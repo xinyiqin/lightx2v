@@ -1,0 +1,62 @@
+{
+    "t2v": {
+        "wan2.1": {
+            "single_stage": {
+                "pipeline": {
+                    "inputs": [],
+                    "outputs": ["output_video"]
+                }
+            },
+            "multi_stage": {
+                "text_encoder": {
+                    "inputs": [],
+                    "outputs": ["text_encoder_output"]
+                },
+                "dit": {
+                    "inputs": ["text_encoder_output"],
+                    "outputs": ["latents"]
+                },
+                "vae_decoder": {
+                    "inputs": ["latents"],
+                    "outputs": ["output_video"]
+                }
+            }
+        }
+    },
+    "i2v": {
+        "wan2.1": {
+            "single_stage": {
+                "pipeline": {
+                    "inputs": ["input_image"],
+                    "outputs": ["output_video"]
+                }
+            },
+            "multi_stage": {
+                "text_encoder": {
+                    "inputs": [],
+                    "outputs": ["text_encoder_output"]
+                },
+                "image_encoder": {
+                    "inputs": ["input_image"],
+                    "outputs": ["clip_encoder_output"]
+                },
+                "vae_encoder": {
+                    "inputs": ["input_image"],
+                    "outputs": ["vae_encoder_output"]
+                },
+                "dit": {
+                    "inputs": [
+                        "clip_encoder_output",
+                        "vae_encoder_output",
+                        "text_encoder_output"
+                    ],
+                    "outputs": ["latents"]
+                },
+                "vae_decoder": {
+                    "inputs": ["latents"],
+                    "outputs": ["output_video"]
+                }
+            }
+        }
+    }
+}
