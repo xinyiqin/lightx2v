@@ -1,6 +1,6 @@
 import uuid
 from enum import Enum
-from lightx2v.deploy.utils import current_time 
+from lightx2v.deploy.common.utils import current_time
 
 
 class TaskStatus(Enum):
@@ -54,8 +54,8 @@ class BaseTaskManager:
             subtasks.append({
                 "task_id": task_id,
                 "worker_name": worker_name,
-                "inputs": [task_id + '-' + x for x in worker_item['inputs']],
-                "outputs": [task_id + '-' + x for x in worker_item['outputs']],
+                "inputs": {x: task_id + '-' + x for x in worker_item['inputs']},
+                "outputs": {x: task_id + '-' + x for x in worker_item['outputs']},
                 "queue": worker_item['queue'],
                 "previous": worker_item['previous'], 
                 "status": TaskStatus.CREATED,
@@ -67,6 +67,7 @@ class BaseTaskManager:
                 "update_t": cur_t,
             })
         self.insert_task(task, subtasks)
+        return task_id
 
     def pend_subtask(self, task_id, worker_name):
         self.update_subtask(task_id, worker_name, status=TaskStatus.PENDING)
@@ -86,10 +87,10 @@ class BaseTaskManager:
         all_finished = True
         all_succeed = True
         for sub in subtasks:
-            if sub['task'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
+            if sub['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
                 all_finished = False
                 break
-            if sub['task'] == TaskStatus.FAILED:
+            if sub['status'] == TaskStatus.FAILED:
                 all_succeed = False
         if all_finished and all_succeed:
             self.update_task(task_id, status=TaskStatus.SUCCEED)

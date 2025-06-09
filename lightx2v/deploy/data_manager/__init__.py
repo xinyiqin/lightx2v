@@ -2,10 +2,10 @@ import io
 import json
 import torch
 from PIL import Image
-from lightx2v.deploy.utils import class_try_catch
+from lightx2v.deploy.common.utils import class_try_catch
 
 
-def BaseDataManager:
+class BaseDataManager:
     def __init__(self):
         pass
 
@@ -29,7 +29,7 @@ def BaseDataManager:
         if isinstance(data, dict):
             return {k: self.recurrent_save(v, f"{prefix}-{k}") for k, v in data.items()}
         elif isinstance(data, list):
-            return [self.recurrent_save(v, f"{prefix}-{idx}" for idx, v in enumerate(data)]
+            return [self.recurrent_save(v, f"{prefix}-{idx}") for idx, v in enumerate(data)]
         elif isinstance(data, torch.Tensor):
             save_path = prefix + ".pt"
             self.save_tensor(data, save_path)
@@ -66,7 +66,7 @@ def BaseDataManager:
     def load_object(self, filename, device):
         bytes_data = self.load_bytes(filename)
         data = json.loads(bytes_data.decode('utf-8'))
-        self.recurrent_load(data, device, filename)
+        data = self.recurrent_load(data, device, filename)
         return data
 
     @class_try_catch
@@ -86,7 +86,7 @@ def BaseDataManager:
     @class_try_catch
     def save_image(self, data: Image.Image, filename):
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
+        data.save(buffer, format="PNG")
         self.save_bytes(buffer.getvalue(), filename)
 
     @class_try_catch

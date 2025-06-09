@@ -19,7 +19,6 @@ def str2time(s):
 
 
 def class_try_catch(func):
-    @wraps(func)
     def wrapper(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)

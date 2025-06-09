@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import argparse
 import torch
 from loguru import logger
@@ -11,10 +12,11 @@ from lightx2v.models.input_encoders.hf.llava.model import TextEncoderHFLlavaMode
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config
-from lightx2v.utils.service_utils import ProcessManager, TensorTransporter, ImageTransporter
+from lightx2v.utils.service_utils import ProcessManager
 
-tensor_transporter = TensorTransporter()
-image_transporter = ImageTransporter()
+from lightx2v.deploy.common.pipeline import Pipeline
+from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
+from lightx2v.deploy.common.utils import class_try_catch
 
 
 class TextEncoderRunner:
@@ -44,7 +46,10 @@ class TextEncoderRunner:
             raise ValueError(f"Unsupported model class: {self.config.model_cls}")
         return text_encoders
 
-    def run(self, text, n_prompt, inputs):
+    @class_try_catch
+    def run(self, inputs, outputs, params, data_manager):
+        text = params['prompt']
+        n_prompt = params.get('n_prompt', '')
         if "wan2.1" in self.config.model_cls:
             text_encoder_output = {}
             context = self.text_encoders[0].infer([text])
@@ -55,8 +60,8 @@ class TextEncoderRunner:
             text_encoder_output = {}
             for i, encoder in enumerate(self.text_encoders):
                 if self.config.task == "i2v" and i == 0:
-                    img = inputs.get("input_image")
-                    img = image_transporter.load_image(img)
+                    input_image_path = inputs["input_image"]
+                    img = data_manager.load_image(input_image_path)
                     text_state, attention_mask = encoder.infer(text, img, self.config)
                 else:
                     text_state, attention_mask = encoder.infer(text, self.config)
@@ -64,19 +69,9 @@ class TextEncoderRunner:
                 text_encoder_output[f"text_encoder_{i + 1}_attention_mask"] = attention_mask
         else:
             raise ValueError(f"Unsupported model class: {self.config.model_cls}")
-        return text_encoder_output
 
-
-def get_worker_info(args, stage_name, worker_name):
-    keys = [args.task, args.model_cls, stage_name, worker_name]
-    worker_info = json.load(open(args.pipeline_json))
-    for k in keys:
-        if k not in worker_info:
-            raise Exception("->".join(keys) + f" is not existed in {args.pipeline_json}!")
-        worker_info = worker_info[k]
-    if "queue" not in worker_info:
-        worker_info['queue'] = "-".join(keys)
-    return worker_info
+        out_path = outputs['text_encoder_output']
+        data_manager.save_object(text_encoder_output, out_path)
 
 
 def init_runner(args):
@@ -87,16 +82,10 @@ def init_runner(args):
         return runner
 
 
-@app.post("/v1/local/text_encoders/generate")
-def v1_local_text_encoder_generate(message: Message):
-    try:
-        task_id = TextEncoderServiceStatus.start_task(message)
-        text_encoder_output = run_text_encoder(message)
-        output = tensor_transporter.prepare_tensor(text_encoder_output)
-        del text_encoder_output
-        return {"task_id": task_id, "task_status": "completed", "output": output, "kwargs": None}
-    except RuntimeError as e:
-        return {"error": str(e)}
+def pull_task(server_url, worker_keys):
+    # request subtask from server
+    # ret = requests.post(args.server, worker_keys)
+    return None
 
 
 # =========================
@@ -107,20 +96,42 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_cls", type=str, required=True, choices=["wan2.1", "hunyuan", "wan2.1_causvid", "wan2.1_skyreels_v2_df"], default="wan2.1")
     parser.add_argument("--task", type=str, choices=["t2v", "i2v"], default="t2v")
+
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)
 
     parser.add_argument("--pipeline_json", type=str, required=True)
     parser.add_argument("--server", type=str, default="127.0.0.1:8080")
 
+    parser.add_argument("--data_path", type=str)
+
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
-    worker_info = get_worker_info(args, "multi_stage", "text_encoder")
+    pipe = Pipeline(args.pipeline_json)
+    stage = "multi_stage"
+    worker_name = "text_encoder"
+    worker_keys = [args.task, args.model_cls, stage, worker_name]
+    worker = pipe.get_worker(worker_keys)
+    queue = worker['queue']
+
+    data_manager = None
+    if args.data_path.startswith("/"):
+        data_manager = LocalDataManager(args.local_data_path)
+    else:
+        raise NotImplementedError
+
     runner = init_runner(args)
 
     while True:
-
+        ret = pull_task(args.server, worker_keys)
+        if isinstance(ret, dict) and ret['status'] == 'succeed':
+            inputs = ret['inputs']
+            outputs = ret['outputs']
+            params = ret['params']
+            runner.run(inputs, outputs, params, data_manager)
+        else:
+            time.sleep(1)
 
 
 if __name__ == "__main__":
