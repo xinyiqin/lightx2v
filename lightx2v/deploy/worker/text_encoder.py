@@ -71,6 +71,7 @@ class TextEncoderRunner:
 
         out_path = outputs['text_encoder_output']
         data_manager.save_object(text_encoder_output, out_path)
+        return True
 
 
 def init_runner(args):
@@ -81,10 +82,16 @@ def init_runner(args):
         return runner
 
 
-def pull_task(server_url, worker_keys):
+def pull_task(server_url, worker_keys, worker_identity):
     # request subtask from server
-    # ret = requests.post(args.server, worker_keys)
+    # ret = requests.post(server_url, worker_keys, worker_identity)
     return None
+
+
+def report_task(server_url, task_id, worker_name, status, worker_identity):
+    # report the subtask status to server
+    # ret = requests.pust(server_url, task_id, worker_name, status, worker_identity)
+    pass
 
 
 # =========================
@@ -105,9 +112,8 @@ def main():
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
-    stage = "multi_stage"
-    worker_name = "text_encoder"
-    worker_keys = [args.task, args.model_cls, stage, worker_name]
+    worker_keys = [args.task, args.model_cls, 'multi_stage', 'text_encoder']
+    worker_identity = 'cur-worker-identity'
 
     data_manager = None
     if args.data_path.startswith("/"):
@@ -118,12 +124,16 @@ def main():
     runner = init_runner(args)
 
     while True:
-        ret = pull_task(args.server, worker_keys)
+        ret = pull_task(args.server, worker_keys, worker_identity)
         if isinstance(ret, dict) and ret['status'] == 'succeed':
+            task_id = ret['task_id']
+            worker_name = ret['worker_name']
             inputs = ret['inputs']
             outputs = ret['outputs']
             params = ret['params']
-            runner.run(inputs, outputs, params, data_manager)
+            ret = runner.run(inputs, outputs, params, data_manager)
+            status = 'succeed' if ret is True else 'failed'
+            report_task(args.server, task_id, worker_name, status, worker_identity)
         else:
             time.sleep(1)
 
