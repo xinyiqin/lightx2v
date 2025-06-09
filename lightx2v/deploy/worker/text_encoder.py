@@ -14,7 +14,6 @@ from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config
 from lightx2v.utils.service_utils import ProcessManager
 
-from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
 from lightx2v.deploy.common.utils import class_try_catch
 
@@ -100,20 +99,15 @@ def main():
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)
 
-    parser.add_argument("--pipeline_json", type=str, required=True)
     parser.add_argument("--server", type=str, default="127.0.0.1:8080")
-
     parser.add_argument("--data_path", type=str)
 
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
-    pipe = Pipeline(args.pipeline_json)
     stage = "multi_stage"
     worker_name = "text_encoder"
     worker_keys = [args.task, args.model_cls, stage, worker_name]
-    worker = pipe.get_worker(worker_keys)
-    queue = worker['queue']
 
     data_manager = None
     if args.data_path.startswith("/"):
