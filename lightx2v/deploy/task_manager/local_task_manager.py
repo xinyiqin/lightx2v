@@ -1,7 +1,8 @@
 import os
 import json
+import asyncio
 from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus
-from lightx2v.deploy.common.utils import current_time, time2str, str2time, class_try_catch
+from lightx2v.deploy.common.utils import current_time, time2str, str2time, class_try_catch_async
 
 
 class LocalTaskManager(BaseTaskManager):
@@ -38,12 +39,12 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, 'w') as fout:
             fout.write(json.dumps(info, indent=4, ensure_ascii=False))
 
-    @class_try_catch
-    def insert_task(self, task, subtasks):
+    @class_try_catch_async
+    async def insert_task(self, task, subtasks):
         self.save(task, subtasks)
 
-    @class_try_catch
-    def list_tasks(self, **kwargs):
+    @class_try_catch_async
+    async def list_tasks(self, **kwargs):
         tasks = []
         fs = [os.path.join(self.local_dir, f) for f in os.listdir(self.local_dir)]
         for f in os.listdir(self.local_dir):
@@ -63,15 +64,15 @@ class LocalTaskManager(BaseTaskManager):
             tasks.append(task)
         return tasks
                
-    @class_try_catch
-    def query_task(self, task_id):
+    @class_try_catch_async
+    async def query_task(self, task_id):
         fpath = self.get_filename(task_id) 
         task = json.load(open(fpath))['task']
         self.parse_dict(task)
         return task
 
-    @class_try_catch
-    def query_subtasks(self, task_id, worker_name=None):
+    @class_try_catch_async
+    async def query_subtasks(self, task_id, worker_name=None):
         fpath = self.get_filename(task_id) 
         subtasks = json.load(open(fpath))['subtasks']
         outs = []
@@ -82,8 +83,8 @@ class LocalTaskManager(BaseTaskManager):
             outs.append(sub)
         return outs
 
-    @class_try_catch
-    def update_task(self, task_id, **kwargs):
+    @class_try_catch_async
+    async def update_task(self, task_id, **kwargs):
         fpath = self.get_filename(task_id) 
         info = json.load(open(fpath))
         task = info['task']
@@ -93,8 +94,8 @@ class LocalTaskManager(BaseTaskManager):
         self.fmt_dict(task)
         self.save(task, info['subtasks'], with_fmt=False)
 
-    @class_try_catch
-    def update_subtask(self, task_id, worker_name, **kwargs):
+    @class_try_catch_async
+    async def update_subtask(self, task_id, worker_name, **kwargs):
         fpath = self.get_filename(task_id) 
         info = json.load(open(fpath))
         for idx, sub in enumerate(info['subtasks']):
@@ -112,15 +113,12 @@ class LocalTaskManager(BaseTaskManager):
         raise Exception(f"Not found task_id={task_id}, worker_name={worker_name}!")
 
 
-if __name__ == "__main__":
-
+async def test():
     from lightx2v.deploy.common.pipeline import Pipeline
-
     p = Pipeline("/data/nvme1/liuliang1/lightx2v/configs/model_pipeline.json")
     m = LocalTaskManager("/data/nvme1/liuliang1/lightx2v/local_task")
 
     keys = ["t2v", "wan2.1", "multi_stage"]
-    task_type, model_cls, stage = keys
     workers = p.get_workers(keys)
     params = {
         "prompt": "fake input prompts",
@@ -130,26 +128,30 @@ if __name__ == "__main__":
         },
     }
 
-    task_id = m.create_task(task_type, model_cls, stage, workers, params)
+    task_id = await m.create_task(keys, workers, params)
     print(" * create_task:", task_id)
 
-    tasks = m.list_tasks()
+    tasks = await m.list_tasks()
     print("* list_tasks:", tasks)
 
-    task = m.query_task(task_id)
+    task = await m.query_task(task_id)
     print("* query_task:", task)
 
-    subtasks = m.next_subtasks(task_id)
+    subtasks = await m.next_subtasks(task_id)
     print("* next_subtasks:", subtasks)
 
     for sub in subtasks:
-        m.pend_subtask(task_id, sub['worker_name'])
-        m.run_subtask(task_id, sub['worker_name'], 'fake-work-ip-host')
-        m.finish_subtask(task_id, sub['worker_name'], TaskStatus.SUCCEED)
+        await m.pend_subtask(task_id, sub['worker_name'])
+        await m.run_subtask(task_id, sub['worker_name'], 'fake-work-ip-host')
+        await m.finish_subtask(task_id, sub['worker_name'], TaskStatus.SUCCEED)
         # m.cancel_task(task_id)
         # m.revoke_task(task_id)
 
-    task = m.query_task(task_id)
-    subtasks = m.query_subtasks(task_id)
+    task = await m.query_task(task_id)
+    subtasks = await m.query_subtasks(task_id)
     print("* final task:", task)
     print("* final subtasks:", subtasks)
+
+
+if __name__ == "__main__":
+    asyncio.run(test())

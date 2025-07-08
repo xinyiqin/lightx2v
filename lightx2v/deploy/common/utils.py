@@ -1,5 +1,12 @@
-from datetime import datetime
+import os
+import io
+import time
+import httpx
+import base64
 import traceback
+from PIL import Image
+from loguru import logger
+from datetime import datetime
 
 FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -27,3 +34,61 @@ def class_try_catch(func):
             traceback.print_exc()
             return None
     return wrapper
+
+
+def class_try_catch_async(func):
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await func(self, *args, **kwargs)
+        except Exception:
+            print(f"Error in {self.__class__.__name__}.{func.__name__}:")
+            traceback.print_exc()
+            return None
+    return wrapper
+
+
+def data_name(x, task_id):
+    return f"{task_id}-{x}"
+
+
+async def fetch_resource(url, timeout):
+    logger.info(f"Begin to download resource from url: {url}")
+    t0 = time.time()
+    async with httpx.AsyncClient() as client:
+        async with client.stream("GET", url, timeout=timeout) as response:
+            response.raise_for_status()
+            ans_bytes = []
+            async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                ans_bytes.append(chunk)
+                if len(ans_bytes) > 128:
+                    raise Exception(f"url {url} recv data is too big")
+            content = b"".join(ans_bytes)
+    logger.info(f"Download url {url} resource cost time: {time.time() - t0} seconds")
+    return content
+
+
+async def preload_data(inp, typ, val):
+    try:
+        if typ == "url":
+            timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
+            data = await fetch_resource(val, timeout=timeout)
+        elif typ == "base64":
+            data = base64.b64decode(val)
+        else:
+            raise ValueError(f"cannot read image which type is {typ}!")
+
+        # check if valid image bytes
+        if 'image' in inp:
+            image = Image.open(io.BytesIO(data))
+        return data
+
+    except Exception as e:
+        raise ValueError(f"Failed to read {inp}, type={typ}, val={val[:100]}: {e}!")
+
+
+async def get_inputs_data(params, raw_inputs):
+    inputs_data = {}
+    for inp in raw_inputs:
+        item = params.pop(inp)
+        inputs_data[inp] = await preload_data(inp, item['type'], item['data'])
+    return inputs_data
