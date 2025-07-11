@@ -1,6 +1,6 @@
 import uuid
 from enum import Enum
-from lightx2v.deploy.common.utils import current_time, data_name
+from lightx2v.deploy.common.utils import current_time, data_name, time2str, str2time
 
 
 class TaskStatus(Enum):
@@ -22,7 +22,7 @@ class BaseTaskManager:
     async def list_tasks(self, **kwargs):
         raise NotImplementedError
 
-    async def query_task(self, task_id):
+    async def query_task(self, task_id, fmt=False):
         raise NotImplementedError
 
     async def query_subtasks(self, task_id, worker_name=None):
@@ -34,7 +34,23 @@ class BaseTaskManager:
     async def update_subtask(self, task_id, worker_name, **kwargs):
         raise NotImplementedError
 
-    async def create_task(self, worker_keys, workers, params):
+    def fmt_dict(self, data):
+        for k in ['status']:
+            if k in data:
+                data[k] = data[k].name
+        for k in ['create_t', 'update_t']:
+            if k in data:
+                data[k] = time2str(data[k])
+
+    def parse_dict(self, data):
+        for k in ['status']:
+            if k in data:
+                data[k] = TaskStatus[data[k]]
+        for k in ['create_t', 'update_t']:
+            if k in data:
+                data[k] = str2time(data[k])
+
+    async def create_task(self, worker_keys, workers, params, inputs, outputs):
         task_type, model_cls, stage = worker_keys
         cur_t = current_time()
         task_id = str(uuid.uuid4())
@@ -49,6 +65,8 @@ class BaseTaskManager:
             "status": TaskStatus.CREATED, 
             "extra_info": "",
             "tag": "",
+            "inputs": {x: data_name(x, task_id) for x in inputs},
+            "outputs": {x: data_name(x, task_id) for x in outputs},
         }
         subtasks = []
         for worker_name, worker_item in workers.items():
@@ -139,3 +157,9 @@ class BaseTaskManager:
                 await self.update_subtask(task_id, sub['worker_name'], status=TaskStatus.CREATED)
         await self.update_task(task_id, status=TaskStatus.CREATED)
         return True
+
+    async def check_identity(self, task_id, worker_name, worker_identity, status):
+        subtasks = await self.query_subtasks(task_id, worker_name)
+        assert len(subtasks) >= 1, f"no worker task_id={task_id} name={worker_name}"
+        pre = subtasks[0]['worker_identity']
+        assert pre == worker_identity, f"identity not matched: {pre} vs {worker_identity}"

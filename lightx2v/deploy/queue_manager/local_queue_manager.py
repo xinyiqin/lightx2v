@@ -24,7 +24,7 @@ class LocalQueueManager(BaseQueueManager):
     @class_try_catch_async
     async def put_subtask(self, subtask):
         out_name = self.get_filename(subtask['queue'])
-        keys = ['task_id', 'worker_name', 'inputs', 'outputs', 'params']
+        keys = ['queue', 'task_id', 'worker_name', 'inputs', 'outputs', 'params']
         msg = json.dumps({k: subtask[k] for k in keys}) + "\n"
         with open(out_name, 'a') as fout:
             fout.write(msg)
@@ -47,16 +47,24 @@ class LocalQueueManager(BaseQueueManager):
         return subtask
 
     @class_try_catch_async
-    async def get_subtask(self, queue, timeout):
+    async def get_subtasks(self, queue, max_batch, timeout):
         t0 = time.time()
+        subtasks = []
         while True:
             subtask = self.read_first_line(queue)
             if subtask:
-                return subtask
-            elapse = time.time() - t0
-            if elapse > timeout:
-                return None
-            await asyncio.sleep(1)
+                subtasks.append(subtask)
+                if len(subtasks) >= max_batch:
+                    return subtasks
+                else:
+                    continue
+            else:
+                if len(subtasks) > 0:
+                    return subtasks
+                elapse = time.time() - t0
+                if elapse > timeout:
+                    return None
+                await asyncio.sleep(1)
 
     def get_filename(self, queue):
         return os.path.join(self.local_dir, f"{queue}.jsonl")

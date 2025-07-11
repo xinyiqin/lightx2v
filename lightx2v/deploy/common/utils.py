@@ -86,7 +86,7 @@ async def preload_data(inp, typ, val):
         raise ValueError(f"Failed to read {inp}, type={typ}, val={val[:100]}: {e}!")
 
 
-async def get_inputs_data(params, raw_inputs):
+async def load_inputs(params, raw_inputs):
     inputs_data = {}
     for inp in raw_inputs:
         item = params.pop(inp)

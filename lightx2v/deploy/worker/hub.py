@@ -1,7 +1,5 @@
 import os
 import json
-import time
-import argparse
 import torch
 from loguru import logger
 
@@ -12,16 +10,16 @@ from lightx2v.models.input_encoders.hf.llava.model import TextEncoderHFLlavaMode
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config
-from lightx2v.utils.service_utils import ProcessManager
-
-from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
-from lightx2v.deploy.common.utils import class_try_catch
+from lightx2v.deploy.common.utils import class_try_catch_async
 
 
 class TextEncoderRunner:
-    def __init__(self, config):
-        self.config = config
-        self.text_encoders = self.load_model()
+    def __init__(self, args):
+        with ProfilingContext("Init TextEncoderRunner Cost"):
+            config = set_config(args)
+            logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
+            self.config = config
+            self.text_encoders = self.load_model()
 
     def load_model(self):
         if "wan2.1" in self.config.model_cls:
@@ -45,8 +43,8 @@ class TextEncoderRunner:
             raise ValueError(f"Unsupported model class: {self.config.model_cls}")
         return text_encoders
 
-    @class_try_catch
-    def run(self, inputs, outputs, params, data_manager):
+    @class_try_catch_async
+    async def run(self, inputs, outputs, params, data_manager):
         text = params['prompt']
         n_prompt = params.get('n_prompt', '')
         if "wan2.1" in self.config.model_cls:
@@ -60,7 +58,7 @@ class TextEncoderRunner:
             for i, encoder in enumerate(self.text_encoders):
                 if self.config.task == "i2v" and i == 0:
                     input_image_path = inputs["input_image"]
-                    img = data_manager.load_image(input_image_path)
+                    img = await data_manager.load_image(input_image_path)
                     text_state, attention_mask = encoder.infer(text, img, self.config)
                 else:
                     text_state, attention_mask = encoder.infer(text, self.config)
@@ -70,73 +68,5 @@ class TextEncoderRunner:
             raise ValueError(f"Unsupported model class: {self.config.model_cls}")
 
         out_path = outputs['text_encoder_output']
-        data_manager.save_object(text_encoder_output, out_path)
+        await data_manager.save_object(text_encoder_output, out_path)
         return True
-
-
-def init_runner(args):
-    with ProfilingContext("Init Server Cost"):
-        config = set_config(args)
-        logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
-        runner = TextEncoder(config)
-        return runner
-
-
-def pull_task(server_url, worker_keys, worker_identity):
-    # request subtask from server
-    # ret = requests.post(server_url, worker_keys, worker_identity)
-    return None
-
-
-def report_task(server_url, task_id, worker_name, status, worker_identity):
-    # report the subtask status to server
-    # ret = requests.pust(server_url, task_id, worker_name, status, worker_identity)
-    pass
-
-
-# =========================
-# Main Entry
-# =========================
-def main():
-    ProcessManager.register_signal_handler()
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_cls", type=str, required=True, choices=["wan2.1", "hunyuan", "wan2.1_causvid", "wan2.1_skyreels_v2_df"], default="wan2.1")
-    parser.add_argument("--task", type=str, choices=["t2v", "i2v"], default="t2v")
-
-    parser.add_argument("--model_path", type=str, required=True)
-    parser.add_argument("--config_json", type=str, required=True)
-
-    parser.add_argument("--server", type=str, default="127.0.0.1:8080")
-    parser.add_argument("--data_path", type=str)
-
-    args = parser.parse_args()
-    logger.info(f"args: {args}")
-
-    worker_keys = [args.task, args.model_cls, 'multi_stage', 'text_encoder']
-    worker_identity = 'cur-worker-identity'
-
-    data_manager = None
-    if args.data_path.startswith("/"):
-        data_manager = LocalDataManager(args.local_data_path)
-    else:
-        raise NotImplementedError
-
-    runner = init_runner(args)
-
-    while True:
-        ret = pull_task(args.server, worker_keys, worker_identity)
-        if isinstance(ret, dict) and ret['status'] == 'succeed':
-            task_id = ret['task_id']
-            worker_name = ret['worker_name']
-            inputs = ret['inputs']
-            outputs = ret['outputs']
-            params = ret['params']
-            ret = runner.run(inputs, outputs, params, data_manager)
-            status = 'succeed' if ret is True else 'failed'
-            report_task(args.server, task_id, worker_name, status, worker_identity)
-        else:
-            time.sleep(1)
-
-
-if __name__ == "__main__":
-    main()

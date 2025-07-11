@@ -5,5 +5,5 @@ class BaseQueueManager:
     async def put_subtask(self, subtask):
         raise NotImplementedError
 
-    async def get_subtask(self, queue, timeout):
+    async def get_subtasks(self, queue, max_batch, timeout):
         raise NotImplementedError

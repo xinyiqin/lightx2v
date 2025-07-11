@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus
-from lightx2v.deploy.common.utils import current_time, time2str, str2time, class_try_catch_async
+from lightx2v.deploy.common.utils import current_time, class_try_catch_async
 
 
 class LocalTaskManager(BaseTaskManager):
@@ -13,22 +13,6 @@ class LocalTaskManager(BaseTaskManager):
 
     def get_filename(self, task_id):
         return os.path.join(self.local_dir, f"{task_id}.json")
-
-    def fmt_dict(self, data):
-        for k in ['status']:
-            if k in data:
-                data[k] = data[k].name
-        for k in ['create_t', 'update_t']:
-            if k in data:
-                data[k] = time2str(data[k])
-
-    def parse_dict(self, data):
-        for k in ['status']:
-            if k in data:
-                data[k] = TaskStatus[data[k]]
-        for k in ['create_t', 'update_t']:
-            if k in data:
-                data[k] = str2time(data[k])
 
     def save(self, task, subtasks, with_fmt=True):
         info = {"task": task, "subtasks": subtasks}
@@ -65,9 +49,11 @@ class LocalTaskManager(BaseTaskManager):
         return tasks
                
     @class_try_catch_async
-    async def query_task(self, task_id):
+    async def query_task(self, task_id, fmt=False):
         fpath = self.get_filename(task_id) 
         task = json.load(open(fpath))['task']
+        if fmt:
+            return task
         self.parse_dict(task)
         return task
 
@@ -120,6 +106,8 @@ async def test():
 
     keys = ["t2v", "wan2.1", "multi_stage"]
     workers = p.get_workers(keys)
+    inputs = p.get_inputs(keys)
+    outputs = p.get_outputs(keys)
     params = {
         "prompt": "fake input prompts",
         "resolution": {
@@ -128,7 +116,7 @@ async def test():
         },
     }
 
-    task_id = await m.create_task(keys, workers, params)
+    task_id = await m.create_task(keys, workers, params, inputs, outputs)
     print(" * create_task:", task_id)
 
     tasks = await m.list_tasks()
