@@ -24,6 +24,11 @@ class WanTransformerWeights(WeightModule):
         self.blocks = WeightModuleList([WanTransformerAttentionBlock(i, self.task, self.mm_type, self.config) for i in range(self.blocks_num)])
         self.add_module("blocks", self.blocks)
 
+    def clear(self):
+        for block in self.blocks:
+            for phase in block.compute_phases:
+                phase.clear()
+
 
 class WanTransformerAttentionBlock(WeightModule):
     def __init__(self, block_index, task, mm_type, config):
@@ -32,7 +37,7 @@ class WanTransformerAttentionBlock(WeightModule):
         self.mm_type = mm_type
         self.task = task
         self.config = config
-        self.quant_method = config["mm_config"].get("quant_method", None)
+        self.quant_method = config.get("quant_method", None)
         self.sparge = config.get("sparge", False)
 
         self.lazy_load = self.config.get("lazy_load", False)
@@ -89,7 +94,7 @@ class WanModulation(WeightModule):
         self.mm_type = mm_type
         self.task = task
         self.config = config
-        self.quant_method = config["mm_config"].get("quant_method", None)
+        self.quant_method = config.get("quant_method", None)
         self.sparge = config.get("sparge", False)
 
         self.lazy_load = lazy_load
@@ -112,7 +117,7 @@ class WanSelfAttention(WeightModule):
         self.mm_type = mm_type
         self.task = task
         self.config = config
-        self.quant_method = config["mm_config"].get("quant_method", None)
+        self.quant_method = config.get("quant_method", None)
         self.sparge = config.get("sparge", False)
 
         self.lazy_load = lazy_load
@@ -185,7 +190,7 @@ class WanSelfAttention(WeightModule):
             self.self_attn_1.load(sparge_ckpt)
         else:
             self.add_module("self_attn_1", ATTN_WEIGHT_REGISTER[self.config["self_attn_1_type"]]())
-        if self.quant_method in ["smoothquant", "awq"]:
+        if self.quant_method in ["advanced_ptq"]:
             self.add_module(
                 "smooth_norm1_weight",
                 TENSOR_REGISTER["Default"](
@@ -314,7 +319,7 @@ class WanFFN(WeightModule):
         self.mm_type = mm_type
         self.task = task
         self.config = config
-        self.quant_method = config["mm_config"].get("quant_method", None)
+        self.quant_method = config.get("quant_method", None)
         self.lazy_load = lazy_load
         self.lazy_load_file = lazy_load_file
 
@@ -342,7 +347,7 @@ class WanFFN(WeightModule):
             ),
         )
 
-        if self.quant_method in ["smoothquant", "awq"]:
+        if self.quant_method in ["advanced_ptq"]:
             self.add_module(
                 "smooth_norm2_weight",
                 TENSOR_REGISTER["Default"](

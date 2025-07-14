@@ -49,7 +49,7 @@ class DefaultRunner:
             else:
                 self.run_input_encoder = self.run_input_encoder_server_t2v
         else:
-            if not self.config.get("lazy_load", False):
+            if not self.config.get("lazy_load", False) and not self.config.get("unload_modules", False):
                 self.load_model()
             self.run_dit = self.run_dit_local
             self.run_vae_decoder = self.run_vae_decoder_local
@@ -101,6 +101,14 @@ class DefaultRunner:
         self.config["negative_prompt"] = inputs.get("negative_prompt", "")
         self.config["image_path"] = inputs.get("image_path", "")
         self.config["save_video_path"] = inputs.get("save_video_path", "")
+        self.config["infer_steps"] = inputs.get("infer_steps", self.config.get("infer_steps", 5))
+        self.config["target_video_length"] = inputs.get("target_video_length", self.config.get("target_video_length", 81))
+        self.config["seed"] = inputs.get("seed", self.config.get("seed", 42))
+        self.config["audio_path"] = inputs.get("audio_path", "")  # for wan-audio
+        self.config["video_duration"] = inputs.get("video_duration", 5)  # for wan-audio
+
+        # self.config["sample_shift"] = inputs.get("sample_shift", self.config.get("sample_shift", 5))
+        # self.config["sample_guide_scale"] = inputs.get("sample_guide_scale", self.config.get("sample_guide_scale", 5))
 
     def run(self):
         for step_index in range(self.model.scheduler.infer_steps):
@@ -128,8 +136,13 @@ class DefaultRunner:
     def end_run(self):
         self.model.scheduler.clear()
         del self.inputs, self.model.scheduler
-        if self.config.get("lazy_load", False):
-            self.model.transformer_infer.weights_stream_mgr.clear()
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
+            if hasattr(self.model.transformer_infer, "weights_stream_mgr"):
+                self.model.transformer_infer.weights_stream_mgr.clear()
+            if hasattr(self.model.transformer_weights, "clear"):
+                self.model.transformer_weights.clear()
+            self.model.pre_weight.clear()
+            self.model.post_weight.clear()
             del self.model
         torch.cuda.empty_cache()
         gc.collect()
@@ -155,7 +168,7 @@ class DefaultRunner:
 
     @ProfilingContext("Run DiT")
     async def run_dit_local(self, kwargs):
-        if self.config.get("lazy_load", False):
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.model = self.load_transformer()
         self.init_scheduler()
         self.model.scheduler.prepare(self.inputs["image_encoder_output"])
@@ -165,10 +178,10 @@ class DefaultRunner:
 
     @ProfilingContext("Run VAE Decoder")
     async def run_vae_decoder_local(self, latents, generator):
-        if self.config.get("lazy_load", False):
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.vae_decoder = self.load_vae_decoder()
         images = self.vae_decoder.decode(latents, generator=generator, config=self.config)
-        if self.config.get("lazy_load", False):
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             del self.vae_decoder
             torch.cuda.empty_cache()
             gc.collect()
