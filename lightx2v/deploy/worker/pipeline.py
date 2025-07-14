@@ -22,11 +22,11 @@ class PipelineRunner:
     async def run(self, inputs, outputs, params, data_manager):
 
         input_image_path = inputs.get("input_image", "")
-        output_video_path = inputs.get("output_video", "")
+        output_video_path = outputs.get("output_video", "")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             # prepare image path
-            if input_image_path:
+            if self.config.task == "i2v" and input_image_path:
                 img_data = await data_manager.load_bytes(input_image_path)
                 params["image_path"] = os.path.join(tmp_dir, input_image_path)
                 with open(params["image_path"], 'wb') as fout:
