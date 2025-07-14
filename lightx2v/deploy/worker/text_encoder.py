@@ -46,7 +46,7 @@ class TextEncoderRunner:
     @class_try_catch_async
     async def run(self, inputs, outputs, params, data_manager):
         text = params['prompt']
-        n_prompt = params.get('n_prompt', '')
+        n_prompt = params.get('negative_prompt', '')
         if "wan2.1" in self.config.model_cls:
             text_encoder_output = {}
             context = self.text_encoders[0].infer([text])

@@ -135,6 +135,9 @@ async def test():
         # m.cancel_task(task_id)
         # m.revoke_task(task_id)
 
+    subtasks = await m.next_subtasks(task_id)
+    print("* 2 next_subtasks:", subtasks)
+
     task = await m.query_task(task_id)
     subtasks = await m.query_subtasks(task_id)
     print("* final task:", task)

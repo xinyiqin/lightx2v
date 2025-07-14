@@ -31,14 +31,11 @@ def error_response(e, code):
     return JSONResponse({"message": f"error: {e}!"}, status_code=code)
 
 
-async def prepare_subtasks(task_id, params=None):
-    if params is None:
-        task = await self.query_task(task_id)
-        params = task['params']
+async def prepare_subtasks(task_id):
     # pend subtasks that could run, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
+    logger.info(f"got next subtasks: {subtasks}.")
     for sub in subtasks:
-        sub['params'] = params
         await task_manager.pend_subtask(task_id, sub['worker_name'])
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
@@ -67,7 +64,7 @@ async def api_v1_task_submit(request: Request):
         for inp, data in inputs_data.items():
             await data_manager.save_bytes(data, data_name(inp, task_id))
 
-        await prepare_subtasks(task_id, params)
+        await prepare_subtasks(task_id)
         return {'task_id': task_id, "workers": workers, "params": params}
 
     except Exception as e:
@@ -107,11 +104,12 @@ async def api_v1_worker_fetch(request: Request):
             worker['queue'], max_batch, timeout
         )
         if not subtasks:
-            return error_response(f"no subtask for worker {keys}!", 404)
+            # return error_response(f"no subtask for worker {keys}!", 404)
+            return {'subtasks': []}
 
         for sub in subtasks:
             await task_manager.run_subtask(
-                subtask['task_id'], subtask['worker_name'], identity
+                sub['task_id'], sub['worker_name'], identity
             )
         return {'subtasks': subtasks}
 

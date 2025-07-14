@@ -1,16 +1,22 @@
 import os
 import time
 import uuid
+import json
+import asyncio
 import argparse
-import torch
+import requests
 from loguru import logger
 
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
 from lightx2v.deploy.task_manager import TaskStatus
-from lightx2v.deploy.common.utils import class_try_catch
+
+from lightx2v.deploy.worker.pipeline import PipelineRunner
+from lightx2v.deploy.worker.text_encoder import TextEncoderRunner
+
 
 RUNNER_MAP = {
+    "pipeline": PipelineRunner,
     "text_encoder": TextEncoderRunner,
     "image_encoder": None,
     "vae_encoder": None,
@@ -27,7 +33,7 @@ def fetch_subtasks(server_url, worker_keys, worker_identity):
         "max_batch": 1,
         "timeout": 5,
     }
-    ret = requests.get(url, params=params)
+    ret = requests.get(url, data=json.dumps(params))
     if ret.status_code == 200:
         subtasks = ret.json()['subtasks']
         print(f"fetch ok: {subtasks}")
@@ -45,7 +51,7 @@ def report_task(server_url, task_id, worker_name, status, worker_identity):
         "status": status,
         "worker_identity": worker_identity,
     }
-    ret = requests.get(url, params=params)
+    ret = requests.get(url, data=json.dumps(params))
     if ret.status_code == 200:
         ret = ret.json()
         print(f"report ok: {ret}")
@@ -55,23 +61,23 @@ def report_task(server_url, task_id, worker_name, status, worker_identity):
         return False
 
 
-async def main(args)
+async def main(args):
     worker_keys = [args.task, args.model_cls, args.stage, args.worker]
 
     data_manager = None
     if args.data_url.startswith("/"):
-        data_manager = LocalDataManager(args.local_data_path)
+        data_manager = LocalDataManager(args.data_url)
     else:
         raise NotImplementedError
     runner = RUNNER_MAP[args.worker](args)
 
     while True:
         subtasks = fetch_subtasks(args.server, worker_keys, args.identity)
-        if subtasks is not None:
+        if subtasks is not None and len(subtasks) > 0:
             for sub in subtasks:
-                ret = await runner.run(ret['inputs'], ret['outputs'], ret['params'], data_manager)
+                ret = await runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager)
                 status = TaskStatus.SUCCEED.name if ret is True else TaskStatus.FAILED.name
-                report_task(args.server, ret['task_id'], ret['worker_name'], status, args.identity)
+                report_task(args.server, sub['task_id'], sub['worker_name'], status, args.identity)
         else:
             await asyncio.sleep(5)
 
@@ -80,7 +86,7 @@ async def main(args)
 # Main Entry
 # =========================
 
-if __name__ == "__name__":
+if __name__ == "__main__":
     ProcessManager.register_signal_handler()
     parser = argparse.ArgumentParser()
 

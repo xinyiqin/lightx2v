@@ -121,7 +121,7 @@ class BaseTaskManager:
 
     async def next_subtasks(self, task_id):
         task = await self.query_task(task_id)
-        if task['status'] != TaskStatus.CREATED:
+        if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING]:
             return []
         subtasks = await self.query_subtasks(task_id)
         succeeds = set()
@@ -137,6 +137,7 @@ class BaseTaskManager:
                         dep_ok = False
                         break
                 if dep_ok:
+                    sub['params'] = task['params']
                     nexts.append(sub)
         return nexts
 

@@ -52,8 +52,8 @@ def submit_task(base_url, task, model_cls, stage, prompt=None, input_image=None)
 
 if __name__ == "__main__":
     base_url = "http://127.0.0.1:8080"
-    # task = submit_task(base_url, "t2v", "wan2.1", "single_stage")
+    task = submit_task(base_url, "t2v", "wan2.1", "single_stage")
     # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage")
-    task = submit_task(base_url, "i2v", "wan2.1", "multi_stage")
+    # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8080/1.jpg"})
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8000/img_lightx2v.png"})

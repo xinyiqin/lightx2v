@@ -48,6 +48,10 @@ def class_try_catch_async(func):
 
 
 def data_name(x, task_id):
+    if x == 'input_image':
+        x = x + ".png"
+    elif x == "output_video":
+        x = x + ".mp4"
     return f"{task_id}-{x}"
 
 
