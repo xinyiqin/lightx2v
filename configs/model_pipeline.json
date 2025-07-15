@@ -33,7 +33,7 @@
             },
             "multi_stage": {
                 "text_encoder": {
-                    "inputs": [],
+                    "inputs": ["input_image"],
                     "outputs": ["text_encoder_output"]
                 },
                 "image_encoder": {

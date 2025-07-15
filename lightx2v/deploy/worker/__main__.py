@@ -11,17 +11,16 @@ from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
 from lightx2v.deploy.task_manager import TaskStatus
 
-from lightx2v.deploy.worker.pipeline import PipelineRunner
-from lightx2v.deploy.worker.text_encoder import TextEncoderRunner
+from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker
 
 
 RUNNER_MAP = {
-    "pipeline": PipelineRunner,
-    "text_encoder": TextEncoderRunner,
-    "image_encoder": None,
-    "vae_encoder": None,
-    "vae_decoder": None,
-    "dit": None,
+    "pipeline": PipelineWorker,
+    "text_encoder": TextEncoderWorker,
+    "image_encoder": ImageEncoderWorker,
+    "vae_encoder": VaeEncoderWorker,
+    "vae_decoder": VaeDecoderWorker,
+    "dit": DiTWorker,
 }
 
 
