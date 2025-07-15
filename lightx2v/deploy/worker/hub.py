@@ -24,6 +24,7 @@ class BaseWorker:
     @ProfilingContext("Init Worker Worker Cost:")
     def __init__(self, args):
         config = set_config(args)
+        config["mode"] = ""
         logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
         seed_all(config.seed)
         if config.parallel_attn_type:
@@ -47,7 +48,7 @@ class PipelineWorker(BaseWorker):
             tmp_video_path = os.path.join(tmp_dir, output_video_path)
 
             # prepare tmp image
-            if self.runner.config.task == "i2v" and input_image_path:
+            if self.runner.config.task == "i2v":
                 img_data = await data_manager.load_bytes(input_image_path)
                 with open(tmp_image_path, 'wb') as fout:
                     fout.write(img_data)
@@ -82,7 +83,7 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config["use_prompt_enhancer"]:
             prompt = self.runner.config["prompt_enhanced"]
 
-        if self.runner.config.task == "i2v" and input_image_path:
+        if self.runner.config.task == "i2v":
             img = await data_manager.load_image(input_image_path)
 
         out = self.run_text_encoder(prompt, img)

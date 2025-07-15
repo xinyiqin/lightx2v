@@ -30,7 +30,7 @@ class DefaultRunner:
 
     def init_modules(self):
         logger.info("Initializing runner modules...")
-        if self.config.get("mode", "") == "split_server":
+        if self.config["mode"] == "split_server":
             self.tensor_transporter = TensorTransporter()
             self.image_transporter = ImageTransporter()
             if not self.check_sub_servers("dit"):
