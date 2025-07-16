@@ -8,4 +8,3 @@ python -m lightx2v.deploy.worker \
     --task t2v \
     --model_cls wan2.1 \
     --stage single_stage --worker pipeline
-    # --stage multi_stage --worker text_encoder

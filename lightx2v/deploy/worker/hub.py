@@ -1,4 +1,5 @@
 import os
+import gc
 import json
 import torch
 import tempfile
@@ -21,6 +22,7 @@ from lightx2v.deploy.common.utils import class_try_catch_async
 
 
 class BaseWorker:
+
     @ProfilingContext("Init Worker Worker Cost:")
     def __init__(self, args):
         config = set_config(args)
@@ -31,6 +33,10 @@ class BaseWorker:
             if not dist.is_initialized():
                 dist.init_process_group(backend="nccl")
         self.runner = RUNNER_REGISTER[config.model_cls](config)
+
+    def update_config(self, kwargs):
+        for k, v in kwargs.items():
+            setattr(self.runner.config, k, v)
 
 
 class PipelineWorker(BaseWorker):
@@ -86,7 +92,7 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config.task == "i2v":
             img = await data_manager.load_image(input_image_path)
 
-        out = self.run_text_encoder(prompt, img)
+        out = self.runner.run_text_encoder(prompt, img)
         await data_manager.save_object(out, outputs['text_encoder_output'])
 
         del out 
@@ -106,7 +112,7 @@ class ImageEncoderWorker(BaseWorker):
         self.runner.set_inputs(params)
 
         img = await data_manager.load_image(inputs["input_image"])
-        out = self.run_image_encoder(img)
+        out = self.runner.run_image_encoder(img)
         await data_manager.save_object(out, outputs['clip_encoder_output'])
 
         del out 
@@ -127,10 +133,12 @@ class VaeEncoderWorker(BaseWorker):
         self.runner.set_inputs(params)
 
         img = await data_manager.load_image(inputs["input_image"])
-        out, kwargs = self.runner.run_vae_encoder(img)
+        # run vae encoder changed the config, we use kwargs pass changes
+        vals, kwargs = self.runner.run_vae_encoder(img)
+        out = {"vals": vals, "kwargs": kwargs}
         await data_manager.save_object(out, outputs['vae_encoder_output'])
 
-        del out 
+        del out, img, vals
         torch.cuda.empty_cache()
         gc.collect()
         return True
@@ -146,26 +154,26 @@ class DiTWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.runner.set_inputs(params)
 
-        text_out = inputs["text_encoder_output"]
-        clip_out = inputs["clip_encoder_output"]
-        vae_out = inputs["vae_encoder_output"]
-
         device = 'cuda:0'
+        text_out = inputs["text_encoder_output"]
         text_encoder_output = await data_manager.load_object(text_out, device)
         image_encoder_output = None
 
         if self.runner.config.task == "i2v":
-            clip_encoder_out = await data_manager.load_object(clip_out, device)
-            vae_encoder_out = await data_manager.load_object(vae_out, device)
+            clip_path = inputs["clip_encoder_output"]
+            vae_path = inputs["vae_encoder_output"]
+            clip_encoder_out = await data_manager.load_object(clip_path, device)
+            vae_encoder_out = await data_manager.load_object(vae_path, device)
             image_encoder_output = {
                 "clip_encoder_out": clip_encoder_out,
-                "vae_encode_out": vae_encode_out,
-
+                "vae_encode_out": vae_encoder_out["vals"],
             }
+            # apploy the config changes by vae encoder
+            self.update_config(vae_encoder_out["kwargs"])
 
         self.runner.inputs = {
             "text_encoder_output": text_encoder_output,
-            "image_encoder_output": None,
+            "image_encoder_output": image_encoder_output,
         }
 
         kwargs = self.runner.set_target_shape()
