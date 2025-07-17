@@ -29,6 +29,17 @@ TEMPLATE = {
 }
 
 
+def get_model_lists(base_url):
+    url = base_url + "/api/v1/model/list"
+    ret = requests.get(url)
+    if ret.status_code == 200:
+        print("model lists:")
+        for model in ret.json()['models']:
+            print(f"- {model}")
+    else:
+        print(f"get model lists fail: [{ret.status_code}], error: {ret.text}")
+
+
 def submit_task(base_url, task, model_cls, stage, prompt=None, input_image=None):
     url = base_url + "/api/v1/task/submit"
     data = TEMPLATE[task][model_cls]
@@ -91,12 +102,14 @@ def fetch_result(base_url, task_id, save_dir='./results'):
 
 if __name__ == "__main__":
     base_url = "http://127.0.0.1:8080"
+    get_model_lists(base_url)
+
     # task = submit_task(base_url, "t2v", "wan2.1", "single_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "single_stage")
-    task = submit_task(base_url, "t2v", "wan2.1", "multi_stage")
+    # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8080/1.jpg"})
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8000/img_lightx2v.png"})
     # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage", prompt="A dog is playing with a ball")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", prompt="The cat lose its glasses")
-    fetch_result(base_url, task)
+    # fetch_result(base_url, task)

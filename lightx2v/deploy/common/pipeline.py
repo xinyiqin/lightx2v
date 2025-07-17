@@ -8,6 +8,7 @@ class Pipeline:
         self.data = json.load(open(pipeline_json_file))
         self.inputs = {}
         self.outputs = {}
+        self.model_lists = []
         self.tidy_pipeline()
 
     def init_dict(self, base, task, model_cls):
@@ -53,9 +54,11 @@ class Pipeline:
                     self.init_dict(self.inputs, task, model_cls)
                     self.init_dict(self.outputs, task, model_cls)
                     self.tidy_task(task, model_cls, stage, v3)
+                    self.model_lists.append({"task": task, "model_cls": model_cls, "stage": stage})
         print("pipelines:", json.dumps(self.data, indent=4))
         print("inputs:", self.inputs)
         print("outputs:", self.outputs)
+        print("model_lists:", self.model_lists)
 
     def get_item_by_keys(self, keys):
         item = self.data
@@ -90,6 +93,9 @@ class Pipeline:
                 raise Exception(f"{keys} are not in outputs!")
             item = item[k]
         return item
+
+    def get_model_lists(self):
+        return self.model_lists
 
 
 if __name__ == "__main__":

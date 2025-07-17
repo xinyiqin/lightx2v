@@ -41,6 +41,15 @@ async def prepare_subtasks(task_id):
         assert r, "put subtask to queue error"
 
 
+@app.get("/api/v1/model/list")
+async def api_v1_model_list():
+    try:
+        return {'models': model_pipelines.get_model_lists()}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
 @app.post("/api/v1/task/submit")
 async def api_v1_task_submit(request: Request):
     task_id = None
