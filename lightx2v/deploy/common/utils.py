@@ -25,6 +25,17 @@ def str2time(s):
     return d.timestamp()
 
 
+def try_catch(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            print(f"Error in {func.__name__}:")
+            traceback.print_exc()
+            return None
+    return wrapper
+
+
 def class_try_catch(func):
     def wrapper(self, *args, **kwargs):
         try:

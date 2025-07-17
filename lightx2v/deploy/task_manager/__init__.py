@@ -90,7 +90,7 @@ class BaseTaskManager:
 
     async def pend_subtask(self, task_id, worker_name):
         await self.update_subtask(task_id, worker_name, status=TaskStatus.PENDING)
-        await self.update_task(task_id, status=TaskStatus.RUNNING)
+        await self.update_task(task_id, status=TaskStatus.PENDING)
 
     async def run_subtask(self, task_id, worker_name, worker_identity):
         await self.update_subtask(
@@ -99,29 +99,33 @@ class BaseTaskManager:
             worker_identity=worker_identity,
             status=TaskStatus.RUNNING,
         )
+        await self.update_task(task_id, status=TaskStatus.RUNNING)
 
     async def finish_subtask(self, task_id, worker_name, status):
         await self.update_subtask(task_id, worker_name, status=status)
         subtasks = await self.query_subtasks(task_id)
-        all_finished = True
-        all_succeed = True
+        running_subs = []
+        has_failed_sub = False
         for sub in subtasks:
             if sub['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
-                all_finished = False
-                break
+                running_subs.append(sub)
             if sub['status'] == TaskStatus.FAILED:
-                all_succeed = False
-        if all_finished and all_succeed:
+                has_failed_sub = True
+        # some subtask failed, we should fail all other subtasks
+        if has_failed_sub:
+            await self.update_task(task_id, status=TaskStatus.FAILED)
+            for sub in running_subs:
+                await self.update_subtask(task_id, sub['worker_name'], status=TaskStatus.FAILED)
+            return TaskStatus.FAILED
+        # all subtasks finished and all succeed
+        elif len(running_subs) == 0:
             await self.update_task(task_id, status=TaskStatus.SUCCEED)
             return TaskStatus.SUCCEED
-        if not all_succeed:
-            await self.update_task(task_id, status=TaskStatus.FAILED)
-            return TaskStatus.FAILED
         return None
 
     async def next_subtasks(self, task_id):
         task = await self.query_task(task_id)
-        if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING]:
+        if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.PENDING]:
             return []
         subtasks = await self.query_subtasks(task_id)
         succeeds = set()

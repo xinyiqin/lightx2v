@@ -1,5 +1,7 @@
 import requests
+import time
 import base64
+import os
 
 
 def get_b64_data(image_path):
@@ -42,7 +44,7 @@ def submit_task(base_url, task, model_cls, stage, prompt=None, input_image=None)
 
     ret = requests.post(url, json=data)
     if ret.status_code == 200:
-        data = ret.json()
+        data = ret.json()['task_id']
         print(f"submit task ok: {data}")
         return data
     else:
@@ -50,11 +52,51 @@ def submit_task(base_url, task, model_cls, stage, prompt=None, input_image=None)
         return None
 
 
+def fetch_result(base_url, task_id, save_dir='./results'):
+    outputs = None
+    interval = 5
+    while True:
+        ret = requests.get(f"{base_url}/api/v1/task/query", json={"task_id": task_id})
+        if ret.status_code == 200:
+            data = ret.json()
+            print(f"query task ok: {data}")
+            if data['status'] in ['CREATED', 'PENDING', 'RUNNING']:
+                time.sleep(interval)
+                continue
+            elif data['status'] == 'SUCCEED':
+                outputs = data['outputs']
+                break
+            elif data['status'] == 'FAILED':
+                raise Exception(f"task failed!")
+            else:
+                raise Exception(f"unknown status: {data['status']}")
+        else:
+            print(f"query task fail: [{ret.status_code}], error: {ret.text}")
+            time.sleep(interval)
+
+    if outputs is None:
+        raise Exception(f"task failed: {data['error']}")
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    for _, name in outputs.items():
+        ret = requests.get(f"{base_url}/api/v1/task/result", json={"name": name})
+        if ret.status_code == 200:
+            with open(os.path.join(save_dir, name), "wb") as fout: 
+                fout.write(ret.content)
+                print(f"save result {name} to {save_dir} ok")
+        else:
+            print(f"fetch result fail: [{ret.status_code}], error: {ret.text}")
+
+
 if __name__ == "__main__":
     base_url = "http://127.0.0.1:8080"
-    task = submit_task(base_url, "t2v", "wan2.1", "single_stage")
+    # task = submit_task(base_url, "t2v", "wan2.1", "single_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "single_stage")
-    # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage")
+    task = submit_task(base_url, "t2v", "wan2.1", "multi_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8080/1.jpg"})
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8000/img_lightx2v.png"})
+    # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage", prompt="A dog is playing with a ball")
+    # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", prompt="The cat lose its glasses")
+    fetch_result(base_url, task)

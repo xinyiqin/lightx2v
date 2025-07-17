@@ -3,7 +3,7 @@ import uvicorn
 import argparse
 import traceback
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from loguru import logger
 
 from lightx2v.utils.profiler import ProfilingContext
@@ -82,7 +82,20 @@ async def api_v1_task_query(request: Request):
         params = await request.json()
         task_id = params.pop('task_id')
         task = await task_manager.query_task(task_id, fmt=True)
-        return {'task': task}
+        keys = ['task_id', 'status', 'outputs']
+        return {k: task[k] for k in keys}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/result")
+async def api_v1_task_result(request: Request):
+    try:
+        params = await request.json()
+        name = params.pop('name')
+        data = await data_manager.load_bytes(name)
+        return Response(content=data, media_type="application/octet-stream")
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -100,18 +113,18 @@ async def api_v1_worker_fetch(request: Request):
 
         # get worker info
         worker = model_pipelines.get_worker(keys)
-        subtasks = await queue_manager.get_subtasks(
-            worker['queue'], max_batch, timeout
-        )
+        subtasks = await queue_manager.get_subtasks(worker['queue'], max_batch, timeout)
+
         if not subtasks:
-            # return error_response(f"no subtask for worker {keys}!", 404)
             return {'subtasks': []}
 
+        valid_subtasks = []
         for sub in subtasks:
-            await task_manager.run_subtask(
-                sub['task_id'], sub['worker_name'], identity
-            )
-        return {'subtasks': subtasks}
+            task = await task_manager.query_task(sub['task_id'])
+            if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+                valid_subtasks.append(sub)
+                await task_manager.run_subtask(sub['task_id'], sub['worker_name'], identity)
+        return {'subtasks': valid_subtasks}
 
     except Exception as e:
         traceback.print_exc()
