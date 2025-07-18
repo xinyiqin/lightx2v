@@ -110,6 +110,32 @@ async def api_v1_task_result(request: Request):
         return error_response(str(e), 500)
 
 
+@app.get("/api/v1/task/cancel")
+async def api_v1_task_cancel(request: Request):
+    try:
+        params = await request.json()
+        task_id = params.pop('task_id')
+        ret = await task_manager.cancel_task(task_id)
+        return {'msg': 'ok' if ret else 'failed'}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/resume")
+async def api_v1_task_resume(request: Request):
+    try:
+        params = await request.json()
+        task_id = params.pop('task_id')
+        ret = await task_manager.resume_task(task_id)
+        if ret:
+            await prepare_subtasks(task_id)
+        return {'msg': 'ok' if ret else 'failed'}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
 @app.get("/api/v1/worker/fetch")
 async def api_v1_worker_fetch(request: Request):
     try:

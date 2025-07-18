@@ -146,19 +146,23 @@ class BaseTaskManager:
         return nexts
 
     async def cancel_task(self, task_id):
+        task = await self.query_task(task_id)
+        if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
+            return False
         await self.update_task(task_id, status=TaskStatus.CANCEL)
+        return True
 
-    async def revoke_task(self, task_id, all_subtask=False):
+    async def resume_task(self, task_id, all_subtask=False):
         task = await self.query_task(task_id)
         # the task is not finished
         if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
             return False
-        # the task is no need to revoke
+        # the task is no need to resume
         if not all_subtask and task['status'] == TaskStatus.SUCCEED:
             return False
         subtasks = await self.query_subtasks(task_id)
         for sub in subtasks:
-            if all_subtask or sub['status'] == TaskStatus.FAILED:
+            if all_subtask or sub['status'] != TaskStatus.SUCCEED:
                 await self.update_subtask(task_id, sub['worker_name'], status=TaskStatus.CREATED)
         await self.update_task(task_id, status=TaskStatus.CREATED)
         return True

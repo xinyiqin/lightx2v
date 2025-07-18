@@ -63,6 +63,24 @@ def submit_task(base_url, task, model_cls, stage, prompt=None, input_image=None)
         return None
 
 
+def cancel_task(base_url, task_id):
+    url = base_url + "/api/v1/task/cancel"
+    ret = requests.get(url, json={"task_id": task_id})
+    if ret.status_code == 200:
+        print(f"cancel task ok: {ret.json()}")
+    else:
+        print(f"cancel task fail: [{ret.status_code}], error: {ret.text}")
+
+
+def resume_task(base_url, task_id):
+    url = base_url + "/api/v1/task/resume"
+    ret = requests.get(url, json={"task_id": task_id})
+    if ret.status_code == 200:
+        print(f"resume task ok: {ret.json()}")
+    else:
+        print(f"resume task fail: [{ret.status_code}], error: {ret.text}")
+
+
 def fetch_result(base_url, task_id, save_dir='./results'):
     outputs = None
     interval = 5
@@ -112,4 +130,9 @@ if __name__ == "__main__":
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", input_image={"type": "url", "data": "http://127.0.0.1:8000/img_lightx2v.png"})
     # task = submit_task(base_url, "t2v", "wan2.1", "multi_stage", prompt="A dog is playing with a ball")
     # task = submit_task(base_url, "i2v", "wan2.1", "multi_stage", prompt="The cat lose its glasses")
+
+    # cancel_task(base_url, task)
+    # time.sleep(10)
+    # resume_task(base_url, task)
+
     # fetch_result(base_url, task)

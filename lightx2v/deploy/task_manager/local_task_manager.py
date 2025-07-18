@@ -133,7 +133,7 @@ async def test():
         await m.run_subtask(task_id, sub['worker_name'], 'fake-work-ip-host')
         await m.finish_subtask(task_id, sub['worker_name'], TaskStatus.SUCCEED)
         # m.cancel_task(task_id)
-        # m.revoke_task(task_id)
+        # m.resume_task(task_id)
 
     subtasks = await m.next_subtasks(task_id)
     print("* 2 next_subtasks:", subtasks)
