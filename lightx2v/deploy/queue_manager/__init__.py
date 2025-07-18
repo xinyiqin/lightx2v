@@ -7,3 +7,10 @@ class BaseQueueManager:
 
     async def get_subtasks(self, queue, max_batch, timeout):
         raise NotImplementedError
+
+
+# Import queue manager implementations
+from .local_queue_manager import LocalQueueManager
+from .rabbitmq_queue_manager import RabbitMQQueueManager
+
+__all__ = ['BaseQueueManager', 'LocalQueueManager', 'RabbitMQQueueManager']

@@ -95,3 +95,9 @@ class BaseDataManager:
         buffer = io.BytesIO(bytes_data)
         img = Image.open(buffer).convert("RGB")
         return img
+
+
+# Import data manager implementations
+from .local_data_manager import LocalDataManager
+
+__all__ = ['BaseDataManager', 'LocalDataManager']

@@ -61,8 +61,7 @@ class LocalQueueManager(BaseQueueManager):
             else:
                 if len(subtasks) > 0:
                     return subtasks
-                elapse = time.time() - t0
-                if elapse > timeout:
+                if time.time() - t0 > timeout:
                     return None
                 await asyncio.sleep(1)
 
@@ -83,7 +82,7 @@ async def test():
     await q.put_subtask(subtask)
     await asyncio.sleep(5)
     for i in range(2):
-        subtask = await q.get_subtask("test_queue", 3)
+        subtask = await q.get_subtasks("test_queue", 3, 5)
         print("get subtask:", subtask)
 
 

@@ -172,3 +172,9 @@ class BaseTaskManager:
         assert len(subtasks) >= 1, f"no worker task_id={task_id} name={worker_name}"
         pre = subtasks[0]['worker_identity']
         assert pre == worker_identity, f"identity not matched: {pre} vs {worker_identity}"
+
+
+# Import task manager implementations
+from .local_task_manager import LocalTaskManager
+
+__all__ = ['BaseTaskManager', 'LocalTaskManager']

@@ -10,9 +10,9 @@ from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.utils import load_inputs, data_name
-from lightx2v.deploy.task_manager.local_task_manager import LocalTaskManager
-from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
-from lightx2v.deploy.queue_manager.local_queue_manager import LocalQueueManager
+from lightx2v.deploy.task_manager import LocalTaskManager
+from lightx2v.deploy.data_manager import LocalDataManager
+from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
 
 # =========================
@@ -226,6 +226,8 @@ if __name__ == "__main__":
             raise NotImplementedError
         if args.queue_url.startswith('/'):
             queue_manager = LocalQueueManager(args.queue_url)
+        elif args.queue_url.startswith('amqp://'):
+            queue_manager = RabbitMQQueueManager(args.queue_url)
         else:
             raise NotImplementedError
 
