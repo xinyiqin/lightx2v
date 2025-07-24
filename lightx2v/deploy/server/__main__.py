@@ -32,11 +32,10 @@ def error_response(e, code):
 
 
 async def prepare_subtasks(task_id):
-    # pend subtasks that could run, put to message queue
+    # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
     logger.info(f"got next subtasks: {subtasks}.")
     for sub in subtasks:
-        await task_manager.pend_subtask(task_id, sub['worker_name'])
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
 
@@ -79,9 +78,7 @@ async def api_v1_task_submit(request: Request):
     except Exception as e:
         traceback.print_exc()
         if task_id:
-            subtasks = await task_manager.query_subtasks(task_id)
-            for sub in subtasks:
-                await task_manager.finish_subtask(task_id, sub['worker_name'], TaskStatus.FAILED) 
+            await task_manager.finish_subtasks(task_id, TaskStatus.FAILED)
         return error_response(str(e), 500)
 
 
@@ -153,12 +150,10 @@ async def api_v1_worker_fetch(request: Request):
         if not subtasks:
             return {'subtasks': []}
 
-        valid_subtasks = []
-        for sub in subtasks:
-            task = await task_manager.query_task(sub['task_id'])
-            if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
-                valid_subtasks.append(sub)
-                await task_manager.run_subtask(sub['task_id'], sub['worker_name'], identity)
+        worker_names = [sub['worker_name'] for sub in subtasks]
+        task_ids = [sub['task_id'] for sub in subtasks]
+        valids = await task_manager.run_subtasks(task_ids, worker_names, identity)
+        valid_subtasks = [sub for sub in subtasks if (sub['task_id'], sub['worker_name']) in valids]
         return {'subtasks': valid_subtasks}
 
     except Exception as e:
@@ -176,13 +171,9 @@ async def api_v1_worker_report(request: Request):
         status = TaskStatus[params.pop('status')]
         identity = params.pop('worker_identity')
 
-        # check if task identity == worker identity ?
-        await task_manager.check_identity(task_id, worker_name, identity, status)
-        # update task status
-        await task_manager.finish_subtask(task_id, worker_name, status)
+        await task_manager.finish_subtasks(task_id, status, worker_identity=identity, worker_name=worker_name)
         # prepare new ready subtasks
         await prepare_subtasks(task_id)
-
         return {'msg': 'ok'}
 
     except Exception as e:

@@ -131,7 +131,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.identity == '':
         # TODO: spec worker instance identity by k8s env
-        args.identity = str(uuid.uuid4())
+        args.identity = 'worker-' + str(uuid.uuid4())[:8]
     logger.info(f"args: {args}")
 
     asyncio.run(main(args))
