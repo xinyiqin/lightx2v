@@ -41,10 +41,10 @@ def fetch_subtasks(server_url, worker_keys, worker_identity):
     ret = requests.get(url, data=json.dumps(params))
     if ret.status_code == 200:
         subtasks = ret.json()['subtasks']
-        print(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
+        logger.info(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
         return subtasks
     else:
-        print(f"{worker_identity} fetch {worker_keys} fail: [{ret.status_code}], error: {ret.text}")
+        logger.warning(f"{worker_identity} fetch {worker_keys} fail: [{ret.status_code}], error: {ret.text}")
         return None
 
 @try_catch
@@ -60,10 +60,10 @@ def report_task(server_url, task_id, worker_name, status, worker_identity):
     if ret.status_code == 200:
         RUNNING_SUBTASKS.pop(task_id)
         ret = ret.json()
-        print(f"{worker_identity} report {task_id} {worker_name} {status} ok")
+        logger.info(f"{worker_identity} report {task_id} {worker_name} {status} ok")
         return True
     else:
-        print(f"{worker_identity} report {task_id} {worker_name} {status} fail: [{ret.status_code}], error: {ret.text}")
+        logger.warning(f"{worker_identity} report {task_id} {worker_name} {status} fail: [{ret.status_code}], error: {ret.text}")
         return False
 
 
@@ -94,7 +94,7 @@ async def main(args):
 
 
 def signal_handler(signum, frame):
-    print("\nReceived Ctrl+C, report all running subtasks")
+    logger.info("\nReceived Ctrl+C, report all running subtasks")
     for task_id, s in RUNNING_SUBTASKS.items():
         report_task(s['server'], task_id, s['worker_name'], TaskStatus.FAILED.name, s['identity'])
     ProcessManager.kill_all_related_processes()
