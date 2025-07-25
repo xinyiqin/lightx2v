@@ -28,6 +28,7 @@ async def test():
     import torch
     from PIL import Image
     m = LocalDataManager("/data/nvme1/liuliang1/lightx2v/local_data")
+    await m.init()
 
     img = Image.open("/data/nvme1/liuliang1/lightx2v/assets/img_lightx2v.png")
     tensor = torch.Tensor([233, 456, 789]).to(dtype=torch.bfloat16, device="cuda:0")

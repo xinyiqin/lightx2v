@@ -71,6 +71,7 @@ class LocalQueueManager(BaseQueueManager):
 
 async def test():
     q = LocalQueueManager("/data/nvme1/liuliang1/lightx2v/local_queue")
+    await q.init()
     subtask = {
         "task_id": "test-subtask-id",
         "queue": "test_queue",

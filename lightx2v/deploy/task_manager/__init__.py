@@ -16,13 +16,19 @@ class BaseTaskManager:
     def __init__(self):
         pass
 
+    async def init(self):
+        pass
+
+    async def close(self):
+        pass
+
     async def insert_task(self, task, subtasks):
         raise NotImplementedError
 
     async def list_tasks(self, **kwargs):
         raise NotImplementedError
 
-    async def query_task(self, task_id, fmt=False):
+    async def query_task(self, task_id):
         raise NotImplementedError
 
     async def next_subtasks(self, task_id):
@@ -85,7 +91,7 @@ class BaseTaskManager:
                 "create_t": cur_t,
                 "update_t": cur_t,
             })
-        await self.insert_task(task, subtasks)
+        assert await self.insert_task(task, subtasks), f"create task {task_id} failed"
         return task_id
 
 

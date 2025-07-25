@@ -2,6 +2,12 @@ class BaseQueueManager:
     def __init__(self):
         pass
 
+    async def init(self):
+        pass
+
+    async def close(self):
+        pass
+
     async def put_subtask(self, subtask):
         raise NotImplementedError
 

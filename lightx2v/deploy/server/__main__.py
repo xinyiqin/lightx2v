@@ -2,6 +2,7 @@ import os
 import uvicorn
 import argparse
 import traceback
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
@@ -10,7 +11,7 @@ from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.utils import load_inputs, data_name
-from lightx2v.deploy.task_manager import LocalTaskManager
+from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager
 from lightx2v.deploy.data_manager import LocalDataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
@@ -24,7 +25,18 @@ task_manager = None
 data_manager = None
 queue_manager = None
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await task_manager.init()
+    await data_manager.init()
+    await queue_manager.init()
+    yield
+    await queue_manager.close()
+    await data_manager.close()
+    await task_manager.close()
+
+app = FastAPI(lifespan=lifespan)
 
 
 def error_response(e, code):
@@ -87,7 +99,8 @@ async def api_v1_task_query(request: Request):
     try:
         params = await request.json()
         task_id = params.pop('task_id')
-        task = await task_manager.query_task(task_id, fmt=True)
+        task = await task_manager.query_task(task_id)
+        task['status'] = task['status'].name
         keys = ['task_id', 'status', 'outputs']
         return {k: task[k] for k in keys}
     except Exception as e:
@@ -209,6 +222,8 @@ if __name__ == "__main__":
         model_pipelines = Pipeline(args.pipeline_json)
         if args.task_url.startswith('/'):
             task_manager = LocalTaskManager(args.task_url)
+        elif args.task_url.startswith('postgresql://'):
+            task_manager = PostgresSQLTaskManager(args.task_url)
         else:
             raise NotImplementedError
         if args.data_url.startswith('/'):

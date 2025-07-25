@@ -16,6 +16,12 @@ class RabbitMQQueueManager(BaseQueueManager):
         self.chan = None
         self.queues = set()
 
+    async def init(self):
+        await self.get_conn()
+
+    async def close(self):
+        await self.del_conn()
+
     async def get_conn(self):
         if self.chan and self.conn:
             return
@@ -91,6 +97,7 @@ class RabbitMQQueueManager(BaseQueueManager):
 async def test():
     conn_url = "amqp://mtc:Sensetime666@127.0.0.1:5672"
     q = RabbitMQQueueManager(conn_url)
+    await q.init()
     subtask = {
         "task_id": "test-subtask-id",
         "queue": "test_queue",
@@ -104,8 +111,7 @@ async def test():
     for i in range(2):
         subtask = await q.get_subtasks("test_queue", 3, 5)
         print("get subtask:", subtask)
-    await q.del_conn()
-
+    await q.close()
 
 if __name__ == "__main__":
     asyncio.run(test())

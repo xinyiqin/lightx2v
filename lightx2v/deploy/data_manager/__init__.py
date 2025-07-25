@@ -9,6 +9,12 @@ class BaseDataManager:
     def __init__(self):
         pass
 
+    async def init(self):
+        pass
+
+    async def close(self):
+        pass
+
     def to_device(self, data, device):
         if isinstance(data, dict):
             return {key: self.to_device(value, device) for key, value in data.items()}

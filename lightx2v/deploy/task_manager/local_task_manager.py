@@ -11,11 +11,6 @@ class LocalTaskManager(BaseTaskManager):
        if not os.path.exists(self.local_dir):
            os.makedirs(self.local_dir)
 
-    @classmethod
-    async def create(cls, local_dir):
-        self = cls(local_dir)
-        return self
-
     def get_filename(self, task_id):
         return os.path.join(self.local_dir, f"{task_id}.json")
 
@@ -40,20 +35,19 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, 'w') as fout:
             fout.write(json.dumps(info, indent=4, ensure_ascii=False))
 
-    def load(self, task_id, fmt=False):
+    def load(self, task_id):
         fpath = self.get_filename(task_id)
         info = json.load(open(fpath))
         task, subtasks = info['task'], info['subtasks']
-        if not fmt:
-            self.parse_dict(task)
+        self.parse_dict(task)
         for sub in subtasks:
-            if not fmt:
-                self.parse_dict(sub)
+            self.parse_dict(sub)
         return task, subtasks
 
     @class_try_catch_async
     async def insert_task(self, task, subtasks):
         self.save(task, subtasks)
+        return True
 
     @class_try_catch_async
     async def list_tasks(self, **kwargs):
@@ -77,8 +71,8 @@ class LocalTaskManager(BaseTaskManager):
         return tasks
 
     @class_try_catch_async
-    async def query_task(self, task_id, fmt=False):
-        return self.load(task_id, fmt)[0]
+    async def query_task(self, task_id):
+        return self.load(task_id)[0]
 
     @class_try_catch_async
     async def next_subtasks(self, task_id):
@@ -205,7 +199,8 @@ class LocalTaskManager(BaseTaskManager):
 async def test():
     from lightx2v.deploy.common.pipeline import Pipeline
     p = Pipeline("/data/nvme1/liuliang1/lightx2v/configs/model_pipeline.json")
-    m = await LocalTaskManager.create("/data/nvme1/liuliang1/lightx2v/local_task")
+    m = LocalTaskManager("/data/nvme1/liuliang1/lightx2v/local_task")
+    await m.init()
 
     keys = ["t2v", "wan2.1", "multi_stage"]
     workers = p.get_workers(keys)
@@ -247,7 +242,7 @@ async def test():
 
     task = await m.query_task(task_id)
     print(" - final task:", task)
-
+    await m.close()
 
 if __name__ == "__main__":
     asyncio.run(test())
