@@ -18,6 +18,7 @@ from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config
+from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
 from lightx2v.deploy.common.utils import class_try_catch_async
 
 
@@ -64,7 +65,7 @@ class PipelineWorker(BaseWorker):
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.runner.set_inputs(params)
-            await self.runner.run_pipeline() 
+            self.runner.run_pipeline()
 
             # save output video
             video_data = open(tmp_video_path, 'rb').read()
@@ -134,8 +135,14 @@ class VaeEncoderWorker(BaseWorker):
 
         img = await data_manager.load_image(inputs["input_image"])
         # run vae encoder changed the config, we use kwargs pass changes
-        vals, kwargs = self.runner.run_vae_encoder(img)
-        out = {"vals": vals, "kwargs": kwargs}
+        vals = self.runner.run_vae_encoder(img)
+        out = {
+            "vals": vals,
+            "kwargs": {
+                "lat_h": self.runner.config.lat_h,
+                "lat_w": self.runner.config.lat_w,
+            }
+        }
         await data_manager.save_object(out, outputs['vae_encoder_output'])
 
         del out, img, vals
@@ -176,8 +183,8 @@ class DiTWorker(BaseWorker):
             "image_encoder_output": image_encoder_output,
         }
 
-        kwargs = self.runner.set_target_shape()
-        out, _ = await self.runner.run_dit_local(kwargs)
+        self.runner.set_target_shape()
+        out, _ = self.runner._run_dit_local()
         await data_manager.save_tensor(out, outputs['latents'])
 
         del out, text_encoder_output , image_encoder_output
@@ -190,6 +197,7 @@ class VaeDecoderWorker(BaseWorker):
     def __init__(self, args):
         super().__init__(args)
         vae_encoder, self.runner.vae_decoder = self.runner.load_vae()
+        self.runner.vfi_model = self.runner.load_vfi_model() if "video_frame_interpolation" in self.runner.config else None
         del vae_encoder
 
     @class_try_catch_async
@@ -205,7 +213,23 @@ class VaeDecoderWorker(BaseWorker):
 
             latents = await data_manager.load_tensor(inputs["latents"], "cuda:0")
             images = self.runner.vae_decoder.decode(latents, generator=None, config=self.runner.config)
-            self.runner.save_video(images)
+            images = vae_to_comfyui_image(images)
+            fps = self.runner.config.get("fps", 16)
+
+            if "video_frame_interpolation" in self.runner.config:
+                assert self.runner.vfi_model is not None and self.runner.config["video_frame_interpolation"].get("target_fps", None) is not None
+                target_fps = self.runner.config["video_frame_interpolation"]["target_fps"]
+                logger.info(f"Interpolating frames from {self.runner.config.get('fps', 16)} to {target_fps}")
+                images = self.runner.vfi_model.interpolate_frames(
+                    images,
+                    source_fps=self.runner.config.get("fps", 16),
+                    target_fps=target_fps,
+                )
+                fps = target_fps
+
+            if not self.runner.config.get("parallel_attn_type", None) or dist.get_rank() == 0:
+                logger.info(f"Saving video to {self.runner.config.save_video_path}")
+                save_to_video(images, self.runner.config.save_video_path, fps=fps, method="ffmpeg")  # type: ignore
 
             # save output video
             video_data = open(tmp_video_path, 'rb').read()

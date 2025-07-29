@@ -77,8 +77,8 @@ async def main(args):
         data_manager = S3DataManager(args.data_url)
     else:
         raise NotImplementedError
-    await data_manager.init()
     runner = RUNNER_MAP[args.worker](args)
+    await data_manager.init()
 
     while True:
         subtasks = fetch_subtasks(args.server, worker_keys, args.identity)
