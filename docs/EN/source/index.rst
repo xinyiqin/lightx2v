@@ -46,16 +46,18 @@ Documentation
    Model Quantization <method_tutorials/quantization.md>
    Feature Caching <method_tutorials/cache.md>
    Attention Module <method_tutorials/attention.md>
-   Offloading <method_tutorials/offload.md>
+   Offload <method_tutorials/offload.md>
    Parallel Inference <method_tutorials/parallel.md>
    Changing Resolution Inference <method_tutorials/changing_resolution.md>
    Step Distill <method_tutorials/step_distill.md>
    Autoregressive Distill <method_tutorials/autoregressive_distill.md>
+   Video Frame Interpolation <method_tutorials/video_frame_interpolation.md>
 
 .. toctree::
    :maxdepth: 1
    :caption: Deployment Guides
 
+   Model Structure <deploy_guides/model_structure.md>
    Low Latency Deployment <deploy_guides/for_low_latency.md>
    Low Resource Deployment <deploy_guides/for_low_resource.md>
    Lora Deployment <deploy_guides/lora_deploy.md>

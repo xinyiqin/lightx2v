@@ -25,7 +25,7 @@ sys.path.append(os.path.abspath("../.."))
 # -- Project information -----------------------------------------------------
 
 project = "Lightx2v"
-copyright = "2024, Lightx2v Team"
+copyright = "2025, Lightx2v Team"
 author = "the Lightx2v Team"
 
 # -- General configuration ---------------------------------------------------
@@ -40,10 +40,16 @@ extensions = [
     "sphinx_copybutton",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.mathjax",
     "myst_parser",
     "sphinxarg.ext",
     "sphinxcontrib.redoc",
     "sphinxcontrib.openapi",
+]
+
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
 ]
 
 html_static_path = ["_static"]

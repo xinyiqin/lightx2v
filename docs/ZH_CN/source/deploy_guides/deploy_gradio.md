@@ -1,8 +1,24 @@
-# Gradio 部署
+# Gradio 部署指南
 
 ## 📖 概述
 
-Lightx2v 是一个轻量级的视频推理和生成引擎，提供了基于 Gradio 的 Web 界面，支持图像到视频（Image-to-Video）和文本到视频（Text-to-Video）两种生成模式。
+Lightx2v 是一个轻量级的视频推理和生成引擎，提供基于 Gradio 的 Web 界面，支持图像到视频（Image-to-Video）和文本到视频（Text-to-Video）两种生成模式。
+
+对于Windows系统，我们提供了便捷的一键部署方式，支持自动环境配置和智能参数优化。详细操作请参考[一键启动Gradio](./deploy_local_windows.md/#一键启动gradio推荐)章节。
+
+![Gradio中文界面](../../../../assets/figs/portabl_windows/pic_gradio_zh.png)
+
+## 📁 文件结构
+
+```
+LightX2V/app/
+├── gradio_demo.py          # 英文界面演示
+├── gradio_demo_zh.py       # 中文界面演示
+├── run_gradio.sh          # 启动脚本
+├── README.md              # 说明文档
+├── outputs/               # 生成视频保存目录
+└── inference_logs.log     # 推理日志
+```
 
 本项目包含两个主要演示文件：
 - `gradio_demo.py` - 英文界面版本
@@ -12,27 +28,17 @@ Lightx2v 是一个轻量级的视频推理和生成引擎，提供了基于 Grad
 
 ### 环境要求
 
-- Python 3.10+ (推荐)
-- CUDA 12.4+ (推荐)
-- 至少 8GB GPU 显存
-- 至少 16GB 系统内存（最好最少有 32G）
-- 至少 128GB SSD固态硬盘 (**💾 强烈建议使用SSD固态硬盘存储模型文件！"延迟加载"启动时，显著提升模型加载速度和推理性能**)
+按照[快速开始文档](../getting_started/quickstart.md)安装环境
 
-
-### 安装依赖☀
-
-```bash
-# 安装基础依赖
-pip install -r requirements.txt
-pip install gradio
-```
 #### 推荐优化库配置
 
 - ✅ [Flash attention](https://github.com/Dao-AILab/flash-attention)
 - ✅ [Sage attention](https://github.com/thu-ml/SageAttention)
 - ✅ [vllm-kernel](https://github.com/vllm-project/vllm)
 - ✅ [sglang-kernel](https://github.com/sgl-project/sglang/tree/main/sgl-kernel)
-- ✅ [q8-kernel](https://github.com/KONAKONA666/q8_kernels) (只支持ADA架构的GPU)
+- ✅ [q8-kernel](https://github.com/KONAKONA666/q8_kernels) (仅支持ADA架构的GPU)
+
+可根据需要，按照各算子的项目主页教程进行安装
 
 ### 🤖 支持的模型
 
@@ -53,19 +59,36 @@ pip install gradio
 | ✅ [Wan2.1-T2V-14B-Lightx2v](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-Lightx2v) | 14B | 标准版本 | 平衡速度和质量 |
 | ✅ [Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) | 14B | 蒸馏优化版 | 高质量+快速推理 |
 
-
 **💡 模型选择建议**:
-- **首次使用**: 建议选择蒸馏版本
+- **首次使用**: 建议选择蒸馏版本 (`wan2.1_distill`)
 - **追求质量**: 选择720p分辨率或14B参数模型
-- **追求速度**: 选择480p分辨率或1.3B参数模型
+- **追求速度**: 选择480p分辨率或1.3B参数模型，优先使用蒸馏版本
 - **资源受限**: 优先选择蒸馏版本和较低分辨率
+- **实时应用**: 强烈推荐使用蒸馏模型 (`wan2.1_distill`)
 
+**🎯 模型类别说明**:
+- **`wan2.1`**: 标准模型，提供最佳的视频生成质量，适合对质量要求极高的场景
+- **`wan2.1_distill`**: 蒸馏模型，通过知识蒸馏技术优化，推理速度显著提升，在保持良好质量的同时大幅减少计算时间，适合大多数应用场景
 
+**📥 下载模型**:
+
+可参考[模型结构文档](./model_structure.md)下载完整模型（包含量化和非量化版本）或仅下载量化/非量化版本。
+
+**下载选项说明**：
+
+- **完整模型**：下载包含量化和非量化版本的完整模型时，在`Gradio` Web前端的高级选项中可以自由选择DIT/T5/CLIP的量化精度。
+
+- **仅非量化版本**：仅下载非量化版本时，在`Gradio` Web前端中，`DIT/T5/CLIP`的量化精度只能选择bf16/fp16。如需使用量化版本的模型，请手动下载量化权重到Gradio启动的`i2v_model_path`或者`t2v_model_path`目录下。
+
+- **仅量化版本**：仅下载量化版本时，在`Gradio` Web前端中，`DIT/T5/CLIP`的量化精度只能选择fp8或int8（取决于您下载的权重）。如需使用非量化版本的模型，请手动下载非量化权重到Gradio启动的`i2v_model_path`或者`t2v_model_path`目录下。
+
+- **注意**：无论是下载了完整模型还是部分模型，`i2v_model_path` 和 `t2v_model_path` 参数的值都应该是一级目录的路径。例如：`Wan2.1-I2V-14B-480P-Lightx2v/`，而不是 `Wan2.1-I2V-14B-480P-Lightx2v/int8`。
 
 ### 启动方式
 
 #### 方式一：使用启动脚本（推荐）
 
+**Linux 环境：**
 ```bash
 # 1. 编辑启动脚本，配置相关路径
 cd app/
@@ -82,30 +105,48 @@ vim run_gradio.sh
 # 2. 运行启动脚本
 bash run_gradio.sh
 
-# 3. 或使用参数启动（推荐）
-bash run_gradio.sh --task i2v --lang zh --model_size 14b --port 8032
-# bash run_gradio.sh --task i2v --lang zh --model_size 14b --port 8032
-# bash run_gradio.sh --task i2v --lang zh --model_size 1.3b --port 8032
+# 3. 或使用参数启动（推荐使用蒸馏模型）
+bash run_gradio.sh --task i2v --lang zh --model_cls wan2.1 --model_size 14b --port 8032
+bash run_gradio.sh --task t2v --lang zh --model_cls wan2.1 --model_size 1.3b --port 8032
+bash run_gradio.sh --task i2v --lang zh --model_cls wan2.1_distill --model_size 14b --port 8032
+bash run_gradio.sh --task t2v --lang zh --model_cls wan2.1_distill --model_size 1.3b --port 8032
+```
+
+**Windows 环境：**
+```cmd
+# 1. 编辑启动脚本，配置相关路径
+cd app\
+notepad run_gradio_win.bat
+
+# 需要修改的配置项：
+# - lightx2v_path: Lightx2v项目根目录路径
+# - i2v_model_path: 图像到视频模型路径
+# - t2v_model_path: 文本到视频模型路径
+
+# 💾 重要提示：建议将模型路径指向SSD存储位置
+# 例如：D:\models\ 或 E:\models\
+
+# 2. 运行启动脚本
+run_gradio_win.bat
+
+# 3. 或使用参数启动（推荐使用蒸馏模型）
+run_gradio_win.bat --task i2v --lang zh --model_cls wan2.1 --model_size 14b --port 8032
+run_gradio_win.bat --task t2v --lang zh --model_cls wan2.1 --model_size 1.3b --port 8032
+run_gradio_win.bat --task i2v --lang zh --model_cls wan2.1_distill --model_size 14b --port 8032
+run_gradio_win.bat --task t2v --lang zh --model_cls wan2.1_distill --model_size 1.3b --port 8032
 ```
 
 #### 方式二：直接命令行启动
 
+**Linux 环境：**
+
 **图像到视频模式：**
 ```bash
 python gradio_demo_zh.py \
-    --model_path /path/to/Wan2.1-I2V-14B-720P-Lightx2v \
+    --model_path /path/to/Wan2.1-I2V-14B-480P-Lightx2v \
+    --model_cls wan2.1 \
     --model_size 14b \
     --task i2v \
-    --server_name 0.0.0.0 \
-    --server_port 7862
-```
-
-**文本到视频模式：**
-```bash
-python gradio_demo_zh.py \
-    --model_path /path/to/Wan2.1-T2V-1.3B \
-    --model_size 1.3b \
-    --task t2v \
     --server_name 0.0.0.0 \
     --server_port 7862
 ```
@@ -113,10 +154,35 @@ python gradio_demo_zh.py \
 **英文界面版本：**
 ```bash
 python gradio_demo.py \
-    --model_path /path/to/model \
+    --model_path /path/to/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v \
+    --model_cls wan2.1_distill \
     --model_size 14b \
-    --task i2v \
+    --task t2v \
     --server_name 0.0.0.0 \
+    --server_port 7862
+```
+
+**Windows 环境：**
+
+**图像到视频模式：**
+```cmd
+python gradio_demo_zh.py ^
+    --model_path D:\models\Wan2.1-I2V-14B-480P-Lightx2v ^
+    --model_cls wan2.1 ^
+    --model_size 14b ^
+    --task i2v ^
+    --server_name 127.0.0.1 ^
+    --server_port 7862
+```
+
+**英文界面版本：**
+```cmd
+python gradio_demo_zh.py ^
+    --model_path D:\models\Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v ^
+    --model_cls wan2.1_distill ^
+    --model_size 14b ^
+    --task i2v ^
+    --server_name 127.0.0.1 ^
     --server_port 7862
 ```
 
@@ -125,8 +191,8 @@ python gradio_demo.py \
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `--model_path` | str | ✅ | - | 模型文件夹路径 |
-| `--model_cls` | str | ❌ | wan2.1 | 模型类别（目前仅支持wan2.1） |
-| `--model_size` | str | ✅ | - | 模型大小：`14b（图像到视频或者文本到视频）` 或 `1.3b（文本到视频）` |
+| `--model_cls` | str | ❌ | wan2.1 | 模型类别：`wan2.1`（标准模型）或 `wan2.1_distill`（蒸馏模型，推理更快） |
+| `--model_size` | str | ✅ | - | 模型大小：`14b` 或 `1.3b）` |
 | `--task` | str | ✅ | - | 任务类型：`i2v`（图像到视频）或 `t2v`（文本到视频） |
 | `--server_port` | int | ❌ | 7862 | 服务器端口 |
 | `--server_name` | str | ❌ | 0.0.0.0 | 服务器IP地址 |
@@ -178,7 +244,6 @@ python gradio_demo.py \
 
 启用"自动配置推理选项"后，系统会根据您的硬件配置自动优化参数：
 
-
 ### GPU内存规则
 - **80GB+**: 默认配置，无需优化
 - **48GB**: 启用CPU卸载，卸载比例50%
@@ -201,23 +266,11 @@ python gradio_demo.py \
 
 **💡 针对显存不足或性能受限的设备**:
 
-- **🎯 模型选择**: 优先使用蒸馏版本模型 (StepDistill-CfgDistill)
+- **🎯 模型选择**: 优先使用蒸馏版本模型 (`wan2.1_distill`)
 - **⚡ 推理步数**: 建议设置为 4 步
 - **🔧 CFG设置**: 建议关闭CFG选项以提升生成速度
 - **🔄 自动配置**: 启用"自动配置推理选项"
-
-
-## 📁 文件结构
-
-```
-lightx2v/app/
-├── gradio_demo.py          # 英文界面演示
-├── gradio_demo_zh.py       # 中文界面演示
-├── run_gradio.sh          # 启动脚本
-├── README.md              # 说明文档
-├── saved_videos/          # 生成视频保存目录
-└── inference_logs.log     # 推理日志
-```
+- **💾 存储优化**: 确保模型存储在SSD上以获得最佳加载性能
 
 ## 🎨 界面说明
 
@@ -239,17 +292,20 @@ lightx2v/app/
 
 **💡 提示**: 一般情况下，启用"自动配置推理选项"后，系统会根据您的硬件配置自动优化参数设置，通常不会出现性能问题。如果遇到问题，请参考以下解决方案：
 
-1. **CUDA内存不足**
+1. **Gradio网页打开空白**
+   - 尝试升级gradio `pip install --upgrade gradio`
+
+2. **CUDA内存不足**
    - 启用CPU卸载
    - 降低分辨率
    - 启用量化选项
 
-1. **系統内存不足**
+3. **系统内存不足**
    - 启用CPU卸载
    - 启用延迟加载选项
    - 启用量化选项
 
-2. **生成速度慢**
+4. **生成速度慢**
    - 减少推理步数
    - 启用自动配置
    - 使用轻量级模型
@@ -257,13 +313,13 @@ lightx2v/app/
    - 使用量化算子
    - 💾 **检查模型是否存放在SSD上**
 
-3. **模型加载缓慢**
+5. **模型加载缓慢**
    - 💾 **将模型迁移到SSD存储**
    - 启用延迟加载选项
    - 检查磁盘I/O性能
    - 考虑使用NVMe SSD
 
-4. **视频质量不佳**
+6. **视频质量不佳**
    - 增加推理步数
    - 提高CFG缩放因子
    - 使用14B模型
@@ -282,8 +338,6 @@ nvidia-smi
 htop
 ```
 
-
 欢迎提交Issue和Pull Request来改进这个项目！
-
 
 **注意**: 使用本工具生成的视频内容请遵守相关法律法规，不得用于非法用途。

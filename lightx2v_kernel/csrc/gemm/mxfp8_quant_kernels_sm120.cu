@@ -282,12 +282,12 @@ inline int getMultiProcessorCount() {
   return multi_processor_count;  // Return the cached value on subsequent calls
 }
 
-void scaled_fp8_quant_sm120(
+void scaled_mxfp8_quant_sm120(
     torch::Tensor& output, torch::Tensor const& input, torch::Tensor& output_sf) {
   int32_t m = input.size(0);
   int32_t n = input.size(1);
 
-  TORCH_CHECK(n % 32 == 0, "The N dimension must be multiple of 16.");
+  TORCH_CHECK(n % 32 == 0, "The N dimension must be multiple of 32.");
 
   int multiProcessorCount = getMultiProcessorCount();
 

@@ -16,14 +16,17 @@ LoRA (Low-Rank Adaptation) 是一种高效的模型微调技术，通过低秩�
 
 ```json
 {
-  "lora_path": [
-    "/path/to/your/lora.safetensors"
-  ],
-  "strength_model": 1.0
+  "lora_configs": [
+    {
+      "path": "/path/to/your/lora.safetensors",
+      "strength": 1.0
+    }
+  ]
 }
 ```
 
 **配置参数说明：**
+
 - `lora_path`: LoRA 权重文件路径列表，支持多个 LoRA 同时加载
 - `strength_model`: LoRA 强度系数 (alpha)，控制 LoRA 对原模型的影响程度
 
@@ -38,7 +41,27 @@ python -m lightx2v.infer \
   --model_path /path/to/model \
   --config_json /path/to/config.json \
   --lora_path /path/to/your/lora.safetensors \
+  --lora_strength 0.8 \
   --prompt "Your prompt here"
+```
+
+### 多LoRA配置
+
+要使用多个具有不同强度的LoRA，请在配置JSON文件中指定：
+
+```json
+{
+  "lora_configs": [
+    {
+      "path": "/path/to/first_lora.safetensors",
+      "strength": 0.8
+    },
+    {
+      "path": "/path/to/second_lora.safetensors",
+      "strength": 0.5
+    }
+  ]
+}
 ```
 
 ### 支持的 LoRA 格式
@@ -116,6 +139,7 @@ python tools/extract/lora_extractor.py \
 ### 高级用法示例
 
 **提取高秩 LoRA：**
+
 ```bash
 python tools/extract/lora_extractor.py \
   --source-model /path/to/base/model \
@@ -126,6 +150,7 @@ python tools/extract/lora_extractor.py \
 ```
 
 **仅保存权重差值：**
+
 ```bash
 python tools/extract/lora_extractor.py \
   --source-model /path/to/base/model \
@@ -164,6 +189,7 @@ python tools/extract/lora_merger.py \
 ### 高级用法示例
 
 **部分强度合并：**
+
 ```bash
 python tools/extract/lora_merger.py \
   --source-model /path/to/base/model \
@@ -174,6 +200,7 @@ python tools/extract/lora_merger.py \
 ```
 
 **多格式支持：**
+
 ```bash
 python tools/extract/lora_merger.py \
   --source-model /path/to/base/model.pt \

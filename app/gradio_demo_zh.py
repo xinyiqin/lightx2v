@@ -1,6 +1,5 @@
 import os
 import gradio as gr
-import asyncio
 import argparse
 import json
 import torch
@@ -12,6 +11,7 @@ from loguru import logger
 import importlib.util
 import psutil
 import random
+import glob
 
 logger.add(
     "inference_logs.log",
@@ -23,6 +23,40 @@ logger.add(
 )
 
 MAX_NUMPY_SEED = 2**32 - 1
+
+
+def find_hf_model_path(model_path, subdir=["original", "fp8", "int8"]):
+    paths_to_check = [model_path]
+    if isinstance(subdir, list):
+        for sub in subdir:
+            paths_to_check.append(os.path.join(model_path, sub))
+    else:
+        paths_to_check.append(os.path.join(model_path, subdir))
+
+    for path in paths_to_check:
+        safetensors_pattern = os.path.join(path, "*.safetensors")
+        safetensors_files = glob.glob(safetensors_pattern)
+        if safetensors_files:
+            logger.info(f"Found Hugging Face model files in: {path}")
+            return path
+    raise FileNotFoundError(f"No Hugging Face model files (.safetensors) found.\nPlease download the model from: https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
+
+
+def find_torch_model_path(model_path, filename=None, subdir=["original", "fp8", "int8"]):
+    paths_to_check = [
+        os.path.join(model_path, filename),
+    ]
+    if isinstance(subdir, list):
+        for sub in subdir:
+            paths_to_check.append(os.path.join(model_path, sub, filename))
+    else:
+        paths_to_check.append(os.path.join(model_path, subdir, filename))
+    print(paths_to_check)
+    for path in paths_to_check:
+        if os.path.exists(path):
+            logger.info(f"Found PyTorch model checkpoint: {path}")
+            return path
+    raise FileNotFoundError(f"PyTorch model file '{filename}' not found.\nPlease download the model from https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
 
 
 def generate_random_seed():
@@ -129,10 +163,10 @@ def cleanup_memory():
         pass
 
 
-def generate_unique_filename(base_dir="./saved_videos"):
-    os.makedirs(base_dir, exist_ok=True)
+def generate_unique_filename(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(base_dir, f"{model_cls}_{timestamp}.mp4")
+    return os.path.join(output_dir, f"{model_cls}_{timestamp}.mp4")
 
 
 def is_fp8_supported_gpu():
@@ -141,6 +175,63 @@ def is_fp8_supported_gpu():
     compute_capability = torch.cuda.get_device_capability(0)
     major, minor = compute_capability
     return (major == 8 and minor == 9) or (major >= 9)
+
+
+def is_ada_architecture_gpu():
+    if not torch.cuda.is_available():
+        return False
+    try:
+        gpu_name = torch.cuda.get_device_name(0).upper()
+        ada_keywords = ["RTX 40", "RTX40", "4090", "4080", "4070", "4060"]
+        return any(keyword in gpu_name for keyword in ada_keywords)
+    except Exception as e:
+        logger.warning(f"Failed to get GPU name: {e}")
+        return False
+
+
+def get_quantization_options(model_path):
+    """根据model_path动态获取量化选项"""
+    import os
+
+    # 检查子目录
+    subdirs = ["original", "fp8", "int8"]
+    has_subdirs = {subdir: os.path.exists(os.path.join(model_path, subdir)) for subdir in subdirs}
+
+    # 检查根目录下的原始文件
+    t5_bf16_exists = os.path.exists(os.path.join(model_path, "models_t5_umt5-xxl-enc-bf16.pth"))
+    clip_fp16_exists = os.path.exists(os.path.join(model_path, "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"))
+
+    # 生成选项
+    def get_choices(has_subdirs, original_type, fp8_type, int8_type, fallback_type, has_original_file=False):
+        choices = []
+        if has_subdirs["original"]:
+            choices.append(original_type)
+        if has_subdirs["fp8"]:
+            choices.append(fp8_type)
+        if has_subdirs["int8"]:
+            choices.append(int8_type)
+
+        # 如果没有子目录但有原始文件，添加原始类型
+        if has_original_file:
+            if not choices or "original" not in choices:
+                choices.append(original_type)
+
+        # 如果没有任何选项，使用默认值
+        if not choices:
+            choices = [fallback_type]
+
+        return choices, choices[0]
+
+    # DIT选项
+    dit_choices, dit_default = get_choices(has_subdirs, "bf16", "fp8", "int8", "bf16")
+
+    # T5选项 - 检查是否有原始文件
+    t5_choices, t5_default = get_choices(has_subdirs, "bf16", "fp8", "int8", "bf16", t5_bf16_exists)
+
+    # CLIP选项 - 检查是否有原始文件
+    clip_choices, clip_default = get_choices(has_subdirs, "fp16", "fp8", "int8", "fp16", clip_fp16_exists)
+
+    return {"dit_choices": dit_choices, "dit_default": dit_default, "t5_choices": t5_choices, "t5_default": t5_default, "clip_choices": clip_choices, "clip_default": clip_default}
 
 
 global_runner = None
@@ -213,6 +304,8 @@ def run_inference(
     if os.path.exists(os.path.join(model_path, "config.json")):
         with open(os.path.join(model_path, "config.json"), "r") as f:
             model_config = json.load(f)
+    else:
+        model_config = {}
 
     if task == "t2v":
         if model_size == "1.3b":
@@ -291,22 +384,30 @@ def run_inference(
                 ],
             ]
 
-    save_video_path = generate_unique_filename()
+    save_video_path = generate_unique_filename(output_dir)
 
     is_dit_quant = dit_quant_scheme != "bf16"
     is_t5_quant = t5_quant_scheme != "bf16"
+
     if is_t5_quant:
-        t5_path = os.path.join(model_path, t5_quant_scheme)
-        t5_quant_ckpt = os.path.join(t5_path, f"models_t5_umt5-xxl-enc-{t5_quant_scheme}.pth")
+        t5_model_name = f"models_t5_umt5-xxl-enc-{t5_quant_scheme}.pth"
+        t5_quantized_ckpt = find_torch_model_path(model_path, t5_model_name, t5_quant_scheme)
+        t5_original_ckpt = None
     else:
-        t5_quant_ckpt = None
+        t5_quantized_ckpt = None
+        t5_model_name = "models_t5_umt5-xxl-enc-bf16.pth"
+        t5_original_ckpt = find_torch_model_path(model_path, t5_model_name, "original")
 
     is_clip_quant = clip_quant_scheme != "fp16"
+
     if is_clip_quant:
-        clip_path = os.path.join(model_path, clip_quant_scheme)
-        clip_quant_ckpt = os.path.join(clip_path, f"clip-{clip_quant_scheme}.pth")
+        clip_model_name = f"clip-{t5_quant_scheme}.pth"
+        clip_quantized_ckpt = find_torch_model_path(model_path, clip_model_name, clip_quant_scheme)
+        clip_original_ckpt = None
     else:
-        clip_quant_ckpt = None
+        clip_quantized_ckpt = None
+        clip_model_name = "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+        clip_original_ckpt = find_torch_model_path(model_path, clip_model_name, "original")
 
     needs_reinit = (
         lazy_load
@@ -344,8 +445,10 @@ def run_inference(
                 mm_type = f"W-{dit_quant_scheme}-channel-sym-A-{dit_quant_scheme}-channel-sym-dynamic-Sgl"
         elif quant_op == "q8f":
             mm_type = f"W-{dit_quant_scheme}-channel-sym-A-{dit_quant_scheme}-channel-sym-dynamic-Q8F"
+            t5_quant_scheme = f"{t5_quant_scheme}-q8f"
+            clip_quant_scheme = f"{clip_quant_scheme}-q8f"
 
-        dit_quantized_ckpt = os.path.join(model_path, dit_quant_scheme)
+        dit_quantized_ckpt = find_hf_model_path(model_path, dit_quant_scheme)
         if os.path.exists(os.path.join(dit_quantized_ckpt, "config.json")):
             with open(os.path.join(dit_quantized_ckpt, "config.json"), "r") as f:
                 quant_model_config = json.load(f)
@@ -381,17 +484,20 @@ def run_inference(
         "coefficients": coefficient[0] if use_ret_steps else coefficient[1],
         "use_ret_steps": use_ret_steps,
         "teacache_thresh": teacache_thresh,
+        "t5_original_ckpt": t5_original_ckpt,
         "t5_cpu_offload": t5_cpu_offload,
         "unload_modules": unload_modules,
         "t5_quantized": is_t5_quant,
-        "t5_quantized_ckpt": t5_quant_ckpt,
+        "t5_quantized_ckpt": t5_quantized_ckpt,
         "t5_quant_scheme": t5_quant_scheme,
+        "clip_original_ckpt": clip_original_ckpt,
         "clip_quantized": is_clip_quant,
-        "clip_quantized_ckpt": clip_quant_ckpt,
+        "clip_quantized_ckpt": clip_quantized_ckpt,
         "clip_quant_scheme": clip_quant_scheme,
+        "vae_path": find_torch_model_path(model_path, "Wan2.1_VAE.pth"),
         "use_tiling_vae": use_tiling_vae,
-        "tiny_vae": use_tiny_vae,
-        "tiny_vae_path": (os.path.join(model_path, "taew2_1.pth") if use_tiny_vae else None),
+        "use_tiny_vae": use_tiny_vae,
+        "tiny_vae_path": (find_torch_model_path(model_path, "taew2_1.pth") if use_tiny_vae else None),
         "lazy_load": lazy_load,
         "do_mm_calib": False,
         "parallel_attn_type": None,
@@ -406,6 +512,7 @@ def run_inference(
         "rotary_chunk": rotary_chunk,
         "rotary_chunk_size": rotary_chunk_size,
         "clean_cuda_cache": clean_cuda_cache,
+        "denoising_step_list": [1000, 750, 500, 250],
     }
 
     args = argparse.Namespace(
@@ -421,7 +528,6 @@ def run_inference(
 
     config.update({k: v for k, v in vars(args).items()})
     config = EasyDict(config)
-    config["mode"] = "infer"
     config.update(model_config)
     config.update(quant_model_config)
 
@@ -451,7 +557,7 @@ def run_inference(
     else:
         runner.config = config
 
-    asyncio.run(runner.run_pipeline())
+    runner.run_pipeline()
 
     del config, args, model_config, quant_model_config
     if "dit_quantized_ckpt" in locals():
@@ -509,7 +615,11 @@ def auto_configure(enable_auto_config, resolution):
         quant_type = "int8"
 
     attn_priority = ["sage_attn2", "flash_attn3", "flash_attn2", "torch_sdpa"]
-    quant_op_priority = ["sgl", "vllm", "q8f"]
+
+    if is_ada_architecture_gpu():
+        quant_op_priority = ["q8f", "vllm", "sgl"]
+    else:
+        quant_op_priority = ["sgl", "vllm", "q8f"]
 
     for op in attn_priority:
         if dict(available_attn_ops).get(op):
@@ -728,9 +838,6 @@ def auto_configure(enable_auto_config, resolution):
 
 
 def main():
-    def toggle_image_input(task):
-        return gr.update(visible=(task == "i2v"))
-
     with gr.Blocks(
         title="Lightx2v (轻量级视频推理和生成引擎)",
         css="""
@@ -739,6 +846,30 @@ def main():
         .warning { color: #ff6b6b; font-weight: bold; }
         .advanced-options { background: #f9f9ff; border-radius: 10px; padding: 15px; }
         .tab-button { font-size: 16px; padding: 10px 20px; }
+        .auto-config-title {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            text-align: center;
+            margin: 0 !important;
+            padding: 8px;
+            border: 2px solid #4ecdc4;
+            border-radius: 8px;
+            background-color: #f0f8ff;
+        }
+        .auto-config-checkbox {
+            border: 2px solid #ff6b6b !important;
+            border-radius: 8px !important;
+            padding: 10px !important;
+            background: linear-gradient(135deg, #fff5f5, #f0fff0) !important;
+            box-shadow: 0 2px 8px rgba(255, 107, 107, 0.2) !important;
+        }
+        .auto-config-checkbox label {
+            font-size: 16px !important;
+            font-weight: bold !important;
+            color: #2c3e50 !important;
+        }
     """,
     ) as demo:
         gr.Markdown(f"# 🎬 {model_cls} 视频生成器")
@@ -803,9 +934,14 @@ def main():
                                     )
 
                                 with gr.Column():
-                                    enable_auto_config = gr.Checkbox(
-                                        label="自动配置推理选项", value=False, info="自动优化GPU设置以匹配当前分辨率。修改分辨率后，请重新勾选此选项，否则可能导致性能下降或运行失败。"
-                                    )
+                                    with gr.Group():
+                                        gr.Markdown("### 🚀 **智能配置推荐**", elem_classes=["auto-config-title"])
+                                        enable_auto_config = gr.Checkbox(
+                                            label="🎯 **自动配置推理选项**",
+                                            value=False,
+                                            info="💡 **智能优化GPU设置以匹配当前分辨率。修改分辨率后，请重新勾选此选项，否则可能导致性能下降或运行失败。**",
+                                            elem_classes=["auto-config-checkbox"],
+                                        )
                                 with gr.Column(scale=9):
                                     seed = gr.Slider(
                                         label="随机种子",
@@ -820,18 +956,42 @@ def main():
                                 randomize_btn.click(fn=generate_random_seed, inputs=None, outputs=seed)
 
                                 with gr.Column():
-                                    infer_steps = gr.Slider(
-                                        label="推理步数",
-                                        minimum=1,
-                                        maximum=100,
-                                        step=1,
-                                        value=40,
-                                        info="视频生成的推理步数。增加步数可能提高质量但降低速度。",
-                                    )
+                                    # 根据模型类别设置默认推理步数
+                                    if model_cls == "wan2.1_distill":
+                                        infer_steps = gr.Slider(
+                                            label="推理步数",
+                                            minimum=4,
+                                            maximum=4,
+                                            step=1,
+                                            value=4,
+                                            interactive=False,
+                                            info="推理步数固定为4，以获得最佳性能(对于蒸馏模型)。",
+                                        )
+                                    elif model_cls == "wan2.1":
+                                        if task == "i2v":
+                                            infer_steps = gr.Slider(
+                                                label="推理步数",
+                                                minimum=1,
+                                                maximum=100,
+                                                step=1,
+                                                value=40,
+                                                info="视频生成的推理步数。增加步数可能提高质量但降低速度。",
+                                            )
+                                        elif task == "t2v":
+                                            infer_steps = gr.Slider(
+                                                label="推理步数",
+                                                minimum=1,
+                                                maximum=100,
+                                                step=1,
+                                                value=50,
+                                                info="视频生成的推理步数。增加步数可能提高质量但降低速度。",
+                                            )
 
+                            # 根据模型类别设置默认CFG
+                            default_enable_cfg = False if model_cls == "wan2.1_distill" else True
                             enable_cfg = gr.Checkbox(
                                 label="启用无分类器引导",
-                                value=True,
+                                value=default_enable_cfg,
                                 info="启用无分类器引导以控制提示词强度",
                             )
                             cfg_scale = gr.Slider(
@@ -870,7 +1030,7 @@ def main():
 
                         save_video_path = gr.Textbox(
                             label="输出视频路径",
-                            value=generate_unique_filename(),
+                            value=generate_unique_filename(output_dir),
                             info="必须包含.mp4扩展名。如果留空或使用默认值，将自动生成唯一文件名。",
                         )
                     with gr.Column(scale=6):
@@ -975,22 +1135,25 @@ def main():
                             info="选择量化矩阵乘法算子以加速推理",
                             interactive=True,
                         )
+                        # 获取动态量化选项
+                        quant_options = get_quantization_options(model_path)
+
                         dit_quant_scheme = gr.Dropdown(
                             label="Dit",
-                            choices=["fp8", "int8", "bf16"],
-                            value="bf16",
+                            choices=quant_options["dit_choices"],
+                            value=quant_options["dit_default"],
                             info="Dit模型的量化精度",
                         )
                         t5_quant_scheme = gr.Dropdown(
                             label="T5编码器",
-                            choices=["fp8", "int8", "bf16"],
-                            value="bf16",
+                            choices=quant_options["t5_choices"],
+                            value=quant_options["t5_default"],
                             info="T5编码器模型的量化精度",
                         )
                         clip_quant_scheme = gr.Dropdown(
                             label="Clip编码器",
-                            choices=["fp8", "int8", "fp16"],
-                            value="fp16",
+                            choices=quant_options["clip_choices"],
+                            value=quant_options["clip_default"],
                             info="Clip编码器的量化精度",
                         )
                         precision_mode = gr.Dropdown(
@@ -1149,7 +1312,7 @@ def main():
                 outputs=output_video,
             )
 
-    demo.launch(share=True, server_port=args.server_port, server_name=args.server_name)
+    demo.launch(share=True, server_port=args.server_port, server_name=args.server_name, inbrowser=True, allowed_paths=[output_dir])
 
 
 if __name__ == "__main__":
@@ -1158,20 +1321,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_cls",
         type=str,
-        choices=["wan2.1"],
+        choices=["wan2.1", "wan2.1_distill"],
         default="wan2.1",
-        help="要使用的模型类别",
+        help="要使用的模型类别 (wan2.1: 标准模型, wan2.1_distill: 蒸馏模型，推理更快)",
     )
     parser.add_argument("--model_size", type=str, required=True, choices=["14b", "1.3b"], help="模型大小：14b 或 1.3b")
     parser.add_argument("--task", type=str, required=True, choices=["i2v", "t2v"], help="指定任务类型。'i2v'用于图像到视频转换，'t2v'用于文本到视频生成。")
     parser.add_argument("--server_port", type=int, default=7862, help="服务器端口")
     parser.add_argument("--server_name", type=str, default="0.0.0.0", help="服务器IP")
+    parser.add_argument("--output_dir", type=str, default="./outputs", help="输出视频保存目录")
     args = parser.parse_args()
 
-    global model_path, model_cls, model_size
+    global model_path, model_cls, model_size, output_dir
     model_path = args.model_path
     model_cls = args.model_cls
     model_size = args.model_size
     task = args.task
+    output_dir = args.output_dir
 
     main()

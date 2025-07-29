@@ -17,14 +17,17 @@ Specify LoRA path in configuration file:
 
 ```json
 {
-  "lora_path": [
-    "/path/to/your/lora.safetensors"
-  ],
-  "strength_model": 1.0
+  "lora_configs": [
+    {
+      "path": "/path/to/your/lora.safetensors",
+      "strength": 1.0
+    }
+  ]
 }
 ```
 
 **Configuration Parameter Description:**
+
 - `lora_path`: LoRA weight file path list, supports loading multiple LoRAs simultaneously
 - `strength_model`: LoRA strength coefficient (alpha), controls LoRA's influence on the original model
 
@@ -39,7 +42,27 @@ python -m lightx2v.infer \
   --model_path /path/to/model \
   --config_json /path/to/config.json \
   --lora_path /path/to/your/lora.safetensors \
+  --lora_strength 0.8 \
   --prompt "Your prompt here"
+```
+
+### Multiple LoRAs Configuration
+
+To use multiple LoRAs with different strengths, specify them in the config JSON file:
+
+```json
+{
+  "lora_configs": [
+    {
+      "path": "/path/to/first_lora.safetensors",
+      "strength": 0.8
+    },
+    {
+      "path": "/path/to/second_lora.safetensors",
+      "strength": 0.5
+    }
+  ]
+}
 ```
 
 ### Supported LoRA Formats
@@ -117,6 +140,7 @@ python tools/extract/lora_extractor.py \
 ### Advanced Usage Examples
 
 **Extract High-Rank LoRA:**
+
 ```bash
 python tools/extract/lora_extractor.py \
   --source-model /path/to/base/model \
@@ -127,6 +151,7 @@ python tools/extract/lora_extractor.py \
 ```
 
 **Save Weight Differences Only:**
+
 ```bash
 python tools/extract/lora_extractor.py \
   --source-model /path/to/base/model \
@@ -165,6 +190,7 @@ python tools/extract/lora_merger.py \
 ### Advanced Usage Examples
 
 **Partial Strength Merging:**
+
 ```bash
 python tools/extract/lora_merger.py \
   --source-model /path/to/base/model \
@@ -175,6 +201,7 @@ python tools/extract/lora_merger.py \
 ```
 
 **Multi-Format Support:**
+
 ```bash
 python tools/extract/lora_merger.py \
   --source-model /path/to/base/model.pt \

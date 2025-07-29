@@ -14,11 +14,11 @@
 
 # Lightx2v project root directory path
 # Example: /home/user/lightx2v or /data/video_gen/lightx2v
-lightx2v_path=/path/to/lightx2v
+lightx2v_path=/data/video_gen/LightX2V
 # Model path configuration
 # Image-to-video model path (for i2v tasks)
 # Example: /path/to/Wan2.1-I2V-14B-720P-Lightx2v
-i2v_model_path=/path/to/Wan2.1-I2V-14B-720P-Lightx2v-Step-Distill
+i2v_model_path=/path/to/Wan2.1-I2V-14B-480P-Lightx2v
 
 # Text-to-video model path (for t2v tasks)
 # Example: /path/to/Wan2.1-T2V-1.3B
@@ -28,9 +28,16 @@ t2v_model_path=/path/to/Wan2.1-T2V-1.3B
 # Default model size (14b, 1.3b)
 model_size="14b"
 
+# Model class configuration
+# Default model class (wan2.1, wan2.1_distill)
+model_cls="wan2.1"
+
 # Server configuration
 server_name="0.0.0.0"
 server_port=8032
+
+# Output directory configuration
+output_dir="./outputs"
 
 # GPU configuration
 gpu_id=0
@@ -72,6 +79,14 @@ while [[ $# -gt 0 ]]; do
             model_size="$2"
             shift 2
             ;;
+        --model_cls)
+            model_cls="$2"
+            shift 2
+            ;;
+        --output_dir)
+            output_dir="$2"
+            shift 2
+            ;;
         --help)
             echo "🎬 Lightx2v Gradio Demo Startup Script"
             echo "=========================================="
@@ -90,15 +105,23 @@ while [[ $# -gt 0 ]]; do
             echo "                     Model size (default: 14b)"
             echo "                     14b: 14 billion parameters model"
             echo "                     1.3b: 1.3 billion parameters model"
-            echo "  --help            Show this help message"
+                echo "  --model_cls MODEL_CLASS"
+    echo "                     Model class (default: wan2.1)"
+    echo "                     wan2.1: Standard model variant"
+    echo "                     wan2.1_distill: Distilled model variant for faster inference"
+    echo "  --output_dir OUTPUT_DIR"
+    echo "                     Output video save directory (default: ./saved_videos)"
+    echo "  --help            Show this help message"
             echo ""
             echo "🚀 Usage examples:"
             echo "  $0                                    # Default startup for image-to-video mode"
             echo "  $0 --task i2v --lang zh --port 8032   # Start with specified parameters"
             echo "  $0 --task t2v --lang en --port 7860   # Text-to-video with English interface"
             echo "  $0 --task i2v --gpu 1 --port 8032     # Use GPU 1"
-            echo "  $0 --task t2v --model_size 1.3b       # Use 1.3B model"
-            echo "  $0 --task i2v --model_size 14b        # Use 14B model"
+                echo "  $0 --task t2v --model_size 1.3b       # Use 1.3B model"
+    echo "  $0 --task i2v --model_size 14b        # Use 14B model"
+    echo "  $0 --task i2v --model_cls wan2.1_distill  # Use distilled model"
+    echo "  $0 --task i2v --output_dir ./custom_output  # Use custom output directory"
             echo ""
             echo "📝 Notes:"
             echo "  - Edit script to configure model paths before first use"
@@ -129,6 +152,12 @@ fi
 # Validate model size
 if [[ "$model_size" != "14b" && "$model_size" != "1.3b" ]]; then
     echo "Error: Model size must be '14b' or '1.3b'"
+    exit 1
+fi
+
+# Validate model class
+if [[ "$model_cls" != "wan2.1" && "$model_cls" != "wan2.1_distill" ]]; then
+    echo "Error: Model class must be 'wan2.1' or 'wan2.1_distill'"
     exit 1
 fi
 
@@ -181,9 +210,11 @@ echo "📁 Project path: $lightx2v_path"
 echo "🤖 Model path: $model_path"
 echo "🎯 Task type: $task"
 echo "🤖 Model size: $model_size"
+echo "🤖 Model class: $model_cls"
 echo "🌏 Interface language: $lang"
 echo "🖥️  GPU device: $gpu_id"
 echo "🌐 Server address: $server_name:$server_port"
+echo "📁 Output directory: $output_dir"
 echo "=========================================="
 
 # Display system resource information
@@ -202,16 +233,18 @@ fi
 echo "🎬 Starting Gradio demo..."
 echo "📱 Please access in browser: http://$server_name:$server_port"
 echo "⏹️  Press Ctrl+C to stop service"
-echo "🔄 First startup may take several minutes to load model..."
+echo "🔄 First startup may take several minutes to load resources..."
 echo "=========================================="
 
 # Start Python demo
 python $demo_file \
     --model_path "$model_path" \
+    --model_cls "$model_cls" \
     --task "$task" \
     --server_name "$server_name" \
     --server_port "$server_port" \
-    --model_size "$model_size"
+    --model_size "$model_size" \
+    --output_dir "$output_dir"
 
 # Display final system resource usage
 echo ""

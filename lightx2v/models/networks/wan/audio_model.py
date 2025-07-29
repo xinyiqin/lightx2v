@@ -8,25 +8,12 @@ from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
 from lightx2v.models.networks.wan.weights.transformer_weights import (
     WanTransformerWeights,
 )
-from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
-from lightx2v.models.networks.wan.infer.post_infer import WanPostInfer
-
-from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
 from lightx2v.models.networks.wan.infer.audio.pre_wan_audio_infer import WanAudioPreInfer
 from lightx2v.models.networks.wan.infer.audio.post_wan_audio_infer import WanAudioPostInfer
 from lightx2v.models.networks.wan.infer.feature_caching.transformer_infer import WanTransformerInferTeaCaching
+
 from safetensors import safe_open
-import lightx2v.attentions.distributed.ulysses.wrap as ulysses_dist_wrap
-import lightx2v.attentions.distributed.ring.wrap as ring_dist_wrap
-
-from lightx2v.attentions.common.radial_attn import MaskMap
-
-from lightx2v.models.networks.wan.infer.transformer_infer import (
-    WanTransformerInfer,
-)
-from lightx2v.models.networks.wan.infer.feature_caching.transformer_infer import (
-    WanTransformerInferTeaCaching,
-)
+from lightx2v.common.ops.attn.radial_attn import MaskMap
 
 
 class WanAudioModel(WanModel):
@@ -38,14 +25,9 @@ class WanAudioModel(WanModel):
         super().__init__(model_path, config, device)
 
     def _init_infer_class(self):
+        super()._init_infer_class()
         self.pre_infer_class = WanAudioPreInfer
         self.post_infer_class = WanAudioPostInfer
-        if self.config["feature_caching"] == "NoCaching":
-            self.transformer_infer_class = WanTransformerInfer
-        elif self.config["feature_caching"] == "Tea":
-            self.transformer_infer_class = WanTransformerInferTeaCaching
-        else:
-            raise NotImplementedError(f"Unsupported feature_caching type: {self.config['feature_caching']}")
 
     @torch.no_grad()
     def infer(self, inputs):
