@@ -20,3 +20,4 @@ ftfy
 easydict
 aio-pika
 asyncpg>=0.27.0
+boto3>=1.26.0

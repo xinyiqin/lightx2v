@@ -10,7 +10,7 @@ import requests
 from loguru import logger
 
 from lightx2v.utils.service_utils import ProcessManager
-from lightx2v.deploy.data_manager.local_data_manager import LocalDataManager
+from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.task_manager import TaskStatus
 from lightx2v.deploy.common.utils import try_catch
 from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker
@@ -73,8 +73,11 @@ async def main(args):
     data_manager = None
     if args.data_url.startswith("/"):
         data_manager = LocalDataManager(args.data_url)
+    elif args.data_url.startswith("{"):
+        data_manager = S3DataManager(args.data_url)
     else:
         raise NotImplementedError
+    await data_manager.init()
     runner = RUNNER_MAP[args.worker](args)
 
     while True:

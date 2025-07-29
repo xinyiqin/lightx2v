@@ -1,9 +1,9 @@
-lightx2v_path=/data/nvme1/liuliang1/lightx2v
+lightx2v_path=/path/to/lightx2v
 export PYTHONPATH=$lightx2v_path:$PYTHONPATH
 export CUDA_VISIBLE_DEVICES=7
 
 python -m lightx2v.deploy.worker \
-    --model_path /data/nvme1/models/x2v_models/wan/Wan2.1-I2V-14B-480P/ \
+    --model_path /path/to/Wan2.1-I2V-14B-480P/ \
     --config_json $lightx2v_path/configs/wan/wan_i2v.json \
     --task i2v \
     --model_cls wan2.1 \

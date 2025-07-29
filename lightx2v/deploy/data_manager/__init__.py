@@ -31,6 +31,9 @@ class BaseDataManager:
     async def load_bytes(self, filename):
         raise NotImplementedError
 
+    async def delete_bytes(self, filename):
+        raise NotImplementedError
+
     async def recurrent_save(self, data, prefix):
         if isinstance(data, dict):
             return {k: await self.recurrent_save(v, f"{prefix}-{k}") for k, v in data.items()}
@@ -49,18 +52,25 @@ class BaseDataManager:
 
     async def recurrent_load(self, data, device, prefix):
         if isinstance(data, dict):
-            return {k: await self.recurrent_load(v, device, prefix) for k, v in data.items()}
+            return {k: await self.recurrent_load(v, device, f"{prefix}-{k}") for k, v in data.items()}
         elif isinstance(data, list):
-            return [await self.recurrent_load(v, device, prefix) for idx, v in enumerate(data)]
-        elif isinstance(data, str) and data.startswith(prefix):
-            if data.endswith(".pt"):
-                return await self.load_tensor(data, device)
-            elif data.endswith(".png"):
-                return await self.load_image(data)
-            else:
-                return data
+            return [await self.recurrent_load(v, device, f"{prefix}-{idx}") for idx, v in enumerate(data)]
+        elif isinstance(data, str) and data == prefix + ".pt":
+            return await self.load_tensor(data, device)
+        elif isinstance(data, str) and data == prefix + ".png":
+            return await self.load_image(data)
         else:
             return data
+
+    async def recurrent_delete(self, data, prefix):
+        if isinstance(data, dict):
+            return {k: await self.recurrent_delete(v, f"{prefix}-{k}") for k, v in data.items()}
+        elif isinstance(data, list):
+            return [await self.recurrent_delete(v, f"{prefix}-{idx}") for idx, v in enumerate(data)]
+        elif isinstance(data, str) and data == prefix + ".pt":
+            await self.delete_bytes(data)
+        elif isinstance(data, str) and data == prefix + ".png":
+            await self.delete_bytes(data)
 
     @class_try_catch_async
     async def save_object(self, data, filename):
@@ -74,6 +84,13 @@ class BaseDataManager:
         data = json.loads(bytes_data.decode('utf-8'))
         data = await self.recurrent_load(data, device, filename)
         return data
+
+    @class_try_catch_async
+    async def delete_object(self, filename):
+        bytes_data = await self.load_bytes(filename)
+        data = json.loads(bytes_data.decode('utf-8'))
+        await self.recurrent_delete(data, filename)
+        await self.delete_bytes(filename)
 
     @class_try_catch_async
     async def save_tensor(self, data: torch.Tensor, filename):
@@ -102,8 +119,17 @@ class BaseDataManager:
         img = Image.open(buffer).convert("RGB")
         return img
 
+    def get_delete_func(self, type):
+        maps = {
+            "TENSOR": self.delete_bytes,
+            "IMAGE": self.delete_bytes,
+            "OBJECT": self.delete_object,
+            "VIDEO": self.delete_bytes,
+        }
+        return maps[type]
 
 # Import data manager implementations
 from .local_data_manager import LocalDataManager
+from .s3_data_manager import S3DataManager
 
-__all__ = ['BaseDataManager', 'LocalDataManager']
+__all__ = ['BaseDataManager', 'LocalDataManager', 'S3DataManager']

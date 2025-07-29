@@ -82,7 +82,7 @@ async def fetch_resource(url, timeout):
     return content
 
 
-async def preload_data(inp, typ, val):
+async def preload_data(inp, inp_type, typ, val):
     try:
         if typ == "url":
             timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
@@ -93,17 +93,20 @@ async def preload_data(inp, typ, val):
             raise ValueError(f"cannot read image which type is {typ}!")
 
         # check if valid image bytes
-        if 'image' in inp:
+        if inp_type == "IMAGE":
             image = Image.open(io.BytesIO(data))
+            logger.info(f"load image: {image.size}")
+        else:
+            raise Exception(f"cannot parse inp_type={inp_type} data")
         return data
 
     except Exception as e:
         raise ValueError(f"Failed to read {inp}, type={typ}, val={val[:100]}: {e}!")
 
 
-async def load_inputs(params, raw_inputs):
+async def load_inputs(params, raw_inputs, types):
     inputs_data = {}
     for inp in raw_inputs:
         item = params.pop(inp)
-        inputs_data[inp] = await preload_data(inp, item['type'], item['data'])
+        inputs_data[inp] = await preload_data(inp, types[inp], item['type'], item['data'])
     return inputs_data

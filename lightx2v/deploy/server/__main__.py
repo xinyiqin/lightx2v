@@ -12,7 +12,7 @@ from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.utils import load_inputs, data_name
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager
-from lightx2v.deploy.data_manager import LocalDataManager
+from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
 
@@ -72,9 +72,10 @@ async def api_v1_task_submit(request: Request):
         workers = model_pipelines.get_workers(keys)
         inputs = model_pipelines.get_inputs(keys)
         outputs = model_pipelines.get_outputs(keys)
+        types = model_pipelines.get_types(keys)
 
         # process multimodal inputs data
-        inputs_data = await load_inputs(params, inputs) 
+        inputs_data = await load_inputs(params, inputs, types)
         logger.info(f"{params}")
 
         # init task
@@ -184,9 +185,23 @@ async def api_v1_worker_report(request: Request):
         status = TaskStatus[params.pop('status')]
         identity = params.pop('worker_identity')
 
-        await task_manager.finish_subtasks(task_id, status, worker_identity=identity, worker_name=worker_name)
-        # prepare new ready subtasks
-        await prepare_subtasks(task_id)
+        ret = await task_manager.finish_subtasks(
+            task_id, status, worker_identity=identity, worker_name=worker_name
+        )
+        # not all subtasks finished, prepare new ready subtasks
+        if ret not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
+            await prepare_subtasks(task_id)
+
+        # all subtasks succeed, delete temp data
+        elif ret == TaskStatus.SUCCEED:
+            task = await task_manager.query_task(task_id)
+            keys = [task['task_type'], task['model_cls'], task['stage']]
+            temps = model_pipelines.get_temps(keys)
+            for temp in temps:
+                type = model_pipelines.get_type(temp)
+                name = data_name(temp, task_id)
+                await data_manager.get_delete_func(type)(name)
+
         return {'msg': 'ok'}
 
     except Exception as e:
@@ -228,6 +243,8 @@ if __name__ == "__main__":
             raise NotImplementedError
         if args.data_url.startswith('/'):
             data_manager = LocalDataManager(args.data_url)
+        elif args.data_url.startswith('{'):
+            data_manager = S3DataManager(args.data_url)
         else:
             raise NotImplementedError
         if args.queue_url.startswith('/'):

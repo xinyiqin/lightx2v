@@ -178,7 +178,7 @@ class DiTWorker(BaseWorker):
 
         kwargs = self.runner.set_target_shape()
         out, _ = await self.runner.run_dit_local(kwargs)
-        await data_manager.save_object(out, outputs['latents'])
+        await data_manager.save_tensor(out, outputs['latents'])
 
         del out, text_encoder_output , image_encoder_output
         torch.cuda.empty_cache()
@@ -203,7 +203,7 @@ class VaeDecoderWorker(BaseWorker):
             logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.runner.set_inputs(params)
 
-            latents = await data_manager.load_object(inputs["latents"], "cuda:0")
+            latents = await data_manager.load_tensor(inputs["latents"], "cuda:0")
             images = self.runner.vae_decoder.decode(latents, generator=None, config=self.runner.config)
             self.runner.save_video(images)
 

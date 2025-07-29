@@ -1,5 +1,6 @@
 import os
 import asyncio
+from loguru import logger
 from lightx2v.deploy.data_manager import BaseDataManager
 from lightx2v.deploy.common.utils import class_try_catch_async
 
@@ -22,6 +23,13 @@ class LocalDataManager(BaseDataManager):
         inp_path = os.path.join(self.local_dir, filename)
         with open(inp_path, 'rb') as fin:
             return fin.read()
+
+    @class_try_catch_async
+    async def delete_bytes(self, filename):
+        inp_path = os.path.join(self.local_dir, filename)
+        os.remove(inp_path)
+        logger.info(f"deleted local file {filename}")
+        return True
 
 
 async def test():
@@ -55,6 +63,9 @@ async def test():
     }, "test_object.json")
     print(await m.load_object("test_object.json", "cuda:0"))
 
+    await m.get_delete_func("OBJECT")("test_object.json")
+    await m.get_delete_func("TENSOR")("test_tensor.pt")
+    await m.get_delete_func("IMAGE")("test_img.png")
 
 if __name__ == "__main__":
     asyncio.run(test())

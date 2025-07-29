@@ -5,10 +5,14 @@ import sys
 class Pipeline:
     def __init__(self, pipeline_json_file):
         self.pipeline_json_file = pipeline_json_file
-        self.data = json.load(open(pipeline_json_file))
+        x = json.load(open(pipeline_json_file))
+        self.data = x['data']
+        self.meta = x['meta']
         self.inputs = {}
         self.outputs = {}
+        self.temps = {}
         self.model_lists = []
+        self.types = {}
         self.tidy_pipeline()
 
     def init_dict(self, base, task, model_cls):
@@ -22,18 +26,24 @@ class Pipeline:
         out2worker = {}
         out2num = {}
         cur_inps = set()
+        cur_temps = set()
+        cur_types = {}
         for worker_name, worker_item in v3.items():
 
             prevs = []
             for inp in worker_item['inputs']:
+                cur_types[inp] = self.get_type(inp)
                 if inp in out2worker:
                     prevs.append(out2worker[inp])
                     out2num[inp] -= 1
+                    if out2num[inp] <= 0:
+                        cur_temps.add(inp)
                 else:
                     cur_inps.add(inp)
             worker_item['previous'] = prevs
 
             for out in worker_item['outputs']:
+                cur_types[out] = self.get_type(out)
                 out2worker[out] = worker_name
                 if out not in out2num:
                     out2num[out] = 0
@@ -45,6 +55,8 @@ class Pipeline:
         cur_outs = [out for out, num in out2num.items() if num > 0]
         self.inputs[task][model_cls][stage] = list(cur_inps)
         self.outputs[task][model_cls][stage] = cur_outs
+        self.temps[task][model_cls][stage] = list(cur_temps)
+        self.types[task][model_cls][stage] = cur_types
 
     # tidy previous dependence workers and queue name
     def tidy_pipeline(self):
@@ -53,11 +65,15 @@ class Pipeline:
                 for stage, v3 in v2.items():
                     self.init_dict(self.inputs, task, model_cls)
                     self.init_dict(self.outputs, task, model_cls)
+                    self.init_dict(self.temps, task, model_cls)
+                    self.init_dict(self.types, task, model_cls)
                     self.tidy_task(task, model_cls, stage, v3)
                     self.model_lists.append({"task": task, "model_cls": model_cls, "stage": stage})
         print("pipelines:", json.dumps(self.data, indent=4))
         print("inputs:", self.inputs)
         print("outputs:", self.outputs)
+        print("temps:", self.temps)
+        print("types:", self.types)
         print("model_lists:", self.model_lists)
 
     def get_item_by_keys(self, keys):
@@ -94,8 +110,29 @@ class Pipeline:
             item = item[k]
         return item
 
+    # eg. keys: ['t2v', 'wan2.1', 'multi_stage']
+    def get_temps(self, keys):
+        item = self.temps
+        for k in keys:
+            if k not in item:
+                raise Exception(f"{keys} are not in temps!")
+            item = item[k]
+        return item
+
+    # eg. keys: ['t2v', 'wan2.1', 'multi_stage']
+    def get_types(self, keys):
+        item = self.types
+        for k in keys:
+            if k not in item:
+                raise Exception(f"{keys} are not in types!")
+            item = item[k]
+        return item
+
     def get_model_lists(self):
         return self.model_lists
+
+    def get_type(self, name):
+        return self.meta['special_types'].get(name, "OBJECT")
 
 
 if __name__ == "__main__":
