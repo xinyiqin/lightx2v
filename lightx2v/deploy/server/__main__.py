@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uvicorn
 import argparse
 import traceback
@@ -157,11 +158,24 @@ async def api_v1_worker_fetch(request: Request):
         max_batch = params.get('max_batch', 1)
         timeout = params.get('timeout', 5)
 
+        # check client disconnected
+        async def check_client(request, fetch_task):
+            while True:
+                ret = await request.is_disconnected()
+                if ret:
+                    logger.warning(f"Client {request.client} disconnected")
+                    fetch_task.cancel()
+                    return
+                await asyncio.sleep(1)
+
         # get worker info
         worker = model_pipelines.get_worker(keys)
-        subtasks = await queue_manager.get_subtasks(worker['queue'], max_batch, timeout)
+        fetch_task = asyncio.create_task(queue_manager.get_subtasks(worker['queue'], max_batch, timeout))
+        asyncio.create_task(check_client(request, fetch_task))
+        subtasks = await fetch_task
+        disconnected = await request.is_disconnected()
 
-        if not subtasks:
+        if not subtasks or disconnected:
             return {'subtasks': []}
 
         worker_names = [sub['worker_name'] for sub in subtasks]

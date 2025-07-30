@@ -2,6 +2,7 @@ import json
 import asyncio
 import time
 import aio_pika
+import traceback
 from loguru import logger
 
 from lightx2v.deploy.queue_manager import BaseQueueManager
@@ -63,29 +64,36 @@ class RabbitMQQueueManager(BaseQueueManager):
         logger.info(f"Published subtask {subtask} to queue {queue}")
         return True
 
-    @class_try_catch_async
     async def get_subtasks(self, queue, max_batch, timeout):
-        q = await self.declare_queue(queue)
-        subtasks = []
-        t0 = time.time()
+        try:
+            q = await self.declare_queue(queue)
+            subtasks = []
+            t0 = time.time()
 
-        while True:
-            cur_timeout = max(timeout - (time.time() - t0), 0.1)
-            message = await q.get(no_ack=False, timeout=cur_timeout, fail=False)
-            if message:
-                await message.ack()
-                subtask = json.loads(message.body.decode('utf-8'))
-                subtasks.append(subtask)
-                if len(subtasks) >= max_batch:
-                    return subtasks
+            while True:
+                cur_timeout = max(timeout - (time.time() - t0), 0.1)
+                message = await q.get(no_ack=False, timeout=cur_timeout, fail=False)
+                if message:
+                    await message.ack()
+                    subtask = json.loads(message.body.decode('utf-8'))
+                    subtasks.append(subtask)
+                    if len(subtasks) >= max_batch:
+                        return subtasks
+                    else:
+                        continue
                 else:
-                    continue
-            else:
-                if len(subtasks) > 0:
-                    return subtasks
-                if time.time() - t0 > timeout:
-                    return None
-                await asyncio.sleep(1)
+                    if len(subtasks) > 0:
+                        return subtasks
+                    if time.time() - t0 > timeout:
+                        return None
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            logger.warning("rabbitmq get_subtasks cancelled")
+            return None
+        except:
+            logger.warning(f"rabbitmq get_subtasks failed: {traceback.format_exc()}")
+            return None
 
     async def del_conn(self):
         if self.chan:

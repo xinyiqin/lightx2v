@@ -1,18 +1,16 @@
 import os
 import sys
 import signal
-import time
 import uuid
 import json
 import asyncio
 import argparse
-import requests
+import aiohttp
+import traceback
 from loguru import logger
 
-from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.task_manager import TaskStatus
-from lightx2v.deploy.common.utils import try_catch
 from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker
 
 
@@ -27,10 +25,11 @@ RUNNER_MAP = {
 
 # {task_id: {"server": xx, "worker_name": xx, "identity": xx}}
 RUNNING_SUBTASKS = {}
+FETCH_TASK = None
+RUN_TASK = None
 
 
-@try_catch
-def fetch_subtasks(server_url, worker_keys, worker_identity):
+async def fetch_subtasks(server_url, worker_keys, worker_identity):
     url = server_url + "/api/v1/worker/fetch"
     params = {
         "worker_keys": worker_keys,
@@ -38,17 +37,31 @@ def fetch_subtasks(server_url, worker_keys, worker_identity):
         "max_batch": 1,
         "timeout": 60,
     }
-    ret = requests.get(url, data=json.dumps(params))
-    if ret.status_code == 200:
-        subtasks = ret.json()['subtasks']
-        logger.info(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
-        return subtasks
-    else:
-        logger.warning(f"{worker_identity} fetch {worker_keys} fail: [{ret.status_code}], error: {ret.text}")
-        return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, data=json.dumps(params)) as ret:
+                if ret.status == 200:
+                    ret = await ret.json()
+                    subtasks = ret['subtasks']
+                    for sub in subtasks:
+                        RUNNING_SUBTASKS[sub['task_id']] = {
+                            "server": server_url,
+                            "worker_name": sub['worker_name'],
+                            "identity": worker_identity,
+                        }
+                    logger.info(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
+                    return subtasks
+                else:
+                    error_text = await ret.text()
+                    logger.warning(f"{worker_identity} fetch {worker_keys} fail: [{ret.status}], error: {error_text}")
+                    return None
+    except asyncio.CancelledError:
+        logger.warning("Fetch subtasks cancelled, shutting down...")
+        raise asyncio.CancelledError
+    except:
+        logger.warning(f"Fetch subtasks failed: {traceback.format_exc()}")
 
-@try_catch
-def report_task(server_url, task_id, worker_name, status, worker_identity):
+async def report_task(server_url, task_id, worker_name, status, worker_identity):
     url = server_url + "/api/v1/worker/report"
     params = {
         "task_id": task_id,
@@ -56,16 +69,23 @@ def report_task(server_url, task_id, worker_name, status, worker_identity):
         "status": status,
         "worker_identity": worker_identity,
     }
-    ret = requests.get(url, data=json.dumps(params))
-    if ret.status_code == 200:
-        RUNNING_SUBTASKS.pop(task_id)
-        ret = ret.json()
-        logger.info(f"{worker_identity} report {task_id} {worker_name} {status} ok")
-        return True
-    else:
-        logger.warning(f"{worker_identity} report {task_id} {worker_name} {status} fail: [{ret.status_code}], error: {ret.text}")
-        return False
-
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, data=json.dumps(params)) as ret:
+                if ret.status == 200:
+                    RUNNING_SUBTASKS.pop(task_id)
+                    ret = await ret.json()
+                    logger.info(f"{worker_identity} report {task_id} {worker_name} {status} ok")
+                    return True
+                else:
+                    error_text = await ret.text()
+                    logger.warning(f"{worker_identity} report {task_id} {worker_name} {status} fail: [{ret.status}], error: {error_text}")
+                    return False
+    except asyncio.CancelledError:
+        logger.warning("Report task cancelled, shutting down...")
+        raise asyncio.CancelledError
+    except:
+        logger.warning(f"Report task failed: {traceback.format_exc()}")
 
 async def main(args):
     worker_keys = [args.task, args.model_cls, args.stage, args.worker]
@@ -80,32 +100,50 @@ async def main(args):
     runner = RUNNER_MAP[args.worker](args)
     await data_manager.init()
 
-    while True:
-        subtasks = fetch_subtasks(args.server, worker_keys, args.identity)
-        if subtasks is not None and len(subtasks) > 0:
-            for sub in subtasks:
-                RUNNING_SUBTASKS[sub['task_id']] = {
-                    "server": args.server,
-                    "worker_name": sub['worker_name'],
-                    "identity": args.identity,
-                }
-                ret = await runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager)
-                status = TaskStatus.SUCCEED.name if ret is True else TaskStatus.FAILED.name
-                report_task(args.server, sub['task_id'], sub['worker_name'], status, args.identity)
-        else:
-            await asyncio.sleep(5)
+    try:
+        while True:
+            subtasks = await fetch_subtasks(args.server, worker_keys, args.identity)
+            if subtasks is not None and len(subtasks) > 0:
+                for sub in subtasks:
+                    ret = await runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager)
+                    status = TaskStatus.SUCCEED.name if ret is True else TaskStatus.FAILED.name
+                    await report_task(args.server, sub['task_id'], sub['worker_name'], status, args.identity)
+            else:
+                await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        logger.warning("Main loop cancelled, shutting down...")
+    except:
+        logger.error(f"Main loop failed: {traceback.format_exc()}")
 
 
-def signal_handler(signum, frame):
-    logger.info("\nReceived Ctrl+C, report all running subtasks")
-    for task_id, s in RUNNING_SUBTASKS.items():
-        report_task(s['server'], task_id, s['worker_name'], TaskStatus.FAILED.name, s['identity'])
-    ProcessManager.kill_all_related_processes()
-    sys.exit(0)
+async def shutdown(loop):
+    logger.warning("Received kill signal")
 
+    main_task = None
+    for t in asyncio.all_tasks():
+        if t is not asyncio.current_task():
+            if t.get_name() == "main":
+                main_task = t
+            else:
+                logger.warning(f"Cancel async task {t} ...")
+                t.cancel()
+    if main_task:
+        logger.warning(f"Cancel async main task {main_task} ...")
+        main_task.cancel()
 
-signal.signal(signal.SIGINT, signal_handler)  # 捕获Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # 捕获终止信号
+    try:
+        # Report any remaining running subtasks as failed
+        for task_id, s in RUNNING_SUBTASKS.items():
+            logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
+            await report_task(s['server'], task_id, s['worker_name'], TaskStatus.FAILED.name, s['identity'])
+    except:
+        logger.warning(f"Report task failed: {traceback.format_exc()}")
+
+    # Force exit after a short delay to ensure cleanup
+    def force_exit():
+        logger.warning("Force exiting process...")
+        sys.exit(0)
+    loop.call_later(2, force_exit)
 
 
 # =========================
@@ -137,4 +175,15 @@ if __name__ == "__main__":
         args.identity = 'worker-' + str(uuid.uuid4())[:8]
     logger.info(f"args: {args}")
 
-    asyncio.run(main(args))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    for s in [signal.SIGINT, signal.SIGTERM]:
+        loop.add_signal_handler(s, lambda: asyncio.create_task(shutdown(loop)))
+
+    try:
+        loop.create_task(main(args), name="main")
+        loop.run_forever()
+    finally:
+        loop.close()
+        logger.warning("Event loop closed")

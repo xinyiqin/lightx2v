@@ -1,6 +1,8 @@
 import os
 import time
 import json
+import traceback
+from loguru import logger
 import asyncio
 from lightx2v.deploy.queue_manager import BaseQueueManager 
 from lightx2v.deploy.common.utils import class_try_catch_async
@@ -48,22 +50,29 @@ class LocalQueueManager(BaseQueueManager):
 
     @class_try_catch_async
     async def get_subtasks(self, queue, max_batch, timeout):
-        t0 = time.time()
-        subtasks = []
-        while True:
-            subtask = self.read_first_line(queue)
-            if subtask:
-                subtasks.append(subtask)
-                if len(subtasks) >= max_batch:
-                    return subtasks
+        try:
+            t0 = time.time()
+            subtasks = []
+            while True:
+                subtask = self.read_first_line(queue)
+                if subtask:
+                    subtasks.append(subtask)
+                    if len(subtasks) >= max_batch:
+                        return subtasks
+                    else:
+                        continue
                 else:
-                    continue
-            else:
-                if len(subtasks) > 0:
-                    return subtasks
-                if time.time() - t0 > timeout:
-                    return None
-                await asyncio.sleep(1)
+                    if len(subtasks) > 0:
+                        return subtasks
+                    if time.time() - t0 > timeout:
+                        return None
+                    await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            logger.warning("local queue get_subtasks cancelled")
+            return None
+        except:
+            logger.warning(f"local queue get_subtasks failed: {traceback.format_exc()}")
+            return None
 
     def get_filename(self, queue):
         return os.path.join(self.local_dir, f"{queue}.jsonl")

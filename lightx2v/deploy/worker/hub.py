@@ -1,8 +1,12 @@
 import os
 import gc
 import json
+import ctypes
 import torch
 import tempfile
+import threading
+import asyncio
+import traceback
 from loguru import logger
 import torch.distributed as dist
 from lightx2v.utils.utils import seed_all
@@ -40,12 +44,62 @@ class BaseWorker:
             setattr(self.runner.config, k, v)
 
 
+class RunnerThread(threading.Thread):
+    def __init__(self, loop, future, run_func, **kwargs):
+        super().__init__(daemon=True)
+        self.loop = loop
+        self.future = future
+        self.run_func = run_func
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            res = self.run_func(**self.kwargs)
+            status = True
+        except:
+            logger.error(f"RunnerThread run failed: {traceback.format_exc()}")
+            res = None
+            status = False
+        finally:
+            async def set_future_result():
+                self.future.set_result((status, res))
+            # add the task of setting future to the loop queue
+            asyncio.run_coroutine_threadsafe(set_future_result(), self.loop)
+
+    def stop(self):
+        if self.is_alive():
+            try:
+                logger.warning(f"Force terminate thread {self.ident} ...")
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                    ctypes.c_long(self.ident), 
+                    ctypes.py_object(SystemExit)
+                )
+            except Exception as e:
+                logger.error(f"Force terminate thread failed: {e}")
+
+
+def class_try_catch_async_with_thread(func):
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await func(self, *args, **kwargs)
+        except asyncio.CancelledError:
+            logger.warning(f"RunnerThread inside {func.__name__} cancelled")
+            if hasattr(self, "thread"):
+                self.thread.stop()
+            raise asyncio.CancelledError
+        except Exception:
+            print(f"Error in {self.__class__.__name__}.{func.__name__}:")
+            traceback.print_exc()
+            return None
+    return wrapper
+
+
 class PipelineWorker(BaseWorker):
     def __init__(self, args):
         super().__init__(args)
         self.runner.init_modules()
 
-    @class_try_catch_async
+    @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
         with tempfile.TemporaryDirectory() as tmp_dir:
 
@@ -65,12 +119,16 @@ class PipelineWorker(BaseWorker):
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.runner.set_inputs(params)
-            self.runner.run_pipeline()
 
-            # save output video
-            video_data = open(tmp_video_path, 'rb').read()
-            await data_manager.save_bytes(video_data, output_video_path)
-            return True
+            future = asyncio.Future()
+            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner.run_pipeline)
+            self.thread.start()
+            status, _ = await future
+            if status:
+                # save output video
+                video_data = open(tmp_video_path, 'rb').read()
+                await data_manager.save_bytes(video_data, output_video_path)
+                return True
 
 
 class TextEncoderWorker(BaseWorker):
