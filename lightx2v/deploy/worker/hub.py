@@ -45,16 +45,17 @@ class BaseWorker:
 
 
 class RunnerThread(threading.Thread):
-    def __init__(self, loop, future, run_func, **kwargs):
+    def __init__(self, loop, future, run_func, *args, **kwargs):
         super().__init__(daemon=True)
         self.loop = loop
         self.future = future
         self.run_func = run_func
+        self.args = args
         self.kwargs = kwargs
 
     def run(self):
         try:
-            res = self.run_func(**self.kwargs)
+            res = self.run_func(*self.args, **self.kwargs)
             status = True
         except:
             logger.error(f"RunnerThread run failed: {traceback.format_exc()}")
@@ -88,7 +89,7 @@ def class_try_catch_async_with_thread(func):
                 self.thread.stop()
             raise asyncio.CancelledError
         except Exception:
-            print(f"Error in {self.__class__.__name__}.{func.__name__}:")
+            logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
     return wrapper
@@ -124,11 +125,12 @@ class PipelineWorker(BaseWorker):
             self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner.run_pipeline)
             self.thread.start()
             status, _ = await future
-            if status:
-                # save output video
-                video_data = open(tmp_video_path, 'rb').read()
-                await data_manager.save_bytes(video_data, output_video_path)
-                return True
+            if not status:
+                return False
+            # save output video
+            video_data = open(tmp_video_path, 'rb').read()
+            await data_manager.save_bytes(video_data, output_video_path)
+            return True
 
 
 class TextEncoderWorker(BaseWorker):
@@ -214,7 +216,7 @@ class DiTWorker(BaseWorker):
         super().__init__(args)
         self.runner.model = self.runner.load_transformer()
 
-    @class_try_catch_async
+    @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.runner.set_inputs(params)
@@ -242,7 +244,14 @@ class DiTWorker(BaseWorker):
         }
 
         self.runner.set_target_shape()
-        out, _ = self.runner._run_dit_local()
+
+        future = asyncio.Future()
+        self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner._run_dit_local)
+        self.thread.start()
+        status, (out, _) = await future
+        if not status:
+            return False
+
         await data_manager.save_tensor(out, outputs['latents'])
 
         del out, text_encoder_output , image_encoder_output

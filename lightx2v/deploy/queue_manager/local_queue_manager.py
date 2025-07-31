@@ -28,6 +28,7 @@ class LocalQueueManager(BaseQueueManager):
         out_name = self.get_filename(subtask['queue'])
         keys = ['queue', 'task_id', 'worker_name', 'inputs', 'outputs', 'params']
         msg = json.dumps({k: subtask[k] for k in keys}) + "\n"
+        logger.info(f"Local published subtask: ({subtask['task_id']}, {subtask['worker_name']}) to {subtask['queue']}")
         with open(out_name, 'a') as fout:
             fout.write(msg)
             return True
@@ -68,10 +69,10 @@ class LocalQueueManager(BaseQueueManager):
                         return None
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
-            logger.warning("local queue get_subtasks cancelled")
+            logger.warning(f"local queue get_subtasks for {queue} cancelled")
             return None
         except:
-            logger.warning(f"local queue get_subtasks failed: {traceback.format_exc()}")
+            logger.warning(f"local queue get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 
     def get_filename(self, queue):

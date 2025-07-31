@@ -30,7 +30,7 @@ def try_catch(func):
         try:
             return func(*args, **kwargs)
         except Exception:
-            print(f"Error in {func.__name__}:")
+            logger.error(f"Error in {func.__name__}:")
             traceback.print_exc()
             return None
     return wrapper
@@ -41,7 +41,7 @@ def class_try_catch(func):
         try:
             return func(self, *args, **kwargs)
         except Exception:
-            print(f"Error in {self.__class__.__name__}.{func.__name__}:")
+            logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
     return wrapper
@@ -52,7 +52,7 @@ def class_try_catch_async(func):
         try:
             return await func(self, *args, **kwargs)
         except Exception:
-            print(f"Error in {self.__class__.__name__}.{func.__name__}:")
+            logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
     return wrapper

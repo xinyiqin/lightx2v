@@ -61,7 +61,7 @@ class RabbitMQQueueManager(BaseQueueManager):
             content_type='application/json'
         )
         await self.chan.default_exchange.publish(message, routing_key=queue)
-        logger.info(f"Published subtask {subtask} to queue {queue}")
+        logger.info(f"Rabbitmq published subtask: ({subtask['task_id']}, {subtask['worker_name']}) to {queue}")
         return True
 
     async def get_subtasks(self, queue, max_batch, timeout):
@@ -89,10 +89,10 @@ class RabbitMQQueueManager(BaseQueueManager):
                     await asyncio.sleep(1)
 
         except asyncio.CancelledError:
-            logger.warning("rabbitmq get_subtasks cancelled")
+            logger.warning(f"rabbitmq get_subtasks for {queue} cancelled")
             return None
         except:
-            logger.warning(f"rabbitmq get_subtasks failed: {traceback.format_exc()}")
+            logger.warning(f"rabbitmq get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 
     async def del_conn(self):

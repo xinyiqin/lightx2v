@@ -294,8 +294,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
         try:
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
-                print("\n\ntask:", task)
-                print("\n\nsubtasks:", subtasks)
                 if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.PENDING]:
                     return []
                 succeeds = set()

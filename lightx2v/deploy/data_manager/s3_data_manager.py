@@ -41,7 +41,7 @@ class S3DataManager(BaseDataManager):
                 except Exception as e:
                     logger.info(f"check bucket {self.bucket_name} error: {e}, try to create it...")
                     self.s3_client.create_bucket(Bucket=self.bucket_name)
-                print(f"Successfully init S3 bucket: {self.bucket_name}")
+                logger.info(f"Successfully init S3 bucket: {self.bucket_name}")
                 return
             except Exception as e:
                 logger.warning(f"Failed to connect to S3: {e}")

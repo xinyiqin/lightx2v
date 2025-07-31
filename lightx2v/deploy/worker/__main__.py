@@ -25,21 +25,19 @@ RUNNER_MAP = {
 
 # {task_id: {"server": xx, "worker_name": xx, "identity": xx}}
 RUNNING_SUBTASKS = {}
-FETCH_TASK = None
-RUN_TASK = None
 
 
-async def fetch_subtasks(server_url, worker_keys, worker_identity):
+async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, timeout):
     url = server_url + "/api/v1/worker/fetch"
     params = {
         "worker_keys": worker_keys,
         "worker_identity": worker_identity,
-        "max_batch": 1,
-        "timeout": 60,
+        "max_batch": max_batch,
+        "timeout": timeout,
     }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, data=json.dumps(params)) as ret:
+            async with session.get(url, data=json.dumps(params), timeout=timeout + 10) as ret:
                 if ret.status == 200:
                     ret = await ret.json()
                     subtasks = ret['subtasks']
@@ -102,7 +100,7 @@ async def main(args):
 
     try:
         while True:
-            subtasks = await fetch_subtasks(args.server, worker_keys, args.identity)
+            subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
             if subtasks is not None and len(subtasks) > 0:
                 for sub in subtasks:
                     ret = await runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager)
@@ -118,26 +116,20 @@ async def main(args):
 
 async def shutdown(loop):
     logger.warning("Received kill signal")
-
-    main_task = None
     for t in asyncio.all_tasks():
         if t is not asyncio.current_task():
-            if t.get_name() == "main":
-                main_task = t
-            else:
-                logger.warning(f"Cancel async task {t} ...")
-                t.cancel()
-    if main_task:
-        logger.warning(f"Cancel async main task {main_task} ...")
-        main_task.cancel()
+            logger.warning(f"Cancel async task {t} ...")
+            t.cancel()
 
-    try:
-        # Report any remaining running subtasks as failed
-        for task_id, s in RUNNING_SUBTASKS.items():
+    # Report any remaining running subtasks as failed
+    task_ids = list(RUNNING_SUBTASKS.keys())
+    for task_id in task_ids:
+        try:
+            s = RUNNING_SUBTASKS[task_id]
             logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
             await report_task(s['server'], task_id, s['worker_name'], TaskStatus.FAILED.name, s['identity'])
-    except:
-        logger.warning(f"Report task failed: {traceback.format_exc()}")
+        except:
+            logger.warning(f"Report task {task_id} failed: {traceback.format_exc()}")
 
     # Force exit after a short delay to ensure cleanup
     def force_exit():
@@ -162,6 +154,8 @@ if __name__ == "__main__":
     parser.add_argument("--stage", type=str, required=True)
     parser.add_argument("--worker", type=str, required=True)
     parser.add_argument("--identity", type=str, default='')
+    parser.add_argument("--max_batch", type=int, default=1)
+    parser.add_argument("--timeout", type=int, default=600)
 
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)

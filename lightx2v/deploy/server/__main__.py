@@ -47,8 +47,8 @@ def error_response(e, code):
 async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
-    logger.info(f"got next subtasks: {subtasks}.")
     for sub in subtasks:
+        logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']})")
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
 
@@ -77,10 +77,10 @@ async def api_v1_task_submit(request: Request):
 
         # process multimodal inputs data
         inputs_data = await load_inputs(params, inputs, types)
-        logger.info(f"{params}")
 
         # init task
         task_id = await task_manager.create_task(keys, workers, params, inputs, outputs)
+        logger.info(f"Submit task: {task_id} {params}")
 
         # save multimodal inputs data
         for inp, data in inputs_data.items():
@@ -152,18 +152,18 @@ async def api_v1_task_resume(request: Request):
 async def api_v1_worker_fetch(request: Request):
     try:
         params = await request.json()
-        logger.info(f"{params}")
+        logger.info(f"Worker fetch: {params}")
         keys = params.pop('worker_keys')
         identity = params.pop('worker_identity')
         max_batch = params.get('max_batch', 1)
         timeout = params.get('timeout', 5)
 
         # check client disconnected
-        async def check_client(request, fetch_task):
+        async def check_client(request, fetch_task, keys, identity):
             while True:
                 ret = await request.is_disconnected()
                 if ret:
-                    logger.warning(f"Client {request.client} disconnected")
+                    logger.warning(f"Worker {identity} {keys} {request.client} disconnected")
                     fetch_task.cancel()
                     return
                 await asyncio.sleep(1)
@@ -171,7 +171,7 @@ async def api_v1_worker_fetch(request: Request):
         # get worker info
         worker = model_pipelines.get_worker(keys)
         fetch_task = asyncio.create_task(queue_manager.get_subtasks(worker['queue'], max_batch, timeout))
-        asyncio.create_task(check_client(request, fetch_task))
+        asyncio.create_task(check_client(request, fetch_task, keys, identity))
         subtasks = await fetch_task
         disconnected = await request.is_disconnected()
 
@@ -182,6 +182,8 @@ async def api_v1_worker_fetch(request: Request):
         task_ids = [sub['task_id'] for sub in subtasks]
         valids = await task_manager.run_subtasks(task_ids, worker_names, identity)
         valid_subtasks = [sub for sub in subtasks if (sub['task_id'], sub['worker_name']) in valids]
+
+        logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
         return {'subtasks': valid_subtasks}
 
     except Exception as e:
@@ -208,6 +210,7 @@ async def api_v1_worker_report(request: Request):
 
         # all subtasks succeed, delete temp data
         elif ret == TaskStatus.SUCCEED:
+            logger.info(f"Task {task_id} succeed")
             task = await task_manager.query_task(task_id)
             keys = [task['task_type'], task['model_cls'], task['stage']]
             temps = model_pipelines.get_temps(keys)
@@ -215,6 +218,9 @@ async def api_v1_worker_report(request: Request):
                 type = model_pipelines.get_type(temp)
                 name = data_name(temp, task_id)
                 await data_manager.get_delete_func(type)(name)
+
+        elif ret == TaskStatus.FAILED:
+            logger.warning(f"Task {task_id} failed")
 
         return {'msg': 'ok'}
 

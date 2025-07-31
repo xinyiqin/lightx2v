@@ -1,5 +1,6 @@
 import json
 import sys
+from loguru import logger
 
 
 class Pipeline:
@@ -69,12 +70,12 @@ class Pipeline:
                     self.init_dict(self.types, task, model_cls)
                     self.tidy_task(task, model_cls, stage, v3)
                     self.model_lists.append({"task": task, "model_cls": model_cls, "stage": stage})
-        print("pipelines:", json.dumps(self.data, indent=4))
-        print("inputs:", self.inputs)
-        print("outputs:", self.outputs)
-        print("temps:", self.temps)
-        print("types:", self.types)
-        print("model_lists:", self.model_lists)
+        logger.info(f"pipelines: {json.dumps(self.data, indent=4)}")
+        logger.info(f"inputs: {self.inputs}")
+        logger.info(f"outputs: {self.outputs}")
+        logger.info(f"temps: {self.temps}")
+        logger.info(f"types: {self.types}")
+        logger.info(f"model_lists: {self.model_lists}")
 
     def get_item_by_keys(self, keys):
         item = self.data
