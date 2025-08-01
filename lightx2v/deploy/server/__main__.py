@@ -171,7 +171,7 @@ async def api_v1_worker_fetch(request: Request):
         # get worker info
         worker = model_pipelines.get_worker(keys)
         fetch_task = asyncio.create_task(queue_manager.get_subtasks(worker['queue'], max_batch, timeout))
-        asyncio.create_task(check_client(request, fetch_task, keys, identity))
+        check_task = asyncio.create_task(check_client(request, fetch_task, keys, identity))
         subtasks = await fetch_task
         disconnected = await request.is_disconnected()
 
@@ -183,7 +183,9 @@ async def api_v1_worker_fetch(request: Request):
         valids = await task_manager.run_subtasks(task_ids, worker_names, identity)
         valid_subtasks = [sub for sub in subtasks if (sub['task_id'], sub['worker_name']) in valids]
 
-        logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
+        if len(valid_subtasks) > 0:
+            logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
+            check_task.cancel()
         return {'subtasks': valid_subtasks}
 
     except Exception as e:

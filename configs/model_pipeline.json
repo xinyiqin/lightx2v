@@ -67,6 +67,21 @@
             "input_image": "IMAGE",
             "latents": "TENSOR",
             "output_video": "VIDEO"
+        },
+        "monitor": {
+            "subtask_created_timeout": 5,
+            "subtask_pending_timeout": 1800,
+            "subtask_running_timeout": {
+                "default":60,
+                "t2v-wan2.1-single_stage-pipeline": 300,
+                "t2v-wan2.1-multi_stage-dit": 300,
+                "i2v-wan2.1-single_stage-pipeline": 1200,
+                "i2v-wan2.1-multi_stage-dit": 1200
+            },
+            "worker_avg_window": 20,
+            "worker_offline_timeout": 5,
+            "worker_min_capacity": 20,
+            "task_tolerance_timeout": 3600
         }
     }
 }

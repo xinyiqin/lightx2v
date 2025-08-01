@@ -14,6 +14,7 @@ class Pipeline:
         self.temps = {}
         self.model_lists = []
         self.types = {}
+        self.queues = set()
         self.tidy_pipeline()
 
     def init_dict(self, base, task, model_cls):
@@ -52,6 +53,7 @@ class Pipeline:
 
             if "queue" not in worker_item:
                 worker_item['queue'] = "-".join([task, model_cls, stage, worker_name])
+            self.queues.add(worker_item['queue'])
 
         cur_outs = [out for out, num in out2num.items() if num > 0]
         self.inputs[task][model_cls][stage] = list(cur_inps)
@@ -76,6 +78,7 @@ class Pipeline:
         logger.info(f"temps: {self.temps}")
         logger.info(f"types: {self.types}")
         logger.info(f"model_lists: {self.model_lists}")
+        logger.info(f"queues: {self.queues}")
 
     def get_item_by_keys(self, keys):
         item = self.data
@@ -134,6 +137,31 @@ class Pipeline:
 
     def get_type(self, name):
         return self.meta['special_types'].get(name, "OBJECT")
+
+    def get_subtask_created_timeout(self):
+        return self.meta['monitor']['subtask_created_timeout']
+
+    def get_subtask_pending_timeout(self):
+        return self.meta['monitor']['subtask_pending_timeout']
+
+    def get_subtask_running_timeout(self, queue):
+        default = self.meta['monitor']['subtask_running_timeout']['default']
+        return self.meta['monitor']['subtask_running_timeout'].get(queue, default)
+
+    def get_worker_avg_window(self):
+        return self.meta['monitor']['worker_avg_window']
+
+    def get_worker_offline_timeout(self):
+        return self.meta['monitor']['worker_offline_timeout']
+
+    def get_worker_min_capacity(self):
+        return self.meta['monitor']['worker_min_capacity']
+
+    def get_task_tolerance_timeout(self):
+        return self.meta['monitor']['task_tolerance_timeout']
+
+    def get_queues(self):
+        return self.queues
 
 
 if __name__ == "__main__":

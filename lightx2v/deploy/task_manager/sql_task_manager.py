@@ -38,6 +38,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
         for k in ['params', 'extra_info', 'inputs', 'outputs', 'previous']:
             if k in data:
                 data[k] = json.loads(data[k])
+        for k in ['create_t', 'update_t']:
+            if k in data:
+                data[k] = datetime.fromtimestamp(data[k])
 
     async def get_conn(self):
         if self.pool is None:
@@ -236,6 +239,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
             params = []
             conds = []
             param_idx = 0
+            if kwargs.get('subtasks', False):
+                query = f"SELECT * FROM {self.table_subtasks}"
 
             if 'status' in kwargs:
                 param_idx += 1
@@ -243,21 +248,21 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     next_idx = param_idx + len(kwargs['status'])
                     placeholders = ','.join([f'${i}' for i in range(param_idx, next_idx)])
                     conds.append(f"status IN ({placeholders})")
-                    params.extend(kwargs['status'])
+                    params.extend([x.name for x in kwargs['status']])
                     param_idx = next_idx
                 else:
                     conds.append(f"status = ${param_idx}")
-                    params.append(kwargs['status'])
+                    params.append(kwargs['status'].name)
 
             if 'start_created_t' in kwargs:
                 param_idx += 1
                 conds.append(f"create_t >= ${param_idx}")
-                params.append(kwargs['start_created_t'])
+                params.append(datetime.fromtimestamp(kwargs['start_created_t']))
 
             if 'end_created_t' in kwargs:
                 param_idx += 1
                 conds.append(f"create_t <= ${param_idx}")
-                params.append(kwargs['end_created_t'])
+                params.append(datetime.fromtimestamp(kwargs['end_created_t']))
 
             if conds:
                 query += " WHERE " + " AND ".join(conds)
