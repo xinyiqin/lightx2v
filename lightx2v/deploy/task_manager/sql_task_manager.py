@@ -40,7 +40,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 data[k] = json.loads(data[k])
         for k in ['create_t', 'update_t']:
             if k in data:
-                data[k] = datetime.fromtimestamp(data[k])
+                data[k] = data[k].timestamp()
 
     async def get_conn(self):
         if self.pool is None:

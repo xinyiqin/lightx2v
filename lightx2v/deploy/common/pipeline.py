@@ -160,6 +160,12 @@ class Pipeline:
     def get_task_tolerance_timeout(self):
         return self.meta['monitor']['task_tolerance_timeout']
 
+    def get_schedule_ratio_high(self):
+        return self.meta['monitor']['schedule_ratio_high']
+    
+    def get_schedule_ratio_low(self):
+        return self.meta['monitor']['schedule_ratio_low']
+
     def get_queues(self):
         return self.queues
 

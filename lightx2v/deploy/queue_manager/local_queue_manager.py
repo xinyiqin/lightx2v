@@ -78,6 +78,16 @@ class LocalQueueManager(BaseQueueManager):
     def get_filename(self, queue):
         return os.path.join(self.local_dir, f"{queue}.jsonl")
 
+    @class_try_catch_async
+    async def pending_num(self, queue):
+        out_name = self.get_filename(queue)
+        if not os.path.exists(out_name):
+            return 0
+        lines = []
+        with open(out_name) as fin:
+            lines = fin.readlines()
+        return len(lines)
+
 
 async def test():
     q = LocalQueueManager("/data/nvme1/liuliang1/lightx2v/local_queue")

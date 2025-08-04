@@ -14,6 +14,9 @@ class BaseQueueManager:
     async def get_subtasks(self, queue, max_batch, timeout):
         raise NotImplementedError
 
+    async def pending_num(self, queue):
+        raise NotImplementedError
+
 
 # Import queue manager implementations
 from .local_queue_manager import LocalQueueManager

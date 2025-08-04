@@ -69,7 +69,7 @@
             "output_video": "VIDEO"
         },
         "monitor": {
-            "subtask_created_timeout": 5,
+            "subtask_created_timeout": 1800,
             "subtask_pending_timeout": 1800,
             "subtask_running_timeout": {
                 "default":60,
@@ -81,7 +81,9 @@
             "worker_avg_window": 20,
             "worker_offline_timeout": 5,
             "worker_min_capacity": 20,
-            "task_tolerance_timeout": 3600
+            "task_tolerance_timeout": 3600,
+            "schedule_ratio_high": 0.25,
+            "schedule_ratio_low": 0.02
         }
     }
 }

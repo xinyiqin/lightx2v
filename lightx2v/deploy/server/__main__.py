@@ -16,6 +16,7 @@ from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManage
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
+from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 
 # =========================
 # FastAPI Related Code
@@ -25,6 +26,7 @@ model_pipelines = None
 task_manager = None
 data_manager = None
 queue_manager = None
+server_monitor = None
 
 
 @asynccontextmanager
@@ -32,7 +34,9 @@ async def lifespan(app: FastAPI):
     await task_manager.init()
     await data_manager.init()
     await queue_manager.init()
+    asyncio.create_task(server_monitor.init())
     yield
+    await server_monitor.close()
     await queue_manager.close()
     await data_manager.close()
     await task_manager.close()
@@ -75,6 +79,12 @@ async def api_v1_task_submit(request: Request):
         outputs = model_pipelines.get_outputs(keys)
         types = model_pipelines.get_types(keys)
 
+        # check if task can be published to queues
+        queues = [v['queue'] for v in workers.values()]
+        wait_time = await server_monitor.check_queue_busy(keys, queues)
+        if wait_time is None:
+            return error_response(f"Queue busy, please try again later", 500)
+
         # process multimodal inputs data
         inputs_data = await load_inputs(params, inputs, types)
 
@@ -87,7 +97,7 @@ async def api_v1_task_submit(request: Request):
             await data_manager.save_bytes(data, data_name(inp, task_id))
 
         await prepare_subtasks(task_id)
-        return {'task_id': task_id, "workers": workers, "params": params}
+        return {'task_id': task_id, "workers": workers, "params": params, "wait_time": wait_time}
 
     except Exception as e:
         traceback.print_exc()
@@ -102,6 +112,8 @@ async def api_v1_task_query(request: Request):
         params = await request.json()
         task_id = params.pop('task_id')
         task = await task_manager.query_task(task_id)
+        if task is None:
+            return {'msg': 'task not found'}
         task['status'] = task['status'].name
         keys = ['task_id', 'status', 'outputs']
         return {k: task[k] for k in keys}
@@ -152,26 +164,27 @@ async def api_v1_task_resume(request: Request):
 async def api_v1_worker_fetch(request: Request):
     try:
         params = await request.json()
-        logger.info(f"Worker fetch: {params}")
+        logger.info(f"Worker fetching: {params}")
         keys = params.pop('worker_keys')
         identity = params.pop('worker_identity')
         max_batch = params.get('max_batch', 1)
         timeout = params.get('timeout', 5)
 
         # check client disconnected
-        async def check_client(request, fetch_task, keys, identity):
+        async def check_client(request, fetch_task, identity, queue):
             while True:
                 ret = await request.is_disconnected()
                 if ret:
-                    logger.warning(f"Worker {identity} {keys} {request.client} disconnected")
+                    await server_monitor.worker_update(queue, identity, WorkerStatus.DISCONNECT)
                     fetch_task.cancel()
                     return
                 await asyncio.sleep(1)
 
         # get worker info
         worker = model_pipelines.get_worker(keys)
+        await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHING)
         fetch_task = asyncio.create_task(queue_manager.get_subtasks(worker['queue'], max_batch, timeout))
-        check_task = asyncio.create_task(check_client(request, fetch_task, keys, identity))
+        check_task = asyncio.create_task(check_client(request, fetch_task, identity, worker['queue']))
         subtasks = await fetch_task
         disconnected = await request.is_disconnected()
 
@@ -186,6 +199,7 @@ async def api_v1_worker_fetch(request: Request):
         if len(valid_subtasks) > 0:
             logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
             check_task.cancel()
+            await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHED)
         return {'subtasks': valid_subtasks}
 
     except Exception as e:
@@ -202,6 +216,7 @@ async def api_v1_worker_report(request: Request):
         worker_name = params.pop('worker_name')
         status = TaskStatus[params.pop('status')]
         identity = params.pop('worker_identity')
+        await server_monitor.worker_update(None, identity, WorkerStatus.REPORT)
 
         ret = await task_manager.finish_subtasks(
             task_id, status, worker_identity=identity, worker_name=worker_name
@@ -226,6 +241,16 @@ async def api_v1_worker_report(request: Request):
 
         return {'msg': 'ok'}
 
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/metrics")
+async def api_v1_monitor_metrics(request: Request):
+    try:
+        metrics = await server_monitor.cal_metrics()
+        return {'metrics': metrics}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -275,5 +300,6 @@ if __name__ == "__main__":
             queue_manager = RabbitMQQueueManager(args.queue_url)
         else:
             raise NotImplementedError
+        server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
 
     uvicorn.run(app, host=args.ip, port=args.port, reload=False, workers=1)

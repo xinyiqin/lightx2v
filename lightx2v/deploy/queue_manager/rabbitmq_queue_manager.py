@@ -95,6 +95,11 @@ class RabbitMQQueueManager(BaseQueueManager):
             logger.warning(f"rabbitmq get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 
+    @class_try_catch_async
+    async def pending_num(self, queue):
+        q = await self.declare_queue(queue)
+        return q.declaration_result.message_count
+
     async def del_conn(self):
         if self.chan:
             await self.chan.close()

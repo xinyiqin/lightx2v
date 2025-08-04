@@ -36,6 +36,7 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
         "timeout": timeout,
     }
     try:
+        logger.info(f"{worker_identity} fetching {worker_keys} with timeout: {timeout}s ...")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, data=json.dumps(params), timeout=timeout + 10) as ret:
                 if ret.status == 200:
