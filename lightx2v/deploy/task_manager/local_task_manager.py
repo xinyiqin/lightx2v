@@ -11,8 +11,11 @@ class LocalTaskManager(BaseTaskManager):
        if not os.path.exists(self.local_dir):
            os.makedirs(self.local_dir)
 
-    def get_filename(self, task_id):
-        return os.path.join(self.local_dir, f"{task_id}.json")
+    def get_task_filename(self, task_id):
+        return os.path.join(self.local_dir, f"task_{task_id}.json")
+
+    def get_user_filename(self, user_id):
+        return os.path.join(self.local_dir, f"user_{user_id}.json")
 
     def fmt_dict(self, data):
         super().fmt_dict(data)
@@ -31,12 +34,12 @@ class LocalTaskManager(BaseTaskManager):
         if with_fmt:
             self.fmt_dict(info['task'])
             [self.fmt_dict(x) for x in info['subtasks']]
-        out_name = self.get_filename(task['task_id'])
+        out_name = self.get_task_filename(task['task_id'])
         with open(out_name, 'w') as fout:
             fout.write(json.dumps(info, indent=4, ensure_ascii=False))
 
     def load(self, task_id):
-        fpath = self.get_filename(task_id)
+        fpath = self.get_task_filename(task_id)
         info = json.load(open(fpath))
         task, subtasks = info['task'], info['subtasks']
         self.parse_dict(task)
@@ -54,6 +57,8 @@ class LocalTaskManager(BaseTaskManager):
         tasks = []
         fs = [os.path.join(self.local_dir, f) for f in os.listdir(self.local_dir)]
         for f in os.listdir(self.local_dir):
+            if not f.startswith('task_'):
+                continue
             fpath = os.path.join(self.local_dir, f)
             task = json.load(open(fpath))['task']
             self.parse_dict(task)
@@ -195,6 +200,25 @@ class LocalTaskManager(BaseTaskManager):
         self.save(task, subtasks)
         return True
 
+    @class_try_catch_async
+    async def insert_user_if_not_exists(self, user_info):
+        fpath = self.get_user_filename(user_info['user_id'])
+        if os.path.exists(fpath):
+            return True
+        self.fmt_dict(user_info)
+        with open(fpath, 'w') as fout:
+            fout.write(json.dumps(user_info, indent=4, ensure_ascii=False))
+        return True
+
+    @class_try_catch_async
+    async def query_user(self, user_id):
+        fpath = self.get_user_filename(user_id)
+        if not os.path.exists(fpath):
+            return None
+        data = json.load(open(fpath))
+        self.parse_dict(data)
+        return data
+
 
 async def test():
     from lightx2v.deploy.common.pipeline import Pipeline
@@ -242,6 +266,16 @@ async def test():
 
     task = await m.query_task(task_id)
     print(" - final task:", task)
+
+    user_info = {
+        "source": "github",
+        "id": "test-id-233",
+    }
+    user_id = await m.create_user(user_info)
+    print(" - create_user:", user_id)
+
+    user = await m.query_user(user_id)
+    print(" - query_user:", user)
     await m.close()
 
 if __name__ == "__main__":

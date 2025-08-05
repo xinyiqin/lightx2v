@@ -57,7 +57,6 @@ class WorkerClient:
 
     def check(self):
         elapse = time.time() - self.update_t
-        logger.warning(f"Worker {self.queue} {self.identity} elapse {elapse:.2f} s, status={self.status} infer_avg={self.infer_cost.avg} offline_avg={self.offline_cost.avg} infer_timeout={self.infer_timeout} offline_timeout={self.offline_timeout}")
         if self.status == WorkerStatus.FETCHED:
             # infer too long
             if self.infer_cost.avg is not None and elapse > self.infer_cost.avg * 5:

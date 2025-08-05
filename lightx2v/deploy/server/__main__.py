@@ -4,8 +4,10 @@ import uvicorn
 import argparse
 import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, Request, Depends
+from fastapi.responses import JSONResponse, Response, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from lightx2v.utils.profiler import ProfilingContext
@@ -17,6 +19,7 @@ from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
+from lightx2v.deploy.server.auth import auth_manager, get_current_user, verify_worker_access
 
 # =========================
 # FastAPI Related Code
@@ -43,9 +46,48 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 
 def error_response(e, code):
     return JSONResponse({"message": f"error: {e}!"}, status_code=code)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    with open(os.path.join(static_dir, "index.html"), "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/auth/login/github")
+async def github_auth(request: Request):
+    client_id = auth_manager.github_client_id
+    redirect_uri = f"{request.base_url}"
+    auth_url = f"https://github.com/login/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}"
+    return {"auth_url": auth_url}
+
+
+@app.get("/auth/callback/github")
+async def github_callback(request: Request):
+    try:
+        logger.info(f"GitHub callback request: {request}")
+        code = request.query_params.get("code")
+        if not code:
+            return error_response("Missing authorization code", 400)
+        result = await auth_manager.auth_github(code)
+        logger.info(f"GitHub callback result: {result}")
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
 
 
 async def prepare_subtasks(task_id):
@@ -58,7 +100,7 @@ async def prepare_subtasks(task_id):
 
 
 @app.get("/api/v1/model/list")
-async def api_v1_model_list():
+async def api_v1_model_list(user = Depends(get_current_user)):
     try:
         return {'models': model_pipelines.get_model_lists()}
     except Exception as e:
@@ -67,7 +109,7 @@ async def api_v1_model_list():
 
 
 @app.post("/api/v1/task/submit")
-async def api_v1_task_submit(request: Request):
+async def api_v1_task_submit(request: Request, user = Depends(get_current_user)):
     task_id = None
     try:
         params = await request.json()
@@ -107,7 +149,7 @@ async def api_v1_task_submit(request: Request):
 
 
 @app.get("/api/v1/task/query")
-async def api_v1_task_query(request: Request):
+async def api_v1_task_query(request: Request, user = Depends(get_current_user)):
     try:
         params = await request.json()
         task_id = params.pop('task_id')
@@ -123,7 +165,7 @@ async def api_v1_task_query(request: Request):
 
 
 @app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request):
+async def api_v1_task_result(request: Request, user = Depends(get_current_user)):
     try:
         params = await request.json()
         name = params.pop('name')
@@ -135,7 +177,7 @@ async def api_v1_task_result(request: Request):
 
 
 @app.get("/api/v1/task/cancel")
-async def api_v1_task_cancel(request: Request):
+async def api_v1_task_cancel(request: Request, user = Depends(get_current_user)):
     try:
         params = await request.json()
         task_id = params.pop('task_id')
@@ -147,7 +189,7 @@ async def api_v1_task_cancel(request: Request):
 
 
 @app.get("/api/v1/task/resume")
-async def api_v1_task_resume(request: Request):
+async def api_v1_task_resume(request: Request, user = Depends(get_current_user)):
     try:
         params = await request.json()
         task_id = params.pop('task_id')
@@ -161,7 +203,7 @@ async def api_v1_task_resume(request: Request):
 
 
 @app.get("/api/v1/worker/fetch")
-async def api_v1_worker_fetch(request: Request):
+async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_access)):
     try:
         params = await request.json()
         logger.info(f"Worker fetching: {params}")
@@ -208,7 +250,7 @@ async def api_v1_worker_fetch(request: Request):
 
 
 @app.get("/api/v1/worker/report")
-async def api_v1_worker_report(request: Request):
+async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_access)):
     try:
         params = await request.json()
         logger.info(f"{params}")
@@ -247,7 +289,7 @@ async def api_v1_worker_report(request: Request):
 
 
 @app.get("/api/v1/metrics")
-async def api_v1_monitor_metrics(request: Request):
+async def api_v1_monitor_metrics(request: Request, valid = Depends(verify_worker_access)):
     try:
         metrics = await server_monitor.cal_metrics()
         return {'metrics': metrics}

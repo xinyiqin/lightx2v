@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LightX2V 任务管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .main-container {
+            min-height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            color: #667eea !important;
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .btn-github {
+            background-color: #24292e;
+            border-color: #24292e;
+            color: white;
+        }
+        .btn-github:hover {
+            background-color: #1a1e22;
+            border-color: #1a1e22;
+            color: white;
+        }
+        .task-card {
+            transition: transform 0.2s;
+        }
+        .task-card:hover {
+            transform: translateY(-2px);
+        }
+        .status-badge {
+            font-size: 0.8em;
+        }
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+        }
+        .loading {
+            display: none;
+        }
+        .loading.show {
+            display: block;
+        }
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.3s;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 登录页面 -->
+        <div v-if="!isLoggedIn" class="login-container">
+            <div class="container">
+                <div class="row justify-content-center">
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card">
+                            <div class="card-body text-center p-5">
+                                <h2 class="mb-4">
+                                    <i class="fas fa-brain text-primary"></i>
+                                    LightX2V
+                                </h2>
+                                <p class="text-muted mb-4">AI任务管理系统</p>
+                                <button @click="loginWithGitHub" class="btn btn-github btn-lg w-100" :disabled="loading">
+                                    <i class="fab fa-github me-2"></i>
+                                    {{ loading ? '登录中...' : '使用GitHub登录' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主应用页面 -->
+        <div v-else class="main-container">
+            <!-- 导航栏 -->
+            <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+                <div class="container">
+                    <a class="navbar-brand" href="#">
+                        <i class="fas fa-brain me-2"></i>
+                        LightX2V
+                    </a>
+                    <div class="navbar-nav ms-auto">
+                        <div class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                                <img :src="currentUser.avatar_url" alt="Avatar" class="user-avatar me-2">
+                                <span>{{ currentUser.username }}</span>
+                            </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="#" @click="logout">退出登录</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- 主要内容 -->
+            <div class="container mt-4">
+                <!-- 模型列表 -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-list me-2"></i>
+                                    可用模型
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div v-for="model in models" :key="`${model.task_type}-${model.model_cls}-${model.stage}`" class="col-md-4 mb-3">
+                                        <div class="card task-card h-100">
+                                            <div class="card-body">
+                                                <h6 class="card-title">{{ model.task_type }}</h6>
+                                                <p class="card-text text-muted">{{ model.model_cls }}</p>
+                                                <small class="text-muted">阶段: {{ model.stage }}</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="models.length === 0" class="col-12 text-center text-muted">
+                                        暂无可用模型
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 任务提交 -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-plus me-2"></i>
+                                    提交新任务
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <form @submit.prevent="submitTask">
+                                    <div class="row">
+                                        <div class="col-md-3 mb-3">
+                                            <label for="taskType" class="form-label">任务类型</label>
+                                            <select class="form-select" v-model="taskForm.task" required>
+                                                <option value="">选择任务类型</option>
+                                                <option v-for="taskType in availableTaskTypes" :key="taskType" :value="taskType">
+                                                    {{ taskType }}
+                                                </option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label for="modelClass" class="form-label">模型类别</label>
+                                            <select class="form-select" v-model="taskForm.model_cls" required>
+                                                <option value="">选择模型类别</option>
+                                                <option v-for="modelClass in availableModelClasses" :key="modelClass" :value="modelClass">
+                                                    {{ modelClass }}
+                                                </option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label for="stage" class="form-label">阶段</label>
+                                            <select class="form-select" v-model="taskForm.stage" required>
+                                                <option value="">选择阶段</option>
+                                                <option v-for="stage in availableStages" :key="stage" :value="stage">
+                                                    {{ stage }}
+                                                </option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label for="inputFile" class="form-label">输入文件</label>
+                                            <input type="file" class="form-control" @change="handleFileUpload" required>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary" :disabled="submitting">
+                                        <i class="fas fa-paper-plane me-2"></i>
+                                        {{ submitting ? '提交中...' : '提交任务' }}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 任务列表 -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-tasks me-2"></i>
+                                    任务列表
+                                </h5>
+                                <button class="btn btn-outline-primary btn-sm" @click="refreshTasks" :disabled="loading">
+                                    <i class="fas fa-sync-alt me-1"></i>
+                                    刷新
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div v-if="tasks.length === 0" class="text-center text-muted">
+                                    暂无任务记录
+                                </div>
+                                <div v-else class="row">
+                                    <div v-for="task in tasks" :key="task.task_id" class="col-md-6 mb-3">
+                                        <div class="card task-card">
+                                            <div class="card-body">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div>
+                                                        <h6 class="card-title">{{ task.task_id }}</h6>
+                                                        <p class="card-text text-muted">
+                                                            {{ task.task_type }} - {{ task.model_cls }}
+                                                        </p>
+                                                    </div>
+                                                    <span :class="getStatusBadgeClass(task.status)" class="badge status-badge">
+                                                        {{ task.status }}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载指示器 -->
+        <div v-if="loading" class="loading position-fixed top-50 start-50 translate-middle show">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+        </div>
+
+        <!-- 提示消息 -->
+        <div v-if="alert.show" class="position-fixed top-0 start-50 translate-middle-x mt-3" style="z-index: 9999;">
+            <div :class="`alert alert-${alert.type} alert-dismissible fade show`" role="alert">
+                {{ alert.message }}
+                <button type="button" class="btn-close" @click="alert.show = false"></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                // 响应式数据
+                const isLoggedIn = ref(false);
+                const loading = ref(false);
+                const submitting = ref(false);
+                const currentUser = ref({});
+                const models = ref([]);
+                const tasks = ref([]);
+                const alert = ref({ show: false, message: '', type: 'info' });
+
+                const taskForm = ref({
+                    task: '',
+                    model_cls: '',
+                    stage: '',
+                    file: null
+                });
+
+                // 计算属性
+                const availableTaskTypes = computed(() => {
+                    return [...new Set(models.value.map(m => m.task_type))];
+                });
+
+                const availableModelClasses = computed(() => {
+                    if (!taskForm.value.task) return [];
+                    return [...new Set(models.value
+                        .filter(m => m.task_type === taskForm.value.task)
+                        .map(m => m.model_cls))];
+                });
+
+                const availableStages = computed(() => {
+                    if (!taskForm.value.task || !taskForm.value.model_cls) return [];
+                    return [...new Set(models.value
+                        .filter(m => m.task_type === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
+                        .map(m => m.stage))];
+                });
+
+                // 方法
+                const showAlert = (message, type = 'info') => {
+                    alert.value = { show: true, message, type };
+                    setTimeout(() => {
+                        alert.value.show = false;
+                    }, 5000);
+                };
+
+                const setLoading = (value) => {
+                    loading.value = value;
+                };
+
+                const apiCall = async (endpoint, options = {}) => {
+                    const url = `${window.location.origin}${endpoint}`;
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    };
+
+                    if (localStorage.getItem('accessToken')) {
+                        headers['Authorization'] = `Bearer ${localStorage.getItem('accessToken')}`;
+                    }
+
+                    const response = await fetch(url, {
+                        ...options,
+                        headers
+                    });
+
+                    if (response.status === 401) {
+                        logout();
+                        throw new Error('认证失败，请重新登录');
+                    }
+
+                    return response;
+                };
+
+                const loginWithGitHub = async () => {
+                    try {
+                        setLoading(true);
+                        const response = await fetch('/auth/login/github');
+                        const data = await response.json();
+                        window.location.href = data.auth_url;
+                    } catch (error) {
+                        showAlert('获取GitHub认证URL失败', 'danger');
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                const handleGitHubCallback = async (code) => {
+                    try {
+                        setLoading(true);
+                        const response = await fetch(`/auth/callback/github?code=${code}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log(data);
+                            localStorage.setItem('accessToken', data.access_token);
+                            localStorage.setItem('currentUser', JSON.stringify(data.user_info));
+                            currentUser.value = data.user_info;                            
+                            isLoggedIn.value = true;
+                            loadModels();
+                            window.location.href = '/';
+                        } else {
+                            const error = await response.json();
+                            showAlert(`登录失败: ${error.detail}`, 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('登录过程中发生错误', 'danger');
+                        console.error(error);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                const logout = () => {
+                    localStorage.removeItem('accessToken');
+                    localStorage.removeItem('currentUser');
+                    currentUser.value = {};
+                    isLoggedIn.value = false;
+                    models.value = [];
+                    tasks.value = [];
+                };
+
+                const loadModels = async () => {
+                    try {
+                        const response = await apiCall('/api/v1/model/list');
+                        if (response.ok) {
+                            const data = await response.json();
+                            models.value = data.models || [];
+                        } else {
+                            showAlert('加载模型列表失败', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`加载模型失败: ${error.message}`, 'danger');
+                    }
+                };
+
+                const handleFileUpload = (event) => {
+                    taskForm.value.file = event.target.files[0];
+                };
+
+                const submitTask = async () => {
+                    try {
+                        submitting.value = true;
+                        
+                        // 这里简化处理，实际应该上传文件
+                        const formData = {
+                            task: taskForm.value.task,
+                            model_cls: taskForm.value.model_cls,
+                            stage: taskForm.value.stage,
+                            // 文件上传需要特殊处理
+                        };
+
+                        const response = await apiCall('/api/v1/task/submit', {
+                            method: 'POST',
+                            body: JSON.stringify(formData)
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            showAlert(`任务提交成功！任务ID: ${result.task_id}`, 'success');
+                            taskForm.value = { task: '', model_cls: '', stage: '', file: null };
+                            refreshTasks();
+                        } else {
+                            const error = await response.json();
+                            showAlert(`任务提交失败: ${error.message}`, 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`提交任务失败: ${error.message}`, 'danger');
+                    } finally {
+                        submitting.value = false;
+                    }
+                };
+
+                const refreshTasks = async () => {
+                    // 这里可以实现任务列表刷新功能
+                    showAlert('任务列表刷新功能待实现', 'info');
+                };
+
+                const getStatusBadgeClass = (status) => {
+                    const statusMap = {
+                        'SUCCEED': 'bg-success',
+                        'FAILED': 'bg-danger',
+                        'RUNNING': 'bg-warning',
+                        'PENDING': 'bg-secondary'
+                    };
+                    return statusMap[status] || 'bg-secondary';
+                };
+
+                // 监听器
+                watch(() => taskForm.value.task, () => {
+                    taskForm.value.model_cls = '';
+                    taskForm.value.stage = '';
+                });
+
+                watch(() => taskForm.value.model_cls, () => {
+                    taskForm.value.stage = '';
+                });
+
+                // 生命周期
+                onMounted(() => {
+                    // 检查是否已登录
+                    const savedToken = localStorage.getItem('accessToken');
+                    const savedUser = localStorage.getItem('currentUser');
+
+                    if (savedToken && savedUser) {
+                        currentUser.value = JSON.parse(savedUser);
+                        isLoggedIn.value = true;
+                        loadModels();
+                    } else {
+                        // 检查是否是GitHub回调
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const code = urlParams.get('code');
+                        if (code) {
+                            handleGitHubCallback(code);
+                        }
+                    }
+                });
+
+                return {
+                    isLoggedIn,
+                    loading,
+                    submitting,
+                    currentUser,
+                    models,
+                    tasks,
+                    alert,
+                    taskForm,
+                    availableTaskTypes,
+                    availableModelClasses,
+                    availableStages,
+                    showAlert,
+                    loginWithGitHub,
+                    logout,
+                    loadModels,
+                    handleFileUpload,
+                    submitTask,
+                    refreshTasks,
+                    getStatusBadgeClass
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html> 

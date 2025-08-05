@@ -22,6 +22,12 @@ class BaseTaskManager:
     async def close(self):
         pass
 
+    async def insert_user_if_not_exists(self, user_info):
+        raise NotImplementedError
+
+    async def query_user(self, user_id):
+        raise NotImplementedError
+
     async def insert_task(self, task, subtasks):
         raise NotImplementedError
 
@@ -56,6 +62,20 @@ class BaseTaskManager:
             if k in data:
                 data[k] = TaskStatus[data[k]]
 
+    async def create_user(self, user_info):
+        cur_t = current_time()
+        user_id = f"{user_info['source']}_{user_info['id']}"
+        user_info.update({
+            'user_id': user_id,
+            'extra_info': '',
+            'create_t': cur_t,
+            'update_t': cur_t,
+            'tag': '',
+        })
+        assert user_info['source'] == 'github', f"only support github user now"
+        assert await self.insert_user_if_not_exists(user_info), f"create user {user_info} failed"
+        return user_id
+
     async def create_task(self, worker_keys, workers, params, inputs, outputs):
         task_type, model_cls, stage = worker_keys
         cur_t = current_time()
@@ -68,7 +88,7 @@ class BaseTaskManager:
             "params": params,
             "create_t": cur_t,
             "update_t": cur_t,
-            "status": TaskStatus.CREATED, 
+            "status": TaskStatus.CREATED,
             "extra_info": "",
             "tag": "",
             "inputs": {x: data_name(x, task_id) for x in inputs},
