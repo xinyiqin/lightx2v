@@ -435,6 +435,36 @@ class PostgresSQLTaskManager(BaseTaskManager):
         finally:
             await self.release_conn(conn)
 
+    @class_try_catch_async
+    async def insert_user_if_not_exists(self, user_info):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation='read_uncommitted'):
+                row = await conn.fetchrow(f"SELECT * FROM {self.table_users} WHERE user_id = $1", user_info['user_id'])
+                if row:
+                    logger.info(f"user already exists: {user_info['user_id']}")
+                    return True
+                self.fmt_dict(user_info)
+                await conn.execute(f"INSERT INTO {self.table_users} (user_id, user_name, user_email, user_homepage, user_avatar_url, user_source, user_extra_info, user_create_t, user_update_t, user_tag) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                    user_info['user_id'], user_info['user_name'], user_info['user_email'], user_info['user_homepage'], user_info['user_avatar_url'], user_info['user_source'], user_info['user_extra_info'], user_info['user_create_t'], user_info['user_update_t'], user_info['user_tag'])
+        except:
+            logger.error(f"insert_user_if_not_exists error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def query_user(self, user_id):
+        conn = await self.get_conn()
+        try:
+            row = await conn.fetchrow(f"SELECT * FROM {self.table_users} WHERE user_id = $1", user_id)
+            return dict(row)
+        except:
+            logger.error(f"query_user error: {traceback.format_exc()}")
+            return None
+        finally:
+            await self.release_conn(conn)
+
 
 async def test():
     from lightx2v.deploy.common.pipeline import Pipeline

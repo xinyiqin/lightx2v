@@ -2,11 +2,8 @@ import os
 import jwt
 import time
 import aiohttp
-from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import HTTPException
 from loguru import logger
-
-security = HTTPBearer()
 
 
 class AuthManager:
@@ -27,7 +24,12 @@ class AuthManager:
         logger.info(f"AuthManager: WORKER_SECRET_KEY: {self.worker_secret_key}")
 
     def create_jwt_token(self, data):
-        data2 = data.copy()
+        data2 = {
+            "user_id": data['user_id'],
+            "username": data['username'],
+            "email": data['email'],
+            "homepage": data['homepage'],
+        }
         expire = time.time() + (self.jwt_expiration_hours * 3600)
         data2.update({"exp": expire})
         return jwt.encode(data2, self.jwt_secret_key, algorithm=self.jwt_algorithm)
@@ -65,7 +67,7 @@ class AuthManager:
                     response.raise_for_status()
                     user_info = await response.json()
 
-            user_data = {
+            return {
                 "source": "github",
                 "id": str(user_info["id"]),
                 "username": user_info["login"],
@@ -73,9 +75,6 @@ class AuthManager:
                 "homepage": user_info.get("html_url", ""),
                 "avatar_url": user_info.get("avatar_url", ""),
             }
-
-            access_token = self.create_jwt_token(user_data)
-            return {"access_token": access_token, "user_info": user_data}
 
         except aiohttp.ClientError as e:
             logger.error(f"GitHub API request failed: {e}")
@@ -97,20 +96,3 @@ class AuthManager:
 
     def verify_worker_token(self, token):
         return token == self.worker_secret_key
-
-
-auth_manager = AuthManager()
-
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = auth_manager.verify_jwt_token(token)
-    logger.info(f"get_current_user: {payload}")
-    return payload
-
-
-async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    if not auth_manager.verify_worker_token(token):
-        raise HTTPException(status_code=403, detail="Invalid worker token")
-    return True 

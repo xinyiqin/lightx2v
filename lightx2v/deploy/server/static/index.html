@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LightX2V 任务管理系统</title>
+    <title>LightX2V 文生视频服务</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -63,6 +63,67 @@
         .fade-enter-from, .fade-leave-to {
             opacity: 0;
         }
+        .task-card {
+            border-left: 4px solid #667eea;
+            transition: all 0.3s ease;
+        }
+        .task-card:hover {
+            border-left-color: #764ba2;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .task-detail-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .prompt-text {
+            word-break: break-word;
+            line-height: 1.6;
+        }
+        .output-badge {
+            font-size: 0.75em;
+            margin-right: 5px;
+        }
+        .btn-group .btn {
+            margin-left: 5px;
+        }
+        .btn-group .btn:first-child {
+            margin-left: 0;
+        }
+        .status-badge i {
+            font-size: 0.6em;
+        }
+        .card-title {
+            font-weight: 600;
+        }
+        .text-truncate {
+            max-width: 200px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .task-card .card-body {
+            padding: 1.25rem;
+        }
+        .badge {
+            font-weight: 500;
+        }
+        .badge i {
+            font-size: 0.8em;
+        }
+        .task-tags .badge {
+            font-size: 0.75em;
+            padding: 0.35em 0.65em;
+        }
+        .status-badge {
+            font-size: 0.8em;
+            padding: 0.4em 0.8em;
+        }
+        .flex-column .btn-group {
+            width: 100%;
+        }
+        .flex-column .btn-group .btn {
+            flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -78,7 +139,7 @@
                                     <i class="fas fa-brain text-primary"></i>
                                     LightX2V
                                 </h2>
-                                <p class="text-muted mb-4">AI任务管理系统</p>
+                                <p class="text-muted mb-4">文生视频服务</p>
                                 <button @click="loginWithGitHub" class="btn btn-github btn-lg w-100" :disabled="loading">
                                     <i class="fab fa-github me-2"></i>
                                     {{ loading ? '登录中...' : '使用GitHub登录' }}
@@ -95,7 +156,7 @@
             <!-- 导航栏 -->
             <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
                 <div class="container">
-                    <a class="navbar-brand" href="#">
+                    <a class="navbar-brand" href="/">
                         <i class="fas fa-brain me-2"></i>
                         LightX2V
                     </a>
@@ -127,12 +188,12 @@
                             </div>
                             <div class="card-body">
                                 <div class="row">
-                                    <div v-for="model in models" :key="`${model.task_type}-${model.model_cls}-${model.stage}`" class="col-md-4 mb-3">
+                                    <div v-for="model in models" :key="`${model.task}-${model.model_cls}-${model.stage}`" class="col-md-4 mb-3">
                                         <div class="card task-card h-100">
                                             <div class="card-body">
-                                                <h6 class="card-title">{{ model.task_type }}</h6>
-                                                <p class="card-text text-muted">{{ model.model_cls }}</p>
-                                                <small class="text-muted">阶段: {{ model.stage }}</small>
+                                                <h6 class="card-title">任务类型：{{ model.task }}</h6>
+                                                <p class="card-text text-muted">模型名称：{{ model.model_cls }}</p>
+                                                <small class="text-muted">推理模式: {{ model.stage }}</small>
                                             </div>
                                         </div>
                                     </div>
@@ -168,26 +229,37 @@
                                             </select>
                                         </div>
                                         <div class="col-md-3 mb-3">
-                                            <label for="modelClass" class="form-label">模型类别</label>
+                                            <label for="modelClass" class="form-label">模型名称</label>
                                             <select class="form-select" v-model="taskForm.model_cls" required>
-                                                <option value="">选择模型类别</option>
+                                                <option value="">选择模型名称</option>
                                                 <option v-for="modelClass in availableModelClasses" :key="modelClass" :value="modelClass">
                                                     {{ modelClass }}
                                                 </option>
                                             </select>
                                         </div>
                                         <div class="col-md-3 mb-3">
-                                            <label for="stage" class="form-label">阶段</label>
+                                            <label for="stage" class="form-label">推理模式</label>
                                             <select class="form-select" v-model="taskForm.stage" required>
-                                                <option value="">选择阶段</option>
+                                                <option value="">选择推理模式</option>
                                                 <option v-for="stage in availableStages" :key="stage" :value="stage">
                                                     {{ stage }}
                                                 </option>
                                             </select>
                                         </div>
                                         <div class="col-md-3 mb-3">
-                                            <label for="inputFile" class="form-label">输入文件</label>
-                                            <input type="file" class="form-control" @change="handleFileUpload" required>
+                                            <label for="prompt" class="form-label">提示词</label>
+                                            <input type="text" class="form-control" v-model="taskForm.prompt" placeholder="请输入提示词" required>
+                                        </div>
+                                        <div class="col-md-3 mb-3">
+                                            <label for="seed" class="form-label">随机种子</label>
+                                            <input type="number" class="form-control" v-model="taskForm.seed" placeholder="42" required>
+                                        </div>
+                                        <div class="col-md-3 mb-3" v-if="taskForm.task === 'i2v'">
+                                            <label for="inputFile" class="form-label">输入图片</label>
+                                            <input type="file" class="form-control" @change="handleFileUpload" accept="image/*" required>
+                                            <div v-if="imagePreview" class="mt-2">
+                                                <img :src="imagePreview" alt="预览图片" class="img-thumbnail" style="max-width: 100px; max-height: 100px;">
+                                            </div>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" :disabled="submitting">
@@ -218,20 +290,180 @@
                                 <div v-if="tasks.length === 0" class="text-center text-muted">
                                     暂无任务记录
                                 </div>
-                                <div v-else class="row">
-                                    <div v-for="task in tasks" :key="task.task_id" class="col-md-6 mb-3">
-                                        <div class="card task-card">
-                                            <div class="card-body">
-                                                <div class="d-flex justify-content-between align-items-start">
-                                                    <div>
-                                                        <h6 class="card-title">{{ task.task_id }}</h6>
-                                                        <p class="card-text text-muted">
-                                                            {{ task.task_type }} - {{ task.model_cls }}
-                                                        </p>
+                                <div v-else>
+                                    <div v-for="task in tasks" :key="task.task_id" class="card task-card mb-3">
+                                        <div class="card-body">
+                                            <!-- 任务摘要信息 -->
+                                            <div class="row align-items-center">
+                                                <div class="col-md-8">
+                                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                                        <div class="d-flex align-items-center">
+                                                            <h6 class="card-title mb-0 text-primary me-3">
+                                                                <i class="fas fa-hashtag me-1"></i>
+                                                                {{ task.task_id }}
+                                                            </h6>
+                                                            <div class="task-tags">
+                                                                <span class="badge bg-primary me-1">
+                                                                    <i class="fas fa-tasks me-1"></i>
+                                                                    {{ task.task_type }}
+                                                                </span>
+                                                                <span class="badge bg-info me-1">
+                                                                    <i class="fas fa-brain me-1"></i>
+                                                                    {{ task.model_cls }}
+                                                                </span>
+                                                                <span class="badge bg-warning">
+                                                                    <i class="fas fa-cog me-1"></i>
+                                                                    {{ task.stage }}
+                                                                </span>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <span :class="getStatusBadgeClass(task.status)" class="badge status-badge">
-                                                        {{ task.status }}
-                                                    </span>
+                                                    <div class="row">
+                                                        <div class="col-md-6">
+                                                            <p class="card-text mb-2" v-if="task.params.prompt">
+                                                                <strong>
+                                                                    <i class="fas fa-comment me-1"></i>
+                                                                    提示词:
+                                                                </strong> 
+                                                                <span class="text-truncate d-inline-block" style="max-width: 200px;" :title="task.params.prompt">
+                                                                    {{ task.params.prompt.length > 50 ? task.params.prompt.substring(0, 50) + '...' : task.params.prompt }}
+                                                                </span>
+                                                            </p>
+                                                            <p class="card-text mb-1" v-if="task.params.seed">
+                                                                <strong>
+                                                                    <i class="fas fa-seedling me-1"></i>
+                                                                    种子值:
+                                                                </strong> 
+                                                                <span class="badge bg-secondary">{{ task.params.seed }}</span>
+                                                            </p>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <p class="card-text mb-2" v-if="task.create_t">
+                                                                <strong>
+                                                                    <i class="fas fa-calendar me-1"></i>
+                                                                    创建时间:
+                                                                </strong> 
+                                                                <small>{{ formatTime(task.create_t) }}</small>
+                                                            </p>
+                                                            <p v-if="task.status === 'SUCCEED' && task.outputs && Object.keys(task.outputs).length > 0" class="mb-2">
+                                                                <strong>
+                                                                    <i class="fas fa-file-video me-1"></i>
+                                                                    输出:
+                                                                </strong>
+                                                                <span class="mt-1">
+                                                                    <span v-for="(output, key) in task.outputs" :key="key" class="me-2 mb-1 d-inline-flex align-items-center">
+                                                                        {{ key }}
+                                                                        <i class="fas fa-eye ms-1" style="cursor: pointer; color: #28a745;" @click="viewSingleResult(task.task_id, key, output)" title="查看此文件"></i>
+                                                                        <i class="fas fa-download ms-1" style="cursor: pointer; color: #007bff;" @click="downloadSingleResult(task.task_id, key, output)" title="下载此文件"></i>
+                                                                    </span>
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4 text-end">
+                                                    <div class="d-flex align-items-center justify-content-end">
+                                                        <span :class="getStatusBadgeClass(task.status)" class="badge status-badge me-2">
+                                                            <i class="fas fa-circle me-1"></i>
+                                                            {{ task.status }}
+                                                        </span>
+                                                        <div class="btn-group" role="group">
+                                                            <button class="btn btn-outline-info btn-sm" @click="toggleTaskDetail(task.task_id)">
+                                                                <i class="fas fa-info-circle me-1"></i>
+                                                                {{ expandedTasks.includes(task.task_id) ? '收起' : '详情' }}
+                                                            </button>
+                                                            <button v-if="['CREATED', 'PENDING', 'RUNNING'].includes(task.status)" 
+                                                                    class="btn btn-outline-warning btn-sm" 
+                                                                    @click="cancelTask(task.task_id)">
+                                                                <i class="fas fa-stop me-1"></i>
+                                                                取消
+                                                            </button>
+                                                            <button v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)" 
+                                                                    class="btn btn-outline-success btn-sm" 
+                                                                    @click="resumeTask(task.task_id)">
+                                                                <i class="fas fa-redo me-1"></i>
+                                                                重试
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 详细展开信息 -->
+                                            <div v-if="expandedTasks.includes(task.task_id)" class="task-detail-section p-3">
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <h6 class="text-muted mb-2">
+                                                            <i class="fas fa-comment me-1"></i>
+                                                            完整提示词
+                                                        </h6>
+                                                        <div class="bg-white p-3 rounded border">
+                                                            <p class="mb-0 prompt-text">{{ task.params.prompt || '无提示词' }}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <h6 class="text-muted mb-2">
+                                                            <i class="fas fa-cog me-1"></i>
+                                                            任务参数
+                                                        </h6>
+                                                        <div class="bg-white p-3 rounded border">
+                                                            <div class="mb-3 d-flex align-items-center">
+                                                                <strong class="me-2">任务类型:</strong>
+                                                                <span class="badge bg-primary">
+                                                                    <i class="fas fa-tasks me-1"></i>
+                                                                    {{ task.task_type }}
+                                                                </span>
+                                                            </div>
+                                                            <div class="mb-3 d-flex align-items-center">
+                                                                <strong class="me-2">模型名称:</strong>
+                                                                <span class="badge bg-info">
+                                                                    <i class="fas fa-brain me-1"></i>
+                                                                    {{ task.model_cls }}
+                                                                </span>
+                                                            </div>
+                                                            <div class="mb-3 d-flex align-items-center">
+                                                                <strong>推理模式:</strong>
+                                                                <span class="badge bg-warning ms-2">
+                                                                    <i class="fas fa-cog me-1"></i>
+                                                                    {{ task.stage }}
+                                                                </span>
+                                                            </div>
+                                                            <div class="mb-3 d-flex align-items-center" v-if="task.params.seed">
+                                                                <strong>种子值:</strong>
+                                                                <span class="badge bg-secondary ms-2">{{ task.params.seed }}</span>
+                                                            </div>
+                                                            <div class="mb-3 d-flex align-items-center" v-if="task.params.image">
+                                                                <strong>输入图片:</strong>
+                                                                <span class="badge bg-success ms-2">已上传</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="row mt-3">
+                                                    <div class="col-md-6">
+                                                        <h6 class="text-muted mb-2">
+                                                            <i class="fas fa-clock me-1"></i>
+                                                            时间信息
+                                                        </h6>
+                                                        <div class="bg-white p-3 rounded border">
+                                                            <ul class="list-unstyled mb-0">
+                                                                <li><strong>创建时间:</strong> {{ formatTime(task.create_t) }}</li>
+                                                                <li><strong>更新时间:</strong> {{ formatTime(task.update_t) }}</li>
+                                                            </ul>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6" v-if="task.outputs && Object.keys(task.outputs).length > 0">
+                                                        <h6 class="text-muted mb-2">
+                                                            <i class="fas fa-file-video me-1"></i>
+                                                            输出结果
+                                                        </h6>
+                                                        <div class="bg-white p-3 rounded border">
+                                                            <div v-for="(output, key) in task.outputs" :key="key" class="mb-2">
+                                                                <strong>{{ key }}:</strong> 
+                                                                <span class="badge bg-info output-badge">{{ output }}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -262,6 +494,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
     <script>
         const { createApp, ref, computed, onMounted, watch } = Vue;
 
@@ -275,30 +508,35 @@
                 const models = ref([]);
                 const tasks = ref([]);
                 const alert = ref({ show: false, message: '', type: 'info' });
+                const expandedTasks = ref([]); // 新增：用于控制任务详情展开
 
                 const taskForm = ref({
                     task: '',
                     model_cls: '',
                     stage: '',
-                    file: null
+                    file: null,
+                    prompt: '',
+                    seed: 42
                 });
+
+                const imagePreview = ref(null);
 
                 // 计算属性
                 const availableTaskTypes = computed(() => {
-                    return [...new Set(models.value.map(m => m.task_type))];
+                    return [...new Set(models.value.map(m => m.task))];
                 });
 
                 const availableModelClasses = computed(() => {
                     if (!taskForm.value.task) return [];
                     return [...new Set(models.value
-                        .filter(m => m.task_type === taskForm.value.task)
+                        .filter(m => m.task === taskForm.value.task)
                         .map(m => m.model_cls))];
                 });
 
                 const availableStages = computed(() => {
                     if (!taskForm.value.task || !taskForm.value.model_cls) return [];
                     return [...new Set(models.value
-                        .filter(m => m.task_type === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
+                        .filter(m => m.task === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
                         .map(m => m.stage))];
                 });
 
@@ -332,8 +570,7 @@
 
                     if (response.status === 401) {
                         logout();
-                        throw new Error('认证失败，请重新登录');
-                    }
+                        throw new Error('认证失败，请重新登录'); }
 
                     return response;
                 };
@@ -363,11 +600,11 @@
                             currentUser.value = data.user_info;                            
                             isLoggedIn.value = true;
                             loadModels();
-                            window.location.href = '/';
                         } else {
                             const error = await response.json();
                             showAlert(`登录失败: ${error.detail}`, 'danger');
                         }
+                        window.location.href = '/';
                     } catch (error) {
                         showAlert('登录过程中发生错误', 'danger');
                         console.error(error);
@@ -390,7 +627,16 @@
                         const response = await apiCall('/api/v1/model/list');
                         if (response.ok) {
                             const data = await response.json();
+                            console.log(data);
                             models.value = data.models || [];
+                            
+                            // 如果有模型，自动选择第一个模型的信息
+                            if (models.value.length > 0) {
+                                const firstModel = models.value[0];
+                                taskForm.value.task = firstModel.task;
+                                taskForm.value.model_cls = firstModel.model_cls;
+                                taskForm.value.stage = firstModel.stage;
+                            }
                         } else {
                             showAlert('加载模型列表失败', 'danger');
                         }
@@ -400,20 +646,42 @@
                 };
 
                 const handleFileUpload = (event) => {
-                    taskForm.value.file = event.target.files[0];
+                    const file = event.target.files[0];
+                    taskForm.value.file = file;
+                    
+                    // 创建图片预览
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            imagePreview.value = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        imagePreview.value = null;
+                    }
                 };
 
                 const submitTask = async () => {
                     try {
                         submitting.value = true;
                         
-                        // 这里简化处理，实际应该上传文件
-                        const formData = {
+                        // 准备提交数据
+                        var formData = {
                             task: taskForm.value.task,
                             model_cls: taskForm.value.model_cls,
                             stage: taskForm.value.stage,
-                            // 文件上传需要特殊处理
+                            prompt: taskForm.value.prompt,
+                            seed: taskForm.value.seed
                         };
+
+                        // 如果是i2v任务且有图片文件，将图片转换为base64
+                        if (taskForm.value.task === 'i2v' && taskForm.value.file) {
+                            const base64 = await fileToBase64(taskForm.value.file);
+                            formData.input_image = {
+                                type: 'base64',
+                                data: base64
+                            };
+                        }
 
                         const response = await apiCall('/api/v1/task/submit', {
                             method: 'POST',
@@ -423,7 +691,6 @@
                         if (response.ok) {
                             const result = await response.json();
                             showAlert(`任务提交成功！任务ID: ${result.task_id}`, 'success');
-                            taskForm.value = { task: '', model_cls: '', stage: '', file: null };
                             refreshTasks();
                         } else {
                             const error = await response.json();
@@ -436,9 +703,35 @@
                     }
                 };
 
+                const fileToBase64 = (file) => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.readAsDataURL(file);
+                        reader.onload = () => {
+                            // 移除data:image/xxx;base64,前缀，只保留base64部分
+                            const base64 = reader.result.split(',')[1];
+                            resolve(base64);
+                        };
+                        reader.onerror = error => reject(error);
+                    });
+                };
+
+                const formatTime = (timestamp) => {
+                    if (!timestamp) return '';
+                    // 将浮点时间戳转换为毫秒（JavaScript Date 构造函数需要毫秒）
+                    const date = new Date(timestamp * 1000);
+                    return date.toLocaleString('zh-CN');
+                };
+
                 const refreshTasks = async () => {
-                    // 这里可以实现任务列表刷新功能
-                    showAlert('任务列表刷新功能待实现', 'info');
+                    const response = await apiCall('/api/v1/task/list');
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(data);
+                        tasks.value = data.tasks || [];
+                    } else {
+                        showAlert('刷新任务列表失败', 'danger');
+                    }
                 };
 
                 const getStatusBadgeClass = (status) => {
@@ -446,19 +739,120 @@
                         'SUCCEED': 'bg-success',
                         'FAILED': 'bg-danger',
                         'RUNNING': 'bg-warning',
-                        'PENDING': 'bg-secondary'
+                        'PENDING': 'bg-secondary',
+                        'CREATED': 'bg-secondary'
                     };
                     return statusMap[status] || 'bg-secondary';
                 };
 
+                const toggleTaskDetail = (taskId) => {
+                    if (expandedTasks.value.includes(taskId)) {
+                        expandedTasks.value = expandedTasks.value.filter(id => id !== taskId);
+                    } else {
+                        expandedTasks.value.push(taskId);
+                    }
+                };
+
+                const downloadSingleResult = async (taskId, key, outputPath) => {
+                    try {
+                        const response = await apiCall(`/api/v1/task/result?task_id=${taskId}&name=${key}`);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${outputPath}`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(url);
+                        } else {
+                            showAlert('获取结果失败', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`下载结果失败: ${error.message}`, 'danger');
+                    }
+                };
+
+                const viewSingleResult = async (taskId, key, outputPath) => {
+                    try {
+                        const response = await apiCall(`/api/v1/task/result?task_id=${taskId}&name=${key}`);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const videoBlob = new Blob([blob], { type: 'video/mp4' });
+                            const url = window.URL.createObjectURL(videoBlob);
+                            window.open(url, '_blank');
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                            }, 1000);
+                        } else {
+                            showAlert('获取结果失败', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`查看结果失败: ${error.message}`, 'danger');
+                    }
+                };
+
+                const cancelTask = async (taskId) => {
+                    try {
+                        const response = await apiCall(`/api/v1/task/cancel?task_id=${taskId}`);
+                        if (response.ok) {
+                            showAlert('任务取消成功', 'success');
+                            refreshTasks();
+                        } else {
+                            const error = await response.json();
+                            showAlert(`取消任务失败: ${error.message}`, 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`取消任务失败: ${error.message}`, 'danger');
+                    }
+                };
+
+                const resumeTask = async (taskId) => {
+                    try {
+                        const response = await apiCall(`/api/v1/task/resume?task_id=${taskId}`);
+                        if (response.ok) {
+                            showAlert('任务重试成功', 'success');
+                            refreshTasks();
+                        } else {
+                            const error = await response.json();
+                            showAlert(`重试任务失败: ${error.message}`, 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`重试任务失败: ${error.message}`, 'danger');
+                    }
+                };
+
                 // 监听器
                 watch(() => taskForm.value.task, () => {
+                    // 当任务类型改变时，清空模型类和推理模式
                     taskForm.value.model_cls = '';
                     taskForm.value.stage = '';
+                    
+                    // 如果当前任务类型有对应的模型，自动选择第一个
+                    const availableModels = models.value.filter(m => m.task === taskForm.value.task);
+                    if (availableModels.length > 0) {
+                        const firstModel = availableModels[0];
+                        taskForm.value.model_cls = firstModel.model_cls;
+                        taskForm.value.stage = firstModel.stage;
+                    }
+                    
+                    // 清空图片预览
+                    imagePreview.value = null;
+                    taskForm.value.file = null;
                 });
 
                 watch(() => taskForm.value.model_cls, () => {
+                    // 当模型类改变时，清空推理模式
                     taskForm.value.stage = '';
+                    
+                    // 如果当前模型类有对应的推理模式，自动选择第一个
+                    const availableStages = models.value
+                        .filter(m => m.task === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
+                        .map(m => m.stage);
+                    if (availableStages.length > 0) {
+                        taskForm.value.stage = availableStages[0];
+                    }
                 });
 
                 // 生命周期
@@ -471,6 +865,7 @@
                         currentUser.value = JSON.parse(savedUser);
                         isLoggedIn.value = true;
                         loadModels();
+                        refreshTasks();
                     } else {
                         // 检查是否是GitHub回调
                         const urlParams = new URLSearchParams(window.location.search);
@@ -490,9 +885,11 @@
                     tasks,
                     alert,
                     taskForm,
+                    imagePreview,
                     availableTaskTypes,
                     availableModelClasses,
                     availableStages,
+                    expandedTasks,
                     showAlert,
                     loginWithGitHub,
                     logout,
@@ -500,7 +897,13 @@
                     handleFileUpload,
                     submitTask,
                     refreshTasks,
-                    getStatusBadgeClass
+                    getStatusBadgeClass,
+                    formatTime,
+                    toggleTaskDetail,
+                    downloadSingleResult,
+                    viewSingleResult,
+                    cancelTask,
+                    resumeTask
                 };
             }
         }).mount('#app');

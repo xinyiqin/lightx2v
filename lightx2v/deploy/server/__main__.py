@@ -4,10 +4,11 @@ import uvicorn
 import argparse
 import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
 from lightx2v.utils.profiler import ProfilingContext
@@ -19,7 +20,7 @@ from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.task_manager import TaskStatus
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
-from lightx2v.deploy.server.auth import auth_manager, get_current_user, verify_worker_access
+from lightx2v.deploy.server.auth import AuthManager
 
 # =========================
 # FastAPI Related Code
@@ -30,6 +31,7 @@ task_manager = None
 data_manager = None
 queue_manager = None
 server_monitor = None
+auth_manager = None
 
 
 @asynccontextmanager
@@ -55,6 +57,27 @@ app.add_middleware(
 )
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+security = HTTPBearer()
+
+
+async def verify_user_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    payload = auth_manager.verify_jwt_token(token)
+    user_id = payload.get('user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    user = await task_manager.query_user(user_id)
+    logger.info(f"Verfiy user access: {payload}")
+    if user is None or user['user_id'] != user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    return user
+
+
+async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    if not auth_manager.verify_worker_token(token):
+        raise HTTPException(status_code=403, detail="Invalid worker token")
+    return True 
 
 
 def error_response(e, code):
@@ -78,13 +101,15 @@ async def github_auth(request: Request):
 @app.get("/auth/callback/github")
 async def github_callback(request: Request):
     try:
-        logger.info(f"GitHub callback request: {request}")
         code = request.query_params.get("code")
         if not code:
             return error_response("Missing authorization code", 400)
-        result = await auth_manager.auth_github(code)
-        logger.info(f"GitHub callback result: {result}")
-        return result
+        user_info = await auth_manager.auth_github(code)
+        user_id = await task_manager.create_user(user_info)
+        user_info['user_id'] = user_id
+        access_token = auth_manager.create_jwt_token(user_info)
+        logger.info(f"GitHub callback: user_info: {user_info}, access_token: {access_token}")
+        return {"access_token": access_token, "user_info": user_info}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -100,7 +125,7 @@ async def prepare_subtasks(task_id):
 
 
 @app.get("/api/v1/model/list")
-async def api_v1_model_list(user = Depends(get_current_user)):
+async def api_v1_model_list(user = Depends(verify_user_access)):
     try:
         return {'models': model_pipelines.get_model_lists()}
     except Exception as e:
@@ -109,11 +134,12 @@ async def api_v1_model_list(user = Depends(get_current_user)):
 
 
 @app.post("/api/v1/task/submit")
-async def api_v1_task_submit(request: Request, user = Depends(get_current_user)):
+async def api_v1_task_submit(request: Request, user = Depends(verify_user_access)):
     task_id = None
     try:
         params = await request.json()
         keys = [params.pop('task'), params.pop('model_cls'), params.pop('stage')]
+        assert len(params["prompt"]) > 0, "valid prompt is required"
 
         # get worker infos, model input names
         workers = model_pipelines.get_workers(keys)
@@ -131,7 +157,9 @@ async def api_v1_task_submit(request: Request, user = Depends(get_current_user))
         inputs_data = await load_inputs(params, inputs, types)
 
         # init task
-        task_id = await task_manager.create_task(keys, workers, params, inputs, outputs)
+        task_id = await task_manager.create_task(
+            keys, workers, params, inputs, outputs, user['user_id']
+        )
         logger.info(f"Submit task: {task_id} {params}")
 
         # save multimodal inputs data
@@ -149,27 +177,44 @@ async def api_v1_task_submit(request: Request, user = Depends(get_current_user))
 
 
 @app.get("/api/v1/task/query")
-async def api_v1_task_query(request: Request, user = Depends(get_current_user)):
+async def api_v1_task_query(request: Request, user = Depends(verify_user_access)):
     try:
-        params = await request.json()
-        task_id = params.pop('task_id')
-        task = await task_manager.query_task(task_id)
+        task_id = request.query_params['task_id']
+        task = await task_manager.query_task(task_id, user['user_id'])
         if task is None:
             return {'msg': 'task not found'}
         task['status'] = task['status'].name
-        keys = ['task_id', 'status', 'outputs']
-        return {k: task[k] for k in keys}
+        return task
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/list")
+async def api_v1_task_list(request: Request, user = Depends(verify_user_access)):
+    try:
+        user_id = user['user_id']
+        tasks = await task_manager.list_tasks(user_id=user_id)
+        for task in tasks:
+            task['status'] = task['status'].name
+        return {'tasks': tasks}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
 
 
 @app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request, user = Depends(get_current_user)):
+async def api_v1_task_result(request: Request, user = Depends(verify_user_access)):
     try:
-        params = await request.json()
-        name = params.pop('name')
-        data = await data_manager.load_bytes(name)
+        name = request.query_params['name']
+        task_id = request.query_params['task_id']
+        task = await task_manager.query_task(task_id, user_id=user['user_id'])
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
+        if task['status'] != TaskStatus.SUCCEED:
+            return error_response(f"Task {task_id} not succeed", 400)
+        assert name in task['outputs'], f"Output {name} not found in task {task_id}"
+        data = await data_manager.load_bytes(task['outputs'][name])
         return Response(content=data, media_type="application/octet-stream")
     except Exception as e:
         traceback.print_exc()
@@ -177,10 +222,10 @@ async def api_v1_task_result(request: Request, user = Depends(get_current_user))
 
 
 @app.get("/api/v1/task/cancel")
-async def api_v1_task_cancel(request: Request, user = Depends(get_current_user)):
+async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access)):
     try:
-        params = await request.json()
-        task_id = params.pop('task_id')
+        task_id = request.query_params['task_id']
+        assert await task_manager.query_task(task_id, user_id=user['user_id'])
         ret = await task_manager.cancel_task(task_id)
         return {'msg': 'ok' if ret else 'failed'}
     except Exception as e:
@@ -189,10 +234,10 @@ async def api_v1_task_cancel(request: Request, user = Depends(get_current_user))
 
 
 @app.get("/api/v1/task/resume")
-async def api_v1_task_resume(request: Request, user = Depends(get_current_user)):
+async def api_v1_task_resume(request: Request, user = Depends(verify_user_access)):
     try:
-        params = await request.json()
-        task_id = params.pop('task_id')
+        task_id = request.query_params['task_id']
+        assert await task_manager.query_task(task_id, user_id=user['user_id'])
         ret = await task_manager.resume_task(task_id)
         if ret:
             await prepare_subtasks(task_id)
@@ -202,7 +247,7 @@ async def api_v1_task_resume(request: Request, user = Depends(get_current_user))
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/worker/fetch")
+@app.post("/api/v1/worker/fetch")
 async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_access)):
     try:
         params = await request.json()
@@ -249,7 +294,7 @@ async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_ac
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/worker/report")
+@app.post("/api/v1/worker/report")
 async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_access)):
     try:
         params = await request.json()
@@ -324,6 +369,7 @@ if __name__ == "__main__":
 
     with ProfilingContext("Init Server Cost"):
         model_pipelines = Pipeline(args.pipeline_json)
+        auth_manager = AuthManager()
         if args.task_url.startswith('/'):
             task_manager = LocalTaskManager(args.task_url)
         elif args.task_url.startswith('postgresql://'):

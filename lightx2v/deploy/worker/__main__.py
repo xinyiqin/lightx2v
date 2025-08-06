@@ -42,7 +42,7 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
     try:
         logger.info(f"{worker_identity} fetching {worker_keys} with timeout: {timeout}s ...")
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, data=json.dumps(params), headers=HEADERS, timeout=timeout + 10) as ret:
+            async with session.post(url, data=json.dumps(params), headers=HEADERS, timeout=timeout + 10) as ret:
                 if ret.status == 200:
                     ret = await ret.json()
                     subtasks = ret['subtasks']
@@ -74,7 +74,7 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity)
     }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, data=json.dumps(params), headers=HEADERS) as ret:
+            async with session.post(url, data=json.dumps(params), headers=HEADERS) as ret:
                 if ret.status == 200:
                     RUNNING_SUBTASKS.pop(task_id)
                     ret = await ret.json()

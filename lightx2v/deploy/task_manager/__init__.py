@@ -34,7 +34,7 @@ class BaseTaskManager:
     async def list_tasks(self, **kwargs):
         raise NotImplementedError
 
-    async def query_task(self, task_id):
+    async def query_task(self,task_id, user_id=None):
         raise NotImplementedError
 
     async def next_subtasks(self, task_id):
@@ -63,20 +63,26 @@ class BaseTaskManager:
                 data[k] = TaskStatus[data[k]]
 
     async def create_user(self, user_info):
+        assert user_info['source'] == 'github', f"do not support {user_info['source']} user!"
         cur_t = current_time()
         user_id = f"{user_info['source']}_{user_info['id']}"
-        user_info.update({
+        data = {
             'user_id': user_id,
-            'extra_info': '',
+            'source': user_info['source'],
+            'id': user_info['id'],
+            'username': user_info['username'],
+            'email': user_info['email'],
+            'homepage': user_info['homepage'],
+            'avatar_url': user_info['avatar_url'],
             'create_t': cur_t,
             'update_t': cur_t,
+            'extra_info': '',
             'tag': '',
-        })
-        assert user_info['source'] == 'github', f"only support github user now"
-        assert await self.insert_user_if_not_exists(user_info), f"create user {user_info} failed"
+        }
+        assert await self.insert_user_if_not_exists(data), f"create user {data} failed"
         return user_id
 
-    async def create_task(self, worker_keys, workers, params, inputs, outputs):
+    async def create_task(self, worker_keys, workers, params, inputs, outputs, user_id):
         task_type, model_cls, stage = worker_keys
         cur_t = current_time()
         task_id = str(uuid.uuid4())
@@ -93,6 +99,7 @@ class BaseTaskManager:
             "tag": "",
             "inputs": {x: data_name(x, task_id) for x in inputs},
             "outputs": {x: data_name(x, task_id) for x in outputs},
+            "user_id": user_id,
         }
         subtasks = []
         for worker_name, worker_item in workers.items():

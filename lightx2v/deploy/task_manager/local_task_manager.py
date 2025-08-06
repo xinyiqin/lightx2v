@@ -60,24 +60,38 @@ class LocalTaskManager(BaseTaskManager):
             if not f.startswith('task_'):
                 continue
             fpath = os.path.join(self.local_dir, f)
-            task = json.load(open(fpath))['task']
-            self.parse_dict(task)
-
-            if 'status' in kwargs:
-                if isinstance(kwargs['status'], list) and task['status'] not in kwargs['status']:
+            info = json.load(open(fpath))
+            if kwargs.get('subtasks', False):
+                items = info['subtasks']
+            else:
+                items = [info['task']]
+            for task in items:
+                self.parse_dict(task)
+                if 'user_id' in kwargs and task['user_id'] != kwargs['user_id']:
                     continue
-                elif kwargs['status'] != task['status']:
+                if 'status' in kwargs:
+                    if isinstance(kwargs['status'], list) and task['status'] not in kwargs['status']:
+                        continue
+                    elif kwargs['status'] != task['status']:
+                        continue
+                if 'start_created_t' in kwargs and kwargs['start_created_t'] > task['create_t']:
                     continue
-            if 'start_created_t' in kwargs and kwargs['start_created_t'] > task['create_t']:
-                continue
-            if 'end_created_t' in kwargs and kwargs['end_created_t'] < task['create_t']:
-                continue
-            tasks.append(task)
+                if 'end_created_t' in kwargs and kwargs['end_created_t'] < task['create_t']:
+                    continue
+                if 'start_updated_t' in kwargs and kwargs['start_updated_t'] > task['update_t']:
+                    continue
+                if 'end_updated_t' in kwargs and kwargs['end_updated_t'] < task['update_t']:
+                    continue
+                tasks.append(task)
+        tasks = sorted(tasks, key=lambda x: x['create_t'], reverse=True)
         return tasks
 
     @class_try_catch_async
-    async def query_task(self, task_id):
-        return self.load(task_id)[0]
+    async def query_task(self, task_id, user_id=None):
+        task, subtasks = self.load(task_id)
+        if user_id is not None and task['user_id'] != user_id:
+            return None
+        return task
 
     @class_try_catch_async
     async def next_subtasks(self, task_id):
@@ -238,7 +252,21 @@ async def test():
         },
     }
 
-    task_id = await m.create_task(keys, workers, params, inputs, outputs)
+    user_info = {
+        "source": "github",
+        "id": "test-id-233",
+        "username": "test-username-233",
+        "email": "test-email-233@test.com",
+        "homepage": "https://test.com",
+        "avatar_url": "https://test.com/avatar.png",
+    }
+    user_id = await m.create_user(user_info)
+    print(" - create_user:", user_id)
+
+    user = await m.query_user(user_id)
+    print(" - query_user:", user)
+
+    task_id = await m.create_task(keys, workers, params, inputs, outputs, user_id)
     print(" - create_task:", task_id)
 
     tasks = await m.list_tasks()
@@ -267,15 +295,7 @@ async def test():
     task = await m.query_task(task_id)
     print(" - final task:", task)
 
-    user_info = {
-        "source": "github",
-        "id": "test-id-233",
-    }
-    user_id = await m.create_user(user_info)
-    print(" - create_user:", user_id)
 
-    user = await m.query_user(user_id)
-    print(" - query_user:", user)
     await m.close()
 
 if __name__ == "__main__":

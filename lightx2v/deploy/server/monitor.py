@@ -143,10 +143,10 @@ class ServerMonitor:
         fails = set()
 
         created_tasks = await self.task_manager.list_tasks(
-            status=TaskStatus.CREATED, subtasks=True, end_created_t=created_end_t
+            status=TaskStatus.CREATED, subtasks=True, end_updated_t=created_end_t
         )
         pending_tasks = await self.task_manager.list_tasks(
-            status=TaskStatus.PENDING, subtasks=True, end_created_t=pending_end_t
+            status=TaskStatus.PENDING, subtasks=True, end_updated_t=pending_end_t
         )
 
         def fmt_subtask(t):
