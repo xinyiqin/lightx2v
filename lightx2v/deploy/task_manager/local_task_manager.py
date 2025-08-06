@@ -38,10 +38,12 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, 'w') as fout:
             fout.write(json.dumps(info, indent=4, ensure_ascii=False))
 
-    def load(self, task_id):
+    def load(self, task_id, user_id=None):
         fpath = self.get_task_filename(task_id)
         info = json.load(open(fpath))
         task, subtasks = info['task'], info['subtasks']
+        if user_id is not None and task['user_id'] != user_id:
+            raise Exception(f"Task {task_id} is not belong to user {user_id}")
         self.parse_dict(task)
         for sub in subtasks:
             self.parse_dict(sub)
@@ -63,6 +65,7 @@ class LocalTaskManager(BaseTaskManager):
             info = json.load(open(fpath))
             if kwargs.get('subtasks', False):
                 items = info['subtasks']
+                assert 'user_id' not in kwargs, "user_id is not allowed when subtasks is True"
             else:
                 items = [info['task']]
             for task in items:
@@ -88,9 +91,7 @@ class LocalTaskManager(BaseTaskManager):
 
     @class_try_catch_async
     async def query_task(self, task_id, user_id=None):
-        task, subtasks = self.load(task_id)
-        if user_id is not None and task['user_id'] != user_id:
-            return None
+        task, subtasks = self.load(task_id, user_id)
         return task
 
     @class_try_catch_async
@@ -143,6 +144,8 @@ class LocalTaskManager(BaseTaskManager):
     @class_try_catch_async
     async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
         task, subtasks = self.load(task_id)
+        if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+            return None
         subs = subtasks
 
         if worker_name:
@@ -187,8 +190,8 @@ class LocalTaskManager(BaseTaskManager):
         return None
 
     @class_try_catch_async
-    async def cancel_task(self, task_id):
-        task, subtasks = self.load(task_id)
+    async def cancel_task(self, task_id, user_id=None):
+        task, subtasks = self.load(task_id, user_id)
         if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
             return False
         task['status'] = TaskStatus.CANCEL
@@ -197,8 +200,8 @@ class LocalTaskManager(BaseTaskManager):
         return True
 
     @class_try_catch_async
-    async def resume_task(self, task_id, all_subtask=False):
-        task, subtasks = self.load(task_id)
+    async def resume_task(self, task_id, all_subtask=False, user_id=None):
+        task, subtasks = self.load(task_id, user_id)
         # the task is not finished
         if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
             return False

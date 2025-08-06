@@ -14,6 +14,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.db_url = db_url
         self.table_tasks = "tasks"
         self.table_subtasks = "subtasks"
+        self.table_users = "users"
         self.table_versions = "versions"
         self.pool = None
 
@@ -84,6 +85,22 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation='read_uncommitted'):
+                # create users table
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.table_users} (
+                        user_id VARCHAR(256) PRIMARY KEY,
+                        source VARCHAR(32),
+                        id VARCHAR(200),
+                        username VARCHAR(256),
+                        email VARCHAR(256),
+                        homepage VARCHAR(256),
+                        avatar_url VARCHAR(256),
+                        create_t TIMESTAMPTZ,
+                        update_t TIMESTAMPTZ,
+                        extra_info JSONB,
+                        tag VARCHAR(64)
+                    )
+                """)
                 # create tasks table
                 await conn.execute(f"""
                     CREATE TABLE IF NOT EXISTS {self.table_tasks} (
@@ -98,7 +115,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         extra_info JSONB,
                         tag VARCHAR(64),
                         inputs JSONB,
-                        outputs JSONB
+                        outputs JSONB,
+                        user_id VARCHAR(256),
+                        FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
                     )
                 """)
                 # create subtasks table
@@ -130,6 +149,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     )
                 """)
                 # create indexes
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_users}_source ON {self.table_users}(source)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_users}_id ON {self.table_users}(id)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_tasks}_status ON {self.table_tasks}(status)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_tasks}_create_t ON {self.table_tasks}(create_t)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_tasks}_tag ON {self.table_tasks}(tag)")
@@ -149,11 +170,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
         finally:
             await self.release_conn(conn)
 
-    async def load(self, conn, task_id):
-        row = await conn.fetchrow(f"SELECT * FROM {self.table_tasks} WHERE task_id = $1", task_id)
+    async def load(self, conn, task_id, user_id=None, only_task=False):
+        query = f"SELECT * FROM {self.table_tasks} WHERE task_id = $1"
+        params = [task_id]
+        if user_id is not None:
+            query += " AND user_id = $2"
+            params.append(user_id)
+        row = await conn.fetchrow(query, *params)
         task = dict(row)
-        assert task, f"query_task: task not found: {task_id}"
+        assert task, f"query_task: task not found: {task_id} {user_id}"
         self.parse_dict(task)
+        if only_task:
+            return task
         rows = await conn.fetch(f"SELECT * FROM {self.table_subtasks} WHERE task_id = $1", task_id)
         subtasks = []
         for row in rows:
@@ -203,13 +231,13 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 await conn.execute(f"""
                     INSERT INTO {self.table_tasks} 
                     (task_id, task_type, model_cls, stage, params, create_t,
-                        update_t, status, extra_info, tag, inputs, outputs)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        update_t, status, extra_info, tag, inputs, outputs, user_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     """,
                     task['task_id'], task['task_type'], task['model_cls'],
                     task['stage'], task['params'], task['create_t'],
                     task['update_t'], task['status'], task['extra_info'],
-                    task['tag'], task['inputs'], task['outputs']
+                    task['tag'], task['inputs'], task['outputs'], task['user_id']
                 )
                 for sub in subtasks:
                     self.fmt_dict(sub)
@@ -241,6 +269,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             param_idx = 0
             if kwargs.get('subtasks', False):
                 query = f"SELECT * FROM {self.table_subtasks}"
+                assert 'user_id' not in kwargs, "user_id is not allowed when subtasks is True"
 
             if 'status' in kwargs:
                 param_idx += 1
@@ -264,9 +293,24 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 conds.append(f"create_t <= ${param_idx}")
                 params.append(datetime.fromtimestamp(kwargs['end_created_t']))
 
+            if 'start_updated_t' in kwargs:
+                param_idx += 1
+                conds.append(f"update_t >= ${param_idx}")
+                params.append(datetime.fromtimestamp(kwargs['start_updated_t']))
+
+            if 'end_updated_t' in kwargs:
+                param_idx += 1
+                conds.append(f"update_t <= ${param_idx}")
+                params.append(datetime.fromtimestamp(kwargs['end_updated_t']))
+
+            if 'user_id' in kwargs:
+                param_idx += 1
+                conds.append(f"user_id = ${param_idx}")
+                params.append(kwargs['user_id'])
+
             if conds:
                 query += " WHERE " + " AND ".join(conds)
-            query += " ORDER BY create_t ASC"
+            query += " ORDER BY create_t DESC"
 
             rows = await conn.fetch(query, *params)
             tasks = []
@@ -282,10 +326,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def query_task(self, task_id):
+    async def query_task(self, task_id, user_id=None):
         conn = await self.get_conn()
         try:
-            task, _ = await self.load(conn, task_id)
+            task = await self.load(conn, task_id, user_id, only_task=True)
             return task
         except:
             logger.error(f"query_task error: {traceback.format_exc()}")
@@ -356,7 +400,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
                 subs = subtasks
-
+                if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+                    return None
                 if worker_name:
                     subs = [sub for sub in subtasks if sub['worker_name'] == worker_name]
                 assert len(subs) >= 1, f"no worker task_id={task_id}, name={worker_name}"
@@ -397,11 +442,11 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def cancel_task(self, task_id):
+    async def cancel_task(self, task_id, user_id=None):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation='read_uncommitted'):
-                task, subtasks = await self.load(conn, task_id)
+                task, subtasks = await self.load(conn, task_id, user_id)
                 if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
                     return False
                 await self.update_task(conn, task_id, status=TaskStatus.CANCEL)
@@ -413,11 +458,11 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def resume_task(self, task_id, all_subtask=False):
+    async def resume_task(self, task_id, all_subtask=False, user_id=None):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation='read_uncommitted'):
-                task, subtasks = await self.load(conn, task_id)
+                task, subtasks = await self.load(conn, task_id, user_id)
                 # the task is not finished
                 if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                     return False
@@ -445,8 +490,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     logger.info(f"user already exists: {user_info['user_id']}")
                     return True
                 self.fmt_dict(user_info)
-                await conn.execute(f"INSERT INTO {self.table_users} (user_id, user_name, user_email, user_homepage, user_avatar_url, user_source, user_extra_info, user_create_t, user_update_t, user_tag) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-                    user_info['user_id'], user_info['user_name'], user_info['user_email'], user_info['user_homepage'], user_info['user_avatar_url'], user_info['user_source'], user_info['user_extra_info'], user_info['user_create_t'], user_info['user_update_t'], user_info['user_tag'])
+                await conn.execute(f"""
+                    INSERT INTO {self.table_users}
+                    (user_id, source, id, username, email, homepage,
+                        avatar_url, create_t, update_t, extra_info, tag)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    """,
+                    user_info['user_id'], user_info['source'], user_info['id'],
+                    user_info['username'], user_info['email'], user_info['homepage'],
+                    user_info['avatar_url'], user_info['create_t'], user_info['update_t'],
+                    user_info['extra_info'], user_info['tag']
+                )
+                return True
         except:
             logger.error(f"insert_user_if_not_exists error: {traceback.format_exc()}")
             return False
@@ -458,7 +513,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             row = await conn.fetchrow(f"SELECT * FROM {self.table_users} WHERE user_id = $1", user_id)
-            return dict(row)
+            user = dict(row)
+            self.parse_dict(user)
+            return user
         except:
             logger.error(f"query_user error: {traceback.format_exc()}")
             return None
@@ -469,7 +526,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
 async def test():
     from lightx2v.deploy.common.pipeline import Pipeline
     p = Pipeline("/data/nvme1/liuliang1/lightx2v/configs/model_pipeline.json")
-    m = PostgresSQLTaskManager("postgresql://mtc:Sensetime666@127.0.0.1:5432/lightx2v_test")
+    m = PostgresSQLTaskManager("postgresql://test:test@127.0.0.1:5432/lightx2v_test")
     await m.init()
 
     keys = ["t2v", "wan2.1", "multi_stage"]
@@ -484,7 +541,21 @@ async def test():
         },
     }
 
-    task_id = await m.create_task(keys, workers, params, inputs, outputs)
+    user_info = {
+        "source": "github",
+        "id": "4566",
+        "username": "test-username-233",
+        "email": "test-email-233@test.com",
+        "homepage": "https://test.com",
+        "avatar_url": "https://test.com/avatar.png",
+    }
+    user_id = await m.create_user(user_info)
+    print(" - create_user:", user_id)
+
+    user = await m.query_user(user_id)
+    print(" - query_user:", user)
+
+    task_id = await m.create_task(keys, workers, params, inputs, outputs, user_id)
     print(" - create_task:", task_id)
 
     tasks = await m.list_tasks()

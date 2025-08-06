@@ -67,7 +67,7 @@ async def verify_user_access(credentials: HTTPAuthorizationCredentials = Depends
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid user")
     user = await task_manager.query_user(user_id)
-    logger.info(f"Verfiy user access: {payload}")
+    # logger.info(f"Verfiy user access: {payload}")
     if user is None or user['user_id'] != user_id:
         raise HTTPException(status_code=401, detail="Invalid user")
     return user
@@ -225,8 +225,7 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
 async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access)):
     try:
         task_id = request.query_params['task_id']
-        assert await task_manager.query_task(task_id, user_id=user['user_id'])
-        ret = await task_manager.cancel_task(task_id)
+        ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
         return {'msg': 'ok' if ret else 'failed'}
     except Exception as e:
         traceback.print_exc()
@@ -237,11 +236,12 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
 async def api_v1_task_resume(request: Request, user = Depends(verify_user_access)):
     try:
         task_id = request.query_params['task_id']
-        assert await task_manager.query_task(task_id, user_id=user['user_id'])
-        ret = await task_manager.resume_task(task_id)
+        ret = await task_manager.resume_task(task_id, user_id=user['user_id'], all_subtask=True)
         if ret:
             await prepare_subtasks(task_id)
-        return {'msg': 'ok' if ret else 'failed'}
+            return {'msg': 'ok'}
+        else:
+            return error_response(f"Task {task_id} resume failed", 400)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)

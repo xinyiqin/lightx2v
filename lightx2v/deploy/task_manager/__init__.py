@@ -46,10 +46,10 @@ class BaseTaskManager:
     async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
         raise NotImplementedError
 
-    async def cancel_task(self, task_id):
+    async def cancel_task(self, task_id, user_id=None):
         raise NotImplementedError
 
-    async def resume_task(self, task_id, all_subtask=False):
+    async def resume_task(self, task_id, all_subtask=False, user_id=None):
         raise NotImplementedError
 
     def fmt_dict(self, data):
