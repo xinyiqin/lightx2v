@@ -124,6 +124,32 @@
         .flex-column .btn-group .btn {
             flex: 1;
         }
+        
+        /* 分页组件样式 */
+        .pagination .page-link {
+            color: #667eea;
+            border-color: #dee2e6;
+        }
+        .pagination .page-item.active .page-link {
+            background-color: #667eea;
+            border-color: #667eea;
+            color: white;
+        }
+        .pagination .page-item.disabled .page-link {
+            color: #6c757d;
+            background-color: #fff;
+            border-color: #dee2e6;
+        }
+        .pagination .page-link:hover {
+            color: #764ba2;
+            background-color: #e9ecef;
+            border-color: #dee2e6;
+        }
+        .pagination .page-item.active .page-link:hover {
+            background-color: #764ba2;
+            border-color: #764ba2;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -281,10 +307,22 @@
                                     <i class="fas fa-tasks me-2"></i>
                                     任务列表
                                 </h5>
-                                <button class="btn btn-outline-primary btn-sm" @click="refreshTasks" :disabled="loading">
-                                    <i class="fas fa-sync-alt me-1"></i>
-                                    刷新
-                                </button>
+                                <div class="d-flex align-items-center">
+                                    <!-- 状态过滤器 -->
+                                    <select v-model="statusFilter" @change="refreshTasks" class="form-select form-select-sm me-2" style="width: auto;">
+                                        <option value="ALL" selected>ALL</option>
+                                        <option value="CREATED">CREATED</option>
+                                        <option value="PENDING">PENDING</option>
+                                        <option value="RUNNING">RUNNING</option>
+                                        <option value="SUCCEED">SUCCEED</option>
+                                        <option value="FAILED">FAILED</option>
+                                        <option value="CANCEL">CANCEL</option>
+                                    </select>
+                                    <button class="btn btn-outline-primary btn-sm" @click="refreshTasks" :disabled="loading">
+                                        <i class="fas fa-sync-alt me-1"></i>
+                                        刷新
+                                    </button>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div v-if="tasks.length === 0" class="text-center text-muted">
@@ -469,6 +507,51 @@
                                         </div>
                                     </div>
                                 </div>
+                                
+                                <!-- 分页组件 -->
+                                <div v-if="pagination && pagination.total_pages > 0" class="d-flex justify-content-between align-items-center mt-4">
+                                    <div class="text-muted">
+                                        显示第 {{ (pagination.page - 1) * pagination.page_size + 1 }} - 
+                                        {{ Math.min(pagination.page * pagination.page_size, pagination.total) }} 条，
+                                        共 {{ pagination.total }} 条记录
+                                    </div>
+                                    <nav aria-label="任务列表分页">
+                                        <ul class="pagination pagination-sm mb-0">
+                                            <!-- 上一页 -->
+                                            <li class="page-item" :class="{ disabled: pagination.page <= 1 }">
+                                                <a class="page-link" href="#" @click.prevent="changePage(pagination.page - 1)">
+                                                    <i class="fas fa-chevron-left"></i>
+                                                </a>
+                                            </li>
+                                            
+                                            <!-- 页码 -->
+                                            <li v-for="pageNum in visiblePages" :key="pageNum" 
+                                                class="page-item" :class="{ active: pageNum === pagination.page }">
+                                                <a class="page-link" href="#" @click.prevent="changePage(pageNum)">
+                                                    {{ pageNum }}
+                                                </a>
+                                            </li>
+                                            
+                                            <!-- 下一页 -->
+                                            <li class="page-item" :class="{ disabled: pagination.page >= pagination.total_pages }">
+                                                <a class="page-link" href="#" @click.prevent="changePage(pagination.page + 1)">
+                                                    <i class="fas fa-chevron-right"></i>
+                                                </a>
+                                            </li>
+                                        </ul>
+                                    </nav>
+                                    
+                                    <!-- 每页显示数量选择器 -->
+                                    <div class="d-flex align-items-center">
+                                        <span class="text-muted me-2">每页显示:</span>
+                                        <select v-model="pageSize" @change="changePageSize" class="form-select form-select-sm" style="width: auto;">
+                                            <option value="5">5</option>
+                                            <option value="10">10</option>
+                                            <option value="20">20</option>
+                                            <option value="50">50</option>
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -509,6 +592,12 @@
                 const tasks = ref([]);
                 const alert = ref({ show: false, message: '', type: 'info' });
                 const expandedTasks = ref([]); // 新增：用于控制任务详情展开
+                
+                // 分页相关数据
+                const pagination = ref(null);
+                const currentPage = ref(1);
+                const pageSize = ref(10);
+                const statusFilter = ref('ALL');
 
                 const taskForm = ref({
                     task: '',
@@ -538,6 +627,32 @@
                     return [...new Set(models.value
                         .filter(m => m.task === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
                         .map(m => m.stage))];
+                });
+
+                // 分页相关计算属性
+                const visiblePages = computed(() => {
+                    if (!pagination.value) return [];
+                    const totalPages = pagination.value.total_pages;
+                    const current = pagination.value.page;
+                    const pages = [];
+                    
+                    // 显示最多5个页码
+                    let start = Math.max(1, current - 2);
+                    let end = Math.min(totalPages, current + 2);
+                    
+                    // 调整起始位置，确保显示5个页码（如果可能）
+                    if (end - start < 4 && totalPages > 4) {
+                        if (start === 1) {
+                            end = Math.min(totalPages, start + 4);
+                        } else {
+                            start = Math.max(1, end - 4);
+                        }
+                    }
+                    
+                    for (let i = start; i <= end; i++) {
+                        pages.push(i);
+                    }
+                    return pages;
                 });
 
                 // 方法
@@ -727,14 +842,41 @@
                 };
 
                 const refreshTasks = async () => {
-                    const response = await apiCall('/api/v1/task/list');
-                    if (response.ok) {
-                        const data = await response.json();
-                        console.log(data);
-                        tasks.value = data.tasks || [];
-                    } else {
-                        showAlert('刷新任务列表失败', 'danger');
+                    try {
+                        const params = new URLSearchParams({
+                            page: currentPage.value.toString(),
+                            page_size: pageSize.value.toString()
+                        });
+
+                        if (statusFilter.value !== 'ALL') {
+                            params.append('status', statusFilter.value);
+                        }
+
+                        const response = await apiCall(`/api/v1/task/list?${params.toString()}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log(data);
+                            tasks.value = data.tasks || [];
+                            pagination.value = data.pagination || null;
+                        } else {
+                            showAlert('刷新任务列表失败', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert(`刷新任务列表失败: ${error.message}`, 'danger');
                     }
+                };
+
+                const changePage = (page) => {
+                    if (page < 1 || (pagination.value && page > pagination.value.total_pages)) {
+                        return;
+                    }
+                    currentPage.value = page;
+                    refreshTasks();
+                };
+
+                const changePageSize = () => {
+                    currentPage.value = 1; // 重置到第一页
+                    refreshTasks();
                 };
 
                 const getStatusBadgeClass = (status) => {
@@ -893,6 +1035,11 @@
                     availableModelClasses,
                     availableStages,
                     expandedTasks,
+                    pagination,
+                    currentPage,
+                    pageSize,
+                    statusFilter,
+                    visiblePages,
                     showAlert,
                     loginWithGitHub,
                     logout,
@@ -900,6 +1047,8 @@
                     handleFileUpload,
                     submitTask,
                     refreshTasks,
+                    changePage,
+                    changePageSize,
                     getStatusBadgeClass,
                     formatTime,
                     toggleTaskDetail,

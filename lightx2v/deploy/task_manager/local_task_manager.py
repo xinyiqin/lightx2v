@@ -86,7 +86,13 @@ class LocalTaskManager(BaseTaskManager):
                 if 'end_updated_t' in kwargs and kwargs['end_updated_t'] < task['update_t']:
                     continue
                 tasks.append(task)
+        if 'count' in kwargs:
+            return len(tasks)
         tasks = sorted(tasks, key=lambda x: x['create_t'], reverse=True)
+        if 'offset' in kwargs:
+            tasks = tasks[kwargs['offset']:]
+        if 'limit' in kwargs:
+            tasks = tasks[:kwargs['limit']]
         return tasks
 
     @class_try_catch_async
@@ -144,8 +150,6 @@ class LocalTaskManager(BaseTaskManager):
     @class_try_catch_async
     async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
         task, subtasks = self.load(task_id)
-        if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
-            return None
         subs = subtasks
 
         if worker_name:
@@ -160,7 +164,10 @@ class LocalTaskManager(BaseTaskManager):
         for sub in subs:
             sub['status'] = status
             sub['update_t'] = current_time()
- 
+
+        if task['status'] == TaskStatus.CANCEL:
+            return TaskStatus.CANCEL
+
         running_subs = []
         failed_sub = False
         for sub in subtasks:

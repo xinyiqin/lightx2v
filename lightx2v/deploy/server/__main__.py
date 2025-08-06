@@ -194,10 +194,33 @@ async def api_v1_task_query(request: Request, user = Depends(verify_user_access)
 async def api_v1_task_list(request: Request, user = Depends(verify_user_access)):
     try:
         user_id = user['user_id']
-        tasks = await task_manager.list_tasks(user_id=user_id)
+
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        assert page > 0 and page_size > 0, "page and page_size must be greater than 0"
+        status_filter = request.query_params.get('status', None)
+
+        query_params = {'user_id': user_id}
+        if status_filter and status_filter != 'ALL':
+            query_params['status'] = TaskStatus[status_filter.upper()]
+
+        total_tasks = await task_manager.list_tasks(count=True, **query_params)
+        total_pages = (total_tasks + page_size - 1) // page_size
+        page_info = {'page': page, 'page_size': page_size, 'total': total_tasks, 'total_pages': total_pages}
+        if page > total_pages:
+            return {'tasks': [], 'pagination': page_info}
+
+        query_params['offset'] = (page - 1) * page_size
+        query_params['limit'] = page_size
+
+        tasks = await task_manager.list_tasks(**query_params)
         for task in tasks:
             task['status'] = task['status'].name
-        return {'tasks': tasks}
+
+        return {
+            'tasks': tasks,
+            'pagination': page_info
+        }
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)

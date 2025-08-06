@@ -263,13 +263,20 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def list_tasks(self, **kwargs):
         conn = await self.get_conn()
         try:
-            query = f"SELECT * FROM {self.table_tasks}"
+            count = kwargs.get('count', False)
+            query = f"SELECT * FROM "
+            if count:
+                query = f"SELECT COUNT(*) FROM "
+                assert 'limit' not in kwargs, "limit is not allowed when count is True"
+                assert 'offset' not in kwargs, "offset is not allowed when count is True"
             params = []
             conds = []
             param_idx = 0
             if kwargs.get('subtasks', False):
-                query = f"SELECT * FROM {self.table_subtasks}"
+                query += self.table_subtasks
                 assert 'user_id' not in kwargs, "user_id is not allowed when subtasks is True"
+            else:
+                query += self.table_tasks
 
             if 'status' in kwargs:
                 param_idx += 1
@@ -310,9 +317,23 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
             if conds:
                 query += " WHERE " + " AND ".join(conds)
-            query += " ORDER BY create_t DESC"
+            
+            if not count:
+                query += " ORDER BY create_t DESC"
+
+            if 'limit' in kwargs:
+                param_idx += 1
+                query += f" LIMIT ${param_idx}"
+                params.append(kwargs['limit'])
+
+            if 'offset' in kwargs:
+                param_idx += 1
+                query += f" OFFSET ${param_idx}"
+                params.append(kwargs['offset'])
 
             rows = await conn.fetch(query, *params)
+            if count:
+                return rows[0]['count']
             tasks = []
             for row in rows:
                 task = dict(row)
@@ -400,8 +421,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
                 subs = subtasks
-                if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
-                    return None
                 if worker_name:
                     subs = [sub for sub in subtasks if sub['worker_name'] == worker_name]
                 assert len(subs) >= 1, f"no worker task_id={task_id}, name={worker_name}"
@@ -414,6 +433,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 for sub in subs:
                     await self.update_subtask(conn, task_id, sub['worker_name'], status=status)
                     sub['status'] = status
+
+                if task['status'] == TaskStatus.CANCEL:
+                    return TaskStatus.CANCEL
 
                 running_subs = []
                 failed_sub = False
