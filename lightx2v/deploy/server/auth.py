@@ -45,8 +45,11 @@ class AuthManager:
             }
             headers = {"Accept": "application/json"}
 
+            proxy = os.getenv("https_proxy", None)
+            if proxy:
+                logger.info(f"auth_github use proxy: {proxy}")
             async with aiohttp.ClientSession() as session:
-                async with session.post(token_url, data=token_data, headers=headers) as response:
+                async with session.post(token_url, data=token_data, headers=headers, proxy=proxy) as response:
                     response.raise_for_status()
                     token_info = await response.json()
 
@@ -63,7 +66,7 @@ class AuthManager:
                 "Accept": "application/vnd.github.v3+json"
             }
             async with aiohttp.ClientSession() as session:
-                async with session.get(user_url, headers=user_headers) as response:
+                async with session.get(user_url, headers=user_headers, proxy=proxy) as response:
                     response.raise_for_status()
                     user_info = await response.json()
 
