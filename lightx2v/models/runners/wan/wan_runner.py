@@ -1,12 +1,18 @@
-import os
 import gc
+import os
+
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision.transforms.functional as TF
 from PIL import Image
-from lightx2v.utils.registry_factory import RUNNER_REGISTER
+from loguru import logger
+
+from lightx2v.models.input_encoders.hf.t5.model import T5EncoderModel
+from lightx2v.models.input_encoders.hf.xlm_roberta.model import CLIPModel
+from lightx2v.models.networks.wan.lora_adapter import WanLoraWrapper
+from lightx2v.models.networks.wan.model import WanModel
 from lightx2v.models.runners.default_runner import DefaultRunner
-from lightx2v.models.schedulers.wan.scheduler import WanScheduler
 from lightx2v.models.schedulers.wan.changing_resolution.scheduler import (
     WanScheduler4ChangingResolutionInterface,
 )
@@ -14,16 +20,14 @@ from lightx2v.models.schedulers.wan.feature_caching.scheduler import (
     WanSchedulerCaching,
     WanSchedulerTaylorCaching,
 )
-from lightx2v.utils.profiler import ProfilingContext
-from lightx2v.utils.utils import *
-from lightx2v.models.input_encoders.hf.t5.model import T5EncoderModel
-from lightx2v.models.input_encoders.hf.xlm_roberta.model import CLIPModel
-from lightx2v.models.networks.wan.model import WanModel
-from lightx2v.models.networks.wan.lora_adapter import WanLoraWrapper
+from lightx2v.models.schedulers.wan.scheduler import WanScheduler
 from lightx2v.models.video_encoders.hf.wan.vae import WanVAE
+from lightx2v.models.video_encoders.hf.wan.vae_2_2 import Wan2_2_VAE
 from lightx2v.models.video_encoders.hf.wan.vae_tiny import WanVAE_tiny
-from lightx2v.utils.utils import cache_video
-from loguru import logger
+from lightx2v.utils.envs import *
+from lightx2v.utils.registry_factory import RUNNER_REGISTER
+from lightx2v.utils.utils import *
+from lightx2v.utils.utils import best_output_size, cache_video
 
 
 @RUNNER_REGISTER("wan2.1")
@@ -50,7 +54,7 @@ class WanRunner(DefaultRunner):
 
     def load_image_encoder(self):
         image_encoder = None
-        if self.config.task == "i2v":
+        if self.config.task == "i2v" and self.config.get("use_image_encoder", True):
             # quant_config
             clip_quantized = self.config.get("clip_quantized", False)
             if clip_quantized:
@@ -122,7 +126,7 @@ class WanRunner(DefaultRunner):
         vae_config = {
             "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.1_VAE.pth"),
             "device": self.init_device,
-            "parallel": self.config.parallel_vae,
+            "parallel": self.config.parallel and self.config.parallel.get("vae_p_size", False) and self.config.parallel.vae_p_size > 1,
             "use_tiling": self.config.get("use_tiling_vae", False),
         }
         if self.config.task != "i2v":
@@ -134,7 +138,7 @@ class WanRunner(DefaultRunner):
         vae_config = {
             "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.1_VAE.pth"),
             "device": self.init_device,
-            "parallel": self.config.parallel_vae,
+            "parallel": self.config.parallel and self.config.parallel.get("vae_p_size", False) and self.config.parallel.vae_p_size > 1,
             "use_tiling": self.config.get("use_tiling_vae", False),
         }
         if self.config.get("use_tiny_vae", False):
@@ -174,23 +178,37 @@ class WanRunner(DefaultRunner):
     def run_text_encoder(self, text, img):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.text_encoders = self.load_text_encoder()
-        text_encoder_output = {}
         n_prompt = self.config.get("negative_prompt", "")
-        context = self.text_encoders[0].infer([text])
-        context_null = self.text_encoders[0].infer([n_prompt if n_prompt else ""])
+
+        if self.config["cfg_parallel"]:
+            cfg_p_group = self.config["device_mesh"].get_group(mesh_dim="cfg_p")
+            cfg_p_rank = dist.get_rank(cfg_p_group)
+            if cfg_p_rank == 0:
+                context = self.text_encoders[0].infer([text])
+                text_encoder_output = {"context": context}
+            else:
+                context_null = self.text_encoders[0].infer([n_prompt])
+                text_encoder_output = {"context_null": context_null}
+        else:
+            context = self.text_encoders[0].infer([text])
+            context_null = self.text_encoders[0].infer([n_prompt])
+            text_encoder_output = {
+                "context": context,
+                "context_null": context_null,
+            }
+
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             del self.text_encoders[0]
             torch.cuda.empty_cache()
             gc.collect()
-        text_encoder_output["context"] = context
-        text_encoder_output["context_null"] = context_null
+
         return text_encoder_output
 
     def run_image_encoder(self, img):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.image_encoder = self.load_image_encoder()
         img = TF.to_tensor(img).sub_(0.5).div_(0.5).cuda()
-        clip_encoder_out = self.image_encoder.visual([img[None, :, :, :]], self.config).squeeze(0).to(torch.bfloat16)
+        clip_encoder_out = self.image_encoder.visual([img[None, :, :, :]], self.config).squeeze(0).to(GET_DTYPE())
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             del self.image_encoder
             torch.cuda.empty_cache()
@@ -218,8 +236,8 @@ class WanRunner(DefaultRunner):
             return vae_encode_out_list
         else:
             self.config.lat_h, self.config.lat_w = lat_h, lat_w
-            vae_encode_out = self.get_vae_encoder_output(img, lat_h, lat_w)
-            return vae_encode_out
+            vae_encoder_out = self.get_vae_encoder_output(img, lat_h, lat_w)
+            return vae_encoder_out
 
     def get_vae_encoder_output(self, img, lat_h, lat_w):
         h = lat_h * self.config.vae_stride[1]
@@ -238,7 +256,7 @@ class WanRunner(DefaultRunner):
         msk = msk.transpose(1, 2)[0]
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.vae_encoder = self.load_vae_encoder()
-        vae_encode_out = self.vae_encoder.encode(
+        vae_encoder_out = self.vae_encoder.encode(
             [
                 torch.concat(
                     [
@@ -254,13 +272,13 @@ class WanRunner(DefaultRunner):
             del self.vae_encoder
             torch.cuda.empty_cache()
             gc.collect()
-        vae_encode_out = torch.concat([msk, vae_encode_out]).to(torch.bfloat16)
-        return vae_encode_out
+        vae_encoder_out = torch.concat([msk, vae_encoder_out]).to(GET_DTYPE())
+        return vae_encoder_out
 
-    def get_encoder_output_i2v(self, clip_encoder_out, vae_encode_out, text_encoder_output, img):
+    def get_encoder_output_i2v(self, clip_encoder_out, vae_encoder_out, text_encoder_output, img):
         image_encoder_output = {
             "clip_encoder_out": clip_encoder_out,
-            "vae_encode_out": vae_encode_out,
+            "vae_encoder_out": vae_encoder_out,
         }
         return {
             "text_encoder_output": text_encoder_output,
@@ -293,3 +311,128 @@ class WanRunner(DefaultRunner):
             normalize=True,
             value_range=(-1, 1),
         )
+
+
+class MultiModelStruct:
+    def __init__(self, model_list, config, boundary=0.875, num_train_timesteps=1000):
+        self.model = model_list  # [high_noise_model, low_noise_model]
+        assert len(self.model) == 2, "MultiModelStruct only supports 2 models now."
+        self.config = config
+        self.boundary = boundary
+        self.boundary_timestep = self.boundary * num_train_timesteps
+        self.cur_model_index = -1
+        logger.info(f"boundary: {self.boundary}, boundary_timestep: {self.boundary_timestep}")
+
+    @property
+    def device(self):
+        return self.model[self.cur_model_index].device
+
+    def set_scheduler(self, shared_scheduler):
+        self.scheduler = shared_scheduler
+        for model in self.model:
+            model.set_scheduler(shared_scheduler)
+
+    def infer(self, inputs):
+        self.get_current_model_index()
+        self.model[self.cur_model_index].infer(inputs)
+
+    def get_current_model_index(self):
+        if self.scheduler.timesteps[self.scheduler.step_index] >= self.boundary_timestep:
+            logger.info(f"using - HIGH - noise model at step_index {self.scheduler.step_index + 1}")
+            self.scheduler.sample_guide_scale = self.config.sample_guide_scale[0]
+            if self.cur_model_index == -1:
+                self.to_cuda(model_index=0)
+            elif self.cur_model_index == 1:  # 1 -> 0
+                self.offload_cpu(model_index=1)
+                self.to_cuda(model_index=0)
+            self.cur_model_index = 0
+        else:
+            logger.info(f"using - LOW - noise model at step_index {self.scheduler.step_index + 1}")
+            self.scheduler.sample_guide_scale = self.config.sample_guide_scale[1]
+            if self.cur_model_index == -1:
+                self.to_cuda(model_index=1)
+            elif self.cur_model_index == 0:  # 0 -> 1
+                self.offload_cpu(model_index=0)
+                self.to_cuda(model_index=1)
+            self.cur_model_index = 1
+
+    def offload_cpu(self, model_index):
+        self.model[model_index].to_cpu()
+
+    def to_cuda(self, model_index):
+        self.model[model_index].to_cuda()
+
+
+@RUNNER_REGISTER("wan2.2_moe")
+class Wan22MoeRunner(WanRunner):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def load_transformer(self):
+        # encoder -> high_noise_model -> low_noise_model -> vae -> video_output
+        high_noise_model = WanModel(
+            os.path.join(self.config.model_path, "high_noise_model"),
+            self.config,
+            self.init_device,
+        )
+        low_noise_model = WanModel(
+            os.path.join(self.config.model_path, "low_noise_model"),
+            self.config,
+            self.init_device,
+        )
+        return MultiModelStruct([high_noise_model, low_noise_model], self.config, self.config.boundary)
+
+
+@RUNNER_REGISTER("wan2.2")
+class Wan22DenseRunner(WanRunner):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def load_vae_decoder(self):
+        vae_config = {
+            "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.2_VAE.pth"),
+            "device": self.init_device,
+        }
+        vae_decoder = Wan2_2_VAE(**vae_config)
+        return vae_decoder
+
+    def load_vae_encoder(self):
+        vae_config = {
+            "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.2_VAE.pth"),
+            "device": self.init_device,
+        }
+        if self.config.task != "i2v":
+            return None
+        else:
+            return Wan2_2_VAE(**vae_config)
+
+    def load_vae(self):
+        vae_encoder = self.load_vae_encoder()
+        vae_decoder = self.load_vae_decoder()
+        return vae_encoder, vae_decoder
+
+    def run_vae_encoder(self, img):
+        max_area = self.config.target_height * self.config.target_width
+        ih, iw = img.height, img.width
+        dh, dw = self.config.patch_size[1] * self.config.vae_stride[1], self.config.patch_size[2] * self.config.vae_stride[2]
+        ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+
+        scale = max(ow / iw, oh / ih)
+        img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)
+
+        # center-crop
+        x1 = (img.width - ow) // 2
+        y1 = (img.height - oh) // 2
+        img = img.crop((x1, y1, x1 + ow, y1 + oh))
+        assert img.width == ow and img.height == oh
+
+        # to tensor
+        img = TF.to_tensor(img).sub_(0.5).div_(0.5).cuda().unsqueeze(1)
+        vae_encoder_out = self.get_vae_encoder_output(img)
+        self.config.lat_w, self.config.lat_h = ow // self.config.vae_stride[2], oh // self.config.vae_stride[1]
+
+        return vae_encoder_out
+
+    def get_vae_encoder_output(self, img):
+        z = self.vae_encoder.encode(img, self.config)
+        return z

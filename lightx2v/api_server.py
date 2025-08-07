@@ -1,14 +1,14 @@
 import argparse
-import sys
-import signal
 import atexit
+import signal
+import sys
 from pathlib import Path
-from loguru import logger
+
 import uvicorn
+from loguru import logger
 
 from lightx2v.server.api import ApiServer
 from lightx2v.server.service import DistributedInferenceService
-from lightx2v.server.utils import ProcessManager
 
 
 def create_signal_handler(inference_service: DistributedInferenceService):
@@ -40,8 +40,10 @@ def main():
             "wan2.1_causvid",
             "wan2.1_skyreels_v2_df",
             "wan2.1_audio",
+            "wan2.2_moe",
+            "wan2.2_moe_distill",
         ],
-        default="hunyuan",
+        default="wan2.1",
     )
     parser.add_argument("--task", type=str, choices=["t2v", "i2v"], default="t2v")
     parser.add_argument("--model_path", type=str, required=True)

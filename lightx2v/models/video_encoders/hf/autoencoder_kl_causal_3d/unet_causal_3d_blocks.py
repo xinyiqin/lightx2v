@@ -21,15 +21,12 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-from einops import rearrange
-
-from diffusers.utils import logging
 from diffusers.models.activations import get_activation
-from diffusers.models.attention_processor import SpatialNorm
-from diffusers.models.attention_processor import Attention
-from diffusers.models.normalization import AdaGroupNorm
-from diffusers.models.normalization import RMSNorm
+from diffusers.models.attention_processor import Attention, SpatialNorm
+from diffusers.models.normalization import AdaGroupNorm, RMSNorm
+from diffusers.utils import logging
+from einops import rearrange
+from torch import nn
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -159,7 +156,7 @@ class UpsampleCausal3D(nn.Module):
 
         # Cast to float32 to as 'upsample_nearest2d_out_frame' op does not support bfloat16
         dtype = hidden_states.dtype
-        if dtype == torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             hidden_states = hidden_states.to(torch.float32)
 
         # upsample_nearest_nhwc fails with large batch sizes. see https://github.com/huggingface/diffusers/issues/984
@@ -188,7 +185,7 @@ class UpsampleCausal3D(nn.Module):
                 hidden_states = first_h
 
         # If the input is bfloat16, we cast back to bfloat16
-        if dtype == torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             hidden_states = hidden_states.to(dtype)
 
         if self.use_conv:

@@ -1,12 +1,11 @@
 import torch
-import torch.distributed as dist
-from loguru import logger
+
 from lightx2v.utils.envs import *
 
 
 def compute_freqs(c, grid_sizes, freqs):
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    f, h, w = grid_sizes[0].tolist()
+    f, h, w = grid_sizes[0]
     seq_len = f * h * w
     freqs_i = torch.cat(
         [
@@ -22,7 +21,8 @@ def compute_freqs(c, grid_sizes, freqs):
 
 def compute_freqs_audio(c, grid_sizes, freqs):
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    f, h, w = grid_sizes[0].tolist()
+    f, h, w = grid_sizes[0]
+    valid_token_length = f * h * w
     f = f + 1  ##for r2v add 1 channel
     seq_len = f * h * w
     freqs_i = torch.cat(
@@ -34,34 +34,14 @@ def compute_freqs_audio(c, grid_sizes, freqs):
         dim=-1,
     ).reshape(seq_len, 1, -1)
 
+    freqs_i[valid_token_length:, :, :f] = 0  ###for r2v # zero temporl component corresponding to ref embeddings
+
     return freqs_i
-
-
-def compute_freqs_audio_dist(s, c, grid_sizes, freqs):
-    world_size = dist.get_world_size()
-    cur_rank = dist.get_rank()
-    freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    f, h, w = grid_sizes[0].tolist()
-    f = f + 1
-    seq_len = f * h * w
-    freqs_i = torch.cat(
-        [
-            freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
-        ],
-        dim=-1,
-    ).reshape(seq_len, 1, -1)
-
-    freqs_i = pad_freqs(freqs_i, s * world_size)
-    s_per_rank = s
-    freqs_i_rank = freqs_i[(cur_rank * s_per_rank) : ((cur_rank + 1) * s_per_rank), :, :]
-    return freqs_i_rank
 
 
 def compute_freqs_causvid(c, grid_sizes, freqs, start_frame=0):
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    f, h, w = grid_sizes[0].tolist()
+    f, h, w = grid_sizes[0]
     seq_len = f * h * w
     freqs_i = torch.cat(
         [
@@ -83,27 +63,6 @@ def pad_freqs(original_tensor, target_len):
     return padded_tensor
 
 
-def compute_freqs_dist(s, c, grid_sizes, freqs):
-    world_size = dist.get_world_size()
-    cur_rank = dist.get_rank()
-    freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    f, h, w = grid_sizes[0].tolist()
-    seq_len = f * h * w
-    freqs_i = torch.cat(
-        [
-            freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
-        ],
-        dim=-1,
-    ).reshape(seq_len, 1, -1)
-
-    freqs_i = pad_freqs(freqs_i, s * world_size)
-    s_per_rank = s
-    freqs_i_rank = freqs_i[(cur_rank * s_per_rank) : ((cur_rank + 1) * s_per_rank), :, :]
-    return freqs_i_rank
-
-
 def apply_rotary_emb(x, freqs_i):
     n = x.size(1)
     seq_len = freqs_i.size(0)
@@ -112,7 +71,7 @@ def apply_rotary_emb(x, freqs_i):
     # Apply rotary embedding
     x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
     x_i = torch.cat([x_i, x[seq_len:]])
-    return x_i.to(torch.bfloat16)
+    return x_i.to(GET_DTYPE())
 
 
 def apply_rotary_emb_chunk(x, freqs_i, chunk_size, remaining_chunk_size=100):
@@ -126,7 +85,7 @@ def apply_rotary_emb_chunk(x, freqs_i, chunk_size, remaining_chunk_size=100):
         freqs_chunk = freqs_i[start:end]
 
         x_chunk_complex = torch.view_as_complex(x_chunk.to(torch.float32).reshape(end - start, n, -1, 2))
-        x_chunk_embedded = torch.view_as_real(x_chunk_complex * freqs_chunk).flatten(2).to(torch.bfloat16)
+        x_chunk_embedded = torch.view_as_real(x_chunk_complex * freqs_chunk).flatten(2).to(GET_DTYPE())
         output_chunks.append(x_chunk_embedded)
         del x_chunk_complex, x_chunk_embedded
         torch.cuda.empty_cache()
@@ -145,7 +104,7 @@ def apply_rotary_emb_chunk(x, freqs_i, chunk_size, remaining_chunk_size=100):
     del result
     torch.cuda.empty_cache()
 
-    return x_i.to(torch.bfloat16)
+    return x_i.to(GET_DTYPE())
 
 
 def rope_params(max_seq_len, dim, theta=10000):
@@ -167,8 +126,7 @@ def sinusoidal_embedding_1d(dim, position):
     # calculation
     sinusoid = torch.outer(position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
-    if GET_DTYPE() == "BF16":
-        x = x.to(torch.bfloat16)
+    x = x.to(GET_SENSITIVE_DTYPE())
     return x
 
 

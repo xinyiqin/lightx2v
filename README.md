@@ -1,5 +1,5 @@
 <div align="center" style="font-family: charter;">
-  <h1>⚡️ LightX2V:<br> Lightweight Video Generation Inference Framework</h1>
+  <h1>⚡️ LightX2V:<br> Light Video Generation Inference Framework</h1>
 
 <img alt="logo" src="assets/img_lightx2v.png" width=75%></img>
 
@@ -27,7 +27,7 @@ For comprehensive usage instructions, please refer to our documentation: **[Engl
 
 ### Official Open-Source Models
 - ✅ [HunyuanVideo](https://huggingface.co/tencent/HunyuanVideo)
-- ✅ [Wan2.1](https://huggingface.co/Wan-AI/)
+- ✅ [Wan2.1 & Wan2.2](https://huggingface.co/Wan-AI/)
 - ✅ [SkyReels-V2-DF](https://huggingface.co/Skywork/SkyReels-V2-DF-14B-540P)
 - ✅ [CogVideoX1.5-5B-T2V](https://huggingface.co/THUDM/CogVideoX1.5-5B)
 

@@ -1,19 +1,21 @@
 import os
+
 import torch
+
 from lightx2v.common.ops.attn.radial_attn import MaskMap
-from lightx2v.models.networks.wan.model import WanModel
-from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
-from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
-from lightx2v.models.networks.wan.weights.transformer_weights import (
-    WanTransformerWeights,
-)
-from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
-from lightx2v.models.networks.wan.infer.post_infer import WanPostInfer
 from lightx2v.models.networks.wan.infer.causvid.transformer_infer import (
     WanTransformerInferCausVid,
 )
+from lightx2v.models.networks.wan.infer.post_infer import WanPostInfer
+from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
+from lightx2v.models.networks.wan.model import WanModel
+from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
+from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
+from lightx2v.models.networks.wan.weights.transformer_weights import (
+    WanTransformerWeights,
+)
 from lightx2v.utils.envs import *
-from safetensors import safe_open
+from lightx2v.utils.utils import find_torch_model_path
 
 
 class WanCausVidModel(WanModel):
@@ -29,23 +31,17 @@ class WanCausVidModel(WanModel):
         self.post_infer_class = WanPostInfer
         self.transformer_infer_class = WanTransformerInferCausVid
 
-    def _load_ckpt(self, use_bf16, skip_bf16):
-        ckpt_folder = "causvid_models"
-        safetensors_path = os.path.join(self.model_path, f"{ckpt_folder}/causal_model.safetensors")
-        if os.path.exists(safetensors_path):
-            with safe_open(safetensors_path, framework="pt") as f:
-                weight_dict = {key: (f.get_tensor(key).to(torch.bfloat16) if use_bf16 or all(s not in key for s in skip_bf16) else f.get_tensor(key)).pin_memory().to(self.device) for key in f.keys()}
-                return weight_dict
-
-        ckpt_path = os.path.join(self.model_path, f"{ckpt_folder}/causal_model.pt")
+    def _load_ckpt(self, unified_dtype, sensitive_layer):
+        ckpt_path = find_torch_model_path(self.config, self.model_path, "causvid_model.pt")
         if os.path.exists(ckpt_path):
             weight_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
             weight_dict = {
-                key: (weight_dict[key].to(torch.bfloat16) if use_bf16 or all(s not in key for s in skip_bf16) else weight_dict[key]).pin_memory().to(self.device) for key in weight_dict.keys()
+                key: (weight_dict[key].to(GET_DTYPE()) if unified_dtype or all(s not in key for s in sensitive_layer) else weight_dict[key].to(GET_SENSITIVE_DTYPE())).pin_memory().to(self.device)
+                for key in weight_dict.keys()
             }
             return weight_dict
 
-        return super()._load_ckpt(use_bf16, skip_bf16)
+        return super()._load_ckpt(unified_dtype, sensitive_layer)
 
     @torch.no_grad()
     def infer(self, inputs, kv_start, kv_end):

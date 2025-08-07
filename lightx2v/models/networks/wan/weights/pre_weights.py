@@ -1,9 +1,9 @@
-from lightx2v.utils.registry_factory import (
-    MM_WEIGHT_REGISTER,
-    LN_WEIGHT_REGISTER,
-    CONV3D_WEIGHT_REGISTER,
-)
 from lightx2v.common.modules.weight_module import WeightModule
+from lightx2v.utils.registry_factory import (
+    CONV3D_WEIGHT_REGISTER,
+    LN_WEIGHT_REGISTER,
+    MM_WEIGHT_REGISTER,
+)
 
 
 class WanPreWeights(WeightModule):
@@ -39,7 +39,7 @@ class WanPreWeights(WeightModule):
             MM_WEIGHT_REGISTER["Default"]("time_projection.1.weight", "time_projection.1.bias"),
         )
 
-        if config.task == "i2v":
+        if config.task == "i2v" and config.get("use_image_encoder", True):
             self.add_module(
                 "proj_0",
                 LN_WEIGHT_REGISTER["Default"]("img_emb.proj.0.weight", "img_emb.proj.0.bias"),

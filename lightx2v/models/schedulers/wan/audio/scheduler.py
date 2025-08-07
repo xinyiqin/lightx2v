@@ -1,21 +1,14 @@
-import os
 import gc
 import math
+
 import numpy as np
 import torch
-from typing import List, Optional, Tuple, Union
-from lightx2v.utils.envs import *
+
 from lightx2v.models.schedulers.scheduler import BaseScheduler
-from loguru import logger
-
-from diffusers.configuration_utils import register_to_config
-from torch import Tensor
-from diffusers import (
-    FlowMatchEulerDiscreteScheduler as FlowMatchEulerDiscreteSchedulerBase,  # pyright: ignore
-)
+from lightx2v.utils.envs import *
 
 
-def unsqueeze_to_ndim(in_tensor: Tensor, tgt_n_dim: int):
+def unsqueeze_to_ndim(in_tensor, tgt_n_dim):
     if in_tensor.ndim > tgt_n_dim:
         warnings.warn(f"the given tensor of shape {in_tensor.shape} is expected to unsqueeze to {tgt_n_dim}, the original tensor will be returned")
         return in_tensor
@@ -39,8 +32,8 @@ class EulerSchedulerTimestepFix(BaseScheduler):
 
     def step_pre(self, step_index):
         self.step_index = step_index
-        if GET_DTYPE() == "BF16":
-            self.latents = self.latents.to(dtype=torch.bfloat16)
+        if GET_DTYPE() == GET_SENSITIVE_DTYPE():
+            self.latents = self.latents.to(GET_DTYPE())
 
     def prepare(self, image_encoder_output=None):
         self.prepare_latents(self.config.target_shape, dtype=torch.float32)
@@ -98,5 +91,5 @@ class ConsistencyModelScheduler(EulerSchedulerTimestepFix):
         sigma = unsqueeze_to_ndim(self.sigmas[self.step_index], sample.ndim).to(sample.device, sample.dtype)
         sigma_next = unsqueeze_to_ndim(self.sigmas[self.step_index + 1], sample.ndim).to(sample.device, sample.dtype)
         x0 = sample - model_output * sigma
-        x_t_next = x0 * (1 - sigma_next) + sigma_next * torch.randn_like(x0)
+        x_t_next = x0 * (1 - sigma_next) + sigma_next * torch.randn(x0.shape, dtype=x0.dtype, device=x0.device, generator=self.generator)
         self.latents = x_t_next

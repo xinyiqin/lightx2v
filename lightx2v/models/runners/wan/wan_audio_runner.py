@@ -1,32 +1,29 @@
-import os
 import gc
+import os
+import subprocess
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import torch
-import torchvision.transforms.functional as TF
-from PIL import Image
-from contextlib import contextmanager
-from typing import Optional, Tuple, Union, List, Dict, Any
-from dataclasses import dataclass
-
-from lightx2v.utils.registry_factory import RUNNER_REGISTER
-from lightx2v.models.runners.wan.wan_runner import WanRunner
-from lightx2v.utils.profiler import ProfilingContext4Debug, ProfilingContext
-from lightx2v.models.networks.wan.audio_model import WanAudioModel
-from lightx2v.models.networks.wan.lora_adapter import WanLoraWrapper
-from lightx2v.models.networks.wan.audio_adapter import AudioAdapter, AudioAdapterPipe, rank0_load_state_dict_from_path
-from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
-from lightx2v.models.schedulers.wan.audio.scheduler import ConsistencyModelScheduler
-
-from loguru import logger
-from einops import rearrange
 import torchaudio as ta
-from transformers import AutoFeatureExtractor
-
+from PIL import Image
+from einops import rearrange
+from loguru import logger
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms.functional import resize
+from transformers import AutoFeatureExtractor
 
-import subprocess
-import warnings
+from lightx2v.models.networks.wan.audio_adapter import AudioAdapter, AudioAdapterPipe, rank0_load_state_dict_from_path
+from lightx2v.models.networks.wan.audio_model import Wan22MoeAudioModel, WanAudioModel
+from lightx2v.models.networks.wan.lora_adapter import WanLoraWrapper
+from lightx2v.models.runners.wan.wan_runner import MultiModelStruct, WanRunner
+from lightx2v.models.schedulers.wan.audio.scheduler import ConsistencyModelScheduler
+from lightx2v.utils.envs import *
+from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
+from lightx2v.utils.registry_factory import RUNNER_REGISTER
+from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
 
 
 @contextmanager
@@ -262,8 +259,8 @@ class VideoGenerator:
         if prev_video is None:
             return None
 
-        device = self.model.device
-        dtype = torch.bfloat16
+        device = torch.device("cuda")
+        dtype = GET_DTYPE()
         vae_dtype = torch.float
 
         tgt_h, tgt_w = self.config.tgt_h, self.config.tgt_w
@@ -305,7 +302,7 @@ class VideoGenerator:
         return mask.transpose(0, 1)
 
     @torch.no_grad()
-    def generate_segment(self, inputs: Dict[str, Any], audio_features: torch.Tensor, prev_video: Optional[torch.Tensor] = None, prev_frame_length: int = 5, segment_idx: int = 0) -> torch.Tensor:
+    def generate_segment(self, inputs, audio_features, prev_video=None, prev_frame_length=5, segment_idx=0, total_steps=None):
         """Generate video segment"""
         # Update inputs with audio features
         inputs["audio_encoder_output"] = audio_features
@@ -315,8 +312,8 @@ class VideoGenerator:
             self.model.scheduler.reset()
 
         # Prepare previous latents - ALWAYS needed, even for first segment
-        device = self.model.device
-        dtype = torch.bfloat16
+        device = torch.device("cuda")
+        dtype = GET_DTYPE()
         vae_dtype = torch.float
         tgt_h, tgt_w = self.config.tgt_h, self.config.tgt_w
         max_num_frames = self.config.target_video_length
@@ -355,14 +352,15 @@ class VideoGenerator:
         inputs["previmg_encoder_output"] = {"prev_latents": prev_latents, "prev_mask": prev_mask}
 
         # Run inference loop
-        total_steps = self.model.scheduler.infer_steps
+        if total_steps is None:
+            total_steps = self.model.scheduler.infer_steps
         for step_index in range(total_steps):
             logger.info(f"==> Segment {segment_idx}, Step {step_index}/{total_steps}")
 
             with ProfilingContext4Debug("step_pre"):
                 self.model.scheduler.step_pre(step_index=step_index)
 
-            with ProfilingContext4Debug("infer"):
+            with ProfilingContext4Debug("🚀 infer_main"):
                 self.model.infer(inputs)
 
             with ProfilingContext4Debug("step_post"):
@@ -423,9 +421,21 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_adapter = rank0_load_state_dict_from_path(audio_adapter, audio_adapter_path, strict=False)
 
         # Audio encoder
-        device = self.model.device
+        cpu_offload = self.config.get("cpu_offload", False)
+        if cpu_offload:
+            device = torch.device("cpu")
+        else:
+            device = torch.device("cuda")
         audio_encoder_repo = self.config["model_path"] + "/audio_encoder"
-        self._audio_adapter_pipe = AudioAdapterPipe(audio_adapter, audio_encoder_repo=audio_encoder_repo, dtype=torch.bfloat16, device=device, generator=torch.Generator(device), weight=1.0)
+
+        if self.model.transformer_infer.seq_p_group is not None:
+            seq_p_group = self.model.transformer_infer.seq_p_group
+        else:
+            seq_p_group = None
+
+        self._audio_adapter_pipe = AudioAdapterPipe(
+            audio_adapter, audio_encoder_repo=audio_encoder_repo, dtype=GET_DTYPE(), device=device, weight=1.0, cpu_offload=cpu_offload, seq_p_group=seq_p_group
+        )
 
         return self._audio_adapter_pipe
 
@@ -435,10 +445,10 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         if os.path.isfile(self.config.image_path):
             with ProfilingContext("Run Img Encoder"):
-                vae_encode_out, clip_encoder_out = self.run_image_encoder(self.config, self.vae_encoder)
+                vae_encoder_out, clip_encoder_out = self.run_image_encoder(self.config, self.vae_encoder)
                 image_encoder_output = {
                     "clip_encoder_out": clip_encoder_out,
-                    "vae_encode_out": vae_encode_out,
+                    "vae_encoder_out": vae_encoder_out,
                 }
 
         with ProfilingContext("Run Text Encoder"):
@@ -621,7 +631,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         ref_img = Image.open(config.image_path)
         ref_img = (np.array(ref_img).astype(np.float32) - 127.5) / 127.5
-        ref_img = torch.from_numpy(ref_img).to(vae_model.device)
+        ref_img = torch.from_numpy(ref_img).cuda()
         ref_img = rearrange(ref_img, "H W C -> 1 C H W")
         ref_img = ref_img[:, :3]
 
@@ -655,15 +665,15 @@ class WanAudioRunner(WanRunner):  # type:ignore
         cond_frms = torch.nn.functional.interpolate(ref_img, size=(config.tgt_h, config.tgt_w), mode="bicubic")
 
         # clip encoder
-        clip_encoder_out = self.image_encoder.visual([cond_frms], self.config).squeeze(0).to(torch.bfloat16)
+        clip_encoder_out = self.image_encoder.visual([cond_frms], self.config).squeeze(0).to(GET_DTYPE()) if self.config.get("use_image_encoder", True) else None
 
         # vae encode
         cond_frms = rearrange(cond_frms, "1 C H W -> 1 C 1 H W")
-        vae_encode_out = vae_model.encode(cond_frms.to(torch.float), config)
-        if isinstance(vae_encode_out, list):
-            vae_encode_out = torch.stack(vae_encode_out, dim=0).to(torch.bfloat16)
+        vae_encoder_out = vae_model.encode(cond_frms.to(torch.float), config)
+        if isinstance(vae_encoder_out, list):
+            vae_encoder_out = torch.stack(vae_encoder_out, dim=0).to(GET_DTYPE())
 
-        return vae_encode_out, clip_encoder_out
+        return vae_encoder_out, clip_encoder_out
 
     def set_target_shape(self):
         """Set target shape for generation"""
@@ -684,3 +694,100 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         ret["target_shape"] = self.config.target_shape
         return ret
+
+    def run_step(self):
+        """Optimized pipeline with modular components"""
+
+        self.initialize()
+
+        assert self._audio_processor is not None
+        assert self._audio_preprocess is not None
+
+        self._video_generator = VideoGenerator(self.model, self.vae_encoder, self.vae_decoder, self.config, self.progress_callback)
+
+        with memory_efficient_inference():
+            if self.config["use_prompt_enhancer"]:
+                self.config["prompt_enhanced"] = self.post_prompt_enhancer()
+
+            self.inputs = self.prepare_inputs()
+            # Re-initialize scheduler after image encoding sets correct dimensions
+            self.init_scheduler()
+            self.model.scheduler.prepare(self.inputs["image_encoder_output"])
+
+        # Re-create video generator with updated model/scheduler
+        self._video_generator = VideoGenerator(self.model, self.vae_encoder, self.vae_decoder, self.config, self.progress_callback)
+
+        # Process audio
+        audio_array = self._audio_processor.load_audio(self.config["audio_path"])
+        video_duration = self.config.get("video_duration", 5)
+        target_fps = self.config.get("target_fps", 16)
+        max_num_frames = self.config.get("target_video_length", 81)
+
+        audio_len = int(audio_array.shape[0] / self._audio_processor.audio_sr * target_fps)
+        expected_frames = min(max(1, int(video_duration * target_fps)), audio_len)
+
+        # Segment audio
+        audio_segments = self._audio_processor.segment_audio(audio_array, expected_frames, max_num_frames)
+
+        self._video_generator.total_segments = len(audio_segments)
+
+        # Generate video segments
+        prev_video = None
+
+        torch.manual_seed(self.config.seed)
+        # Process audio features
+        audio_features = self._audio_preprocess(audio_segments[0].audio_array, sampling_rate=self._audio_processor.audio_sr, return_tensors="pt").input_values.squeeze(0).to(self.model.device)
+
+        # Generate video segment
+        with memory_efficient_inference():
+            self._video_generator.generate_segment(
+                self.inputs.copy(),  # Copy to avoid modifying original
+                audio_features,
+                prev_video=prev_video,
+                prev_frame_length=5,
+                segment_idx=0,
+                total_steps=1,
+            )
+            # Final cleanup
+            self.end_run()
+
+
+@RUNNER_REGISTER("wan2.2_moe_audio")
+class Wan22MoeAudioRunner(WanAudioRunner):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def load_transformer(self):
+        # encoder -> high_noise_model -> low_noise_model -> vae -> video_output
+        high_noise_model = Wan22MoeAudioModel(
+            os.path.join(self.config.model_path, "high_noise_model"),
+            self.config,
+            self.init_device,
+        )
+        low_noise_model = Wan22MoeAudioModel(
+            os.path.join(self.config.model_path, "low_noise_model"),
+            self.config,
+            self.init_device,
+        )
+
+        if self.config.get("lora_configs") and self.config.lora_configs:
+            assert not self.config.get("dit_quantized", False) or self.config.mm_config.get("weight_auto_quant", False)
+
+            for lora_config in self.config.lora_configs:
+                lora_path = lora_config["path"]
+                strength = lora_config.get("strength", 1.0)
+                if lora_config.name == "high_noise_model":
+                    lora_wrapper = WanLoraWrapper(high_noise_model)
+                    lora_name = lora_wrapper.load_lora(lora_path)
+                    lora_wrapper.apply_lora(lora_name, strength)
+                    logger.info(f"{lora_config.name} Loaded LoRA: {lora_name} with strength: {strength}")
+
+                if lora_config.name == "low_noise_model":
+                    lora_wrapper = WanLoraWrapper(low_noise_model)
+                    lora_name = lora_wrapper.load_lora(lora_path)
+                    lora_wrapper.apply_lora(lora_name, strength)
+                    logger.info(f"{lora_config.name} Loaded LoRA: {lora_name} with strength: {strength}")
+        # XXX: trick
+        self._audio_preprocess = AutoFeatureExtractor.from_pretrained(self.config["model_path"], subfolder="audio_encoder")
+
+        return MultiModelStruct([high_noise_model, low_noise_model], self.config, self.config.boundary)

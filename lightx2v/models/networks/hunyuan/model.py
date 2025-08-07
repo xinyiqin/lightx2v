@@ -1,21 +1,23 @@
-import os
-import torch
 import json
-from lightx2v.models.networks.hunyuan.weights.pre_weights import HunyuanPreWeights
-from lightx2v.models.networks.hunyuan.weights.post_weights import HunyuanPostWeights
-from lightx2v.models.networks.hunyuan.weights.transformer_weights import HunyuanTransformerWeights
-from lightx2v.models.networks.hunyuan.infer.pre_infer import HunyuanPreInfer
-from lightx2v.models.networks.hunyuan.infer.post_infer import HunyuanPostInfer
-from lightx2v.models.networks.hunyuan.infer.transformer_infer import HunyuanTransformerInfer
-from lightx2v.models.networks.hunyuan.infer.feature_caching.transformer_infer import (
-    HunyuanTransformerInferTaylorCaching,
-    HunyuanTransformerInferTeaCaching,
-    HunyuanTransformerInferAdaCaching,
-    HunyuanTransformerInferCustomCaching,
-)
-from lightx2v.utils.envs import *
+import os
+
+import torch
 from loguru import logger
 from safetensors import safe_open
+
+from lightx2v.models.networks.hunyuan.infer.feature_caching.transformer_infer import (
+    HunyuanTransformerInferAdaCaching,
+    HunyuanTransformerInferCustomCaching,
+    HunyuanTransformerInferTaylorCaching,
+    HunyuanTransformerInferTeaCaching,
+)
+from lightx2v.models.networks.hunyuan.infer.post_infer import HunyuanPostInfer
+from lightx2v.models.networks.hunyuan.infer.pre_infer import HunyuanPreInfer
+from lightx2v.models.networks.hunyuan.infer.transformer_infer import HunyuanTransformerInfer
+from lightx2v.models.networks.hunyuan.weights.post_weights import HunyuanPostWeights
+from lightx2v.models.networks.hunyuan.weights.pre_weights import HunyuanPreWeights
+from lightx2v.models.networks.hunyuan.weights.transformer_weights import HunyuanTransformerWeights
+from lightx2v.utils.envs import *
 
 
 class HunyuanModel:
@@ -76,7 +78,7 @@ class HunyuanModel:
                     for k in f.keys():
                         weight_dict[k] = f.get_tensor(k)
                         if weight_dict[k].dtype == torch.float:
-                            weight_dict[k] = weight_dict[k].to(torch.bfloat16)
+                            weight_dict[k] = weight_dict[k].to(GET_DTYPE())
 
         return weight_dict
 

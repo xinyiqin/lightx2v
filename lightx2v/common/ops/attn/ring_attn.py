@@ -1,10 +1,13 @@
 import torch
-from .template import AttnWeightTemplate
-from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER
 import torch.distributed as dist
-from .utils.ring_comm import RingComm
 import torch.nn.functional as F
 from loguru import logger
+
+from lightx2v.utils.envs import *
+from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER
+
+from .template import AttnWeightTemplate
+from .utils.ring_comm import RingComm
 
 try:
     import flash_attn
@@ -38,7 +41,7 @@ class RingAttnWeight(AttnWeightTemplate):
     def __init__(self):
         self.config = {}
 
-    def apply(self, q, k, v, img_qkv_len, cu_seqlens_qkv, attention_module=None):
+    def apply(self, q, k, v, img_qkv_len, cu_seqlens_qkv, attention_module=None, seq_p_group=None):
         """
         执行 Ring 注意力机制，结合图像和文本的查询、键和值。
 
@@ -54,8 +57,8 @@ class RingAttnWeight(AttnWeightTemplate):
             torch.Tensor: 计算得到的注意力结果
         """
         # 获取当前进程的排名和全局进程数
-        cur_rank = dist.get_rank()
-        world_size = dist.get_world_size()
+        cur_rank = dist.get_rank(seq_p_group)
+        world_size = dist.get_world_size(seq_p_group)
 
         if len(cu_seqlens_qkv) == 3:
             txt_qkv_len = cu_seqlens_qkv[1] - img_qkv_len  # 文本查询、键和值的长度
@@ -67,7 +70,7 @@ class RingAttnWeight(AttnWeightTemplate):
         # if RING_COMM is None:
         #     init_ring_comm()
 
-        RING_COMM = RingComm()
+        RING_COMM = RingComm(seq_p_group)
 
         # if len(cu_seqlens_qkv) == 3:
         #     txt_qkv_len = cu_seqlens_qkv[1] - img_qkv_len  # 文本查询、键和值的长度
@@ -112,7 +115,7 @@ class RingAttnWeight(AttnWeightTemplate):
                 k = next_k
                 v = next_v
 
-        attn1 = out.to(torch.bfloat16).squeeze(0).reshape(img_qkv_len + txt_qkv_len, -1)
+        attn1 = out.to(GET_DTYPE()).squeeze(0).reshape(img_qkv_len + txt_qkv_len, -1)
 
         if txt_mask_len > 0:
             attn2, *_ = flash_attn.flash_attn_interface._flash_attn_forward(
@@ -129,7 +132,7 @@ class RingAttnWeight(AttnWeightTemplate):
                 return_softmax=False,
             )
 
-            attn2 = attn2.to(torch.bfloat16).squeeze(0).reshape((txt_mask_len - txt_qkv_len), -1)
+            attn2 = attn2.to(GET_DTYPE()).squeeze(0).reshape((txt_mask_len - txt_qkv_len), -1)
             attn1 = torch.cat([attn1, attn2], dim=0)
 
         return attn1

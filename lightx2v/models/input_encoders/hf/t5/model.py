@@ -1,16 +1,17 @@
 # Modified from transformers.models.t5.modeling_t5
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
-import logging
 import math
 import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from loguru import logger
+
+from lightx2v.models.input_encoders.hf.q_linear import Q8FQuantLinearFp8, Q8FQuantLinearInt8, TorchaoQuantLinearInt8, VllmQuantLinearFp8, VllmQuantLinearInt8
+from lightx2v.utils.envs import *
 
 from .tokenizer import HuggingfaceTokenizer
-from loguru import logger
-from lightx2v.models.input_encoders.hf.q_linear import VllmQuantLinearInt8, VllmQuantLinearFp8, TorchaoQuantLinearInt8, Q8FQuantLinearInt8, Q8FQuantLinearFp8
-
 
 __all__ = [
     "T5Model",
@@ -131,7 +132,7 @@ class T5Attention(nn.Module):
 
         if hasattr(self, "cpu_offload") and self.cpu_offload:
             del attn_bias
-        attn = F.softmax(attn.float(), dim=-1).to(torch.bfloat16)
+        attn = F.softmax(attn.float(), dim=-1).type_as(attn)
         x = torch.einsum("bnij,bjnc->binc", attn, v)
 
         if hasattr(self, "cpu_offload") and self.cpu_offload:
@@ -356,7 +357,7 @@ class T5Encoder(nn.Module):
             optimize_memory_usage()
 
         x = self.dropout(x)
-        return x.to(torch.bfloat16)
+        return x.to(GET_DTYPE())
 
 
 class T5Decoder(nn.Module):

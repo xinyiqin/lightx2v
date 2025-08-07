@@ -3,17 +3,18 @@ try:
 except ModuleNotFoundError:
     flash_attn = None
 import math
+import os
+
+import safetensors
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from einops import rearrange
 from transformers import AutoModel
-from loguru import logger
 
-import os
-import safetensors
-from typing import List, Optional, Tuple, Union
+from lightx2v.utils.envs import *
 
 
 def load_safetensors(in_path: str):
@@ -59,7 +60,7 @@ def rank0_load_state_dict_from_path(model, in_path: str, strict: bool = True):
         model.load_state_dict(state_dict, strict=strict)
     if dist.is_initialized():
         dist.barrier()
-    return model.to(dtype=torch.bfloat16, device="cuda")
+    return model.to(dtype=GET_DTYPE(), device="cuda")
 
 
 def linear_interpolation(features, output_len: int):
@@ -121,7 +122,7 @@ class PerceiverAttentionCA(nn.Module):
         x = self.norm_kv(x)
         shift, scale, gate = (t_emb + self.shift_scale_gate).chunk(3, dim=1)
         latents = self.norm_q(latents) * (1 + scale) + shift
-        q = self.to_q(latents)
+        q = self.to_q(latents.to(GET_DTYPE()))
         k, v = self.to_kv(x).chunk(2, dim=-1)
         q = rearrange(q, "B L (H C) -> (B L) H C", H=self.heads)
         k = rearrange(k, "B T L (H C) -> (B T L) H C", H=self.heads)
@@ -261,8 +262,8 @@ class AudioAdapter(nn.Module):
         audio_feature = rearrange(audio_feature, "B (T S) N C -> B T (S N) C", S=4)
         return audio_feature
 
-    def forward(self, audio_feat: torch.Tensor, timestep: torch.Tensor, latent_frame: int, weight: float = 1.0):
-        def modify_hidden_states(hidden_states, grid_sizes, ca_block: PerceiverAttentionCA, x, t_emb, dtype, weight):
+    def forward(self, audio_feat: torch.Tensor, timestep: torch.Tensor, latent_frame: int, weight: float = 1.0, seq_p_group=None):
+        def modify_hidden_states(hidden_states, grid_sizes, ca_block: PerceiverAttentionCA, x, t_emb, dtype, weight, seq_p_group):
             """thw specify the latent_frame, latent_height, latenf_width after
             hidden_states is patchified.
 
@@ -271,15 +272,27 @@ class AudioAdapter(nn.Module):
             """
             if len(hidden_states.shape) == 2:  # 扩展batchsize dim
                 hidden_states = hidden_states.unsqueeze(0)  # bs = 1
-            # print(weight)
             t, h, w = grid_sizes[0].tolist()
             n_tokens = t * h * w
             ori_dtype = hidden_states.dtype
             device = hidden_states.device
             bs, n_tokens_per_rank = hidden_states.shape[:2]
-            tail_length = n_tokens_per_rank - n_tokens
 
-            n_query_tokens = n_tokens_per_rank - tail_length % n_tokens_per_rank
+            if seq_p_group is not None:
+                sp_size = dist.get_world_size(seq_p_group)
+                sp_rank = dist.get_rank(seq_p_group)
+            else:
+                sp_size = 1
+                sp_rank = 0
+
+            tail_length = n_tokens_per_rank * sp_size - n_tokens
+            n_unused_ranks = tail_length // n_tokens_per_rank
+            if sp_rank > sp_size - n_unused_ranks - 1:
+                n_query_tokens = 0
+            elif sp_rank == sp_size - n_unused_ranks - 1:
+                n_query_tokens = n_tokens_per_rank - tail_length % n_tokens_per_rank
+            else:
+                n_query_tokens = n_tokens_per_rank
 
             if n_query_tokens > 0:
                 hidden_states_aligned = hidden_states[:, :n_query_tokens]
@@ -289,7 +302,7 @@ class AudioAdapter(nn.Module):
                 hidden_states_aligned = hidden_states[:, :1]
                 hidden_states_tail = hidden_states[:, 1:]
 
-            q_lens, t0, t1 = get_q_lens_audio_range(batchsize=bs, n_tokens_per_rank=n_tokens_per_rank, n_query_tokens=n_query_tokens, n_tokens_per_frame=h * w, sp_rank=0)
+            q_lens, t0, t1 = get_q_lens_audio_range(batchsize=bs, n_tokens_per_rank=n_tokens_per_rank, n_query_tokens=n_query_tokens, n_tokens_per_frame=h * w, sp_rank=sp_rank)
             q_lens = torch.tensor(q_lens, device=device, dtype=torch.int32)
             """
             processing audio features in sp_state can be moved outside.
@@ -300,6 +313,7 @@ class AudioAdapter(nn.Module):
             assert q_lens.shape == k_lens.shape
             # ca_block:CrossAttention函数
             residual = ca_block(x, hidden_states_aligned, t_emb, q_lens, k_lens) * weight
+
             residual = residual.to(ori_dtype)  # audio做了CrossAttention之后以Residual的方式注入
             if n_query_tokens == 0:
                 residual = residual * 0.0
@@ -325,6 +339,7 @@ class AudioAdapter(nn.Module):
                     "weight": weight,
                     "t_emb": t_emb,
                     "dtype": x.dtype,
+                    "seq_p_group": seq_p_group,
                 },
                 "modify_func": modify_hidden_states,
             }
@@ -370,13 +385,21 @@ class AudioAdapter(nn.Module):
 
 class AudioAdapterPipe:
     def __init__(
-        self, audio_adapter: AudioAdapter, audio_encoder_repo: str = "microsoft/wavlm-base-plus", dtype=torch.float32, device="cuda", generator=None, tgt_fps: int = 15, weight: float = 1.0
+        self,
+        audio_adapter: AudioAdapter,
+        audio_encoder_repo: str = "microsoft/wavlm-base-plus",
+        dtype=torch.float32,
+        device="cuda",
+        tgt_fps: int = 15,
+        weight: float = 1.0,
+        cpu_offload: bool = False,
+        seq_p_group=None,
     ) -> None:
+        self.seq_p_group = seq_p_group
         self.audio_adapter = audio_adapter
         self.dtype = dtype
-        self.device = device
-        self.generator = generator
         self.audio_encoder_dtype = torch.float16
+        self.cpu_offload = cpu_offload
         ##音频编码器
         self.audio_encoder = AutoModel.from_pretrained(audio_encoder_repo)
 
@@ -403,14 +426,17 @@ class AudioAdapterPipe:
         audio_length = int(50 / self.tgt_fps * video_frame)
 
         with torch.no_grad():
-            audio_input_feat = audio_input_feat.to(self.device, self.audio_encoder_dtype)
             try:
-                audio_feat = self.audio_encoder(audio_input_feat, return_dict=True).last_hidden_state
+                if self.cpu_offload:
+                    self.audio_encoder = self.audio_encoder.to("cuda")
+                audio_feat = self.audio_encoder(audio_input_feat.to(self.audio_encoder_dtype), return_dict=True).last_hidden_state
+                if self.cpu_offload:
+                    self.audio_encoder = self.audio_encoder.to("cpu")
             except Exception as err:
-                audio_feat = torch.rand(1, audio_length, self.audio_feature_dim).to(self.device)
+                audio_feat = torch.rand(1, audio_length, self.audio_feature_dim).to("cuda")
                 print(err)
             audio_feat = audio_feat.to(self.dtype)
             if dropout_cond is not None:
                 audio_feat = dropout_cond(audio_feat)
 
-        return self.audio_adapter(audio_feat=audio_feat, timestep=timestep, latent_frame=latent_frame, weight=self.weight)
+        return self.audio_adapter(audio_feat=audio_feat, timestep=timestep, latent_frame=latent_frame, weight=self.weight, seq_p_group=self.seq_p_group)

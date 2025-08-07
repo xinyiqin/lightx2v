@@ -1,13 +1,14 @@
+import glob
 import os
 import random
 import subprocess
-import glob
+from typing import Optional
+
 import imageio
 import imageio_ffmpeg as ffmpeg
 import numpy as np
 import torch
 import torchvision
-from typing import Optional
 from einops import rearrange
 from loguru import logger
 
@@ -276,16 +277,16 @@ def find_torch_model_path(config, ckpt_config_key=None, filename=None, subdir=["
     raise FileNotFoundError(f"PyTorch model file '{filename}' not found.\nPlease download the model from https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
 
 
-def find_hf_model_path(config, ckpt_config_key=None, subdir=["original", "fp8", "int8"]):
+def find_hf_model_path(config, model_path, ckpt_config_key=None, subdir=["original", "fp8", "int8"]):
     if ckpt_config_key and config.get(ckpt_config_key, None) is not None:
         return config.get(ckpt_config_key)
 
-    paths_to_check = [config.model_path]
+    paths_to_check = [model_path]
     if isinstance(subdir, list):
         for sub in subdir:
-            paths_to_check.append(os.path.join(config.model_path, sub))
+            paths_to_check.append(os.path.join(model_path, sub))
     else:
-        paths_to_check.append(os.path.join(config.model_path, subdir))
+        paths_to_check.append(os.path.join(model_path, subdir))
 
     for path in paths_to_check:
         safetensors_pattern = os.path.join(path, "*.safetensors")
@@ -294,3 +295,71 @@ def find_hf_model_path(config, ckpt_config_key=None, subdir=["original", "fp8", 
             logger.info(f"Found Hugging Face model files in: {path}")
             return path
     raise FileNotFoundError(f"No Hugging Face model files (.safetensors) found.\nPlease download the model from: https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
+
+
+def find_gguf_model_path(config, ckpt_config_key=None, subdir=None):
+    gguf_path = config.get(ckpt_config_key, None)
+    if gguf_path is None:
+        raise ValueError(f"GGUF path not found in config with key '{ckpt_config_key}'")
+    if not isinstance(gguf_path, str) or not gguf_path.endswith(".gguf"):
+        raise ValueError(f"GGUF path must be a string ending with '.gguf', got: {gguf_path}")
+    if os.sep in gguf_path or (os.altsep and os.altsep in gguf_path):
+        if os.path.exists(gguf_path):
+            logger.info(f"Found GGUF model file in: {gguf_path}")
+            return os.path.abspath(gguf_path)
+        else:
+            raise FileNotFoundError(f"GGUF file not found at path: {gguf_path}")
+    else:
+        # It's just a filename, search in predefined paths
+        paths_to_check = [config.model_path]
+        if subdir:
+            paths_to_check.append(os.path.join(config.model_path, subdir))
+
+        for path in paths_to_check:
+            gguf_file_path = os.path.join(path, gguf_path)
+            gguf_file = glob.glob(gguf_file_path)
+            if gguf_file:
+                logger.info(f"Found GGUF model file in: {gguf_file_path}")
+                return gguf_file_path
+
+    raise FileNotFoundError(f"No GGUF model files (.gguf) found.\nPlease download the model from: https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
+
+
+def masks_like(tensor, zero=False, generator=None, p=0.2):
+    assert isinstance(tensor, torch.Tensor)
+    out = torch.ones_like(tensor)
+    if zero:
+        if generator is not None:
+            # 生成随机数判断是否需要修改
+            random_num = torch.rand(1, generator=generator, device=generator.device).item()
+            if random_num < p:
+                out[:, 0] = torch.zeros_like(out[:, 0])
+        else:
+            out[:, 0] = torch.zeros_like(out[:, 0])
+
+    return out
+
+
+def best_output_size(w, h, dw, dh, expected_area):
+    # float output size
+    ratio = w / h
+    ow = (expected_area * ratio) ** 0.5
+    oh = expected_area / ow
+
+    # process width first
+    ow1 = int(ow // dw * dw)
+    oh1 = int(expected_area / ow1 // dh * dh)
+    assert ow1 % dw == 0 and oh1 % dh == 0 and ow1 * oh1 <= expected_area
+    ratio1 = ow1 / oh1
+
+    # process height first
+    oh2 = int(oh // dh * dh)
+    ow2 = int(expected_area / oh2 // dw * dw)
+    assert oh2 % dh == 0 and ow2 % dw == 0 and ow2 * oh2 <= expected_area
+    ratio2 = ow2 / oh2
+
+    # compare ratios
+    if max(ratio / ratio1, ratio1 / ratio) < max(ratio / ratio2, ratio2 / ratio):
+        return ow1, oh1
+    else:
+        return ow2, oh2

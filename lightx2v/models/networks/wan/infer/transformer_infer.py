@@ -1,12 +1,15 @@
+from functools import partial
+
 import torch
-from .utils import compute_freqs, compute_freqs_dist, compute_freqs_audio, compute_freqs_audio_dist, apply_rotary_emb, apply_rotary_emb_chunk
+
 from lightx2v.common.offload.manager import (
-    WeightAsyncStreamManager,
     LazyWeightAsyncStreamManager,
+    WeightAsyncStreamManager,
 )
 from lightx2v.common.transformer_infer.transformer_infer import BaseTransformerInfer
 from lightx2v.utils.envs import *
-from functools import partial
+
+from .utils import apply_rotary_emb, apply_rotary_emb_chunk, compute_freqs, compute_freqs_audio
 
 
 class WanTransformerInfer(BaseTransformerInfer):
@@ -27,7 +30,10 @@ class WanTransformerInfer(BaseTransformerInfer):
             self.apply_rotary_emb_func = apply_rotary_emb
         self.clean_cuda_cache = self.config.get("clean_cuda_cache", False)
         self.mask_map = None
+        self.infer_dtype = GET_DTYPE()
+        self.sensitive_layer_dtype = GET_SENSITIVE_DTYPE()
 
+        self.seq_p_group = None
         if self.config.get("cpu_offload", False):
             if torch.cuda.get_device_capability(0) == (9, 0):
                 assert self.config["self_attn_1_type"] != "sage_attn2"
@@ -46,22 +52,25 @@ class WanTransformerInfer(BaseTransformerInfer):
                     self.infer_func = self._infer_with_phases_offload
                 else:
                     self.infer_func = self._infer_with_phases_lazy_offload
+            elif offload_granularity == "model":
+                self.infer_func = self._infer_without_offload
 
-            if not self.config.get("lazy_load", False):
-                self.weights_stream_mgr = WeightAsyncStreamManager(
-                    blocks_num=self.blocks_num,
-                    offload_ratio=offload_ratio,
-                    phases_num=self.phases_num,
-                )
-            else:
-                self.weights_stream_mgr = LazyWeightAsyncStreamManager(
-                    blocks_num=self.blocks_num,
-                    offload_ratio=offload_ratio,
-                    phases_num=self.phases_num,
-                    num_disk_workers=self.config.get("num_disk_workers", 2),
-                    max_memory=self.config.get("max_memory", 2),
-                    offload_gra=offload_granularity,
-                )
+            if offload_granularity != "model":
+                if not self.config.get("lazy_load", False):
+                    self.weights_stream_mgr = WeightAsyncStreamManager(
+                        blocks_num=self.blocks_num,
+                        offload_ratio=offload_ratio,
+                        phases_num=self.phases_num,
+                    )
+                else:
+                    self.weights_stream_mgr = LazyWeightAsyncStreamManager(
+                        blocks_num=self.blocks_num,
+                        offload_ratio=offload_ratio,
+                        phases_num=self.phases_num,
+                        num_disk_workers=self.config.get("num_disk_workers", 2),
+                        max_memory=self.config.get("max_memory", 2),
+                        offload_gra=offload_granularity,
+                    )
         else:
             self.infer_func = self._infer_without_offload
 
@@ -75,6 +84,13 @@ class WanTransformerInfer(BaseTransformerInfer):
         cu_seqlens_q = torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32)
         cu_seqlens_k = torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(0, dtype=torch.int32)
         return cu_seqlens_q, cu_seqlens_k
+
+    def compute_freqs(self, q, grid_sizes, freqs):
+        if "audio" in self.config.get("model_cls", ""):
+            freqs_i = compute_freqs_audio(q.size(2) // 2, grid_sizes, freqs)
+        else:
+            freqs_i = compute_freqs(q.size(2) // 2, grid_sizes, freqs)
+        return freqs_i
 
     @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
     def infer(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
@@ -100,6 +116,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     freqs,
                     context,
                 )
+                if audio_dit_blocks:
+                    x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
             self.weights_stream_mgr.swap_weights()
 
@@ -128,6 +146,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     freqs,
                     context,
                 )
+                if audio_dit_blocks:
+                    x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
             self.weights_stream_mgr.swap_weights()
 
@@ -170,6 +190,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     elif cur_phase_idx == 3:
                         y = self.infer_ffn(cur_phase, x, attn_out, c_shift_msa, c_scale_msa)
                         x = self.post_process(x, y, c_gate_msa)
+                        if audio_dit_blocks:
+                            x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
                 is_last_phase = block_idx == weights.blocks_num - 1 and phase_idx == self.phases_num - 1
                 if not is_last_phase:
@@ -230,6 +252,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     elif cur_phase_idx == 3:
                         y = self.infer_ffn(cur_phase, x, attn_out, c_shift_msa, c_scale_msa)
                         x = self.post_process(x, y, c_gate_msa)
+                        if audio_dit_blocks:
+                            x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
                 if not (block_idx == weights.blocks_num - 1 and phase_idx == self.phases_num - 1):
                     next_block_idx = block_idx + 1 if phase_idx == self.phases_num - 1 else block_idx
@@ -266,6 +290,14 @@ class WanTransformerInfer(BaseTransformerInfer):
             freqs_cis[valid_token_length:, :, : rope_t_dim // 2] = 0
             return freqs_cis
 
+    @torch._dynamo.disable
+    def _apply_audio_dit(self, x, block_idx, grid_sizes, audio_dit_blocks):
+        for ipa_out in audio_dit_blocks:
+            if block_idx in ipa_out:
+                cur_modify = ipa_out[block_idx]
+                x = cur_modify["modify_func"](x, grid_sizes, **cur_modify["kwargs"])
+        return x
+
     def _infer_without_offload(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
         for block_idx in range(self.blocks_num):
             x = self.infer_block(
@@ -278,12 +310,9 @@ class WanTransformerInfer(BaseTransformerInfer):
                 freqs,
                 context,
             )
+            if audio_dit_blocks:
+                x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
-            if audio_dit_blocks is not None and len(audio_dit_blocks) > 0:
-                for ipa_out in audio_dit_blocks:
-                    if block_idx in ipa_out:
-                        cur_modify = ipa_out[block_idx]
-                        x = cur_modify["modify_func"](x, grid_sizes, **cur_modify["kwargs"])
         return x
 
     def infer_block(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context):
@@ -306,42 +335,36 @@ class WanTransformerInfer(BaseTransformerInfer):
         return x
 
     def infer_modulation(self, weights, embed0):
-        if embed0.dim() == 3:
+        if embed0.dim() == 3 and embed0.shape[2] == 1:
             modulation = weights.modulation.tensor.unsqueeze(2)
             embed0 = (modulation + embed0).chunk(6, dim=1)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = [ei.squeeze(1) for ei in embed0]
-        elif embed0.dim() == 2:
+        else:
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (weights.modulation.tensor + embed0).chunk(6, dim=1)
+
         if self.clean_cuda_cache:
             del embed0
             torch.cuda.empty_cache()
 
         return shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa
 
-    def compute_freqs(self, q, grid_sizes, freqs):
-        if "audio" in self.config.get("model_cls", ""):
-            freqs_i = compute_freqs_audio(q.size(2) // 2, grid_sizes, freqs)
-        else:
-            freqs_i = compute_freqs(q.size(2) // 2, grid_sizes, freqs)
-        return freqs_i
-
     def infer_self_attn(self, weights, grid_sizes, x, seq_lens, freqs, shift_msa, scale_msa):
         if hasattr(weights, "smooth_norm1_weight"):
-            norm1_weight = (1 + scale_msa.squeeze(0)) * weights.smooth_norm1_weight.tensor
-            norm1_bias = shift_msa.squeeze(0) * weights.smooth_norm1_bias.tensor
+            norm1_weight = (1 + scale_msa.squeeze()) * weights.smooth_norm1_weight.tensor
+            norm1_bias = shift_msa.squeeze() * weights.smooth_norm1_bias.tensor
         else:
-            norm1_weight = 1 + scale_msa.squeeze(0)
-            norm1_bias = shift_msa.squeeze(0)
+            norm1_weight = 1 + scale_msa.squeeze()
+            norm1_bias = shift_msa.squeeze()
 
         norm1_out = weights.norm1.apply(x)
 
-        if GET_DTYPE() != "BF16":
-            norm1_out = norm1_out.float()
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            norm1_out = norm1_out.to(self.sensitive_layer_dtype)
 
         norm1_out.mul_(norm1_weight).add_(norm1_bias)
 
-        if GET_DTYPE() != "BF16":
-            norm1_out = norm1_out.to(torch.bfloat16)
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            norm1_out = norm1_out.to(self.infer_dtype)
 
         s, n, d = *norm1_out.shape[:1], self.num_heads, self.head_dim
 
@@ -350,8 +373,6 @@ class WanTransformerInfer(BaseTransformerInfer):
         v = weights.self_attn_v.apply(norm1_out).view(s, n, d)
 
         freqs_i = self.compute_freqs(q, grid_sizes, freqs)
-
-        freqs_i = self.zero_temporal_component_in_3DRoPE(seq_lens, freqs_i)
 
         q = self.apply_rotary_emb_func(q, freqs_i)
         k = self.apply_rotary_emb_func(k, freqs_i)
@@ -363,7 +384,7 @@ class WanTransformerInfer(BaseTransformerInfer):
             del freqs_i, norm1_out, norm1_weight, norm1_bias
             torch.cuda.empty_cache()
 
-        if self.config.get("parallel_attn_type", None):
+        if self.config["seq_parallel"]:
             attn_out = weights.self_attn_1_parallel.apply(
                 q=q,
                 k=k,
@@ -371,6 +392,7 @@ class WanTransformerInfer(BaseTransformerInfer):
                 img_qkv_len=q.shape[0],
                 cu_seqlens_qkv=cu_seqlens_q,
                 attention_module=weights.self_attn_1,
+                seq_p_group=self.seq_p_group,
             )
         else:
             attn_out = weights.self_attn_1.apply(
@@ -394,22 +416,22 @@ class WanTransformerInfer(BaseTransformerInfer):
         return y
 
     def infer_cross_attn(self, weights, x, context, y_out, gate_msa):
-        if GET_DTYPE() != "BF16":
-            x = x.float() + y_out.float() * gate_msa.squeeze(0)
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            x = x.to(self.sensitive_layer_dtype) + y_out.to(self.sensitive_layer_dtype) * gate_msa.squeeze()
         else:
-            x.add_(y_out * gate_msa.squeeze(0))
+            x.add_(y_out * gate_msa.squeeze())
 
         norm3_out = weights.norm3.apply(x)
-        if self.task == "i2v":
+        if self.task == "i2v" and self.config.get("use_image_encoder", True):
             context_img = context[:257]
             context = context[257:]
         else:
             context_img = None
 
-        if GET_DTYPE() != "BF16":
-            context = context.to(torch.bfloat16)
-            if self.task == "i2v":
-                context_img = context_img.to(torch.bfloat16)
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            context = context.to(self.infer_dtype)
+            if self.task == "i2v" and self.config.get("use_image_encoder", True):
+                context_img = context_img.to(self.infer_dtype)
 
         n, d = self.num_heads, self.head_dim
 
@@ -431,7 +453,7 @@ class WanTransformerInfer(BaseTransformerInfer):
             model_cls=self.config["model_cls"],
         )
 
-        if self.task == "i2v" and context_img is not None:
+        if self.task == "i2v" and self.config.get("use_image_encoder", True) and context_img is not None:
             k_img = weights.cross_attn_norm_k_img.apply(weights.cross_attn_k_img.apply(context_img)).view(-1, n, d)
             v_img = weights.cross_attn_v_img.apply(context_img).view(-1, n, d)
 
@@ -470,18 +492,18 @@ class WanTransformerInfer(BaseTransformerInfer):
             torch.cuda.empty_cache()
 
         if hasattr(weights, "smooth_norm2_weight"):
-            norm2_weight = (1 + c_scale_msa.squeeze(0)) * weights.smooth_norm2_weight.tensor
-            norm2_bias = c_shift_msa.squeeze(0) * weights.smooth_norm2_bias.tensor
+            norm2_weight = (1 + c_scale_msa.squeeze()) * weights.smooth_norm2_weight.tensor
+            norm2_bias = c_shift_msa.squeeze() * weights.smooth_norm2_bias.tensor
         else:
-            norm2_weight = 1 + c_scale_msa.squeeze(0)
-            norm2_bias = c_shift_msa.squeeze(0)
+            norm2_weight = 1 + c_scale_msa.squeeze()
+            norm2_bias = c_shift_msa.squeeze()
 
         norm2_out = weights.norm2.apply(x)
-        if GET_DTYPE() != "BF16":
-            norm2_out = norm2_out.float()
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            norm2_out = norm2_out.to(self.sensitive_layer_dtype)
         norm2_out.mul_(norm2_weight).add_(norm2_bias)
-        if GET_DTYPE() != "BF16":
-            norm2_out = norm2_out.to(torch.bfloat16)
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            norm2_out = norm2_out.to(self.infer_dtype)
 
         y = weights.ffn_0.apply(norm2_out)
         if self.clean_cuda_cache:
@@ -495,10 +517,10 @@ class WanTransformerInfer(BaseTransformerInfer):
         return y
 
     def post_process(self, x, y, c_gate_msa):
-        if GET_DTYPE() != "BF16":
-            x = x.float() + y.float() * c_gate_msa.squeeze(0)
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            x = x.to(self.sensitive_layer_dtype) + y.to(self.sensitive_layer_dtype) * c_gate_msa.squeeze()
         else:
-            x.add_(y * c_gate_msa.squeeze(0))
+            x.add_(y * c_gate_msa.squeeze())
 
         if self.clean_cuda_cache:
             del y, c_gate_msa

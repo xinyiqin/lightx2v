@@ -1,32 +1,39 @@
-import os
-import torch
-import glob
 import json
+import os
+
+import torch
+import torch.distributed as dist
+from loguru import logger
+from safetensors import safe_open
+
 from lightx2v.common.ops.attn import MaskMap
-from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
-from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
-from lightx2v.models.networks.wan.weights.transformer_weights import (
-    WanTransformerWeights,
+from lightx2v.models.networks.wan.infer.dist_infer.transformer_infer import WanTransformerDistInfer
+from lightx2v.models.networks.wan.infer.feature_caching.transformer_infer import (
+    WanTransformerInferAdaCaching,
+    WanTransformerInferCustomCaching,
+    WanTransformerInferDualBlock,
+    WanTransformerInferDynamicBlock,
+    WanTransformerInferFirstBlock,
+    WanTransformerInferTaylorCaching,
+    WanTransformerInferTeaCaching,
 )
-from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
 from lightx2v.models.networks.wan.infer.post_infer import WanPostInfer
+from lightx2v.models.networks.wan.infer.pre_infer import WanPreInfer
 from lightx2v.models.networks.wan.infer.transformer_infer import (
     WanTransformerInfer,
 )
-from lightx2v.models.networks.wan.infer.feature_caching.transformer_infer import (
-    WanTransformerInferTeaCaching,
-    WanTransformerInferTaylorCaching,
-    WanTransformerInferAdaCaching,
-    WanTransformerInferCustomCaching,
-    WanTransformerInferFirstBlock,
-    WanTransformerInferDualBlock,
-    WanTransformerInferDynamicBlock,
+from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
+from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
+from lightx2v.models.networks.wan.weights.transformer_weights import (
+    WanTransformerWeights,
 )
-from lightx2v.models.networks.wan.infer.dist_infer.transformer_infer import WanTransformerDistInfer
-from safetensors import safe_open
 from lightx2v.utils.envs import *
 from lightx2v.utils.utils import *
-from loguru import logger
+
+try:
+    import gguf
+except ImportError:
+    gguf = None
 
 
 class WanModel:
@@ -37,12 +44,21 @@ class WanModel:
     def __init__(self, model_path, config, device):
         self.model_path = model_path
         self.config = config
+        self.cpu_offload = self.config.get("cpu_offload", False)
+        self.offload_granularity = self.config.get("offload_granularity", "block")
+
         self.clean_cuda_cache = self.config.get("clean_cuda_cache", False)
         self.dit_quantized = self.config.mm_config.get("mm_type", "Default") != "Default"
 
         if self.dit_quantized:
             dit_quant_scheme = self.config.mm_config.get("mm_type").split("-")[1]
-            self.dit_quantized_ckpt = find_hf_model_path(config, "dit_quantized_ckpt", subdir=dit_quant_scheme)
+            if self.config.model_cls == "wan2.1_distill":
+                dit_quant_scheme = "distill_" + dit_quant_scheme
+            if dit_quant_scheme == "gguf":
+                self.dit_quantized_ckpt = find_gguf_model_path(config, "dit_quantized_ckpt", subdir=dit_quant_scheme)
+                self.config.use_gguf = True
+            else:
+                self.dit_quantized_ckpt = find_hf_model_path(config, self.model_path, "dit_quantized_ckpt", subdir=dit_quant_scheme)
             quant_config_path = os.path.join(self.dit_quantized_ckpt, "config.json")
             if os.path.exists(quant_config_path):
                 with open(quant_config_path, "r") as f:
@@ -66,7 +82,7 @@ class WanModel:
     def _init_infer_class(self):
         self.pre_infer_class = WanPreInfer
         self.post_infer_class = WanPostInfer
-        if self.config.get("parallel_attn_type", None):
+        if self.config["seq_parallel"]:
             self.transformer_infer_class = WanTransformerDistInfer
         else:
             if self.config["feature_caching"] == "NoCaching":
@@ -88,20 +104,23 @@ class WanModel:
             else:
                 raise NotImplementedError(f"Unsupported feature_caching type: {self.config['feature_caching']}")
 
-    def _load_safetensor_to_dict(self, file_path, use_bf16, skip_bf16):
+    def _load_safetensor_to_dict(self, file_path, unified_dtype, sensitive_layer):
         with safe_open(file_path, framework="pt") as f:
-            return {key: (f.get_tensor(key).to(torch.bfloat16) if use_bf16 or all(s not in key for s in skip_bf16) else f.get_tensor(key)).pin_memory().to(self.device) for key in f.keys()}
+            return {
+                key: (f.get_tensor(key).to(GET_DTYPE()) if unified_dtype or all(s not in key for s in sensitive_layer) else f.get_tensor(key).to(GET_SENSITIVE_DTYPE())).pin_memory().to(self.device)
+                for key in f.keys()
+            }
 
-    def _load_ckpt(self, use_bf16, skip_bf16):
-        safetensors_path = find_hf_model_path(self.config, "dit_original_ckpt", subdir="original")
+    def _load_ckpt(self, unified_dtype, sensitive_layer):
+        safetensors_path = find_hf_model_path(self.config, self.model_path, "dit_original_ckpt", subdir="original")
         safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
         weight_dict = {}
         for file_path in safetensors_files:
-            file_weights = self._load_safetensor_to_dict(file_path, use_bf16, skip_bf16)
+            file_weights = self._load_safetensor_to_dict(file_path, unified_dtype, sensitive_layer)
             weight_dict.update(file_weights)
         return weight_dict
 
-    def _load_quant_ckpt(self, use_bf16, skip_bf16):
+    def _load_quant_ckpt(self, unified_dtype, sensitive_layer):
         ckpt_path = self.dit_quantized_ckpt
         logger.info(f"Loading quant dit model from {ckpt_path}")
 
@@ -121,17 +140,17 @@ class WanModel:
             with safe_open(safetensor_path, framework="pt") as f:
                 logger.info(f"Loading weights from {safetensor_path}")
                 for k in f.keys():
-                    if f.get_tensor(k).dtype == torch.float:
-                        if use_bf16 or all(s not in k for s in skip_bf16):
-                            weight_dict[k] = f.get_tensor(k).pin_memory().to(torch.bfloat16).to(self.device)
+                    if f.get_tensor(k).dtype in [torch.float16, torch.bfloat16, torch.float]:
+                        if unified_dtype or all(s not in k for s in sensitive_layer):
+                            weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_DTYPE()).to(self.device)
                         else:
-                            weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
+                            weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_SENSITIVE_DTYPE()).to(self.device)
                     else:
                         weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
 
         return weight_dict
 
-    def _load_quant_split_ckpt(self, use_bf16, skip_bf16):
+    def _load_quant_split_ckpt(self, unified_dtype, sensitive_layer):
         lazy_load_model_path = self.dit_quantized_ckpt
         logger.info(f"Loading splited quant model from {lazy_load_model_path}")
         pre_post_weight_dict = {}
@@ -139,20 +158,28 @@ class WanModel:
         safetensor_path = os.path.join(lazy_load_model_path, "non_block.safetensors")
         with safe_open(safetensor_path, framework="pt", device="cpu") as f:
             for k in f.keys():
-                if f.get_tensor(k).dtype == torch.float:
-                    if use_bf16 or all(s not in k for s in skip_bf16):
-                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(torch.bfloat16).to(self.device)
+                if f.get_tensor(k).dtype in [torch.float16, torch.bfloat16, torch.float]:
+                    if unified_dtype or all(s not in k for s in sensitive_layer):
+                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_DTYPE()).to(self.device)
                     else:
-                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
+                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_SENSITIVE_DTYPE()).to(self.device)
                 else:
                     pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
 
         return pre_post_weight_dict
 
+    def _load_gguf_ckpt(self):
+        gguf_path = self.dit_quantized_ckpt
+        logger.info(f"Loading gguf-quant dit model from {gguf_path}")
+        reader = gguf.GGUFReader(gguf_path)
+        for tensor in reader.tensors:
+            # TODO: implement _load_gguf_ckpt
+            pass
+
     def _init_weights(self, weight_dict=None):
-        use_bf16 = GET_DTYPE() == "BF16"
+        unified_dtype = GET_DTYPE() == GET_SENSITIVE_DTYPE()
         # Some layers run with float32 to achieve high accuracy
-        skip_bf16 = {
+        sensitive_layer = {
             "norm",
             "embedding",
             "modulation",
@@ -162,12 +189,12 @@ class WanModel:
         }
         if weight_dict is None:
             if not self.dit_quantized or self.weight_auto_quant:
-                self.original_weight_dict = self._load_ckpt(use_bf16, skip_bf16)
+                self.original_weight_dict = self._load_ckpt(unified_dtype, sensitive_layer)
             else:
                 if not self.config.get("lazy_load", False):
-                    self.original_weight_dict = self._load_quant_ckpt(use_bf16, skip_bf16)
+                    self.original_weight_dict = self._load_quant_ckpt(unified_dtype, sensitive_layer)
                 else:
-                    self.original_weight_dict = self._load_quant_split_ckpt(use_bf16, skip_bf16)
+                    self.original_weight_dict = self._load_quant_split_ckpt(unified_dtype, sensitive_layer)
         else:
             self.original_weight_dict = weight_dict
         # init weights
@@ -183,6 +210,10 @@ class WanModel:
         self.pre_infer = self.pre_infer_class(self.config)
         self.post_infer = self.post_infer_class(self.config)
         self.transformer_infer = self.transformer_infer_class(self.config)
+        if self.config["cfg_parallel"]:
+            self.infer_func = self.infer_with_cfg_parallel
+        else:
+            self.infer_func = self.infer_wo_cfg_parallel
 
     def set_scheduler(self, scheduler):
         self.scheduler = scheduler
@@ -202,14 +233,21 @@ class WanModel:
 
     @torch.no_grad()
     def infer(self, inputs):
+        return self.infer_func(inputs)
+
+    @torch.no_grad()
+    def infer_wo_cfg_parallel(self, inputs):
+        if self.cpu_offload:
+            if self.offload_granularity == "model" and self.scheduler.step_index == 0:
+                self.to_cuda()
+            elif self.offload_granularity != "model":
+                self.pre_weight.to_cuda()
+                self.post_weight.to_cuda()
+
         if self.transformer_infer.mask_map is None:
             _, c, h, w = self.scheduler.latents.shape
             video_token_num = c * (h // 2) * (w // 2)
             self.transformer_infer.mask_map = MaskMap(video_token_num, c)
-
-        if self.config.get("cpu_offload", False):
-            self.pre_weight.to_cuda()
-            self.post_weight.to_cuda()
 
         embed, grid_sizes, pre_infer_out = self.pre_infer.infer(self.pre_weight, inputs, positive=True)
         x = self.transformer_infer.infer(self.transformer_weights, grid_sizes, embed, *pre_infer_out)
@@ -226,12 +264,38 @@ class WanModel:
             x = self.transformer_infer.infer(self.transformer_weights, grid_sizes, embed, *pre_infer_out)
             noise_pred_uncond = self.post_infer.infer(self.post_weight, x, embed, grid_sizes)[0]
 
-            self.scheduler.noise_pred = noise_pred_uncond + self.config.sample_guide_scale * (self.scheduler.noise_pred - noise_pred_uncond)
+            self.scheduler.noise_pred = noise_pred_uncond + self.scheduler.sample_guide_scale * (self.scheduler.noise_pred - noise_pred_uncond)
 
-            if self.config.get("cpu_offload", False):
+            if self.clean_cuda_cache:
+                del x, embed, pre_infer_out, noise_pred_uncond, grid_sizes
+                torch.cuda.empty_cache()
+
+        if self.cpu_offload:
+            if self.offload_granularity == "model" and self.scheduler.step_index == self.scheduler.infer_steps - 1:
+                self.to_cpu()
+            elif self.offload_granularity != "model":
                 self.pre_weight.to_cpu()
                 self.post_weight.to_cpu()
 
-                if self.clean_cuda_cache:
-                    del x, embed, pre_infer_out, noise_pred_uncond, grid_sizes
-                    torch.cuda.empty_cache()
+    @torch.no_grad()
+    def infer_with_cfg_parallel(self, inputs):
+        assert self.config["enable_cfg"], "enable_cfg must be True"
+        cfg_p_group = self.config["device_mesh"].get_group(mesh_dim="cfg_p")
+        assert dist.get_world_size(cfg_p_group) == 2, f"cfg_p_world_size must be equal to 2"
+        cfg_p_rank = dist.get_rank(cfg_p_group)
+
+        if cfg_p_rank == 0:
+            embed, grid_sizes, pre_infer_out = self.pre_infer.infer(self.pre_weight, inputs, positive=True)
+            x = self.transformer_infer.infer(self.transformer_weights, grid_sizes, embed, *pre_infer_out)
+            noise_pred = self.post_infer.infer(self.post_weight, x, embed, grid_sizes)[0]
+        else:
+            embed, grid_sizes, pre_infer_out = self.pre_infer.infer(self.pre_weight, inputs, positive=False)
+            x = self.transformer_infer.infer(self.transformer_weights, grid_sizes, embed, *pre_infer_out)
+            noise_pred = self.post_infer.infer(self.post_weight, x, embed, grid_sizes)[0]
+
+        noise_pred_list = [torch.zeros_like(noise_pred) for _ in range(2)]
+        dist.all_gather(noise_pred_list, noise_pred, group=cfg_p_group)
+
+        noise_pred_cond = noise_pred_list[0]  # cfg_p_rank == 0
+        noise_pred_uncond = noise_pred_list[1]  # cfg_p_rank == 1
+        self.scheduler.noise_pred = noise_pred_uncond + self.scheduler.sample_guide_scale * (noise_pred_cond - noise_pred_uncond)

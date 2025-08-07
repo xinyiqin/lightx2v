@@ -1,7 +1,8 @@
 import torch
-from diffusers.models.embeddings import TimestepEmbedding
-from .utils import rope_params, sinusoidal_embedding_1d, guidance_scale_embedding
+
 from lightx2v.utils.envs import *
+
+from .utils import guidance_scale_embedding, rope_params, sinusoidal_embedding_1d
 
 
 class WanPreInfer:
@@ -24,10 +25,13 @@ class WanPreInfer:
         self.text_len = config["text_len"]
         self.enable_dynamic_cfg = config.get("enable_dynamic_cfg", False)
         self.cfg_scale = config.get("cfg_scale", 4.0)
+        self.infer_dtype = GET_DTYPE()
+        self.sensitive_layer_dtype = GET_SENSITIVE_DTYPE()
 
     def set_scheduler(self, scheduler):
         self.scheduler = scheduler
 
+    @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
     def infer(self, weights, inputs, positive, kv_start=0, kv_end=0):
         x = self.scheduler.latents
 
@@ -35,7 +39,10 @@ class WanPreInfer:
             t = self.scheduler.df_timesteps[self.scheduler.step_index].unsqueeze(0)
             assert t.dim() == 2  # df推理模型timestep是二维
         else:
-            t = torch.stack([self.scheduler.timesteps[self.scheduler.step_index]])
+            timestep = self.scheduler.timesteps[self.scheduler.step_index]
+            t = torch.stack([timestep])
+            if hasattr(self.scheduler, "mask"):
+                t = (self.scheduler.mask[0][:, ::2, ::2] * t).flatten()
 
         if positive:
             context = inputs["text_encoder_output"]["context"]
@@ -43,20 +50,22 @@ class WanPreInfer:
             context = inputs["text_encoder_output"]["context_null"]
 
         if self.task == "i2v":
-            clip_fea = inputs["image_encoder_output"]["clip_encoder_out"]
+            if self.config.get("use_image_encoder", True):
+                clip_fea = inputs["image_encoder_output"]["clip_encoder_out"]
 
             if self.config.get("changing_resolution", False):
-                image_encoder = inputs["image_encoder_output"]["vae_encode_out"][self.scheduler.changing_resolution_index]
+                image_encoder = inputs["image_encoder_output"]["vae_encoder_out"][self.scheduler.changing_resolution_index]
             else:
-                image_encoder = inputs["image_encoder_output"]["vae_encode_out"]
+                image_encoder = inputs["image_encoder_output"]["vae_encoder_out"]
 
-            frame_seq_length = (image_encoder.size(2) // 2) * (image_encoder.size(3) // 2)
-            if kv_end - kv_start >= frame_seq_length:  # 如果是CausalVid, image_encoder取片段
-                idx_s = kv_start // frame_seq_length
-                idx_e = kv_end // frame_seq_length
-                image_encoder = image_encoder[:, idx_s:idx_e, :, :]
-            y = image_encoder
-            x = torch.cat([x, y], dim=0)
+            if image_encoder is not None:
+                frame_seq_length = (image_encoder.size(2) // 2) * (image_encoder.size(3) // 2)
+                if kv_end - kv_start >= frame_seq_length:  # 如果是CausalVid, image_encoder取片段
+                    idx_s = kv_start // frame_seq_length
+                    idx_e = kv_end // frame_seq_length
+                    image_encoder = image_encoder[:, idx_s:idx_e, :, :]
+                y = image_encoder
+                x = torch.cat([x, y], dim=0)
 
         # embeddings
         x = weights.patch_embedding.apply(x.unsqueeze(0))
@@ -72,8 +81,8 @@ class WanPreInfer:
             cfg_embed = torch.nn.functional.silu(cfg_embed)
             cfg_embed = weights.cfg_cond_proj_2.apply(cfg_embed)
             embed = embed + cfg_embed
-        if GET_DTYPE() != "BF16":
-            embed = weights.time_embedding_0.apply(embed.float())
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            embed = weights.time_embedding_0.apply(embed.to(self.sensitive_layer_dtype))
         else:
             embed = weights.time_embedding_0.apply(embed)
         embed = torch.nn.functional.silu(embed)
@@ -93,8 +102,8 @@ class WanPreInfer:
 
         # text embeddings
         stacked = torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
-        if GET_DTYPE() != "BF16":
-            out = weights.text_embedding_0.apply(stacked.squeeze(0).float())
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            out = weights.text_embedding_0.apply(stacked.squeeze(0).to(self.sensitive_layer_dtype))
         else:
             out = weights.text_embedding_0.apply(stacked.squeeze(0))
         out = torch.nn.functional.gelu(out, approximate="tanh")
@@ -103,7 +112,7 @@ class WanPreInfer:
             del out, stacked
             torch.cuda.empty_cache()
 
-        if self.task == "i2v":
+        if self.task == "i2v" and self.config.get("use_image_encoder", True):
             context_clip = weights.proj_0.apply(clip_fea)
             if self.clean_cuda_cache:
                 del clip_fea
@@ -116,7 +125,8 @@ class WanPreInfer:
             context_clip = weights.proj_4.apply(context_clip)
             context = torch.concat([context_clip, context], dim=0)
         if self.clean_cuda_cache:
-            del context_clip
+            if self.config.get("use_image_encoder", True):
+                del context_clip
             torch.cuda.empty_cache()
         return (
             embed,

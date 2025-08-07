@@ -1,9 +1,11 @@
-import torch
 from abc import ABCMeta, abstractmethod
-from lightx2v.utils.registry_factory import MM_WEIGHT_REGISTER
-from lightx2v.utils.quant_utils import IntegerQuantizer, FloatQuantizer
-from lightx2v.utils.envs import *
+
+import torch
 from loguru import logger
+
+from lightx2v.utils.envs import *
+from lightx2v.utils.quant_utils import FloatQuantizer, IntegerQuantizer
+from lightx2v.utils.registry_factory import MM_WEIGHT_REGISTER
 
 try:
     from vllm import _custom_ops as ops
@@ -29,6 +31,16 @@ try:
     from torchao.quantization.utils import quant_int8_per_token_matmul, quantize_activation_per_token_absmax
 except ModuleNotFoundError:
     quant_int8_per_token_matmul, quantize_activation_per_token_absmax = None, None
+
+try:
+    import gguf
+except ImportError:
+    gguf = None
+
+try:
+    import marlin_cuda_quant
+except ModuleNotFoundError:
+    marlin_cuda_quant = None
 
 
 class MMWeightTemplate(metaclass=ABCMeta):
@@ -122,6 +134,7 @@ class MMWeightQuantTemplate(MMWeightTemplate):
         self.act_quant_func = None
         self.lazy_load = lazy_load
         self.lazy_load_file = lazy_load_file
+        self.infer_dtype = GET_DTYPE()
 
     # =========================
     # weight load functions
@@ -132,12 +145,12 @@ class MMWeightQuantTemplate(MMWeightTemplate):
             self.weight = self.lazy_load_file.get_tensor(self.weight_name).pin_memory()
             self.weight_scale = self.lazy_load_file.get_tensor(self.weight_scale_name).float().pin_memory()
             if self.bias_name is not None:
-                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(torch.bfloat16).pin_memory()
+                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(self.infer_dtype).pin_memory()
         else:
             self.weight = self.lazy_load_file.get_tensor(self.weight_name)
             self.weight_scale = self.lazy_load_file.get_tensor(self.weight_scale_name).float()
             if self.bias_name is not None:
-                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(torch.bfloat16)
+                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(self.infer_dtype)
 
         if self.weight_need_transpose:
             self.weight = self.weight.t()
@@ -387,7 +400,7 @@ class MMWeightWfp8channelAfp8channeldynamicQ8F(MMWeightQuantTemplate):
             self.bias.float(),
             input_tensor_scale,
             self.weight_scale,
-            out_dtype=torch.bfloat16,
+            out_dtype=self.infer_dtype,
         )
         return output_tensor.squeeze(0)
 
@@ -418,7 +431,7 @@ class MMWeightWint8channelAint8channeldynamicQ8F(MMWeightQuantTemplate):
             input_tensor_scale,
             self.weight_scale,
             fuse_gelu=False,
-            out_dtype=torch.bfloat16,
+            out_dtype=self.infer_dtype,
         )
         return output_tensor.squeeze(0)
 
@@ -442,7 +455,7 @@ class MMWeightWfp8block128Afp8channelgroup128dynamicDeepgemm(MMWeightQuantTempla
         Act Scale: torch.Size([1024, 16]), torch.float32
         Weight : torch.Size([4096, 2048]), torch.float8_e4m3fn
         Weight Scale: torch.Size([32, 16]), torch.float32
-        Out : torch.Size([1024, 4096]), torch.bfloat16
+        Out : torch.Size([1024, 4096]), self.infer_dtype
     """
 
     def __init__(self, weight_name, bias_name, lazy_load=False, lazy_load_file=None):
@@ -561,7 +574,7 @@ class MMWeightWfp8channelAfp8channeldynamicSglActVllm(MMWeightQuantTemplate):
             self.weight,
             input_tensor_scale,
             self.weight_scale,
-            torch.bfloat16,
+            self.infer_dtype,
             bias=self.bias,
         )
         return output_tensor
@@ -591,7 +604,7 @@ class MMWeightWfp8channelAfp8channeldynamicSgl(MMWeightQuantTemplate):
             self.weight,
             input_tensor_scale,
             self.weight_scale,
-            torch.bfloat16,
+            self.infer_dtype,
             bias=self.bias,
         )
         return output_tensor
@@ -626,7 +639,7 @@ class MMWeightWint8channelAint8channeldynamicSglActVllm(MMWeightQuantTemplate):
             self.weight,
             input_tensor_scale,
             self.weight_scale,
-            torch.bfloat16,
+            self.infer_dtype,
             self.bias,
         )
         return output_tensor
@@ -652,10 +665,59 @@ class MMWeightWint8channelAint8channeldynamicSglActVllm(MMWeightQuantTemplate):
     def apply(self, input_tensor):
         input_tensor = input_tensor
         input_tensor_quant, input_tensor_scale = self.act_quant_func(input_tensor)
-        output_tensor = quant_int8_per_token_matmul(input_tensor_quant, input_tensor_scale, self.weight, self.weight_scale.t().float(), output_dtype=torch.bfloat16)
+        output_tensor = quant_int8_per_token_matmul(input_tensor_quant, input_tensor_scale, self.weight, self.weight_scale.t().float(), output_dtype=self.infer_dtype)
         if self.bias is not None:
             output_tensor = output_tensor + self.bias
 
+        return output_tensor
+
+
+class MMWeightGGUFTemplate(MMWeightQuantTemplate):
+    TORCH_COMPATIBLE_QTYPES = (None, gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16)
+
+    def __init__(self, weight_name, bias_name, lazy_load=False, lazy_load_file=None):
+        super().__init__(weight_name, bias_name, lazy_load, lazy_load_file)
+
+    def dequantize_func(self):
+        # TODO: implement dequantize_func
+        pass
+
+
+@MM_WEIGHT_REGISTER("W-gguf-Q4_K")
+class MMWeightGGUFQ4K(MMWeightGGUFTemplate):
+    def __init__(self, weight_name, bias_name, lazy_load=False, lazy_load_file=None):
+        super().__init__(weight_name, bias_name, lazy_load, lazy_load_file)
+
+
+@MM_WEIGHT_REGISTER("W-int4-group128-sym-Marlin")
+class MMWeightWint4group128Marlin(MMWeightQuantTemplate):
+    """
+    Name: "W-int4-group128-sym-Marlin
+
+    Quant int4 x FP16:
+        Weight: int4 pergroup sym
+        Kernel: Marlin
+    """
+
+    def __init__(self, weight_name, bias_name, lazy_load=False, lazy_load_file=None):
+        super().__init__(weight_name, bias_name, lazy_load, lazy_load_file)
+        self.load_func = self.load_quantized
+
+    def load(self, weight_dict):
+        assert not self.lazy_load
+        self.load_func(weight_dict)
+        self.workspace = weight_dict[f"{self.weight_name}_workspace"]
+        if self.bias_name is not None:
+            self.bias = weight_dict[self.bias_name]
+            self.pinned_bias = torch.empty(self.bias.shape, pin_memory=True, dtype=self.bias.dtype)
+        else:
+            self.bias = None
+
+    def apply(self, input_tensor):
+        output_tensor = torch.empty(input_tensor.shape[:-1] + (self.weight_scale.shape[1],), dtype=input_tensor.dtype, device=input_tensor.device)
+        marlin_cuda_quant.mul(input_tensor, self.weight, output_tensor, self.weight_scale.half(), self.workspace, -1, -1, -1, -1)
+        if hasattr(self, "bias") and self.bias is not None:
+            output_tensor.add_(self.bias)
         return output_tensor
 
 

@@ -1,6 +1,7 @@
 import torch
-from lightx2v.utils.registry_factory import TENSOR_REGISTER
+
 from lightx2v.utils.envs import *
+from lightx2v.utils.registry_factory import TENSOR_REGISTER
 
 
 @TENSOR_REGISTER("Default")
@@ -9,12 +10,14 @@ class DefaultTensor:
         self.tensor_name = tensor_name
         self.lazy_load = lazy_load
         self.lazy_load_file = lazy_load_file
+        self.infer_dtype = GET_DTYPE()
+        self.sensitive_layer_dtype = GET_SENSITIVE_DTYPE()
 
     def load_from_disk(self):
         if not torch._dynamo.is_compiling():
-            self.tensor = self.lazy_load_file.get_tensor(self.tensor_name).to(torch.bfloat16).pin_memory()
+            self.tensor = self.lazy_load_file.get_tensor(self.tensor_name).to(self.infer_dtype).pin_memory()
         else:
-            self.tensor = self.lazy_load_file.get_tensor(self.tensor_name).to(torch.bfloat16)
+            self.tensor = self.lazy_load_file.get_tensor(self.tensor_name).to(self.infer_dtype)
 
     def load(self, weight_dict):
         if not self.lazy_load:
