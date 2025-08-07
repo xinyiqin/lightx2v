@@ -34,9 +34,6 @@ class BaseWorker:
         config["mode"] = ""
         logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
         seed_all(config.seed)
-        if config.parallel_attn_type:
-            if not dist.is_initialized():
-                dist.init_process_group(backend="nccl")
         self.runner = RUNNER_REGISTER[config.model_cls](config)
 
     def update_config(self, kwargs):
@@ -233,7 +230,7 @@ class DiTWorker(BaseWorker):
             vae_encoder_out = await data_manager.load_object(vae_path, device)
             image_encoder_output = {
                 "clip_encoder_out": clip_encoder_out,
-                "vae_encode_out": vae_encoder_out["vals"],
+                "vae_encoder_out": vae_encoder_out["vals"],
             }
             # apploy the config changes by vae encoder
             self.update_config(vae_encoder_out["kwargs"])
