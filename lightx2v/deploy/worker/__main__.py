@@ -91,7 +91,9 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity)
         logger.warning(f"Report task failed: {traceback.format_exc()}")
 
 async def main(args):
-    worker_keys = [args.task, args.model_cls, args.stage, args.worker]
+    if args.model_name == "":
+        args.model_name = args.model_cls
+    worker_keys = [args.task, args.model_name, args.stage, args.worker]
 
     data_manager = None
     if args.data_url.startswith("/"):
@@ -156,6 +158,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--task", type=str, required=True)
     parser.add_argument("--model_cls", type=str, required=True)
+    parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--stage", type=str, required=True)
     parser.add_argument("--worker", type=str, required=True)
     parser.add_argument("--identity", type=str, default='')

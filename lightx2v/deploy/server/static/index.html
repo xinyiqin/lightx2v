@@ -282,9 +282,19 @@
                                         </div>
                                         <div class="col-md-3 mb-3" v-if="taskForm.task === 'i2v'">
                                             <label for="inputFile" class="form-label">输入图片</label>
-                                            <input type="file" class="form-control" @change="handleFileUpload" accept="image/*" required>
+                                            <input type="file" class="form-control" @change="handleImageUpload" accept="image/*" required>
                                             <div v-if="imagePreview" class="mt-2">
                                                 <img :src="imagePreview" alt="预览图片" class="img-thumbnail" style="max-width: 100px; max-height: 100px;">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3 mb-3" v-if="isAudioModel">
+                                            <label for="audioFile" class="form-label">输入音频</label>
+                                            <input type="file" class="form-control" @change="handleAudioUpload" accept="audio/*" required>
+                                            <div v-if="audioPreview" class="mt-2">
+                                                <audio controls style="max-width: 100%; max-height: 60px;">
+                                                    <source :src="audioPreview" type="audio/mpeg">
+                                                    您的浏览器不支持音频播放
+                                                </audio>
                                             </div>
                                         </div>
                                     </div>
@@ -470,10 +480,6 @@
                                                                 <strong>种子值:</strong>
                                                                 <span class="badge bg-secondary ms-2">{{ task.params.seed }}</span>
                                                             </div>
-                                                            <div class="mb-3 d-flex align-items-center" v-if="task.params.image">
-                                                                <strong>输入图片:</strong>
-                                                                <span class="badge bg-success ms-2">已上传</span>
-                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -490,15 +496,19 @@
                                                             </ul>
                                                         </div>
                                                     </div>
-                                                    <div class="col-md-6" v-if="task.outputs && Object.keys(task.outputs).length > 0">
+                                                    <div class="col-md-6" v-if="task.outputs && task.inputs">
                                                         <h6 class="text-muted mb-2">
                                                             <i class="fas fa-file-video me-1"></i>
-                                                            输出结果
+                                                            输入文件/输出结果
                                                         </h6>
                                                         <div class="bg-white p-3 rounded border">
+                                                            <div v-for="(input, key) in task.inputs" :key="key" class="mb-2">
+                                                                <strong>输入文件:</strong> 
+                                                                <span class="badge bg-secondary output-badge">{{ key }}</span>
+                                                            </div>
                                                             <div v-for="(output, key) in task.outputs" :key="key" class="mb-2">
-                                                                <strong>{{ key }}:</strong> 
-                                                                <span class="badge bg-info output-badge">{{ output }}</span>
+                                                                <strong>输出结果:</strong> 
+                                                                <span class="badge bg-success output-badge">{{ key }}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -603,12 +613,14 @@
                     task: '',
                     model_cls: '',
                     stage: '',
-                    file: null,
+                    imageFile: null,
+                    audioFile: null,
                     prompt: '',
                     seed: 42
                 });
 
                 const imagePreview = ref(null);
+                const audioPreview = ref(null);
 
                 // 计算属性
                 const availableTaskTypes = computed(() => {
@@ -627,6 +639,10 @@
                     return [...new Set(models.value
                         .filter(m => m.task === taskForm.value.task && m.model_cls === taskForm.value.model_cls)
                         .map(m => m.stage))];
+                });
+
+                const isAudioModel = computed(() => {
+                    return taskForm.value.model_cls === "wan2.1_audio" || taskForm.value.model_cls === "wan2.2_moe_audio";
                 });
 
                 // 分页相关计算属性
@@ -760,9 +776,9 @@
                     }
                 };
 
-                const handleFileUpload = (event) => {
+                const handleImageUpload = (event) => {
                     const file = event.target.files[0];
-                    taskForm.value.file = file;
+                    taskForm.value.imageFile = file;
                     
                     // 创建图片预览
                     if (file) {
@@ -773,6 +789,22 @@
                         reader.readAsDataURL(file);
                     } else {
                         imagePreview.value = null;
+                    }
+                };
+
+                const handleAudioUpload = (event) => {
+                    const file = event.target.files[0];
+                    taskForm.value.audioFile = file;
+                    
+                    // 创建音频预览
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            audioPreview.value = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        audioPreview.value = null;
                     }
                 };
 
@@ -793,12 +825,22 @@
                         }
 
                         // 如果是i2v任务且有图片文件，将图片转换为base64
-                        if (taskForm.value.task === 'i2v' && taskForm.value.file) {
-                            const base64 = await fileToBase64(taskForm.value.file);
+                        if (taskForm.value.task === 'i2v' && taskForm.value.imageFile) {
+                            const base64 = await fileToBase64(taskForm.value.imageFile);
                             formData.input_image = {
                                 type: 'base64',
                                 data: base64
                             };
+                        }
+
+                        // 如果是音频模型且有音频文件，将音频转换为base64
+                        if (isAudioModel.value && taskForm.value.audioFile) {
+                            const base64 = await fileToBase64(taskForm.value.audioFile);
+                            formData.input_audio = {
+                                type: 'base64',
+                                data: base64
+                            };
+                            formData.negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
                         }
 
                         const response = await apiCall('/api/v1/task/submit', {
@@ -1040,11 +1082,13 @@
                     pageSize,
                     statusFilter,
                     visiblePages,
+                    isAudioModel,
                     showAlert,
                     loginWithGitHub,
                     logout,
                     loadModels,
-                    handleFileUpload,
+                    handleImageUpload,
+                    handleAudioUpload,
                     submitTask,
                     refreshTasks,
                     changePage,

@@ -4,6 +4,7 @@ import time
 import httpx
 import base64
 import traceback
+import torchaudio
 from PIL import Image
 from loguru import logger
 from datetime import datetime
@@ -96,6 +97,12 @@ async def preload_data(inp, inp_type, typ, val):
         if inp_type == "IMAGE":
             image = Image.open(io.BytesIO(data))
             logger.info(f"load image: {image.size}")
+            assert image.size[0] > 0 and image.size[1] > 0, "image is empty"
+        elif inp_type == "AUDIO":
+            waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
+            logger.info(f"load audio: {waveform.size()}, {sample_rate}")
+            assert waveform.size(0) > 0, "audio is empty"
+            assert sample_rate > 0, "audio sample rate is not valid"
         else:
             raise Exception(f"cannot parse inp_type={inp_type} data")
         return data

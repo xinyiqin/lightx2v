@@ -59,12 +59,21 @@
                         "outputs": ["output_video"]
                     }
                 }
+            },
+            "wan2.1_audio": {
+                "single_stage": {
+                    "pipeline": {
+                        "inputs": ["input_image", "input_audio"],
+                        "outputs": ["output_video"]
+                    }
+                }
             }
         }
     },
     "meta": {
         "special_types": {
             "input_image": "IMAGE",
+            "input_audio": "AUDIO",
             "latents": "TENSOR",
             "output_video": "VIDEO"
         },
@@ -76,7 +85,8 @@
                 "t2v-wan2.1-single_stage-pipeline": 300,
                 "t2v-wan2.1-multi_stage-dit": 300,
                 "i2v-wan2.1-single_stage-pipeline": 1200,
-                "i2v-wan2.1-multi_stage-dit": 1200
+                "i2v-wan2.1-multi_stage-dit": 1200,
+                "i2v-wan2.1_audio-single_stage-pipeline": 300
             },
             "worker_avg_window": 20,
             "worker_offline_timeout": 5,
