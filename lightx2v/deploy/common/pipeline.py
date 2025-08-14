@@ -166,6 +166,9 @@ class Pipeline:
     def get_schedule_ratio_low(self):
         return self.meta['monitor']['schedule_ratio_low']
 
+    def get_ping_timeout(self):
+        return self.meta['monitor']['ping_timeout']
+
     def get_queues(self):
         return self.queues
 

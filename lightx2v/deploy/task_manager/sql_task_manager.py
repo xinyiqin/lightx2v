@@ -5,7 +5,7 @@ import traceback
 from loguru import logger
 from datetime import datetime
 from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus
-from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.common.utils import class_try_catch_async, current_time
 
 
 class PostgresSQLTaskManager(BaseTaskManager):
@@ -27,7 +27,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
     def fmt_dict(self, data):
         super().fmt_dict(data)
-        for k in ['create_t', 'update_t']:
+        for k in ['create_t', 'update_t', 'ping_t']:
             if k in data and isinstance(data[k], float):
                 data[k] = datetime.fromtimestamp(data[k])
         for k in ['params', 'extra_info', 'inputs', 'outputs', 'previous']:
@@ -39,7 +39,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         for k in ['params', 'extra_info', 'inputs', 'outputs', 'previous']:
             if k in data:
                 data[k] = json.loads(data[k])
-        for k in ['create_t', 'update_t']:
+        for k in ['create_t', 'update_t', 'ping_t']:
             if k in data:
                 data[k] = data[k].timestamp()
 
@@ -136,6 +136,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         extra_info JSONB,
                         create_t TIMESTAMPTZ,
                         update_t TIMESTAMPTZ,
+                        ping_t TIMESTAMPTZ,
+                        infer_cost FLOAT,
                         PRIMARY KEY (task_id, worker_name),
                         FOREIGN KEY (task_id) REFERENCES {self.table_tasks}(task_id) ON DELETE CASCADE
                     )
@@ -206,9 +208,17 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
     async def update_subtask(self, conn, task_id, worker_name, **kwargs):
         query = f"UPDATE {self.table_subtasks} SET "
-        conds = ["update_t = $1"]
-        params = [datetime.now()]
-        param_idx = 1
+        conds = []
+        params = []
+        param_idx = 0
+        if kwargs.get('update_t', True):
+            param_idx += 1
+            conds.append(f"update_t = ${param_idx}")
+            params.append(datetime.now())
+        if kwargs.get('ping_t', False):
+            param_idx += 1
+            conds.append(f"ping_t = ${param_idx}")
+            params.append(datetime.now())
         if 'status' in kwargs:
             param_idx += 1
             conds.append(f"status = ${param_idx}")
@@ -217,6 +227,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             param_idx += 1
             conds.append(f"worker_identity = ${param_idx}")
             params.append(kwargs['worker_identity'])
+        if 'infer_cost' in kwargs:
+            param_idx += 1
+            conds.append(f"infer_cost = ${param_idx}")
+            params.append(kwargs['infer_cost'])
         query += " ,".join(conds)
         query += f" WHERE task_id = ${param_idx + 1} AND worker_name = ${param_idx + 2}"
         params.extend([task_id, worker_name])
@@ -244,13 +258,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     await conn.execute(f"""
                         INSERT INTO {self.table_subtasks}
                         (task_id, worker_name, inputs, outputs, queue, previous, status,
-                            worker_identity, result, fail_time, extra_info, create_t, update_t)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                            worker_identity, result, fail_time, extra_info, create_t, update_t,
+                            ping_t, infer_cost)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                         """,
                         sub['task_id'], sub['worker_name'], sub['inputs'], sub['outputs'],
                         sub['queue'], sub['previous'], sub['status'], sub['worker_identity'],
                         sub['result'], sub['fail_time'],sub['extra_info'], sub['create_t'],
-                        sub['update_t']
+                        sub['update_t'], sub['ping_t'], sub['infer_cost']
                     )
                 return True
         except:
@@ -309,6 +324,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 param_idx += 1
                 conds.append(f"update_t <= ${param_idx}")
                 params.append(datetime.fromtimestamp(kwargs['end_updated_t']))
+
+            if 'start_ping_t' in kwargs:
+                param_idx += 1
+                conds.append(f"ping_t >= ${param_idx}")
+                params.append(datetime.fromtimestamp(kwargs['start_ping_t']))
+
+            if 'end_ping_t' in kwargs:
+                param_idx += 1
+                conds.append(f"ping_t <= ${param_idx}")
+                params.append(datetime.fromtimestamp(kwargs['end_ping_t']))
 
             if 'user_id' in kwargs:
                 param_idx += 1
@@ -392,25 +417,44 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def run_subtasks(self, task_ids, worker_names, worker_identity):
+    async def run_subtasks(self, cands, worker_identity):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation='read_uncommitted'):
                 valids = []
-                for task_id, worker_name in zip(task_ids, worker_names):
-                    task, subtasks = await self.load(conn, task_id)
+                for cand in cands:
+                    task_id = cand['task_id']
+                    worker_name = cand['worker_name']
+                    task = await self.load(conn, task_id, only_task=True)
                     if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                         continue
-                    for sub in subtasks:
-                        if sub['worker_name'] == worker_name:
-                            await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING, worker_identity=worker_identity)
-                            await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
-                            valids.append((task_id, worker_name))
-                            break
+                    await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING, worker_identity=worker_identity, ping_t=True)
+                    await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
+                    valids.append(cand)
+                    break
                 return valids
         except:
             logger.error(f"run_subtasks error: {traceback.format_exc()}")
             return []
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def ping_subtask(self, task_id, worker_name, worker_identity):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation='read_uncommitted'):
+                task, subtasks = await self.load(conn, task_id)
+                for sub in subtasks:
+                    if sub['worker_name'] == worker_name:
+                        pre = sub['worker_identity']
+                        assert pre == worker_identity, f"worker identity not matched: {pre} vs {worker_identity}"
+                        await self.update_subtask(conn, task_id, worker_name, ping_t=True, update_t=False)
+                        return True
+                return False
+        except:
+            logger.error(f"ping_subtask error: {traceback.format_exc()}")
+            return False
         finally:
             await self.release_conn(conn)
 
@@ -431,7 +475,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
                 assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
                 for sub in subs:
-                    await self.update_subtask(conn, task_id, sub['worker_name'], status=status)
+                    infer_cost = current_time() - sub['update_t']
+                    if status == TaskStatus.SUCCEED:
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, infer_cost=infer_cost)
+                        sub['infer_cost'] = infer_cost
+                    else:
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status)
                     sub['status'] = status
 
                 if task['status'] == TaskStatus.CANCEL:
@@ -589,9 +638,7 @@ async def test():
     subtasks = await m.next_subtasks(task_id)
     print(" - next_subtasks:", subtasks)
 
-    task_ids = [sub['task_id'] for sub in subtasks]
-    worker_names = [sub['worker_name'] for sub in subtasks]
-    await m.run_subtasks(task_ids, worker_names, 'fake-worker')
+    await m.run_subtasks(subtasks, 'fake-worker')
     await m.finish_subtasks(task_id, TaskStatus.FAILED)
     await m.cancel_task(task_id)
     await m.resume_task(task_id)

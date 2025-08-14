@@ -93,7 +93,8 @@
             "worker_min_capacity": 20,
             "task_tolerance_timeout": 3600,
             "schedule_ratio_high": 0.25,
-            "schedule_ratio_low": 0.02
+            "schedule_ratio_low": 0.02,
+            "ping_timeout": 12
         }
     }
 }

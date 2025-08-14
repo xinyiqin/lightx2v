@@ -40,7 +40,10 @@ class BaseTaskManager:
     async def next_subtasks(self, task_id):
         raise NotImplementedError
 
-    async def run_subtasks(self, task_ids, worker_names, worker_identity):
+    async def run_subtasks(self, subtasks, worker_identity):
+        raise NotImplementedError
+
+    async def ping_subtask(self, task_id, worker_name, worker_identity):
         raise NotImplementedError
 
     async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
@@ -117,6 +120,8 @@ class BaseTaskManager:
                 "extra_info": "",
                 "create_t": cur_t,
                 "update_t": cur_t,
+                "ping_t": 0.0,
+                "infer_cost": -1.0,
             })
         assert await self.insert_task(task, subtasks), f"create task {task_id} failed"
         return task_id

@@ -30,6 +30,65 @@ HEADERS = {
     "Authorization": f"Bearer {WORKER_SECRET_KEY}",
     "Content-Type": "application/json"
 }
+STOPPED = False
+
+async def ping_life(server_url, worker_identity, keys):
+    url = server_url + "/api/v1/worker/ping/life"
+    params = {"worker_identity": worker_identity, "worker_keys": keys}
+    while True:
+        try:
+            logger.info(f"{worker_identity} pinging life ...")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=json.dumps(params), headers=HEADERS) as ret:
+                    if ret.status == 200:
+                        ret = await ret.json()
+                        logger.info(f"{worker_identity} ping life: {ret}")
+                        if ret['msg'] == 'delete':
+                            logger.warning(f"{worker_identity} deleted")
+                            # asyncio.create_task(shutdown(asyncio.get_event_loop()))
+                            return
+                        await asyncio.sleep(10)
+                    else:
+                        error_text = await ret.text()
+                        raise Exception(f"{worker_identity} ping life fail: [{ret.status}], error: {error_text}")
+        except asyncio.CancelledError:
+            logger.warning("Ping life cancelled, shutting down...")
+            raise asyncio.CancelledError
+        except:
+            logger.warning(f"Ping life failed: {traceback.format_exc()}")
+            await asyncio.sleep(10)
+
+
+async def ping_subtask(server_url, worker_identity, task_id, worker_name, running_task):
+    url = server_url + "/api/v1/worker/ping/subtask"
+    params = {
+        "worker_identity": worker_identity,
+        "task_id": task_id,
+        "worker_name": worker_name,
+    }
+    while True:
+        try:
+            logger.info(f"{worker_identity} pinging subtask {task_id} {worker_name} ...")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=json.dumps(params), headers=HEADERS) as ret:
+                    if ret.status == 200:
+                        ret = await ret.json()
+                        logger.info(f"{worker_identity} ping subtask {task_id} {worker_name}: {ret}")
+                        if ret['msg'] == 'delete':
+                            logger.warning(f"{worker_identity} subtask {task_id} {worker_name} deleted")
+                            running_task.cancel()
+                            return
+                        await asyncio.sleep(10)
+                    else:
+                        error_text = await ret.text()
+                        raise Exception(f"{worker_identity} ping subtask fail: [{ret.status}], error: {error_text}")
+        except asyncio.CancelledError:
+            logger.warning(f"Ping subtask {task_id} {worker_name} cancelled")
+            raise asyncio.CancelledError
+        except:
+            logger.warning(f"Ping subtask failed: {traceback.format_exc()}")
+            await asyncio.sleep(10)
+
 
 async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, timeout):
     url = server_url + "/api/v1/worker/fetch"
@@ -47,11 +106,9 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
                     ret = await ret.json()
                     subtasks = ret['subtasks']
                     for sub in subtasks:
-                        RUNNING_SUBTASKS[sub['task_id']] = {
-                            "server": server_url,
-                            "worker_name": sub['worker_name'],
-                            "identity": worker_identity,
-                        }
+                        sub['server_url'] = server_url
+                        sub['worker_identity'] = worker_identity
+                        RUNNING_SUBTASKS[sub['task_id']] = sub
                     logger.info(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
                     return subtasks
                 else:
@@ -63,14 +120,17 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
         raise asyncio.CancelledError
     except:
         logger.warning(f"Fetch subtasks failed: {traceback.format_exc()}")
+        await asyncio.sleep(10)
 
-async def report_task(server_url, task_id, worker_name, status, worker_identity):
+
+async def report_task(server_url, task_id, worker_name, status, worker_identity, queue, **kwargs):
     url = server_url + "/api/v1/worker/report"
     params = {
         "task_id": task_id,
         "worker_name": worker_name,
         "status": status,
         "worker_identity": worker_identity,
+        "queue": queue,
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -90,6 +150,7 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity)
     except:
         logger.warning(f"Report task failed: {traceback.format_exc()}")
 
+
 async def main(args):
     if args.model_name == "":
         args.model_name = args.model_cls
@@ -104,25 +165,46 @@ async def main(args):
         raise NotImplementedError
     runner = RUNNER_MAP[args.worker](args)
     await data_manager.init()
+    asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
 
-    try:
-        while True:
-            subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
-            if subtasks is not None and len(subtasks) > 0:
-                for sub in subtasks:
-                    ret = await runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager)
-                    status = TaskStatus.SUCCEED.name if ret is True else TaskStatus.FAILED.name
-                    await report_task(args.server, sub['task_id'], sub['worker_name'], status, args.identity)
-            else:
-                await asyncio.sleep(1)
-    except asyncio.CancelledError:
-        logger.warning("Main loop cancelled, shutting down...")
-    except:
-        logger.error(f"Main loop failed: {traceback.format_exc()}")
+    while True:
+        subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
+        if subtasks is not None and len(subtasks) > 0:
+            for idx, sub in enumerate(subtasks):
+                status = TaskStatus.FAILED.name
+
+                try:
+                    run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
+                    ping_task = asyncio.create_task(ping_subtask(args.server, args.identity, sub['task_id'], sub['worker_name'], run_task))
+                    ret = await run_task
+                    ping_task.cancel()
+                    if ret is True:
+                        status = TaskStatus.SUCCEED.name
+
+                except asyncio.CancelledError:
+                    if STOPPED:
+                        logger.warning("Main loop cancelled, already stopped, should exit")
+                        for i in range(idx + 1, len(subtasks)):
+                            try:
+                                await report_task(status=TaskStatus.FAILED.name, **subtasks[i])
+                            except:
+                                logger.warning(f"Report failed: {traceback.format_exc()}")
+                        return
+                    logger.warning("Main loop cancelled, do not shut down")
+
+                finally:
+                    if sub['task_id'] in RUNNING_SUBTASKS:
+                        try:
+                            await report_task(status=status, **sub)
+                        except:
+                            logger.warning(f"Report failed: {traceback.format_exc()}")
 
 
 async def shutdown(loop):
     logger.warning("Received kill signal")
+    global STOPPED
+    STOPPED = True
+
     for t in asyncio.all_tasks():
         if t is not asyncio.current_task():
             logger.warning(f"Cancel async task {t} ...")
@@ -134,7 +216,7 @@ async def shutdown(loop):
         try:
             s = RUNNING_SUBTASKS[task_id]
             logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
-            await report_task(s['server'], task_id, s['worker_name'], TaskStatus.FAILED.name, s['identity'])
+            await report_task(status=TaskStatus.FAILED.name, **s)
         except:
             logger.warning(f"Report task {task_id} failed: {traceback.format_exc()}")
 

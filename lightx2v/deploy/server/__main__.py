@@ -283,33 +283,36 @@ async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_ac
         # check client disconnected
         async def check_client(request, fetch_task, identity, queue):
             while True:
-                ret = await request.is_disconnected()
-                if ret:
-                    await server_monitor.worker_update(queue, identity, WorkerStatus.DISCONNECT)
+                msg = await request.receive()
+                if msg['type'] == 'http.disconnect':
+                    logger.warning(f"Worker {identity} {queue} disconnected, req: {request.client}, {msg}")
                     fetch_task.cancel()
+                    await server_monitor.worker_update(queue, identity, WorkerStatus.DISCONNECT)
                     return
                 await asyncio.sleep(1)
 
         # get worker info
         worker = model_pipelines.get_worker(keys)
         await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHING)
+
         fetch_task = asyncio.create_task(queue_manager.get_subtasks(worker['queue'], max_batch, timeout))
         check_task = asyncio.create_task(check_client(request, fetch_task, identity, worker['queue']))
-        subtasks = await fetch_task
-        disconnected = await request.is_disconnected()
+        try:
+            subtasks = await asyncio.wait_for(fetch_task, timeout=timeout)
+        except asyncio.TimeoutError:
+            subtasks = []
+            fetch_task.cancel()
+        check_task.cancel()
 
-        if not subtasks or disconnected:
-            return {'subtasks': []}
-
-        worker_names = [sub['worker_name'] for sub in subtasks]
-        task_ids = [sub['task_id'] for sub in subtasks]
-        valids = await task_manager.run_subtasks(task_ids, worker_names, identity)
-        valid_subtasks = [sub for sub in subtasks if (sub['task_id'], sub['worker_name']) in valids]
+        subtasks = [] if subtasks is None else subtasks
+        valid_subtasks = await task_manager.run_subtasks(subtasks, identity)
+        valids = [sub['task_id'] for sub in valid_subtasks]
 
         if len(valid_subtasks) > 0:
-            logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
-            check_task.cancel()
             await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHED)
+            logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
+        else:
+            await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.DISCONNECT)
         return {'subtasks': valid_subtasks}
 
     except Exception as e:
@@ -326,7 +329,8 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
         worker_name = params.pop('worker_name')
         status = TaskStatus[params.pop('status')]
         identity = params.pop('worker_identity')
-        await server_monitor.worker_update(None, identity, WorkerStatus.REPORT)
+        queue = params.pop('queue')
+        await server_monitor.worker_update(queue, identity, WorkerStatus.REPORT)
 
         ret = await task_manager.finish_subtasks(
             task_id, status, worker_identity=identity, worker_name=worker_name
@@ -350,6 +354,59 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
             logger.warning(f"Task {task_id} failed")
 
         return {'msg': 'ok'}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.post("/api/v1/worker/ping/subtask")
+async def api_v1_worker_ping_subtask(request: Request, valid = Depends(verify_worker_access)):
+    try:
+        params = await request.json()
+        logger.info(f"{params}")
+        task_id = params.pop('task_id')
+        worker_name = params.pop('worker_name')
+        identity = params.pop('worker_identity')
+
+        task = await task_manager.query_task(task_id)
+        if task['status'] in [TaskStatus.FAILED, TaskStatus.CANCEL]:
+            return {'msg': 'delete'}
+
+        assert await task_manager.ping_subtask(task_id, worker_name, identity)
+        await server_monitor.worker_update(None, identity, WorkerStatus.PING)
+        return {'msg': 'ok'}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.post("/api/v1/worker/ping/life")
+async def api_v1_worker_ping_life(request: Request, valid = Depends(verify_worker_access)):
+    try:
+        params = await request.json()
+        logger.info(f"{params}")
+        identity = params.pop('worker_identity')
+        keys = params.pop('worker_keys')
+        worker = model_pipelines.get_worker(keys)
+
+        # worker lost, init it again
+        queue = server_monitor.identity_to_queue.get(identity, None)
+        if queue is None:
+            queue = worker['queue']
+            logger.warning(f"worker {identity} lost, refetching it")
+            await server_monitor.worker_update(queue, identity, WorkerStatus.FETCHING)
+        else:
+            assert queue == worker['queue'], f"worker {identity} queue not matched: {queue} vs {worker['queue']}"
+
+        metrics = await server_monitor.cal_metrics()
+        ret = {'queue': queue, 'metrics': metrics[queue]}
+        if identity in metrics[queue]['del_worker_identities']:
+            ret['msg'] = 'delete'
+        else:
+            ret['msg'] = 'ok'
+        return ret
 
     except Exception as e:
         traceback.print_exc()

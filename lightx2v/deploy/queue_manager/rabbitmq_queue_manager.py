@@ -68,26 +68,23 @@ class RabbitMQQueueManager(BaseQueueManager):
         try:
             q = await self.declare_queue(queue)
             subtasks = []
-            t0 = time.time()
-
-            while True:
-                cur_timeout = max(timeout - (time.time() - t0), 0.1)
-                message = await q.get(no_ack=False, timeout=cur_timeout, fail=False)
-                if message:
+            async with q.iterator() as qiter:
+                async for message in qiter:
                     await message.ack()
                     subtask = json.loads(message.body.decode('utf-8'))
                     subtasks.append(subtask)
                     if len(subtasks) >= max_batch:
                         return subtasks
-                    else:
-                        continue
-                else:
-                    if len(subtasks) > 0:
-                        return subtasks
-                    if time.time() - t0 > timeout:
-                        return None
-                    await asyncio.sleep(1)
-
+                    while True:
+                        message = await q.get(no_ack=False, fail=False)
+                        if message:
+                            await message.ack()
+                            subtask = json.loads(message.body.decode('utf-8'))
+                            subtasks.append(subtask)
+                            if len(subtasks) >= max_batch:
+                                return subtasks
+                        else:
+                            return subtasks
         except asyncio.CancelledError:
             logger.warning(f"rabbitmq get_subtasks for {queue} cancelled")
             return None

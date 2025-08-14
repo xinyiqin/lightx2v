@@ -19,13 +19,13 @@ class LocalTaskManager(BaseTaskManager):
 
     def fmt_dict(self, data):
         super().fmt_dict(data)
-        for k in ['create_t', 'update_t']:
+        for k in ['create_t', 'update_t', 'ping_t']:
             if k in data:
                 data[k] = time2str(data[k])
 
     def parse_dict(self, data):
         super().parse_dict(data)
-        for k in ['create_t', 'update_t']:
+        for k in ['create_t', 'update_t', 'ping_t']:
             if k in data:
                 data[k] = str2time(data[k])
 
@@ -85,6 +85,10 @@ class LocalTaskManager(BaseTaskManager):
                     continue
                 if 'end_updated_t' in kwargs and kwargs['end_updated_t'] < task['update_t']:
                     continue
+                if 'start_ping_t' in kwargs and kwargs['start_ping_t'] > task['ping_t']:
+                    continue
+                if 'end_ping_t' in kwargs and kwargs['end_ping_t'] < task['ping_t']:
+                    continue
                 tasks.append(task)
         if 'count' in kwargs:
             return len(tasks)
@@ -129,9 +133,11 @@ class LocalTaskManager(BaseTaskManager):
         return nexts
 
     @class_try_catch_async
-    async def run_subtasks(self, task_ids, worker_names, worker_identity):
+    async def run_subtasks(self, cands, worker_identity):
         valids = []
-        for task_id, worker_name in zip(task_ids, worker_names):
+        for cand in cands:
+            task_id = cand['task_id']
+            worker_name = cand['worker_name']
             task, subtasks = self.load(task_id)
             if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                 continue
@@ -142,10 +148,23 @@ class LocalTaskManager(BaseTaskManager):
                     sub['update_t'] = current_time()
                     task['status'] = TaskStatus.RUNNING
                     task['update_t'] = current_time()
+                    task['ping_t'] = current_time()
                     self.save(task, subtasks)
-                    valids.append((task_id, worker_name))
+                    valids.append(cand)
                     break
         return valids
+
+    @class_try_catch_async
+    async def ping_subtask(self, task_id, worker_name, worker_identity):
+        task, subtasks = self.load(task_id)
+        for sub in subtasks:
+            if sub['worker_name'] == worker_name:
+                pre = sub['worker_identity']
+                assert pre == worker_identity, f"worker identity not matched: {pre} vs {worker_identity}"
+                sub['ping_t'] = current_time()
+                self.save(task, subtasks)
+                return True
+        return False
 
     @class_try_catch_async
     async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
@@ -162,8 +181,11 @@ class LocalTaskManager(BaseTaskManager):
 
         assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
         for sub in subs:
+            pre_t = sub['update_t']
             sub['status'] = status
             sub['update_t'] = current_time()
+            if status == TaskStatus.SUCCEED:
+                sub['infer_cost'] = sub['update_t'] - pre_t
 
         if task['status'] == TaskStatus.CANCEL:
             return TaskStatus.CANCEL
@@ -288,9 +310,7 @@ async def test():
     subtasks = await m.next_subtasks(task_id)
     print(" - next_subtasks:", subtasks)
 
-    task_ids = [sub['task_id'] for sub in subtasks]
-    worker_names = [sub['worker_name'] for sub in subtasks]
-    await m.run_subtasks(task_ids, worker_names, 'fake-worker')
+    await m.run_subtasks(subtasks, 'fake-worker')
     await m.finish_subtasks(task_id, TaskStatus.FAILED)
     await m.cancel_task(task_id)
     await m.resume_task(task_id)

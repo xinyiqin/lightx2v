@@ -45,7 +45,7 @@ class AuthManager:
             }
             headers = {"Accept": "application/json"}
 
-            proxy = os.getenv("https_proxy", None)
+            proxy = os.getenv("auth_https_proxy", None)
             if proxy:
                 logger.info(f"auth_github use proxy: {proxy}")
             async with aiohttp.ClientSession() as session:

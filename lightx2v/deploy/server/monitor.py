@@ -10,6 +10,7 @@ class WorkerStatus(Enum):
     FETCHED = 2
     DISCONNECT = 3
     REPORT = 4
+    PING = 5
 
 
 class CostWindow:
@@ -26,48 +27,66 @@ class CostWindow:
 
 
 class WorkerClient:
-    def __init__(self, queue, identity, infer_timeout, offline_timeout, avg_window):
+    def __init__(self, queue, identity, infer_timeout, offline_timeout, avg_window, ping_timeout):
         self.queue = queue
         self.identity = identity
         self.status = None
         self.update_t = time.time()
+        self.fetched_t = None
         self.infer_cost = CostWindow(avg_window)
         self.offline_cost = CostWindow(avg_window)
         self.infer_timeout = infer_timeout
         self.offline_timeout = offline_timeout
+        self.ping_timeout = ping_timeout
 
-    # FETCHING -> FETCHED -> REPORT -> FETCHING
+    # FETCHING -> FETCHED -> PING * n -> REPORT -> FETCHING
     # FETCHING -> DISCONNECT -> FETCHING
     def update(self, status: WorkerStatus):
         pre_status = self.status
         pre_t = self.update_t
         self.status = status
         self.update_t = time.time()
-        cur_cost = self.update_t - pre_t
 
         if status == WorkerStatus.FETCHING:
-            if pre_status in [WorkerStatus.FETCHED, WorkerStatus.REPORT] and pre_t is not None:
+            if pre_status in [WorkerStatus.DISCONNECT, WorkerStatus.REPORT] and pre_t is not None:
+                cur_cost = self.update_t - pre_t
                 if cur_cost < self.offline_timeout:
                     self.offline_cost.append(max(cur_cost, 1))
 
         elif status == WorkerStatus.REPORT:
-            if pre_status == WorkerStatus.FETCHED and pre_t is not None:
+            if self.fetched_t is not None:
+                cur_cost = self.update_t - self.fetched_t
+                self.fetched_t = None
                 if cur_cost < self.infer_timeout:
                     self.infer_cost.append(max(cur_cost, 1))
 
+        elif status == WorkerStatus.FETCHED:
+            self.fetched_t = time.time()
+
     def check(self):
-        elapse = time.time() - self.update_t
-        if self.status == WorkerStatus.FETCHED:
-            # infer too long
+        # infer too long
+        if self.fetched_t is not None:
+            elapse = time.time() - self.fetched_t
             if self.infer_cost.avg is not None and elapse > self.infer_cost.avg * 5:
+                logger.warning(f"Worker {self.identity} {self.queue} infer timeout: {elapse:.2f} s")
                 return False
             if elapse > self.infer_timeout:
+                logger.warning(f"Worker {self.identity} {self.queue} infer timeout2: {elapse:.2f} s")
                 return False
-        elif self.status == WorkerStatus.DISCONNECT:
-            # offline too long
+
+        elapse = time.time() - self.update_t
+        # no ping too long
+        if self.status in [WorkerStatus.FETCHED, WorkerStatus.PING]:
+            if elapse > self.ping_timeout:
+                logger.warning(f"Worker {self.identity} {self.queue} ping timeout: {elapse:.2f} s")
+                return False
+        # offline too long
+        elif self.status in [WorkerStatus.DISCONNECT, WorkerStatus.REPORT]:
             if self.offline_cost.avg is not None and elapse > self.offline_cost.avg * 5:
+                logger.warning(f"Worker {self.identity} {self.queue} offline timeout: {elapse:.2f} s")
                 return False
             if elapse > self.offline_timeout:
+                logger.warning(f"Worker {self.identity} {self.queue} offline timeout2: {elapse:.2f} s")
                 return False
         return True
 
@@ -91,6 +110,7 @@ class ServerMonitor:
         self.task_timeout = self.model_pipelines.get_task_tolerance_timeout()
         self.schedule_ratio_high = self.model_pipelines.get_schedule_ratio_high()
         self.schedule_ratio_low = self.model_pipelines.get_schedule_ratio_low()
+        self.ping_timeout = self.model_pipelines.get_ping_timeout()
 
     async def init(self):
         while True:
@@ -114,7 +134,7 @@ class ServerMonitor:
         if identity not in self.worker_clients[queue]:
             infer_timeout = self.model_pipelines.get_subtask_running_timeout(queue)
             self.worker_clients[queue][identity] = WorkerClient(
-                queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window
+                queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window, self.ping_timeout
             )
             self.identity_to_queue[identity] = queue
         return self.worker_clients[queue][identity]
@@ -133,13 +153,14 @@ class ServerMonitor:
             idens = list(self.worker_clients[queue].keys())
             for identity in idens:
                 if not self.worker_clients[queue][identity].check():
-                    logger.warning(f"Worker {queue} {identity} out of contact, remove it")
                     self.worker_clients[queue].pop(identity)
                     self.identity_to_queue.pop(identity)
+                    logger.warning(f"Worker {queue} {identity} out of contact removed, remain {self.worker_clients[queue]}")
 
     async def clean_subtasks(self):
         created_end_t = time.time() - self.subtask_created_timeout
         pending_end_t = time.time() - self.subtask_pending_timeout
+        ping_end_t = time.time() - self.ping_timeout
         fails = set()
 
         created_tasks = await self.task_manager.list_tasks(
@@ -169,6 +190,14 @@ class ServerMonitor:
         for t in running_tasks:
             if t['task_id'] in fails:
                 continue
+            if t['ping_t'] > 0:
+                ping_elpase = time.time() - t['ping_t']
+                if ping_elpase >= self.ping_timeout:
+                    logger.warning(f"Subtask {fmt_subtask(t)} PING timeout: {ping_elpase:.2f} s")
+                    await self.task_manager.finish_subtasks(
+                        t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name']
+                    )
+                    fails.add(t['task_id'])
             elapse = time.time() - t['update_t']
             limit = self.model_pipelines.get_subtask_running_timeout(t['queue'])
             if elapse >= limit:
