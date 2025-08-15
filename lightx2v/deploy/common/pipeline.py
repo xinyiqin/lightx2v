@@ -138,36 +138,8 @@ class Pipeline:
     def get_type(self, name):
         return self.meta['special_types'].get(name, "OBJECT")
 
-    def get_subtask_created_timeout(self):
-        return self.meta['monitor']['subtask_created_timeout']
-
-    def get_subtask_pending_timeout(self):
-        return self.meta['monitor']['subtask_pending_timeout']
-
-    def get_subtask_running_timeout(self, queue):
-        default = self.meta['monitor']['subtask_running_timeout']['default']
-        return self.meta['monitor']['subtask_running_timeout'].get(queue, default)
-
-    def get_worker_avg_window(self):
-        return self.meta['monitor']['worker_avg_window']
-
-    def get_worker_offline_timeout(self):
-        return self.meta['monitor']['worker_offline_timeout']
-
-    def get_worker_min_capacity(self):
-        return self.meta['monitor']['worker_min_capacity']
-
-    def get_task_tolerance_timeout(self):
-        return self.meta['monitor']['task_tolerance_timeout']
-
-    def get_schedule_ratio_high(self):
-        return self.meta['monitor']['schedule_ratio_high']
-    
-    def get_schedule_ratio_low(self):
-        return self.meta['monitor']['schedule_ratio_low']
-
-    def get_ping_timeout(self):
-        return self.meta['monitor']['ping_timeout']
+    def get_monitor_config(self):
+        return self.meta['monitor']
 
     def get_queues(self):
         return self.queues

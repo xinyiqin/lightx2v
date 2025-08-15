@@ -80,8 +80,7 @@
         "monitor": {
             "subtask_created_timeout": 1800,
             "subtask_pending_timeout": 1800,
-            "subtask_running_timeout": {
-                "default":60,
+            "subtask_running_timeouts": {
                 "t2v-wan2.1-single_stage-pipeline": 300,
                 "t2v-wan2.1-multi_stage-dit": 300,
                 "i2v-wan2.1-single_stage-pipeline": 1200,
@@ -91,7 +90,9 @@
             "worker_avg_window": 20,
             "worker_offline_timeout": 5,
             "worker_min_capacity": 20,
-            "task_tolerance_timeout": 3600,
+            "worker_min_cnt": 1,
+            "worker_max_cnt": 10,
+            "task_timeout": 3600,
             "schedule_ratio_high": 0.25,
             "schedule_ratio_low": 0.02,
             "ping_timeout": 12

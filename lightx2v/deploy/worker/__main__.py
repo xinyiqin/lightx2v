@@ -165,7 +165,7 @@ async def main(args):
         raise NotImplementedError
     runner = RUNNER_MAP[args.worker](args)
     await data_manager.init()
-    asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
+    # asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
 
     while True:
         subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)

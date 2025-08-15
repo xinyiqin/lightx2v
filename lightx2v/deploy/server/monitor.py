@@ -100,17 +100,36 @@ class ServerMonitor:
         self.stop = False
         self.worker_clients = {}
         self.identity_to_queue = {}
+        self.subtask_run_timeouts = {}
 
         self.all_queues = self.model_pipelines.get_queues()
-        self.subtask_created_timeout = self.model_pipelines.get_subtask_created_timeout()
-        self.subtask_pending_timeout = self.model_pipelines.get_subtask_pending_timeout()
-        self.worker_avg_window = self.model_pipelines.get_worker_avg_window()
-        self.worker_offline_timeout = self.model_pipelines.get_worker_offline_timeout()
-        self.worker_min_capacity = self.model_pipelines.get_worker_min_capacity()
-        self.task_timeout = self.model_pipelines.get_task_tolerance_timeout()
-        self.schedule_ratio_high = self.model_pipelines.get_schedule_ratio_high()
-        self.schedule_ratio_low = self.model_pipelines.get_schedule_ratio_low()
-        self.ping_timeout = self.model_pipelines.get_ping_timeout()
+        self.config = self.model_pipelines.get_monitor_config()
+
+        for queue in self.all_queues:
+            self.subtask_run_timeouts[queue] = self.config['subtask_running_timeouts'].get(queue, 60)
+        self.subtask_created_timeout = self.config['subtask_created_timeout']
+        self.subtask_pending_timeout = self.config['subtask_pending_timeout']
+        self.worker_avg_window = self.config['worker_avg_window']
+        self.worker_offline_timeout = self.config['worker_offline_timeout']
+        self.worker_min_capacity = self.config['worker_min_capacity']
+        self.worker_min_cnt = self.config['worker_min_cnt']
+        self.worker_max_cnt = self.config['worker_max_cnt']
+        self.task_timeout = self.config['task_timeout']
+        self.schedule_ratio_high = self.config['schedule_ratio_high']
+        self.schedule_ratio_low = self.config['schedule_ratio_low']
+        self.ping_timeout = self.config['ping_timeout']
+
+        assert self.worker_avg_window > 0
+        assert self.worker_offline_timeout > 0
+        assert self.worker_min_capacity > 0
+        assert self.worker_min_cnt > 0
+        assert self.worker_max_cnt > 0
+        assert self.worker_min_cnt <= self.worker_max_cnt
+        assert self.task_timeout > 0
+        assert self.schedule_ratio_high > 0 and self.schedule_ratio_high < 1
+        assert self.schedule_ratio_low > 0 and self.schedule_ratio_low < 1
+        assert self.schedule_ratio_high >= self.schedule_ratio_low
+        assert self.ping_timeout > 0
 
     async def init(self):
         while True:
@@ -132,7 +151,7 @@ class ServerMonitor:
         if queue not in self.worker_clients:
             self.worker_clients[queue] = {}
         if identity not in self.worker_clients[queue]:
-            infer_timeout = self.model_pipelines.get_subtask_running_timeout(queue)
+            infer_timeout = self.subtask_run_timeouts[queue]
             self.worker_clients[queue][identity] = WorkerClient(
                 queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window, self.ping_timeout
             )
@@ -199,7 +218,7 @@ class ServerMonitor:
                     )
                     fails.add(t['task_id'])
             elapse = time.time() - t['update_t']
-            limit = self.model_pipelines.get_subtask_running_timeout(t['queue'])
+            limit = self.subtask_run_timeouts[t['queue']]
             if elapse >= limit:
                 logger.warning(f"Subtask {fmt_subtask(t)} RUNNING timeout: {elapse:.2f} s")
                 await self.task_manager.finish_subtasks(
@@ -215,7 +234,7 @@ class ServerMonitor:
             if client.infer_cost.avg is not None:
                 infer_costs.append(client.infer_cost.avg)
         if len(infer_costs) <= 0:
-            return None
+            return self.subtask_run_timeouts[queue]
         return sum(infer_costs) / len(infer_costs)
 
     # check if a task can be published to queues
@@ -225,8 +244,6 @@ class ServerMonitor:
 
         for queue in queues:
             avg_cost = self.get_avg_worker_infer_cost(queue)
-            if avg_cost is None:
-                avg_cost = self.model_pipelines.get_subtask_running_timeout(queue)
             worker_cnt = len(self.worker_clients[queue])
             subtask_pending = await self.queue_manager.pending_num(queue)
             capacity = self.task_timeout * max(worker_cnt, 1) // avg_cost
@@ -261,15 +278,11 @@ class ServerMonitor:
                 "del_worker_identities": [],
             }
 
-            if avg_cost is not None:
-                data[queue]["min_worker"] = max(1, subtask_pending * avg_cost // target_high)
-                data[queue]["max_worker"] = max(1, subtask_pending * avg_cost // target_low)
-            else:
-                avg_cost = self.model_pipelines.get_subtask_running_timeout(queue)
-                data[queue]["avg_cost"] = avg_cost
-                base_cnt = min(subtask_pending // self.worker_min_capacity, 1)
-                data[queue]["min_worker"] = max(1, min(base_cnt, subtask_pending * avg_cost // target_high))
-                data[queue]["max_worker"] = max(1, min(base_cnt, subtask_pending * avg_cost // target_low))
+            fix_cnt = subtask_pending // max(self.worker_min_capacity, 1)
+            min_cnt = min(fix_cnt, subtask_pending * avg_cost // target_high)
+            max_cnt = min(fix_cnt, subtask_pending * avg_cost // target_low)
+            data[queue]["min_worker"] = max(self.worker_min_cnt, min_cnt)
+            data[queue]["max_worker"] = max(self.worker_max_cnt, max_cnt)
 
             if worker_cnt < data[queue]["min_worker"]:
                 data[queue]["need_add_worker"] = data[queue]["min_worker"] - worker_cnt

@@ -2,7 +2,7 @@ import os
 import json
 import hashlib
 import asyncio
-import boto3
+import aioboto3
 from loguru import logger
 from botocore.client import Config
 from lightx2v.deploy.data_manager import BaseDataManager
@@ -19,42 +19,57 @@ class S3DataManager(BaseDataManager):
         self.aws_secret_access_key = self.config['aws_secret_access_key']
         self.endpoint_url = self.config['endpoint_url']
         self.base_path = self.config['base_path']
+        self.connect_timeout = self.config.get('connect_timeout', 60)
+        self.read_timeout = self.config.get('read_timeout', 10)
+        self.write_timeout = self.config.get('write_timeout', 10)
+        self.session = None
         self.s3_client = None
 
     async def init(self):
         for i in range(self.max_retries):
             try:
                 logger.info(f"S3DataManager init with config: {self.config} (attempt {i + 1}/{self.max_retries}) ...")
-                self.s3_client = boto3.client(
+
+                self.session = aioboto3.Session()
+                self.s3_client = await self.session.client(
                     's3',
                     aws_access_key_id=self.aws_access_key_id,
                     aws_secret_access_key=self.aws_secret_access_key,
                     endpoint_url=self.endpoint_url,
                     config=Config(
                         signature_version='s3v4',
-                        s3={'payload_signing_enabled': True}
+                        s3={'payload_signing_enabled': True},
+                        connect_timeout=self.connect_timeout,
+                        read_timeout=self.read_timeout,
+                        parameter_validation=False,
+                        max_pool_connections=50,
                     )
-                )
+                ).__aenter__()
+                
                 try:
-                    self.s3_client.head_bucket(Bucket=self.bucket_name)
+                    await self.s3_client.head_bucket(Bucket=self.bucket_name)
                     logger.info(f"check bucket {self.bucket_name} success")
                 except Exception as e:
                     logger.info(f"check bucket {self.bucket_name} error: {e}, try to create it...")
-                    self.s3_client.create_bucket(Bucket=self.bucket_name)
-                logger.info(f"Successfully init S3 bucket: {self.bucket_name}")
+                    await self.s3_client.create_bucket(Bucket=self.bucket_name)
+                
+                logger.info(f"Successfully init S3 bucket: {self.bucket_name} with timeouts - connect: {self.connect_timeout}s, read: {self.read_timeout}s, write: {self.write_timeout}s")
                 return
             except Exception as e:
                 logger.warning(f"Failed to connect to S3: {e}")
                 await asyncio.sleep(1)
 
     async def close(self):
-        del self.s3_client
+        if self.s3_client:
+            await self.s3_client.__aexit__(None, None, None)
+        if self.session:
+            self.session = None
 
     @class_try_catch_async
     async def save_bytes(self, bytes_data, filename):
         filename = os.path.join(self.base_path, filename)
         content_sha256 = hashlib.sha256(bytes_data).hexdigest()
-        ret = self.s3_client.put_object(
+        await self.s3_client.put_object(
             Bucket=self.bucket_name,
             Key=filename,
             Body=bytes_data,
@@ -66,16 +81,16 @@ class S3DataManager(BaseDataManager):
     @class_try_catch_async
     async def load_bytes(self, filename):
         filename = os.path.join(self.base_path, filename)
-        response = self.s3_client.get_object(
+        response = await self.s3_client.get_object(
             Bucket=self.bucket_name,
             Key=filename
         )
-        return response['Body'].read()
+        return await response['Body'].read()
 
     @class_try_catch_async
     async def delete_bytes(self, filename):
         filename = os.path.join(self.base_path, filename)
-        self.s3_client.delete_object(
+        await self.s3_client.delete_object(
             Bucket=self.bucket_name,
             Key=filename
         )
@@ -84,15 +99,18 @@ class S3DataManager(BaseDataManager):
 
     async def file_exists(self, filename):
         filename = os.path.join(self.base_path, filename)
-        self.s3_client.head_object(
-            Bucket=self.bucket_name,
-            Key=filename
-        )
-        return True
+        try:
+            await self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=filename
+            )
+            return True
+        except Exception:
+            return False
 
     async def list_files(self, prefix=""):
         prefix = os.path.join(self.base_path, prefix)
-        response = self.s3_client.list_objects_v2(
+        response = await self.s3_client.list_objects_v2(
             Bucket=self.bucket_name,
             Prefix=prefix
         )
@@ -112,13 +130,16 @@ async def test():
         "aws_secret_access_key": "xx",
         "endpoint_url": "xxx",
         "bucket_name": "xxx",
-        "base_path": "xxx"
+        "base_path": "xxx",
+        "connect_timeout": 10,
+        "read_timeout": 10,
+        "write_timeout": 10
     }
 
     m = S3DataManager(json.dumps(s3_config))
     await m.init()
 
-    img = Image.open("/data/nvme1/liuliang1/lightx2v/assets/img_lightx2v.png")
+    img = Image.open("../../../assets/img_lightx2v.png")
     tensor = torch.Tensor([233, 456, 789]).to(dtype=torch.bfloat16, device="cuda:0")
 
     await m.save_image(img, "test_img.png")
