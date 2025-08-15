@@ -8,6 +8,7 @@ import imageio
 import imageio_ffmpeg as ffmpeg
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from einops import rearrange
 from loguru import logger
@@ -257,7 +258,7 @@ def save_to_video(
         raise ValueError(f"Unknown save method: {method}")
 
 
-def find_torch_model_path(config, ckpt_config_key=None, filename=None, subdir=["original", "fp8", "int8"]):
+def find_torch_model_path(config, ckpt_config_key=None, filename=None, subdir=["original", "fp8", "int8", "distill_models", "distill_fp8", "distill_int8"]):
     if ckpt_config_key and config.get(ckpt_config_key, None) is not None:
         return config.get(ckpt_config_key)
 
@@ -272,12 +273,11 @@ def find_torch_model_path(config, ckpt_config_key=None, filename=None, subdir=["
 
     for path in paths_to_check:
         if os.path.exists(path):
-            logger.info(f"Found PyTorch model checkpoint: {path}")
             return path
     raise FileNotFoundError(f"PyTorch model file '{filename}' not found.\nPlease download the model from https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
 
 
-def find_hf_model_path(config, model_path, ckpt_config_key=None, subdir=["original", "fp8", "int8"]):
+def find_hf_model_path(config, model_path, ckpt_config_key=None, subdir=["original", "fp8", "int8", "distill_models", "distill_fp8", "distill_int8"]):
     if ckpt_config_key and config.get(ckpt_config_key, None) is not None:
         return config.get(ckpt_config_key)
 
@@ -292,7 +292,6 @@ def find_hf_model_path(config, model_path, ckpt_config_key=None, subdir=["origin
         safetensors_pattern = os.path.join(path, "*.safetensors")
         safetensors_files = glob.glob(safetensors_pattern)
         if safetensors_files:
-            logger.info(f"Found Hugging Face model files in: {path}")
             return path
     raise FileNotFoundError(f"No Hugging Face model files (.safetensors) found.\nPlease download the model from: https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
 
@@ -325,12 +324,86 @@ def find_gguf_model_path(config, ckpt_config_key=None, subdir=None):
     raise FileNotFoundError(f"No GGUF model files (.gguf) found.\nPlease download the model from: https://huggingface.co/lightx2v/ or specify the model path in the configuration file.")
 
 
+def load_weights(checkpoint_path, cpu_offload=False, remove_key=None):
+    if not dist.is_initialized():
+        # Single GPU mode
+        cpu_weight_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        for key in list(cpu_weight_dict.keys()):
+            if remove_key and remove_key in key:
+                cpu_weight_dict.pop(key)
+        logger.info(f"Loading weights from {checkpoint_path}")
+        return cpu_weight_dict
+
+    # Multi-GPU mode
+    is_weight_loader = False
+    current_rank = dist.get_rank()
+    if current_rank == 0:
+        is_weight_loader = True
+
+    cpu_weight_dict = {}
+    if is_weight_loader:
+        logger.info(f"Loading weights from {checkpoint_path}")
+        cpu_weight_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        for key in list(cpu_weight_dict.keys()):
+            if remove_key and remove_key in key:
+                cpu_weight_dict.pop(key)
+
+    meta_dict = {}
+    if is_weight_loader:
+        for key, tensor in cpu_weight_dict.items():
+            meta_dict[key] = {"shape": tensor.shape, "dtype": tensor.dtype}
+
+    obj_list = [meta_dict] if is_weight_loader else [None]
+
+    src_global_rank = 0
+    dist.broadcast_object_list(obj_list, src=src_global_rank)
+    synced_meta_dict = obj_list[0]
+
+    if cpu_offload:
+        target_device = "cpu"
+        distributed_weight_dict = {key: torch.empty(meta["shape"], dtype=meta["dtype"], device=target_device) for key, meta in synced_meta_dict.items()}
+        dist.barrier()
+    else:
+        target_device = torch.device(f"cuda:{current_rank}")
+        distributed_weight_dict = {key: torch.empty(meta["shape"], dtype=meta["dtype"], device=target_device) for key, meta in synced_meta_dict.items()}
+        dist.barrier(device_ids=[torch.cuda.current_device()])
+
+    for key in sorted(synced_meta_dict.keys()):
+        tensor_to_broadcast = distributed_weight_dict[key]
+        if is_weight_loader:
+            tensor_to_broadcast.copy_(cpu_weight_dict[key], non_blocking=True)
+
+        if cpu_offload:
+            if is_weight_loader:
+                gpu_tensor = tensor_to_broadcast.cuda()
+                dist.broadcast(gpu_tensor, src=src_global_rank)
+                tensor_to_broadcast.copy_(gpu_tensor.cpu(), non_blocking=True)
+                del gpu_tensor
+                torch.cuda.empty_cache()
+            else:
+                gpu_tensor = torch.empty_like(tensor_to_broadcast, device="cuda")
+                dist.broadcast(gpu_tensor, src=src_global_rank)
+                tensor_to_broadcast.copy_(gpu_tensor.cpu(), non_blocking=True)
+                del gpu_tensor
+                torch.cuda.empty_cache()
+        else:
+            dist.broadcast(tensor_to_broadcast, src=src_global_rank)
+
+    if is_weight_loader:
+        del cpu_weight_dict
+
+    if cpu_offload:
+        torch.cuda.empty_cache()
+
+    logger.info(f"Weights distributed across {dist.get_world_size()} devices on {target_device}")
+    return distributed_weight_dict
+
+
 def masks_like(tensor, zero=False, generator=None, p=0.2):
     assert isinstance(tensor, torch.Tensor)
     out = torch.ones_like(tensor)
     if zero:
         if generator is not None:
-            # 生成随机数判断是否需要修改
             random_num = torch.rand(1, generator=generator, device=generator.device).item()
             if random_num < p:
                 out[:, 0] = torch.zeros_like(out[:, 0])

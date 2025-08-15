@@ -1,5 +1,4 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
-import logging
 
 import torch
 import torch.distributed as dist
@@ -7,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from loguru import logger
+
+from lightx2v.utils.utils import load_weights
 
 __all__ = [
     "WanVAE",
@@ -758,7 +759,7 @@ class WanVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
+def _video_vae(pretrained_path=None, z_dim=None, device="cpu", cpu_offload=False, **kwargs):
     """
     Autoencoder3d adapted from Stable Diffusion 1.x, 2.x and XL.
     """
@@ -779,8 +780,8 @@ def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
         model = WanVAE_(**cfg)
 
     # load checkpoint
-    logging.info(f"loading {pretrained_path}")
-    model.load_state_dict(torch.load(pretrained_path, map_location=device, weights_only=True), assign=True)
+    weights_dict = load_weights(pretrained_path, cpu_offload=cpu_offload)
+    model.load_state_dict(weights_dict, assign=True)
 
     return model
 
@@ -794,11 +795,13 @@ class WanVAE:
         device="cuda",
         parallel=False,
         use_tiling=False,
+        cpu_offload=False,
     ):
         self.dtype = dtype
         self.device = device
         self.parallel = parallel
         self.use_tiling = use_tiling
+        self.cpu_offload = cpu_offload
 
         mean = [
             -0.7571,
@@ -841,15 +844,7 @@ class WanVAE:
         self.scale = [self.mean, self.inv_std]
 
         # init model
-        self.model = (
-            _video_vae(
-                pretrained_path=vae_pth,
-                z_dim=z_dim,
-            )
-            .eval()
-            .requires_grad_(False)
-            .to(device)
-        )
+        self.model = _video_vae(pretrained_path=vae_pth, z_dim=z_dim, cpu_offload=cpu_offload).eval().requires_grad_(False).to(device)
 
     def current_device(self):
         return next(self.model.parameters()).device
@@ -934,8 +929,8 @@ class WanVAE:
 
         return images
 
-    def decode(self, zs, generator, config):
-        if config.cpu_offload:
+    def decode(self, zs, **args):
+        if self.cpu_offload:
             self.to_cuda()
 
         if self.parallel:
@@ -956,7 +951,7 @@ class WanVAE:
         else:
             images = self.model.decode(zs.unsqueeze(0), self.scale).float().clamp_(-1, 1)
 
-        if config.cpu_offload:
+        if self.cpu_offload:
             images = images.cpu().float()
             self.to_cpu()
 

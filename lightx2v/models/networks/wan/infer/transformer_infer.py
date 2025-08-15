@@ -9,7 +9,7 @@ from lightx2v.common.offload.manager import (
 from lightx2v.common.transformer_infer.transformer_infer import BaseTransformerInfer
 from lightx2v.utils.envs import *
 
-from .utils import apply_rotary_emb, apply_rotary_emb_chunk, compute_freqs, compute_freqs_audio
+from .utils import apply_rotary_emb, apply_rotary_emb_chunk, compute_freqs, compute_freqs_audio, compute_freqs_audio_dist, compute_freqs_dist
 
 
 class WanTransformerInfer(BaseTransformerInfer):
@@ -33,7 +33,11 @@ class WanTransformerInfer(BaseTransformerInfer):
         self.infer_dtype = GET_DTYPE()
         self.sensitive_layer_dtype = GET_SENSITIVE_DTYPE()
 
-        self.seq_p_group = None
+        if self.config["seq_parallel"]:
+            self.seq_p_group = self.config.get("device_mesh").get_group(mesh_dim="seq_p")
+        else:
+            self.seq_p_group = None
+
         if self.config.get("cpu_offload", False):
             if torch.cuda.get_device_capability(0) == (9, 0):
                 assert self.config["self_attn_1_type"] != "sage_attn2"
@@ -86,18 +90,76 @@ class WanTransformerInfer(BaseTransformerInfer):
         return cu_seqlens_q, cu_seqlens_k
 
     def compute_freqs(self, q, grid_sizes, freqs):
-        if "audio" in self.config.get("model_cls", ""):
-            freqs_i = compute_freqs_audio(q.size(2) // 2, grid_sizes, freqs)
+        if self.config["seq_parallel"]:
+            if "audio" in self.config.get("model_cls", ""):
+                freqs_i = compute_freqs_audio_dist(q.size(0), q.size(2) // 2, grid_sizes, freqs, self.seq_p_group)
+            else:
+                freqs_i = compute_freqs_dist(q.size(0), q.size(2) // 2, grid_sizes, freqs, self.seq_p_group)
         else:
-            freqs_i = compute_freqs(q.size(2) // 2, grid_sizes, freqs)
+            if "audio" in self.config.get("model_cls", ""):
+                freqs_i = compute_freqs_audio(q.size(2) // 2, grid_sizes, freqs)
+            else:
+                freqs_i = compute_freqs(q.size(2) // 2, grid_sizes, freqs)
         return freqs_i
 
     @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
-    def infer(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
-        return self.infer_func(weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks)
+    def infer(self, weights, pre_infer_out):
+        x = self.infer_func(
+            weights,
+            pre_infer_out.grid_sizes,
+            pre_infer_out.embed,
+            pre_infer_out.x,
+            pre_infer_out.embed0,
+            pre_infer_out.seq_lens,
+            pre_infer_out.freqs,
+            pre_infer_out.context,
+            pre_infer_out.audio_dit_blocks,
+        )
+        return self._infer_post_blocks(weights, x, pre_infer_out.embed)
+
+    def _infer_post_blocks(self, weights, x, e):
+        if e.dim() == 2:
+            modulation = weights.head_modulation.tensor  # 1, 2, dim
+            e = (modulation + e.unsqueeze(1)).chunk(2, dim=1)
+        elif e.dim() == 3:  # For Diffustion forcing
+            modulation = weights.head_modulation.tensor.unsqueeze(2)  # 1, 2, seq, dim
+            e = (modulation + e.unsqueeze(1)).chunk(2, dim=1)
+            e = [ei.squeeze(1) for ei in e]
+
+        x = weights.norm.apply(x)
+
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            x = x.to(self.sensitive_layer_dtype)
+        x.mul_(1 + e[1].squeeze()).add_(e[0].squeeze())
+        if self.sensitive_layer_dtype != self.infer_dtype:
+            x = x.to(self.infer_dtype)
+
+        x = weights.head.apply(x)
+
+        if self.clean_cuda_cache:
+            del e
+            torch.cuda.empty_cache()
+        return x
+
+    def _infer_without_offload(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
+        for block_idx in range(self.blocks_num):
+            self.block_idx = block_idx
+            x = self.infer_block(
+                weights.blocks[block_idx],
+                grid_sizes,
+                embed,
+                x,
+                embed0,
+                seq_lens,
+                freqs,
+                context,
+                audio_dit_blocks,
+            )
+        return x
 
     def _infer_with_offload(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
         for block_idx in range(self.blocks_num):
+            self.block_idx = block_idx
             if block_idx == 0:
                 self.weights_stream_mgr.active_weights[0] = weights.blocks[0]
                 self.weights_stream_mgr.active_weights[0].to_cuda()
@@ -115,10 +177,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     seq_lens,
                     freqs,
                     context,
+                    audio_dit_blocks,
                 )
-                if audio_dit_blocks:
-                    x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
-
             self.weights_stream_mgr.swap_weights()
 
         return x
@@ -145,9 +205,8 @@ class WanTransformerInfer(BaseTransformerInfer):
                     seq_lens,
                     freqs,
                     context,
+                    audio_dit_blocks,
                 )
-                if audio_dit_blocks:
-                    x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
 
             self.weights_stream_mgr.swap_weights()
 
@@ -164,6 +223,7 @@ class WanTransformerInfer(BaseTransformerInfer):
 
     def _infer_with_phases_offload(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
         for block_idx in range(weights.blocks_num):
+            self.block_idx = block_idx
             for phase_idx in range(self.phases_num):
                 if block_idx == 0 and phase_idx == 0:
                     phase = weights.blocks[block_idx].compute_phases[phase_idx]
@@ -189,9 +249,7 @@ class WanTransformerInfer(BaseTransformerInfer):
                         x, attn_out = self.infer_cross_attn(cur_phase, x, context, y_out, gate_msa)
                     elif cur_phase_idx == 3:
                         y = self.infer_ffn(cur_phase, x, attn_out, c_shift_msa, c_scale_msa)
-                        x = self.post_process(x, y, c_gate_msa)
-                        if audio_dit_blocks:
-                            x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
+                        x = self.post_process(x, y, c_gate_msa, grid_sizes, audio_dit_blocks)
 
                 is_last_phase = block_idx == weights.blocks_num - 1 and phase_idx == self.phases_num - 1
                 if not is_last_phase:
@@ -216,6 +274,7 @@ class WanTransformerInfer(BaseTransformerInfer):
         self.weights_stream_mgr.prefetch_weights_from_disk(weights.blocks)
 
         for block_idx in range(weights.blocks_num):
+            self.block_idx = block_idx
             for phase_idx in range(self.weights_stream_mgr.phases_num):
                 if block_idx == 0 and phase_idx == 0:
                     obj_key = (block_idx, phase_idx)
@@ -251,9 +310,7 @@ class WanTransformerInfer(BaseTransformerInfer):
                         x, attn_out = self.infer_cross_attn(cur_phase, x, context, y_out, gate_msa)
                     elif cur_phase_idx == 3:
                         y = self.infer_ffn(cur_phase, x, attn_out, c_shift_msa, c_scale_msa)
-                        x = self.post_process(x, y, c_gate_msa)
-                        if audio_dit_blocks:
-                            x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
+                        x = self.post_process(x, y, c_gate_msa, grid_sizes, audio_dit_blocks)
 
                 if not (block_idx == weights.blocks_num - 1 and phase_idx == self.phases_num - 1):
                     next_block_idx = block_idx + 1 if phase_idx == self.phases_num - 1 else block_idx
@@ -275,47 +332,7 @@ class WanTransformerInfer(BaseTransformerInfer):
 
         return x
 
-    def zero_temporal_component_in_3DRoPE(self, valid_token_length, rotary_emb=None):
-        if rotary_emb is None:
-            return None
-        self.use_real = False
-        rope_t_dim = 44
-        if self.use_real:
-            freqs_cos, freqs_sin = rotary_emb
-            freqs_cos[valid_token_length:, :, :rope_t_dim] = 0
-            freqs_sin[valid_token_length:, :, :rope_t_dim] = 0
-            return freqs_cos, freqs_sin
-        else:
-            freqs_cis = rotary_emb
-            freqs_cis[valid_token_length:, :, : rope_t_dim // 2] = 0
-            return freqs_cis
-
-    @torch._dynamo.disable
-    def _apply_audio_dit(self, x, block_idx, grid_sizes, audio_dit_blocks):
-        for ipa_out in audio_dit_blocks:
-            if block_idx in ipa_out:
-                cur_modify = ipa_out[block_idx]
-                x = cur_modify["modify_func"](x, grid_sizes, **cur_modify["kwargs"])
-        return x
-
-    def _infer_without_offload(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
-        for block_idx in range(self.blocks_num):
-            x = self.infer_block(
-                weights.blocks[block_idx],
-                grid_sizes,
-                embed,
-                x,
-                embed0,
-                seq_lens,
-                freqs,
-                context,
-            )
-            if audio_dit_blocks:
-                x = self._apply_audio_dit(x, block_idx, grid_sizes, audio_dit_blocks)
-
-        return x
-
-    def infer_block(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context):
+    def infer_block(self, weights, grid_sizes, embed, x, embed0, seq_lens, freqs, context, audio_dit_blocks=None):
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = self.infer_modulation(
             weights.compute_phases[0],
             embed0,
@@ -331,7 +348,7 @@ class WanTransformerInfer(BaseTransformerInfer):
         )
         x, attn_out = self.infer_cross_attn(weights.compute_phases[2], x, context, y_out, gate_msa)
         y = self.infer_ffn(weights.compute_phases[3], x, attn_out, c_shift_msa, c_scale_msa)
-        x = self.post_process(x, y, c_gate_msa)
+        x = self.post_process(x, y, c_gate_msa, grid_sizes, audio_dit_blocks)
         return x
 
     def infer_modulation(self, weights, embed0):
@@ -516,11 +533,18 @@ class WanTransformerInfer(BaseTransformerInfer):
 
         return y
 
-    def post_process(self, x, y, c_gate_msa):
+    def post_process(self, x, y, c_gate_msa, grid_sizes, audio_dit_blocks=None):
         if self.sensitive_layer_dtype != self.infer_dtype:
             x = x.to(self.sensitive_layer_dtype) + y.to(self.sensitive_layer_dtype) * c_gate_msa.squeeze()
         else:
             x.add_(y * c_gate_msa.squeeze())
+
+        # Apply audio_dit if available
+        if audio_dit_blocks is not None and hasattr(self, "block_idx"):
+            for ipa_out in audio_dit_blocks:
+                if self.block_idx in ipa_out:
+                    cur_modify = ipa_out[self.block_idx]
+                    x = cur_modify["modify_func"](x, grid_sizes, **cur_modify["kwargs"])
 
         if self.clean_cuda_cache:
             del y, c_gate_msa

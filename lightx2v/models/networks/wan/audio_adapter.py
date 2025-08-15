@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from einops import rearrange
+from loguru import logger
 from transformers import AutoModel
 
 from lightx2v.utils.envs import *
@@ -53,14 +54,37 @@ def load_pt_safetensors(in_path: str):
 
 
 def rank0_load_state_dict_from_path(model, in_path: str, strict: bool = True):
-    import torch.distributed as dist
+    model = model.to("cuda")
+    # 确定当前进程是否是（负责加载权重）
+    is_leader = False
+    if dist.is_initialized():
+        current_rank = dist.get_rank()
+        if current_rank == 0:
+            is_leader = True
+    elif not dist.is_initialized() or dist.get_rank() == 0:
+        is_leader = True
 
-    if (dist.is_initialized() and dist.get_rank() == 0) or (not dist.is_initialized()):
+    if is_leader:
+        logger.info(f"Loading model state from {in_path}")
         state_dict = load_pt_safetensors(in_path)
         model.load_state_dict(state_dict, strict=strict)
+
+    # 将模型状态从领导者同步到组内所有其他进程
     if dist.is_initialized():
-        dist.barrier()
-    return model.to(dtype=GET_DTYPE(), device="cuda")
+        dist.barrier(device_ids=[torch.cuda.current_device()])
+        src_global_rank = 0
+        for param in model.parameters():
+            dist.broadcast(param.data, src=src_global_rank)
+        for buffer in model.buffers():
+            dist.broadcast(buffer.data, src=src_global_rank)
+    elif dist.is_initialized():
+        dist.barrier(device_ids=[torch.cuda.current_device()])
+        for param in model.parameters():
+            dist.broadcast(param.data, src=0)
+        for buffer in model.buffers():
+            dist.broadcast(buffer.data, src=0)
+
+    return model.to(dtype=GET_DTYPE())
 
 
 def linear_interpolation(features, output_len: int):
@@ -70,17 +94,18 @@ def linear_interpolation(features, output_len: int):
 
 
 def get_q_lens_audio_range(
-    batchsize,
-    n_tokens_per_rank,
-    n_query_tokens,
-    n_tokens_per_frame,
-    sp_rank,
+    batchsize: int,
+    n_tokens_per_rank: int,
+    n_query_tokens: int,
+    n_tokens_per_frame: int,
+    sp_rank: int,
 ):
     if n_query_tokens == 0:
         q_lens = [1] * batchsize
         return q_lens, 0, 1
     idx0 = n_tokens_per_rank * sp_rank
-    first_length = idx0 - idx0 // n_tokens_per_frame * n_tokens_per_frame
+    first_length = n_tokens_per_frame - idx0 % n_tokens_per_frame
+    first_length = min(first_length, n_query_tokens)
     n_frames = (n_query_tokens - first_length) // n_tokens_per_frame
     last_length = n_query_tokens - n_frames * n_tokens_per_frame - first_length
     q_lens = []
@@ -90,8 +115,7 @@ def get_q_lens_audio_range(
     if last_length > 0:
         q_lens.append(last_length)
     t0 = idx0 // n_tokens_per_frame
-    idx1 = idx0 + n_query_tokens
-    t1 = math.ceil(idx1 / n_tokens_per_frame)
+    t1 = t0 + len(q_lens)
     return q_lens * batchsize, t0, t1
 
 
@@ -121,7 +145,12 @@ class PerceiverAttentionCA(nn.Module):
         batchsize = len(x)
         x = self.norm_kv(x)
         shift, scale, gate = (t_emb + self.shift_scale_gate).chunk(3, dim=1)
-        latents = self.norm_q(latents) * (1 + scale) + shift
+        norm_q = self.norm_q(latents)
+        if scale.shape[0] != norm_q.shape[0]:
+            scale = scale.transpose(0, 1)  # (1, 5070, 3072)
+            shift = shift.transpose(0, 1)
+            gate = gate.transpose(0, 1)
+        latents = norm_q * (1 + scale) + shift
         q = self.to_q(latents.to(GET_DTYPE()))
         k, v = self.to_kv(x).chunk(2, dim=-1)
         q = rearrange(q, "B L (H C) -> (B L) H C", H=self.heads)
@@ -133,8 +162,8 @@ class PerceiverAttentionCA(nn.Module):
             v=v,
             cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True),
             cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True),
-            max_seqlen_q=q_lens.max(),
-            max_seqlen_k=k_lens.max(),
+            max_seqlen_q=q_lens.max().item(),
+            max_seqlen_k=k_lens.max().item(),
             dropout_p=0.0,
             softmax_scale=None,
             causal=False,
@@ -198,16 +227,23 @@ class TimeEmbedding(nn.Module):
         self.act_fn = nn.SiLU()
         self.time_proj = nn.Linear(dim, time_proj_dim)
 
-    def forward(
-        self,
-        timestep: torch.Tensor,
-    ):
-        timestep = self.timesteps_proj(timestep)
-        time_embedder_dtype = next(iter(self.time_embedder.parameters())).dtype
-        timestep = timestep.to(time_embedder_dtype)
+    def forward(self, timestep: torch.Tensor):
+        # Project timestep
+        if timestep.dim() == 2:
+            timestep = self.timesteps_proj(timestep.squeeze(0)).unsqueeze(0)
+        else:
+            timestep = self.timesteps_proj(timestep)
+
+        # Match dtype with time_embedder (except int8)
+        target_dtype = next(self.time_embedder.parameters()).dtype
+        if timestep.dtype != target_dtype and target_dtype != torch.int8:
+            timestep = timestep.to(target_dtype)
+
+        # Time embedding projection
         temb = self.time_embedder(timestep)
         timestep_proj = self.time_proj(self.act_fn(temb))
-        return timestep_proj
+
+        return timestep_proj.squeeze(0) if timestep_proj.dim() == 3 else timestep_proj
 
 
 class AudioAdapter(nn.Module):
