@@ -23,7 +23,7 @@ from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config
-from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
+from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image, cache_video
 from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.models.runners.graph_runner import GraphRunner
 from lightx2v.utils.envs import CHECK_ENABLE_GRAPH_MODE
@@ -37,6 +37,10 @@ class BaseWorker:
         config["mode"] = ""
         logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
         seed_all(config.seed)
+        if config.parallel:
+            dist.init_process_group(backend="nccl")
+            torch.cuda.set_device(dist.get_rank())
+            set_parallel_config(config)
         self.runner = RUNNER_REGISTER[config.model_cls](config)
         # fixed config
         self.fixed_config = copy.deepcopy(self.runner.config)
@@ -313,8 +317,9 @@ class VaeDecoderWorker(BaseWorker):
 
             latents = await data_manager.load_tensor(inputs["latents"], "cuda:0")
             images = self.runner.vae_decoder.decode(latents, generator=None, config=self.runner.config)
-            images = vae_to_comfyui_image(images)
-            fps = self.runner.config.get("fps", 16)
+
+            if self.runner.config["model_cls"] != "wan2.2":
+                images = vae_to_comfyui_image(images)
 
             if "video_frame_interpolation" in self.runner.config:
                 assert self.runner.vfi_model is not None and self.runner.config["video_frame_interpolation"].get("target_fps", None) is not None
@@ -325,11 +330,20 @@ class VaeDecoderWorker(BaseWorker):
                     source_fps=self.runner.config.get("fps", 16),
                     target_fps=target_fps,
                 )
-                fps = target_fps
 
-            if not self.runner.config.get("parallel_attn_type", None) or dist.get_rank() == 0:
-                logger.info(f"Saving video to {self.runner.config.save_video_path}")
-                save_to_video(images, self.runner.config.save_video_path, fps=fps, method="ffmpeg")  # type: ignore
+            if "video_frame_interpolation" in self.runner.config and self.runner.config["video_frame_interpolation"].get("target_fps"):
+                fps = self.runner.config["video_frame_interpolation"]["target_fps"]
+            else:
+                fps = self.runner.config.get("fps", 16)
+
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                logger.info(f"🎬 Start to save video 🎬")
+
+                if self.runner.config["model_cls"] != "wan2.2":
+                    save_to_video(images, self.runner.config.save_video_path, fps=fps, method="ffmpeg")  # type: ignore
+                else:
+                    cache_video(tensor=images, save_file=self.runner.config.save_video_path, fps=fps, nrow=1, normalize=True, value_range=(-1, 1))
+                logger.info(f"✅ Video saved successfully to: {self.runner.config.save_video_path} ✅")
 
             # save output video
             video_data = open(tmp_video_path, 'rb').read()

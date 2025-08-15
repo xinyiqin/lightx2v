@@ -969,9 +969,6 @@
                             const videoBlob = new Blob([blob], { type: 'video/mp4' });
                             const url = window.URL.createObjectURL(videoBlob);
                             window.open(url, '_blank');
-                            setTimeout(() => {
-                                window.URL.revokeObjectURL(url);
-                            }, 1000);
                         } else {
                             showAlert('获取结果失败', 'danger');
                         }
