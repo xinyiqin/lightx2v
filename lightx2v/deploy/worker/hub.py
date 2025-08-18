@@ -22,7 +22,7 @@ from lightx2v.models.runners.wan.wan_skyreels_v2_df_runner import WanSkyreelsV2D
 from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner
 
 from lightx2v.utils.profiler import ProfilingContext
-from lightx2v.utils.set_config import set_config
+from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image, cache_video
 from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.models.runners.graph_runner import GraphRunner
@@ -37,9 +37,9 @@ class BaseWorker:
         config["mode"] = ""
         logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
         seed_all(config.seed)
+        self.rank = 0
         if config.parallel:
-            dist.init_process_group(backend="nccl")
-            torch.cuda.set_device(dist.get_rank())
+            self.rank = dist.get_rank()
             set_parallel_config(config)
         self.runner = RUNNER_REGISTER[config.model_cls](config)
         # fixed config
@@ -59,16 +59,19 @@ class BaseWorker:
 
 
 class RunnerThread(threading.Thread):
-    def __init__(self, loop, future, run_func, *args, **kwargs):
+    def __init__(self, loop, future, run_func, rank, *args, **kwargs):
         super().__init__(daemon=True)
         self.loop = loop
         self.future = future
         self.run_func = run_func
         self.args = args
         self.kwargs = kwargs
+        self.rank = rank
 
     def run(self):
         try:
+            # cuda device bind for each thread
+            torch.cuda.set_device(self.rank)
             res = self.run_func(*self.args, **self.kwargs)
             status = True
         except:
@@ -139,6 +142,8 @@ class PipelineWorker(BaseWorker):
             tmp_image_path = os.path.join(tmp_dir, input_image_path)
             tmp_audio_path = os.path.join(tmp_dir, input_audio_path)
             tmp_video_path = os.path.join(tmp_dir, output_video_path)
+            if data_manager.name == "local":
+                tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
 
             # prepare tmp image
             if self.runner.config.task == "i2v":
@@ -159,14 +164,15 @@ class PipelineWorker(BaseWorker):
             self.set_inputs(params)
 
             future = asyncio.Future()
-            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_func)
+            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_func, self.rank)
             self.thread.start()
             status, _ = await future
             if not status:
                 return False
             # save output video
-            video_data = open(tmp_video_path, 'rb').read()
-            await data_manager.save_bytes(video_data, output_video_path)
+            if data_manager.name != "local":
+                video_data = open(tmp_video_path, 'rb').read()
+                await data_manager.save_bytes(video_data, output_video_path)
             return True
 
 
@@ -258,7 +264,7 @@ class DiTWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        device = 'cuda:0'
+        device = torch.device("cuda", self.rank)
         text_out = inputs["text_encoder_output"]
         text_encoder_output = await data_manager.load_object(text_out, device)
         image_encoder_output = None
@@ -283,7 +289,7 @@ class DiTWorker(BaseWorker):
         self.runner.set_target_shape()
 
         future = asyncio.Future()
-        self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner._run_dit_local)
+        self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner._run_dit_local, self.rank)
         self.thread.start()
         status, (out, _) = await future
         if not status:
@@ -310,12 +316,15 @@ class VaeDecoderWorker(BaseWorker):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_video_path = outputs.get("output_video", "")
             tmp_video_path = os.path.join(tmp_dir, output_video_path)
+            if data_manager.name == "local":
+                tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
 
             params["save_video_path"] = tmp_video_path
             logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.set_inputs(params)
 
-            latents = await data_manager.load_tensor(inputs["latents"], "cuda:0")
+            device = torch.device("cuda", self.rank)
+            latents = await data_manager.load_tensor(inputs["latents"], device)
             images = self.runner.vae_decoder.decode(latents, generator=None, config=self.runner.config)
 
             if self.runner.config["model_cls"] != "wan2.2":
@@ -346,8 +355,9 @@ class VaeDecoderWorker(BaseWorker):
                 logger.info(f"✅ Video saved successfully to: {self.runner.config.save_video_path} ✅")
 
             # save output video
-            video_data = open(tmp_video_path, 'rb').read()
-            await data_manager.save_bytes(video_data, output_video_path)
+            if data_manager.name != "local":
+                video_data = open(tmp_video_path, 'rb').read()
+                await data_manager.save_bytes(video_data, output_video_path)
 
             del latents, images
             torch.cuda.empty_cache()

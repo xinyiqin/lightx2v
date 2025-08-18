@@ -8,6 +8,7 @@ from lightx2v.deploy.common.utils import class_try_catch_async
 class LocalDataManager(BaseDataManager):
     def __init__(self, local_dir):
        self.local_dir = local_dir
+       self.name = "local"
        if not os.path.exists(self.local_dir):
            os.makedirs(self.local_dir)
 

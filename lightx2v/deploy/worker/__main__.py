@@ -13,6 +13,8 @@ from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.task_manager import TaskStatus
 from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker
 
+import torch
+import torch.distributed as dist
 
 RUNNER_MAP = {
     "pipeline": PipelineWorker,
@@ -31,6 +33,9 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 STOPPED = False
+WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
+RANK = int(os.environ.get('RANK', 0))
+
 
 async def ping_life(server_url, worker_identity, keys):
     url = server_url + "/api/v1/worker/ping/life"
@@ -151,6 +156,46 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity,
         logger.warning(f"Report task failed: {traceback.format_exc()}")
 
 
+async def boradcast_subtasks(subtasks):
+    if WORLD_SIZE <= 1:
+        return subtasks
+    try:
+        subtasks = [] if subtasks is None else subtasks
+        if RANK == 0:
+            subtasks_data = json.dumps(subtasks, ensure_ascii=False).encode('utf-8')
+            subtasks_tensor = torch.frombuffer(bytearray(subtasks_data), dtype=torch.uint8).to(device='cuda')
+            data_size = subtasks_tensor.shape[0]
+            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device='cuda')
+            logger.info(f"rank {RANK} send subtasks: {subtasks_tensor.shape}, {size_tensor}")
+        else:
+            size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
+
+        dist.broadcast(size_tensor, src=0)
+        if RANK != 0:
+            subtasks_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
+        dist.broadcast(subtasks_tensor, src=0)
+
+        if RANK != 0:
+            subtasks_data = subtasks_tensor.cpu().numpy().tobytes()
+            subtasks = json.loads(subtasks_data.decode('utf-8'))
+            logger.info(f"rank {RANK} recv subtasks: {subtasks}")
+        return subtasks
+
+    except:
+        logger.error(f"Broadcast subtasks failed: {traceback.format_exc()}")
+        return []
+
+
+async def sync_subtask():
+    if WORLD_SIZE <= 1:
+        return
+    try:
+        dist.barrier()
+        logger.info(f"Sync subtask ok")
+    except:
+        logger.error(f"Sync subtask failed: {traceback.format_exc()}")
+
+
 async def main(args):
     if args.model_name == "":
         args.model_name = args.model_cls
@@ -163,41 +208,51 @@ async def main(args):
         data_manager = S3DataManager(args.data_url)
     else:
         raise NotImplementedError
-    runner = RUNNER_MAP[args.worker](args)
     await data_manager.init()
-    # asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
+
+    if WORLD_SIZE > 1:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(dist.get_rank())
+        logger.info(f"Distributed initialized: rank={RANK}, world_size={WORLD_SIZE}")
+
+    runner = RUNNER_MAP[args.worker](args)
+    if WORLD_SIZE > 1:
+        dist.barrier()
+    # if RANK == 0:
+    #    asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
 
     while True:
-        subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
-        if subtasks is not None and len(subtasks) > 0:
-            for idx, sub in enumerate(subtasks):
-                status = TaskStatus.FAILED.name
+        subtasks = None
+        if RANK == 0:
+            subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
+        subtasks = await boradcast_subtasks(subtasks)
 
-                try:
-                    run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
+        for sub in subtasks:
+            status = TaskStatus.FAILED.name
+            ping_task = None
+            try:
+                run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
+                if RANK == 0:
                     ping_task = asyncio.create_task(ping_subtask(args.server, args.identity, sub['task_id'], sub['worker_name'], run_task))
-                    ret = await run_task
+                ret = await run_task
+                await sync_subtask()
+                if ret is True:
+                    status = TaskStatus.SUCCEED.name
+
+            except asyncio.CancelledError:
+                if STOPPED:
+                    logger.warning("Main loop cancelled, already stopped, should exit")
+                    return
+                logger.warning("Main loop cancelled, do not shut down")
+
+            finally:
+                if RANK == 0 and sub['task_id'] in RUNNING_SUBTASKS:
+                    try:
+                        await report_task(status=status, **sub)
+                    except:
+                        logger.warning(f"Report failed: {traceback.format_exc()}")
+                if ping_task:
                     ping_task.cancel()
-                    if ret is True:
-                        status = TaskStatus.SUCCEED.name
-
-                except asyncio.CancelledError:
-                    if STOPPED:
-                        logger.warning("Main loop cancelled, already stopped, should exit")
-                        for i in range(idx + 1, len(subtasks)):
-                            try:
-                                await report_task(status=TaskStatus.FAILED.name, **subtasks[i])
-                            except:
-                                logger.warning(f"Report failed: {traceback.format_exc()}")
-                        return
-                    logger.warning("Main loop cancelled, do not shut down")
-
-                finally:
-                    if sub['task_id'] in RUNNING_SUBTASKS:
-                        try:
-                            await report_task(status=status, **sub)
-                        except:
-                            logger.warning(f"Report failed: {traceback.format_exc()}")
 
 
 async def shutdown(loop):
@@ -210,15 +265,19 @@ async def shutdown(loop):
             logger.warning(f"Cancel async task {t} ...")
             t.cancel()
 
-    # Report any remaining running subtasks as failed
-    task_ids = list(RUNNING_SUBTASKS.keys())
-    for task_id in task_ids:
-        try:
-            s = RUNNING_SUBTASKS[task_id]
-            logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
-            await report_task(status=TaskStatus.FAILED.name, **s)
-        except:
-            logger.warning(f"Report task {task_id} failed: {traceback.format_exc()}")
+    # Report remaining running subtasks failed
+    if RANK == 0:
+        task_ids = list(RUNNING_SUBTASKS.keys())
+        for task_id in task_ids:
+            try:
+                s = RUNNING_SUBTASKS[task_id]
+                logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
+                await report_task(status=TaskStatus.FAILED.name, **s)
+            except:
+                logger.warning(f"Report task {task_id} failed: {traceback.format_exc()}")
+
+    if WORLD_SIZE > 1:
+        dist.destroy_process_group()
 
     # Force exit after a short delay to ensure cleanup
     def force_exit():

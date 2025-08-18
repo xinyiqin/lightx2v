@@ -12,6 +12,7 @@ from lightx2v.deploy.common.utils import class_try_catch_async
 class S3DataManager(BaseDataManager):
 
     def __init__(self, config_string, max_retries=3):
+        self.name = "s3"
         self.config = json.loads(config_string)
         self.max_retries = max_retries
         self.bucket_name = self.config['bucket_name']
