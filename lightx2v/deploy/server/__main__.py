@@ -127,6 +127,9 @@ async def prepare_subtasks(task_id):
 @app.get("/api/v1/model/list")
 async def api_v1_model_list(user = Depends(verify_user_access)):
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'])
+        if msg is not True:
+            return error_response(msg, 400)
         return {'models': model_pipelines.get_model_lists()}
     except Exception as e:
         traceback.print_exc()
@@ -137,6 +140,9 @@ async def api_v1_model_list(user = Depends(verify_user_access)):
 async def api_v1_task_submit(request: Request, user = Depends(verify_user_access)):
     task_id = None
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'], active_new_task=True)
+        if msg is not True:
+            return error_response(msg, 400)
         params = await request.json()
         keys = [params.pop('task'), params.pop('model_cls'), params.pop('stage')]
         assert len(params["prompt"]) > 0, "valid prompt is required"
@@ -179,6 +185,9 @@ async def api_v1_task_submit(request: Request, user = Depends(verify_user_access
 @app.get("/api/v1/task/query")
 async def api_v1_task_query(request: Request, user = Depends(verify_user_access)):
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'])
+        if msg is not True:
+            return error_response(msg, 400)
         task_id = request.query_params['task_id']
         task = await task_manager.query_task(task_id, user['user_id'])
         if task is None:
@@ -194,6 +203,9 @@ async def api_v1_task_query(request: Request, user = Depends(verify_user_access)
 async def api_v1_task_list(request: Request, user = Depends(verify_user_access)):
     try:
         user_id = user['user_id']
+        msg = await server_monitor.check_user_busy(user_id)
+        if msg is not True:
+            return error_response(msg, 400)
 
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 10))
@@ -229,6 +241,9 @@ async def api_v1_task_list(request: Request, user = Depends(verify_user_access))
 @app.get("/api/v1/task/result")
 async def api_v1_task_result(request: Request, user = Depends(verify_user_access)):
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'])
+        if msg is not True:
+            return error_response(msg, 400)
         name = request.query_params['name']
         task_id = request.query_params['task_id']
         task = await task_manager.query_task(task_id, user_id=user['user_id'])
@@ -247,6 +262,9 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access)):
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'])
+        if msg is not True:
+            return error_response(msg, 400)
         task_id = request.query_params['task_id']
         ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
         return {'msg': 'ok' if ret else 'failed'}
@@ -258,6 +276,9 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
 @app.get("/api/v1/task/resume")
 async def api_v1_task_resume(request: Request, user = Depends(verify_user_access)):
     try:
+        msg = await server_monitor.check_user_busy(user['user_id'], active_new_task=True)
+        if msg is not True:
+            return error_response(msg, 400)
         task_id = request.query_params['task_id']
         ret = await task_manager.resume_task(task_id, user_id=user['user_id'], all_subtask=True)
         if ret:

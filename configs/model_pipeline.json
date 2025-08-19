@@ -95,7 +95,10 @@
             "task_timeout": 3600,
             "schedule_ratio_high": 0.25,
             "schedule_ratio_low": 0.02,
-            "ping_timeout": 12
+            "ping_timeout": 12,
+            "user_max_active_tasks": 3,
+            "user_max_daily_tasks": 100,
+            "user_visit_frequency": 0.05
         }
     }
 }

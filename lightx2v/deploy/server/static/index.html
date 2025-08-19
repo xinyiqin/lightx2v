@@ -702,6 +702,14 @@
                     if (response.status === 401) {
                         logout();
                         throw new Error('认证失败，请重新登录'); }
+                    if (response.status === 400) {
+                        const error = await response.json();
+                        showAlert(error.message, 'danger');
+                        throw new Error(error.message);
+                    }
+
+                    // 添加50ms延迟，防止触发服务端频率限制
+                    await new Promise(resolve => setTimeout(resolve, 50));
 
                     return response;
                 };
@@ -730,7 +738,6 @@
                             localStorage.setItem('currentUser', JSON.stringify(data.user_info));
                             currentUser.value = data.user_info;                            
                             isLoggedIn.value = true;
-                            loadModels();
                         } else {
                             const error = await response.json();
                             showAlert(`登录失败: ${error.detail}`, 'danger');
@@ -851,7 +858,7 @@
                         if (response.ok) {
                             const result = await response.json();
                             showAlert(`任务提交成功！任务ID: ${result.task_id}`, 'success');
-                            refreshTasks();
+                            await refreshTasks();
                         } else {
                             const error = await response.json();
                             showAlert(`任务提交失败: ${error.message}`, 'danger');
@@ -942,6 +949,7 @@
 
                 const downloadSingleResult = async (taskId, key, outputPath) => {
                     try {
+                        setLoading(true);
                         const response = await apiCall(`/api/v1/task/result?task_id=${taskId}&name=${key}`);
                         if (response.ok) {
                             const blob = await response.blob();
@@ -958,11 +966,14 @@
                         }
                     } catch (error) {
                         showAlert(`下载结果失败: ${error.message}`, 'danger');
+                    } finally {
+                        setLoading(false);
                     }
                 };
 
                 const viewSingleResult = async (taskId, key, outputPath) => {
                     try {
+                        setLoading(true);
                         const response = await apiCall(`/api/v1/task/result?task_id=${taskId}&name=${key}`);
                         if (response.ok) {
                             const blob = await response.blob();
@@ -974,6 +985,8 @@
                         }
                     } catch (error) {
                         showAlert(`查看结果失败: ${error.message}`, 'danger');
+                    } finally {
+                        setLoading(false);
                     }
                 };
 
@@ -982,7 +995,7 @@
                         const response = await apiCall(`/api/v1/task/cancel?task_id=${taskId}`);
                         if (response.ok) {
                             showAlert('任务取消成功', 'success');
-                            refreshTasks();
+                            await refreshTasks();
                         } else {
                             const error = await response.json();
                             showAlert(`取消任务失败: ${error.message}`, 'danger');
@@ -997,7 +1010,7 @@
                         const response = await apiCall(`/api/v1/task/resume?task_id=${taskId}`);
                         if (response.ok) {
                             showAlert('任务重试成功', 'success');
-                            refreshTasks();
+                            await refreshTasks();
                         } else {
                             const error = await response.json();
                             showAlert(`重试任务失败: ${error.message}`, 'danger');
@@ -1005,6 +1018,11 @@
                     } catch (error) {
                         showAlert(`重试任务失败: ${error.message}`, 'danger');
                     }
+                };
+
+                const initModelAndTasks = async () => {
+                    await loadModels();
+                    await refreshTasks();
                 };
 
                 // 监听器
@@ -1048,8 +1066,7 @@
                     if (savedToken && savedUser) {
                         currentUser.value = JSON.parse(savedUser);
                         isLoggedIn.value = true;
-                        loadModels();
-                        refreshTasks();
+                        initModelAndTasks();
                     } else {
                         // 检查是否是GitHub回调
                         const urlParams = new URLSearchParams(window.location.search);

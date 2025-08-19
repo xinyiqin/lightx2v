@@ -119,6 +119,11 @@ class ServerMonitor:
         self.schedule_ratio_low = self.config['schedule_ratio_low']
         self.ping_timeout = self.config['ping_timeout']
 
+        self.user_visits = {} # user_id -> last_visit_t
+        self.user_max_active_tasks = self.config['user_max_active_tasks']
+        self.user_max_daily_tasks = self.config['user_max_daily_tasks']
+        self.user_visit_frequency = self.config['user_visit_frequency']
+
         assert self.worker_avg_window > 0
         assert self.worker_offline_timeout > 0
         assert self.worker_min_capacity > 0
@@ -236,6 +241,40 @@ class ServerMonitor:
         if len(infer_costs) <= 0:
             return self.subtask_run_timeouts[queue]
         return sum(infer_costs) / len(infer_costs)
+
+    @class_try_catch_async
+    async def check_user_busy(self, user_id, active_new_task=False):
+
+        # check if user visit too frequently
+        cur_t = time.time()
+        if user_id in self.user_visits:
+            elapse = cur_t - self.user_visits[user_id]
+            if elapse <= self.user_visit_frequency:
+                return f"User {user_id} visit too frequently, {elapse:.2f} s vs {self.user_visit_frequency:.2f} s"
+            else:
+                logger.info(f"User {user_id} visit: {elapse:.2f} s vs {self.user_visit_frequency:.2f} s")
+        self.user_visits[user_id] = cur_t
+
+        if active_new_task:
+            # check if user has too many active tasks
+            active_statuses = [TaskStatus.RUNNING, TaskStatus.PENDING, TaskStatus.CREATED]
+            active_tasks = await self.task_manager.list_tasks(status=active_statuses, user_id=user_id)
+            if len(active_tasks) >= self.user_max_active_tasks:
+                return f"User {user_id} has too many active tasks, {len(active_tasks)} vs {self.user_max_active_tasks}"
+            else:
+                logger.info(f"User {user_id} has {len(active_tasks)} active tasks, {self.user_max_active_tasks} max")
+
+            # check if user has too many daily tasks
+            daily_statuses = active_statuses + [TaskStatus.SUCCEED, TaskStatus.CANCEL, TaskStatus.FAILED]
+            daily_tasks = await self.task_manager.list_tasks(
+                status=daily_statuses, user_id=user_id, start_created_t=cur_t - 86400
+            )
+            if len(daily_tasks) >= self.user_max_daily_tasks:
+                return f"User {user_id} has too many daily tasks, {len(daily_tasks)} vs {self.user_max_daily_tasks}"
+            else:
+                logger.info(f"User {user_id} has {len(daily_tasks)} daily tasks, {self.user_max_daily_tasks} max")
+
+        return True
 
     # check if a task can be published to queues
     @class_try_catch_async

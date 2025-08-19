@@ -300,7 +300,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     placeholders = ','.join([f'${i}' for i in range(param_idx, next_idx)])
                     conds.append(f"status IN ({placeholders})")
                     params.extend([x.name for x in kwargs['status']])
-                    param_idx = next_idx
+                    param_idx = next_idx - 1
                 else:
                     conds.append(f"status = ${param_idx}")
                     params.append(kwargs['status'].name)
