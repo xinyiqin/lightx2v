@@ -170,7 +170,7 @@ class PipelineWorker(BaseWorker):
             if not status:
                 return False
             # save output video
-            if data_manager.name != "local":
+            if data_manager.name != "local" and self.rank == 0:
                 video_data = open(tmp_video_path, 'rb').read()
                 await data_manager.save_bytes(video_data, output_video_path)
             return True
@@ -197,7 +197,8 @@ class TextEncoderWorker(BaseWorker):
             img = await data_manager.load_image(input_image_path)
 
         out = self.runner.run_text_encoder(prompt, img)
-        await data_manager.save_object(out, outputs['text_encoder_output'])
+        if self.rank == 0:
+            await data_manager.save_object(out, outputs['text_encoder_output'])
 
         del out 
         torch.cuda.empty_cache()
@@ -217,7 +218,8 @@ class ImageEncoderWorker(BaseWorker):
 
         img = await data_manager.load_image(inputs["input_image"])
         out = self.runner.run_image_encoder(img)
-        await data_manager.save_object(out, outputs['clip_encoder_output'])
+        if self.rank == 0:
+            await data_manager.save_object(out, outputs['clip_encoder_output'])
 
         del out 
         torch.cuda.empty_cache()
@@ -246,7 +248,8 @@ class VaeEncoderWorker(BaseWorker):
                 "lat_w": self.runner.config.lat_w,
             }
         }
-        await data_manager.save_object(out, outputs['vae_encoder_output'])
+        if self.rank == 0:
+            await data_manager.save_object(out, outputs['vae_encoder_output'])
 
         del out, img, vals
         torch.cuda.empty_cache()
@@ -295,7 +298,8 @@ class DiTWorker(BaseWorker):
         if not status:
             return False
 
-        await data_manager.save_tensor(out, outputs['latents'])
+        if self.rank == 0:
+            await data_manager.save_tensor(out, outputs['latents'])
 
         del out, text_encoder_output , image_encoder_output
         torch.cuda.empty_cache()
@@ -355,7 +359,7 @@ class VaeDecoderWorker(BaseWorker):
                 logger.info(f"✅ Video saved successfully to: {self.runner.config.save_video_path} ✅")
 
             # save output video
-            if data_manager.name != "local":
+            if data_manager.name != "local" and self.rank == 0:
                 video_data = open(tmp_video_path, 'rb').read()
                 await data_manager.save_bytes(video_data, output_video_path)
 
