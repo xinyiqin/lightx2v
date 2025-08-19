@@ -32,8 +32,7 @@ class WanPreInfer:
     def set_scheduler(self, scheduler):
         self.scheduler = scheduler
 
-    @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
-    def infer(self, weights, inputs, positive, kv_start=0, kv_end=0):
+    def infer(self, weights, inputs, kv_start=0, kv_end=0):
         x = self.scheduler.latents
 
         if self.scheduler.flag_df:
@@ -45,12 +44,12 @@ class WanPreInfer:
             if self.config["model_cls"] == "wan2.2" and self.config["task"] == "i2v":
                 t = (self.scheduler.mask[0][:, ::2, ::2] * t).flatten()
 
-        if positive:
+        if self.scheduler.infer_condition:
             context = inputs["text_encoder_output"]["context"]
         else:
             context = inputs["text_encoder_output"]["context_null"]
 
-        if self.task == "i2v":
+        if self.task in ["i2v", "flf2v"]:
             if self.config.get("use_image_encoder", True):
                 clip_fea = inputs["image_encoder_output"]["clip_encoder_out"]
 
@@ -113,7 +112,11 @@ class WanPreInfer:
             del out, stacked
             torch.cuda.empty_cache()
 
-        if self.task == "i2v" and self.config.get("use_image_encoder", True):
+        if self.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True):
+            if self.task == "flf2v":
+                _, n, d = clip_fea.shape
+                clip_fea = clip_fea.view(2 * n, d)
+                clip_fea = clip_fea + weights.emb_pos.tensor.squeeze()
             context_clip = weights.proj_0.apply(clip_fea)
             if self.clean_cuda_cache:
                 del clip_fea
@@ -125,6 +128,7 @@ class WanPreInfer:
             context_clip = weights.proj_3.apply(context_clip)
             context_clip = weights.proj_4.apply(context_clip)
             context = torch.concat([context_clip, context], dim=0)
+
         if self.clean_cuda_cache:
             if self.config.get("use_image_encoder", True):
                 del context_clip

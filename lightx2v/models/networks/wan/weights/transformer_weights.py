@@ -36,6 +36,16 @@ class WanTransformerWeights(WeightModule):
             for phase in block.compute_phases:
                 phase.clear()
 
+    def post_weights_to_cuda(self):
+        self.norm.to_cuda()
+        self.head.to_cuda()
+        self.head_modulation.to_cuda()
+
+    def post_weights_to_cpu(self):
+        self.norm.to_cpu()
+        self.head.to_cpu()
+        self.head_modulation.to_cpu()
+
 
 class WanTransformerAttentionBlock(WeightModule):
     def __init__(self, block_index, task, mm_type, config):
@@ -293,7 +303,7 @@ class WanCrossAttention(WeightModule):
         )
         self.add_module("cross_attn_1", ATTN_WEIGHT_REGISTER[self.config["cross_attn_1_type"]]())
 
-        if self.config.task == "i2v" and self.config.get("use_image_encoder", True):
+        if self.config.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True):
             self.add_module(
                 "cross_attn_k_img",
                 MM_WEIGHT_REGISTER[self.mm_type](

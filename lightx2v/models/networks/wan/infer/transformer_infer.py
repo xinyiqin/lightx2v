@@ -39,8 +39,8 @@ class WanTransformerInfer(BaseTransformerInfer):
             self.seq_p_group = None
 
         if self.config.get("cpu_offload", False):
-            if torch.cuda.get_device_capability(0) == (9, 0):
-                assert self.config["self_attn_1_type"] != "sage_attn2"
+            # if torch.cuda.get_device_capability(0) == (9, 0):
+            #     assert self.config["self_attn_1_type"] != "sage_attn2"
             if "offload_ratio" in self.config:
                 offload_ratio = self.config["offload_ratio"]
             else:
@@ -78,11 +78,6 @@ class WanTransformerInfer(BaseTransformerInfer):
         else:
             self.infer_func = self._infer_without_offload
 
-        self.infer_conditional = True
-
-    def switch_status(self):
-        self.infer_conditional = not self.infer_conditional
-
     def _calculate_q_k_len(self, q, k_lens):
         q_lens = torch.tensor([q.size(0)], dtype=torch.int32, device=q.device)
         cu_seqlens_q = torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32)
@@ -102,8 +97,11 @@ class WanTransformerInfer(BaseTransformerInfer):
                 freqs_i = compute_freqs(q.size(2) // 2, grid_sizes, freqs)
         return freqs_i
 
-    @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
     def infer(self, weights, pre_infer_out):
+        x = self.infer_main_blocks(weights, pre_infer_out)
+        return self.infer_post_blocks(weights, x, pre_infer_out.embed)
+
+    def infer_main_blocks(self, weights, pre_infer_out):
         x = self.infer_func(
             weights,
             pre_infer_out.grid_sizes,
@@ -115,9 +113,9 @@ class WanTransformerInfer(BaseTransformerInfer):
             pre_infer_out.context,
             pre_infer_out.audio_dit_blocks,
         )
-        return self._infer_post_blocks(weights, x, pre_infer_out.embed)
+        return x
 
-    def _infer_post_blocks(self, weights, x, e):
+    def infer_post_blocks(self, weights, x, e):
         if e.dim() == 2:
             modulation = weights.head_modulation.tensor  # 1, 2, dim
             e = (modulation + e.unsqueeze(1)).chunk(2, dim=1)
@@ -439,7 +437,7 @@ class WanTransformerInfer(BaseTransformerInfer):
             x.add_(y_out * gate_msa.squeeze())
 
         norm3_out = weights.norm3.apply(x)
-        if self.task == "i2v" and self.config.get("use_image_encoder", True):
+        if self.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True):
             context_img = context[:257]
             context = context[257:]
         else:
@@ -447,7 +445,7 @@ class WanTransformerInfer(BaseTransformerInfer):
 
         if self.sensitive_layer_dtype != self.infer_dtype:
             context = context.to(self.infer_dtype)
-            if self.task == "i2v" and self.config.get("use_image_encoder", True):
+            if self.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True):
                 context_img = context_img.to(self.infer_dtype)
 
         n, d = self.num_heads, self.head_dim
@@ -470,7 +468,7 @@ class WanTransformerInfer(BaseTransformerInfer):
             model_cls=self.config["model_cls"],
         )
 
-        if self.task == "i2v" and self.config.get("use_image_encoder", True) and context_img is not None:
+        if self.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True) and context_img is not None:
             k_img = weights.cross_attn_norm_k_img.apply(weights.cross_attn_k_img.apply(context_img)).view(-1, n, d)
             v_img = weights.cross_attn_v_img.apply(context_img).view(-1, n, d)
 

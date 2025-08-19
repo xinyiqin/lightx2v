@@ -7,6 +7,7 @@ from lightx2v.common.ops import *
 from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner  # noqa: F401
 from lightx2v.models.runners.graph_runner import GraphRunner
 from lightx2v.models.runners.hunyuan.hunyuan_runner import HunyuanRunner  # noqa: F401
+from lightx2v.models.runners.qwen_image.qwen_image_runner import QwenImageRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_audio_runner import Wan22AudioRunner, Wan22MoeAudioRunner, WanAudioRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_causvid_runner import WanCausVidRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_distill_runner import WanDistillRunner  # noqa: F401
@@ -51,11 +52,12 @@ def main():
             "wan2.2_moe_audio",
             "wan2.2_audio",
             "wan2.2_moe_distill",
+            "qwen_image",
         ],
         default="wan2.1",
     )
 
-    parser.add_argument("--task", type=str, choices=["t2v", "i2v"], default="t2v")
+    parser.add_argument("--task", type=str, choices=["t2v", "i2v", "t2i", "flf2v"], default="t2v")
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)
     parser.add_argument("--use_prompt_enhancer", action="store_true")
@@ -64,6 +66,7 @@ def main():
     parser.add_argument("--negative_prompt", type=str, default="")
 
     parser.add_argument("--image_path", type=str, default="", help="The path to input image file for image-to-video (i2v) task")
+    parser.add_argument("--last_frame_path", type=str, default="", help="The path to last frame file for first-last-frame-to-video (flf2v) task")
     parser.add_argument("--audio_path", type=str, default="", help="The path to input audio file for audio-to-video (a2v) task")
 
     parser.add_argument("--save_video_path", type=str, default="./output_lightx2v.mp4", help="The path to save video path/file")

@@ -10,7 +10,7 @@ from requests.exceptions import RequestException
 from lightx2v.utils.envs import *
 from lightx2v.utils.generate_task_id import generate_task_id
 from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
-from lightx2v.utils.utils import cache_video, save_to_video, vae_to_comfyui_image
+from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
 
 from .base_runner import BaseRunner
 
@@ -39,7 +39,9 @@ class DefaultRunner(BaseRunner):
         self.run_vae_decoder = self._run_vae_decoder_local
         if self.config["task"] == "i2v":
             self.run_input_encoder = self._run_input_encoder_local_i2v
-        else:
+        elif self.config["task"] == "flf2v":
+            self.run_input_encoder = self._run_input_encoder_local_flf2v
+        elif self.config["task"] == "t2v":
             self.run_input_encoder = self._run_input_encoder_local_t2v
 
     def set_init_device(self):
@@ -165,6 +167,18 @@ class DefaultRunner(BaseRunner):
             "image_encoder_output": None,
         }
 
+    @ProfilingContext("Run Encoders")
+    def _run_input_encoder_local_flf2v(self):
+        prompt = self.config["prompt_enhanced"] if self.config["use_prompt_enhancer"] else self.config["prompt"]
+        first_frame = Image.open(self.config["image_path"]).convert("RGB")
+        last_frame = Image.open(self.config["last_frame_path"]).convert("RGB")
+        clip_encoder_out = self.run_image_encoder(first_frame, last_frame) if self.config.get("use_image_encoder", True) else None
+        vae_encode_out = self.run_vae_encoder(first_frame, last_frame)
+        text_encoder_output = self.run_text_encoder(prompt, first_frame)
+        torch.cuda.empty_cache()
+        gc.collect()
+        return self.get_encoder_output_i2v(clip_encoder_out, vae_encode_out, text_encoder_output)
+
     @ProfilingContext("Run DiT")
     def _run_dit_local(self, total_steps=None):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
@@ -204,17 +218,8 @@ class DefaultRunner(BaseRunner):
                     logger.info(f"Enhanced prompt: {enhanced_prompt}")
                     return enhanced_prompt
 
-    def run_pipeline(self, save_video=True):
-        if self.config["use_prompt_enhancer"]:
-            self.config["prompt_enhanced"] = self.post_prompt_enhancer()
-
-        self.inputs = self.run_input_encoder()
-        self.set_target_shape()
-        latents, generator = self.run_dit()
-
-        images = self.run_vae_decoder(latents, generator)
-        if self.config["model_cls"] != "wan2.2":
-            images = vae_to_comfyui_image(images)
+    def process_images_after_vae_decoder(self, images, save_video=True):
+        images = vae_to_comfyui_image(images)
 
         if "video_frame_interpolation" in self.config:
             assert self.vfi_model is not None and self.config["video_frame_interpolation"].get("target_fps", None) is not None
@@ -235,11 +240,20 @@ class DefaultRunner(BaseRunner):
             if not dist.is_initialized() or dist.get_rank() == 0:
                 logger.info(f"🎬 Start to save video 🎬")
 
-                if self.config["model_cls"] != "wan2.2":
-                    save_to_video(images, self.config.save_video_path, fps=fps, method="ffmpeg")  # type: ignore
-                else:
-                    cache_video(tensor=images, save_file=self.config.save_video_path, fps=fps, nrow=1, normalize=True, value_range=(-1, 1))
+                save_to_video(images, self.config.save_video_path, fps=fps, method="ffmpeg")
                 logger.info(f"✅ Video saved successfully to: {self.config.save_video_path} ✅")
+
+    def run_pipeline(self, save_video=True):
+        if self.config["use_prompt_enhancer"]:
+            self.config["prompt_enhanced"] = self.post_prompt_enhancer()
+
+        self.inputs = self.run_input_encoder()
+        self.set_target_shape()
+
+        latents, generator = self.run_dit()
+
+        images = self.run_vae_decoder(latents, generator)
+        self.process_images_after_vae_decoder(images, save_video=save_video)
 
         del latents, generator
         torch.cuda.empty_cache()
