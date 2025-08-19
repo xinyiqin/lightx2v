@@ -642,7 +642,7 @@
                 });
 
                 const isAudioModel = computed(() => {
-                    return taskForm.value.model_cls === "wan2.1_audio" || taskForm.value.model_cls === "wan2.2_moe_audio";
+                    return taskForm.value.model_cls && (taskForm.value.model_cls.includes('audio') || taskForm.value.model_cls.includes('Audio'));
                 });
 
                 // 分页相关计算属性
