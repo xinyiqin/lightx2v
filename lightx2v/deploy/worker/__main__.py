@@ -157,10 +157,10 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity,
 
 
 async def boradcast_subtasks(subtasks):
+    subtasks = [] if subtasks is None else subtasks
     if WORLD_SIZE <= 1:
         return subtasks
     try:
-        subtasks = [] if subtasks is None else subtasks
         if RANK == 0:
             subtasks_data = json.dumps(subtasks, ensure_ascii=False).encode('utf-8')
             subtasks_tensor = torch.frombuffer(bytearray(subtasks_data), dtype=torch.uint8).to(device='cuda')
