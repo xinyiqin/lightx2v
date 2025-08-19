@@ -817,6 +817,7 @@
 
                 const submitTask = async () => {
                     try {
+                        setLoading(true);
                         submitting.value = true;
                         
                         // 准备提交数据
@@ -867,6 +868,7 @@
                         showAlert(`提交任务失败: ${error.message}`, 'danger');
                     } finally {
                         submitting.value = false;
+                        setLoading(false);
                     }
                 };
 

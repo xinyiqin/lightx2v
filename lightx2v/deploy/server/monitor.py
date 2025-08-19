@@ -135,6 +135,9 @@ class ServerMonitor:
         assert self.schedule_ratio_low > 0 and self.schedule_ratio_low < 1
         assert self.schedule_ratio_high >= self.schedule_ratio_low
         assert self.ping_timeout > 0
+        assert self.user_max_active_tasks > 0
+        assert self.user_max_daily_tasks > 0
+        assert self.user_visit_frequency > 0
 
     async def init(self):
         while True:
@@ -251,8 +254,6 @@ class ServerMonitor:
             elapse = cur_t - self.user_visits[user_id]
             if elapse <= self.user_visit_frequency:
                 return f"User {user_id} visit too frequently, {elapse:.2f} s vs {self.user_visit_frequency:.2f} s"
-            else:
-                logger.info(f"User {user_id} visit: {elapse:.2f} s vs {self.user_visit_frequency:.2f} s")
         self.user_visits[user_id] = cur_t
 
         if active_new_task:
@@ -261,8 +262,6 @@ class ServerMonitor:
             active_tasks = await self.task_manager.list_tasks(status=active_statuses, user_id=user_id)
             if len(active_tasks) >= self.user_max_active_tasks:
                 return f"User {user_id} has too many active tasks, {len(active_tasks)} vs {self.user_max_active_tasks}"
-            else:
-                logger.info(f"User {user_id} has {len(active_tasks)} active tasks, {self.user_max_active_tasks} max")
 
             # check if user has too many daily tasks
             daily_statuses = active_statuses + [TaskStatus.SUCCEED, TaskStatus.CANCEL, TaskStatus.FAILED]
@@ -271,8 +270,6 @@ class ServerMonitor:
             )
             if len(daily_tasks) >= self.user_max_daily_tasks:
                 return f"User {user_id} has too many daily tasks, {len(daily_tasks)} vs {self.user_max_daily_tasks}"
-            else:
-                logger.info(f"User {user_id} has {len(daily_tasks)} daily tasks, {self.user_max_daily_tasks} max")
 
         return True
 
