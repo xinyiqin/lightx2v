@@ -252,6 +252,8 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
         if task['status'] != TaskStatus.SUCCEED:
             return error_response(f"Task {task_id} not succeed", 400)
         assert name in task['outputs'], f"Output {name} not found in task {task_id}"
+        if name in task['params']:
+            return error_response(f"Output {name} is a stream", 400)
         data = await data_manager.load_bytes(task['outputs'][name])
         return Response(content=data, media_type="application/octet-stream")
     except Exception as e:

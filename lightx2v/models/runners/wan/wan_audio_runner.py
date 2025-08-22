@@ -26,6 +26,7 @@ from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import find_torch_model_path, save_to_video, vae_to_comfyui_image
+from lightx2v.deploy.common.va_recorder import VARecorder
 
 
 @contextmanager
@@ -349,7 +350,9 @@ class VideoGenerator:
             total_steps = self.model.scheduler.infer_steps
         for step_index in range(total_steps):
             logger.info(f"==> Segment {segment_idx}, Step {step_index}/{total_steps}")
-
+            if hasattr(self, "worker_end") and self.worker_end:
+                logger.info("worker_end, wan audio runner run segment break")
+                break
             with ProfilingContext4Debug("step_pre"):
                 self.model.scheduler.step_pre(step_index=step_index)
 
@@ -457,6 +460,20 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         return {"text_encoder_output": text_encoder_output, "image_encoder_output": image_encoder_output, "audio_adapter_pipe": self.load_audio_adapter_lazy()}
 
+    def init_va_recorder(self, sample_rate):
+        output_video_path = self.config.get("save_video_path", None)
+        self.va_recorder = None
+        if isinstance(output_video_path, dict) and (not dist.is_initialized() or dist.get_rank() == 0):
+            assert output_video_path["type"] == "stream", f"unexcept save_video_path: {output_video_path}"
+            record_fps = self.config.get("target_fps", 16)
+            if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+                record_fps = self.config["video_frame_interpolation"]["target_fps"]
+            self.va_recorder = VARecorder(
+                livestream_url=output_video_path["data"],
+                fps=record_fps,
+                sample_rate=sample_rate,
+            )
+
     def run_pipeline(self, save_video=True):
         """Optimized pipeline with modular components"""
 
@@ -498,11 +515,16 @@ class WanAudioRunner(WanRunner):  # type:ignore
             gen_video_list = []
             cut_audio_list = []
             prev_video = None
+            self.init_va_recorder(self._audio_processor.audio_sr)
+            logger.info(f"init va_recorder: {self.va_recorder}")
 
             for idx, segment in enumerate(audio_segments):
                 self.config.seed = self.config.seed + idx
                 torch.manual_seed(self.config.seed)
                 logger.info(f"Processing segment {idx + 1}/{len(audio_segments)}, seed: {self.config.seed}")
+                if hasattr(self, "worker_end") and self.worker_end:
+                    logger.info("worker_end, wan audio runner run segment break")
+                    break
 
                 # Process audio features
                 audio_features = self._audio_preprocess(segment.audio_array, sampling_rate=self._audio_processor.audio_sr, return_tensors="pt").input_values.squeeze(0).to(self.model.device)
@@ -531,6 +553,10 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 else:
                     gen_video_list.append(gen_video[:, :, start_frame:].cpu())
                     cut_audio_list.append(segment.audio_array[start_audio_frame:])
+
+                if self.va_recorder:
+                    cur_video = vae_to_comfyui_image(gen_video_list[-1])
+                    self.va_recorder.pub_livestream(cur_video, cut_audio_list[-1])
 
                 # Update prev_video for next iteration
                 prev_video = gen_video
@@ -563,11 +589,11 @@ class WanAudioRunner(WanRunner):  # type:ignore
             # Save video if requested
             if (self.config.get("device_mesh") is not None and dist.get_rank() == 0) or self.config.get("device_mesh") is None:
                 if save_video and self.config.get("save_video_path", None):
-                    self._save_video_with_audio(comfyui_images, merge_audio, target_fps)
+                    if not self.va_recorder:
+                        self._save_video_with_audio(comfyui_images, merge_audio, target_fps)
 
             # Final cleanup
             self.end_run()
-
             return comfyui_images, comfyui_audio
 
         finally:
@@ -575,6 +601,9 @@ class WanAudioRunner(WanRunner):  # type:ignore
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            if self.va_recorder:
+                self.va_recorder.stop(wait=False)
+                self.va_recorder = None
 
     def _save_video_with_audio(self, images, audio_array, fps):
         """Save video with audio"""

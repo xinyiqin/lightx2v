@@ -90,15 +90,18 @@ async def preload_data(inp, inp_type, typ, val):
             data = await fetch_resource(val, timeout=timeout)
         elif typ == "base64":
             data = base64.b64decode(val)
+        elif typ == "stream":
+            # no bytes data need to be saved by data_manager
+            data = None
         else:
-            raise ValueError(f"cannot read image which type is {typ}!")
+            raise ValueError(f"cannot read {inp}[{inp_type}] which type is {typ}!")
 
         # check if valid image bytes
         if inp_type == "IMAGE":
             image = Image.open(io.BytesIO(data))
             logger.info(f"load image: {image.size}")
             assert image.size[0] > 0 and image.size[1] > 0, "image is empty"
-        elif inp_type == "AUDIO":
+        elif inp_type == "AUDIO" and typ != "stream":
             waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
             logger.info(f"load audio: {waveform.size()}, {sample_rate}")
             assert waveform.size(0) > 0, "audio is empty"
@@ -115,5 +118,9 @@ async def load_inputs(params, raw_inputs, types):
     inputs_data = {}
     for inp in raw_inputs:
         item = params.pop(inp)
-        inputs_data[inp] = await preload_data(inp, types[inp], item['type'], item['data'])
+        bytes_data = await preload_data(inp, types[inp], item['type'], item['data'])
+        if bytes_data is not None:
+            inputs_data[inp] = bytes_data
+        else:
+            params[inp] = item
     return inputs_data

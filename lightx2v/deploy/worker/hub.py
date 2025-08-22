@@ -103,7 +103,9 @@ def class_try_catch_async_with_thread(func):
         except asyncio.CancelledError:
             logger.warning(f"RunnerThread inside {func.__name__} cancelled")
             if hasattr(self, "thread"):
-                self.thread.stop()
+                # self.thread.stop()
+                self.runner.worker_end = True
+                self.thread.join()
             raise asyncio.CancelledError
         except Exception:
             logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
@@ -145,6 +147,14 @@ class PipelineWorker(BaseWorker):
             if data_manager.name == "local":
                 tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
 
+            # for stream audio input and stream video output, value is dict
+            stream_audio_path = params.get("input_audio", None)
+            stream_video_path = params.get("output_video", None)
+            if stream_audio_path is not None:
+                tmp_audio_path = stream_audio_path
+            if stream_video_path is not None:
+                tmp_video_path = stream_video_path
+
             # prepare tmp image
             if self.runner.config.task == "i2v":
                 img_data = await data_manager.load_bytes(input_image_path)
@@ -162,6 +172,7 @@ class PipelineWorker(BaseWorker):
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.set_inputs(params)
+            self.runner.worker_end = False
 
             future = asyncio.Future()
             self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_func, self.rank)
@@ -170,7 +181,7 @@ class PipelineWorker(BaseWorker):
             if not status:
                 return False
             # save output video
-            if data_manager.name != "local" and self.rank == 0:
+            if data_manager.name != "local" and self.rank == 0 and isinstance(tmp_video_path, str):
                 video_data = open(tmp_video_path, 'rb').read()
                 await data_manager.save_bytes(video_data, output_video_path)
             return True
@@ -290,7 +301,7 @@ class DiTWorker(BaseWorker):
         }
 
         self.runner.set_target_shape()
-
+        self.runner.worker_end = False
         future = asyncio.Future()
         self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner._run_dit_local, self.rank)
         self.thread.start()

@@ -111,6 +111,9 @@ class DefaultRunner(BaseRunner):
             total_steps = self.model.scheduler.infer_steps
         for step_index in range(total_steps):
             logger.info(f"==> step_index: {step_index + 1} / {total_steps}")
+            if hasattr(self, "worker_end") and self.worker_end:
+                logger.info("worker_end, default runner run step break")
+                break
 
             with ProfilingContext4Debug("step_pre"):
                 self.model.scheduler.step_pre(step_index=step_index)
