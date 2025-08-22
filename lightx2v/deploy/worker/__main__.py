@@ -106,7 +106,7 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
     try:
         logger.info(f"{worker_identity} fetching {worker_keys} with timeout: {timeout}s ...")
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=json.dumps(params), headers=HEADERS, timeout=timeout + 10) as ret:
+            async with session.post(url, data=json.dumps(params), headers=HEADERS, timeout=timeout+1) as ret:
                 if ret.status == 200:
                     ret = await ret.json()
                     subtasks = ret['subtasks']
@@ -232,8 +232,7 @@ async def main(args):
             ping_task = None
             try:
                 run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
-                if RANK == 0:
-                    ping_task = asyncio.create_task(ping_subtask(args.server, args.identity, sub['task_id'], sub['worker_name'], run_task))
+                ping_task = asyncio.create_task(ping_subtask(args.server, sub['worker_identity'], sub['task_id'], sub['worker_name'], run_task))
                 ret = await run_task
                 await sync_subtask()
                 if ret is True:
@@ -304,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--worker", type=str, required=True)
     parser.add_argument("--identity", type=str, default='')
     parser.add_argument("--max_batch", type=int, default=1)
-    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--timeout", type=int, default=300)
 
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)
