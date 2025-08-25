@@ -2,20 +2,27 @@ import subprocess
 import threading
 import queue
 import time
-import numpy as np
+import os
 from loguru import logger
 import traceback
+import numpy as np
+import torch.distributed as dist
+import torch
 
 
 class VAReader:
     def __init__(
         self,
+        rank: int,
+        world_size: int,
         stream_url: str,
         segment_duration: float = 5.0,
         sample_rate: int = 16000,
         audio_channels: int = 1,
         buffer_size: int = 5,
     ):
+        self.rank = rank
+        self.world_size = world_size
         self.stream_url = stream_url
         self.segment_duration = segment_duration
         self.sample_rate = sample_rate
@@ -33,10 +40,15 @@ class VAReader:
         logger.info(f"Audio duration per chunk: {segment_duration}s, sample rate: {sample_rate}Hz")
 
     def start(self):
-        self.start_ffmpeg_process()
-        self.audio_thread = threading.Thread(target=self.audio_worker, daemon=True)
-        self.audio_thread.start()    
-        logger.info("VAReader started successfully")
+        if self.rank == 0:
+            self.start_ffmpeg_process()
+            self.audio_thread = threading.Thread(target=self.audio_worker, daemon=True)
+            self.audio_thread.start()    
+            logger.info(f"VAReader {self.rank}/{self.world_size} started successfully")
+        else:
+            logger.info(f"VAReader {self.rank}/{self.world_size} wait only")
+        if self.world_size > 1:
+            dist.barrier()
 
     def start_ffmpeg_process(self):
         """Start ffmpeg process read audio from stream"""
@@ -79,7 +91,7 @@ class VAReader:
         except:
             logger.error(f"Audio worker error: {traceback.format_exc()}")
         finally:
-            logger.info("Audio worker thread stopped")
+            logger.warning("Audio worker thread stopped")
 
     def fetch_audio_data(self):
         """Fetch audio data from ffmpeg process"""
@@ -91,9 +103,7 @@ class VAReader:
             # logger.info(f"Fetch audio data: {len(audio_bytes)} bytes, bytes_buffer: {len(self.bytes_buffer)} bytes")
 
             while len(self.bytes_buffer) >= self.chunk_size:
-                audio_data = np.frombuffer(self.bytes_buffer[:self.chunk_size], dtype=np.int16)
-                audio_data = audio_data.astype(np.float32) / 32768.0
-                logger.info(f"Audio segment data: {audio_data.shape} {audio_data.dtype} {audio_data.min()} {audio_data.max()}")    
+                audio_data = self.bytes_buffer[:self.chunk_size]
                 try:
                     self.audio_queue.put(audio_data, timeout=1.0)
                 except queue.Full:
@@ -105,27 +115,51 @@ class VAReader:
         except:
             logger.error(f"Fetch audio data error: {traceback.format_exc()}")
 
+    def braodcast_audio_data(self, audio_data):
+        if self.rank == 0:
+            if audio_data is None:
+                data_size = 0
+            else:
+                audio_tensor = torch.frombuffer(bytearray(audio_data), dtype=torch.uint8).to(device='cuda')
+                data_size = audio_tensor.shape[0]
+            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device='cuda')
+            logger.info(f"rank {self.rank} send audio_data size: {size_tensor.item()} bytes")
+        else:
+            size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
+
+        dist.broadcast(size_tensor, src=0)
+        if size_tensor.item() == 0:
+            return None
+        if self.rank != 0:
+            audio_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
+            logger.info(f"rank {self.rank} recv audio_data size: {size_tensor.item()} bytes")
+        dist.broadcast(audio_tensor, src=0)
+
+        if self.rank != 0:
+            audio_data = audio_tensor.cpu().numpy().tobytes()
+        return audio_data
+
+    def bytes_to_ndarray(self, audio_data):
+        if audio_data is None:
+            return None
+        audio_data = np.frombuffer(audio_data, dtype=np.int16)
+        audio_data = audio_data.astype(np.float32) / 32768.0
+        logger.info(f"Got segment audio rank={self.rank}: {audio_data.shape} {audio_data.dtype} {audio_data.min()} {audio_data.max()}")
+        return audio_data
+
     def get_audio_segment(self, timeout: float = 1.0):
         audio_data = None
-        try:
-            audio_data = self.audio_queue.get(timeout=timeout)
-        except:
-            logger.warning(f"Failed to get audio segment: {traceback.format_exc()}")
+        if self.rank == 0:
+            try:
+                audio_data = self.audio_queue.get(timeout=timeout)
+            except:
+                logger.warning(f"Failed to get audio segment: {traceback.format_exc()}")
+        if self.world_size > 1:
+            audio_data = self.braodcast_audio_data(audio_data)
+        audio_data = self.bytes_to_ndarray(audio_data)
         return audio_data
 
     def stop(self):
-        # Wait for threads to finish
-        if self.audio_thread and self.audio_thread.is_alive():
-            self.audio_thread.join(timeout=5)
-            if self.audio_thread.is_alive():
-                logger.warning("Audio thread did not stop gracefully")
-
-        if self.audio_queue:
-            self.audio_queue.join()
-            self.audio_queue.close()
-            self.audio_queue = None
-            logger.warning("Audio queue closed")
-
         # Stop ffmpeg process
         if self.ffmpeg_process:
             self.ffmpeg_process.terminate()
@@ -135,12 +169,33 @@ class VAReader:
                 self.ffmpeg_process.kill()
             logger.warning("FFmpeg process stopped")
 
+        # Wait for threads to finish
+        if self.audio_thread and self.audio_thread.is_alive():
+            self.audio_thread.join(timeout=5)
+            if self.audio_thread.is_alive():
+                logger.error("Audio thread did not stop gracefully")
+
+        if self.audio_queue:
+            del self.audio_queue
+            self.audio_queue = None
+            logger.warning("Audio queue closed")
+
     def __del__(self):
         self.stop()
 
 
 if __name__ == "__main__":
+
+    WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
+    RANK = int(os.environ.get('RANK', 0))
+    if WORLD_SIZE > 1:
+        dist.init_process_group(backend='nccl')
+        torch.cuda.set_device(dist.get_rank())
+        logger.info(f"Distributed initialized: rank={RANK}, world_size={WORLD_SIZE}")
+
     reader = VAReader(
+        RANK,
+        WORLD_SIZE,
         "rtmp://localhost/live/test_audio",
         segment_duration=5.0,
         sample_rate=16000,
@@ -150,18 +205,18 @@ if __name__ == "__main__":
     fail_count = 0
     max_fail_count = 10
 
-    while True:
-        try:
+    try:
+        while True:
             audio_data = reader.get_audio_segment(timeout=5.0)
             if audio_data is not None:
-                logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
+                # logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
                 fail_count = 0
+                time.sleep(5)
             else:
                 fail_count += 1
                 if fail_count > max_fail_count:
                     logger.warning("Failed to get audio chunk, stop reader")
                     reader.stop()
                     break
-        finally:
-            reader.stop()
-            break
+    finally:
+        reader.stop()
