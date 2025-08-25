@@ -10,16 +10,20 @@ import traceback
 import copy
 from loguru import logger
 import torch.distributed as dist
+import torchvision.transforms.functional as TF
 from lightx2v.utils.utils import seed_all
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 
-from lightx2v.models.runners.hunyuan.hunyuan_runner import HunyuanRunner
-from lightx2v.models.runners.wan.wan_runner import WanRunner
-from lightx2v.models.runners.wan.wan_distill_runner import WanDistillRunner
-from lightx2v.models.runners.wan.wan_causvid_runner import WanCausVidRunner
-from lightx2v.models.runners.wan.wan_audio_runner import WanAudioRunner
-from lightx2v.models.runners.wan.wan_skyreels_v2_df_runner import WanSkyreelsV2DFRunner
-from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner
+from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner  # noqa: F401
+from lightx2v.models.runners.graph_runner import GraphRunner
+from lightx2v.models.runners.hunyuan.hunyuan_runner import HunyuanRunner  # noqa: F401
+from lightx2v.models.runners.qwen_image.qwen_image_runner import QwenImageRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_audio_runner import Wan22AudioRunner, Wan22MoeAudioRunner, WanAudioRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_causvid_runner import WanCausVidRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_distill_runner import WanDistillRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_runner import Wan22MoeRunner, WanRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_skyreels_v2_df_runner import WanSkyreelsV2DFRunner  # noqa: F401
+from lightx2v.models.runners.wan.wan_vace_runner import WanVaceRunner  # noqa: F401
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config, set_parallel_config
@@ -56,6 +60,87 @@ class BaseWorker:
         self.runner.config["save_video_path"] = params.get("save_video_path", "")
         self.runner.config["seed"] = params.get("seed", self.fixed_config.get("seed", 42))
         self.runner.config["audio_path"] = params.get("audio_path", "")
+
+    async def read_image_input(self, input_image_path, data_manager):
+        img = await data_manager.load_image(input_image_path)
+        img = TF.to_tensor(img).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
+        return img
+
+    async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
+            input_image_path = inputs.get("input_image", "")
+            tmp_image_path = os.path.join(tmp_dir, input_image_path)
+
+            # prepare tmp image
+            if self.runner.config.task == "i2v":
+                img_data = await data_manager.load_bytes(input_image_path)
+                with open(tmp_image_path, 'wb') as fout:
+                    fout.write(img_data)
+
+            params["image_path"] = tmp_image_path
+
+    async def prepare_input_audio(self, params, inputs, tmp_dir, data_manager):
+        input_audio_path = inputs.get("input_audio", "")
+        tmp_audio_path = os.path.join(tmp_dir, input_audio_path)
+
+        # for stream audio input, value is dict
+        stream_audio_path = params.get("input_audio", None)
+        if stream_audio_path is not None:
+            tmp_audio_path = stream_audio_path
+
+        if input_audio_path and 'audio' in self.runner.config.model_cls and isinstance(tmp_audio_path, str):
+            audio_data = await data_manager.load_bytes(input_audio_path)
+            with open(tmp_audio_path, 'wb') as fout:
+                fout.write(audio_data)
+
+        params["audio_path"] = tmp_audio_path
+
+    def prepare_output_video(self, params, outputs, tmp_dir, data_manager):
+        output_video_path = outputs.get("output_video", "")
+        tmp_video_path = os.path.join(tmp_dir, output_video_path)
+        if data_manager.name == "local":
+            tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
+
+        # for stream video output, value is dict
+        stream_video_path = params.get("output_video", None)
+        if stream_video_path is not None:
+            tmp_video_path = stream_video_path
+
+        params["save_video_path"] = tmp_video_path
+        return tmp_video_path, output_video_path
+
+    async def prepare_dit_inputs(self, inputs, data_manager):
+        device = torch.device("cuda", self.rank)
+        text_out = inputs["text_encoder_output"]
+        text_encoder_output = await data_manager.load_object(text_out, device)
+        image_encoder_output = None
+
+        if self.runner.config.task == "i2v":
+            clip_path = inputs["clip_encoder_output"]
+            vae_path = inputs["vae_encoder_output"]
+            clip_encoder_out = await data_manager.load_object(clip_path, device)
+            vae_encoder_out = await data_manager.load_object(vae_path, device)
+            image_encoder_output = {
+                "clip_encoder_out": clip_encoder_out,
+                "vae_encoder_out": vae_encoder_out["vals"],
+            }
+            # apploy the config changes by vae encoder
+            self.update_config(vae_encoder_out["kwargs"])
+
+        self.runner.inputs = {
+            "text_encoder_output": text_encoder_output,
+            "image_encoder_output": image_encoder_output,
+        }
+
+        if 'audio' in self.runner.config.model_cls:
+            audio_segments, expected_frames = self.runner.read_audio_input()
+            self.runner.inputs["audio_segments"] = audio_segments
+            self.runner.inputs["expected_frames"] = expected_frames
+
+    async def save_output_video(self, tmp_video_path, output_video_path, data_manager):
+        # save output video
+        if data_manager.name != "local" and self.rank == 0 and isinstance(tmp_video_path, str):
+            video_data = open(tmp_video_path, 'rb').read()
+            await data_manager.save_bytes(video_data, output_video_path)
 
 
 class RunnerThread(threading.Thread):
@@ -138,37 +223,9 @@ class PipelineWorker(BaseWorker):
     async def run(self, inputs, outputs, params, data_manager):
         with tempfile.TemporaryDirectory() as tmp_dir:
 
-            input_image_path = inputs.get("input_image", "")
-            input_audio_path = inputs.get("input_audio", "")
-            output_video_path = outputs.get("output_video", "")
-            tmp_image_path = os.path.join(tmp_dir, input_image_path)
-            tmp_audio_path = os.path.join(tmp_dir, input_audio_path)
-            tmp_video_path = os.path.join(tmp_dir, output_video_path)
-            if data_manager.name == "local":
-                tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
-
-            # for stream audio input and stream video output, value is dict
-            stream_audio_path = params.get("input_audio", None)
-            stream_video_path = params.get("output_video", None)
-            if stream_audio_path is not None:
-                tmp_audio_path = stream_audio_path
-            if stream_video_path is not None:
-                tmp_video_path = stream_video_path
-
-            # prepare tmp image
-            if self.runner.config.task == "i2v":
-                img_data = await data_manager.load_bytes(input_image_path)
-                with open(tmp_image_path, 'wb') as fout:
-                    fout.write(img_data)
-
-            if self.runner.config.model_cls in ["wan2.1_audio", "wan2.2_moe_audio"] and isinstance(tmp_audio_path, str):
-                audio_data = await data_manager.load_bytes(input_audio_path)
-                with open(tmp_audio_path, 'wb') as fout:
-                    fout.write(audio_data)
-
-            params["image_path"] = tmp_image_path
-            params["audio_path"] = tmp_audio_path
-            params["save_video_path"] = tmp_video_path
+            await self.prepare_input_image(params, inputs, tmp_dir, data_manager)
+            await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
+            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.set_inputs(params)
@@ -180,10 +237,7 @@ class PipelineWorker(BaseWorker):
             status, _ = await future
             if not status:
                 return False
-            # save output video
-            if data_manager.name != "local" and self.rank == 0 and isinstance(tmp_video_path, str):
-                video_data = open(tmp_video_path, 'rb').read()
-                await data_manager.save_bytes(video_data, output_video_path)
+            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
             return True
 
 
@@ -205,7 +259,7 @@ class TextEncoderWorker(BaseWorker):
             prompt = self.runner.config["prompt_enhanced"]
 
         if self.runner.config.task == "i2v":
-            img = await data_manager.load_image(input_image_path)
+            img = await self.read_image_input(input_image_path, data_manager)
 
         out = self.runner.run_text_encoder(prompt, img)
         if self.rank == 0:
@@ -227,7 +281,7 @@ class ImageEncoderWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        img = await data_manager.load_image(inputs["input_image"])
+        img = await self.read_image_input(inputs["input_image"], data_manager)
         out = self.runner.run_image_encoder(img)
         if self.rank == 0:
             await data_manager.save_object(out, outputs['clip_encoder_output'])
@@ -249,7 +303,7 @@ class VaeEncoderWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        img = await data_manager.load_image(inputs["input_image"])
+        img = await self.read_image_input(inputs["input_image"], data_manager)
         # run vae encoder changed the config, we use kwargs pass changes
         vals = self.runner.run_vae_encoder(img)
         out = {
@@ -278,32 +332,10 @@ class DiTWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        device = torch.device("cuda", self.rank)
-        text_out = inputs["text_encoder_output"]
-        text_encoder_output = await data_manager.load_object(text_out, device)
-        image_encoder_output = None
-
-        if self.runner.config.task == "i2v":
-            clip_path = inputs["clip_encoder_output"]
-            vae_path = inputs["vae_encoder_output"]
-            clip_encoder_out = await data_manager.load_object(clip_path, device)
-            vae_encoder_out = await data_manager.load_object(vae_path, device)
-            image_encoder_output = {
-                "clip_encoder_out": clip_encoder_out,
-                "vae_encoder_out": vae_encoder_out["vals"],
-            }
-            # apploy the config changes by vae encoder
-            self.update_config(vae_encoder_out["kwargs"])
-
-        self.runner.inputs = {
-            "text_encoder_output": text_encoder_output,
-            "image_encoder_output": image_encoder_output,
-        }
-
-        self.runner.set_target_shape()
+        await self.prepare_dit_inputs(inputs, data_manager)
         self.runner.worker_end = False
         future = asyncio.Future()
-        self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner._run_dit_local, self.rank)
+        self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_dit, self.rank)
         self.thread.start()
         status, (out, _) = await future
         if not status:
@@ -312,10 +344,17 @@ class DiTWorker(BaseWorker):
         if self.rank == 0:
             await data_manager.save_tensor(out, outputs['latents'])
 
-        del out, text_encoder_output , image_encoder_output
+        del out
         torch.cuda.empty_cache()
         gc.collect()
         return True
+
+    def run_dit(self):
+        self.runner.init_run()
+        assert self.runner.video_segment_num == 1, "DiTWorker only support single segment"
+        latents, generator = self.runner.run_segment(total_steps=None)
+        self.runner.end_run()
+        return latents, generator
 
 
 class VaeDecoderWorker(BaseWorker):
@@ -329,52 +368,53 @@ class VaeDecoderWorker(BaseWorker):
     async def run(self, inputs, outputs, params, data_manager):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            output_video_path = outputs.get("output_video", "")
-            tmp_video_path = os.path.join(tmp_dir, output_video_path)
-            if data_manager.name == "local":
-                tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
-
-            params["save_video_path"] = tmp_video_path
+            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.set_inputs(params)
 
             device = torch.device("cuda", self.rank)
             latents = await data_manager.load_tensor(inputs["latents"], device)
-            images = self.runner.vae_decoder.decode(latents, generator=None, config=self.runner.config)
+            self.runner.gen_video = self.runner.run_vae_decoder(latents, None)
+            self.runner.process_images_after_vae_decoder(save_video=True)
 
-            if self.runner.config["model_cls"] != "wan2.2":
-                images = vae_to_comfyui_image(images)
+            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
-            if "video_frame_interpolation" in self.runner.config:
-                assert self.runner.vfi_model is not None and self.runner.config["video_frame_interpolation"].get("target_fps", None) is not None
-                target_fps = self.runner.config["video_frame_interpolation"]["target_fps"]
-                logger.info(f"Interpolating frames from {self.runner.config.get('fps', 16)} to {target_fps}")
-                images = self.runner.vfi_model.interpolate_frames(
-                    images,
-                    source_fps=self.runner.config.get("fps", 16),
-                    target_fps=target_fps,
-                )
+            del latents
+            torch.cuda.empty_cache()
+            gc.collect()
+            return True
 
-            if "video_frame_interpolation" in self.runner.config and self.runner.config["video_frame_interpolation"].get("target_fps"):
-                fps = self.runner.config["video_frame_interpolation"]["target_fps"]
-            else:
-                fps = self.runner.config.get("fps", 16)
 
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                logger.info(f"🎬 Start to save video 🎬")
+class SegmentDitWorker(BaseWorker):
+    def __init__(self, args):
+        super().__init__(args)
+        self.runner.model = self.runner.load_transformer()
+        vae_encoder, self.runner.vae_decoder = self.runner.load_vae()
+        self.runner.vfi_model = self.runner.load_vfi_model() if "video_frame_interpolation" in self.runner.config else None
+        del vae_encoder
 
-                if self.runner.config["model_cls"] != "wan2.2":
-                    save_to_video(images, self.runner.config.save_video_path, fps=fps, method="ffmpeg")  # type: ignore
-                else:
-                    cache_video(tensor=images, save_file=self.runner.config.save_video_path, fps=fps, nrow=1, normalize=True, value_range=(-1, 1))
-                logger.info(f"✅ Video saved successfully to: {self.runner.config.save_video_path} ✅")
+    @class_try_catch_async_with_thread
+    async def run(self, inputs, outputs, params, data_manager):
 
-            # save output video
-            if data_manager.name != "local" and self.rank == 0:
-                video_data = open(tmp_video_path, 'rb').read()
-                await data_manager.save_bytes(video_data, output_video_path)
+        with tempfile.TemporaryDirectory() as tmp_dir:
 
-            del latents, images
+            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
+            await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
+            logger.info(f"run params: {params}, {inputs}, {outputs}")
+            self.set_inputs(params)
+
+            await self.prepare_dit_inputs(inputs, data_manager)
+            self.runner.worker_end = False
+            future = asyncio.Future()
+            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner.run_main, self.rank)
+            self.thread.start()
+            status, _ = await future
+            if not status:
+                return False
+
+            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
+
+            del text_encoder_output , image_encoder_output
             torch.cuda.empty_cache()
             gc.collect()
             return True

@@ -256,6 +256,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_sr = self.config.get("audio_sr", 16000)
         target_fps = self.config.get("target_fps", 16)
         self._audio_processor = AudioProcessor(audio_sr, target_fps)
+        if not isinstance(self.config['audio_path'], str):
+            return [], 0
         audio_array = self._audio_processor.load_audio(self.config["audio_path"])
 
         video_duration = self.config.get("video_duration", 5)
@@ -384,10 +386,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
         self.cut_audio_list = []
         self.prev_video = None
 
-    def init_run_segment(self, segment_idx):
+    def init_run_segment(self, segment_idx, audio_array=None):
         self.segment_idx = segment_idx
-
-        self.segment = self.inputs["audio_segments"][segment_idx]
+        if audio_array is not None:
+            self.segment = AudioSegment(audio_array, 0, audio_array.shape[0], False)
+        else:
+            self.segment = self.inputs["audio_segments"][segment_idx]
 
         self.config.seed = self.config.seed + segment_idx
         torch.manual_seed(self.config.seed)
@@ -422,12 +426,107 @@ class WanAudioRunner(WanRunner):  # type:ignore
             self.gen_video_list.append(self.gen_video[:, :, start_frame:].cpu())
             self.cut_audio_list.append(self.segment.audio_array[start_audio_frame:])
 
+        if self.va_recorder:
+            cur_video = vae_to_comfyui_image(self.gen_video_list[-1])
+            self.va_recorder.pub_livestream(cur_video, self.cut_audio_list[-1])
+
         # Update prev_video for next iteration
         self.prev_video = self.gen_video
 
         # Clean up GPU memory after each segment
         del self.gen_video
         torch.cuda.empty_cache()
+
+    def init_va_recorder(self):
+        output_video_path = self.config.get("save_video_path", None)
+        self.va_recorder = None
+        if isinstance(output_video_path, dict) and (not dist.is_initialized() or dist.get_rank() == 0):
+            assert output_video_path["type"] == "stream", f"unexcept save_video_path: {output_video_path}"
+            record_fps = self.config.get("target_fps", 16)
+            audio_sr = self.config.get("audio_sr", 16000)
+            if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+                record_fps = self.config["video_frame_interpolation"]["target_fps"]
+            self.va_recorder = VARecorder(
+                livestream_url=output_video_path["data"],
+                fps=record_fps,
+                sample_rate=audio_sr,
+            )
+
+    def init_va_reader(self):
+        audio_path = self.config.get("audio_path", None)
+        self.va_reader = None
+        if isinstance(audio_path, dict):
+            assert audio_path["type"] == "stream", f"unexcept audio_path: {audio_path}"
+            rank = 0
+            world_size = 1
+            if dist.is_initialized():
+                rank = dist.get_rank()
+                world_size = dist.get_world_size()
+            target_fps = self.config.get("target_fps", 16)
+            max_num_frames = self.config.get("target_video_length", 81)
+            audio_sr = self.config.get("audio_sr", 16000)
+            self.va_reader = VAReader(
+                rank=rank,
+                world_size=world_size,
+                stream_url=audio_path["data"],
+                sample_rate=audio_sr,
+                segment_duration=max_num_frames / target_fps,
+            )
+
+    def run_main(self, total_steps=None):
+        try:
+            self.init_va_recorder()
+            self.init_va_reader()
+            logger.info(f"init va_recorder: {self.va_recorder} and va_reader: {self.va_reader}")
+
+            if self.va_reader is None:
+                return super().run_main(total_steps)
+
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 0"
+            self.va_reader.start()
+
+            self.init_run()
+            self.video_segment_num = "unlimited"
+
+            fetch_timeout = self.va_reader.segment_duration + 1
+            segment_idx = 0
+            fail_count = 0
+            max_fail_count = 10
+
+            while True:
+                if hasattr(self, "worker_end") and self.worker_end:
+                    logger.info("worker_end, wan audio runner run segment break")
+                    break
+                audio_array = self.va_reader.get_audio_segment(timeout=fetch_timeout)
+                if audio_array is None:
+                    fail_count += 1
+                    logger.warning(f"Failed to get audio chunk {fail_count} times")
+                    if fail_count > max_fail_count:
+                        logger.error(f"Failed to get audio chunk {fail_count} times, stop reader")
+                        break
+                    time.sleep(0.1)
+                    continue
+
+                fail_count = 0
+                self.init_run_segment(segment_idx, audio_array)
+                latents, generator = self.run_segment(total_steps=None)
+                self.gen_video = self.run_vae_decoder(latents, generator)
+                self.end_run_segment()
+                segment_idx += 1
+
+            self.end_run()
+            return None, None
+
+        finally:
+            torch.cuda.empty_cache()
+            gc.collect()
+            if self.va_reader:
+                self.va_reader.stop()
+                self.va_reader = None
+            if self.va_recorder:
+                self.va_recorder.stop(wait=False)
+                self.va_recorder = None
 
     def process_images_after_vae_decoder(self, save_video=True):
         # Merge results
@@ -446,7 +545,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 target_fps=target_fps,
             )
 
-        if save_video:
+        if save_video and isinstance(self.config['save_video_path'], str):
             if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
                 fps = self.config["video_frame_interpolation"]["target_fps"]
             else:

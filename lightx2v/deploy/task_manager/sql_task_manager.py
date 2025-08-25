@@ -219,6 +219,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             param_idx += 1
             conds.append(f"ping_t = ${param_idx}")
             params.append(datetime.now())
+        if kwargs.get('reset_ping_t', False):    
+            param_idx += 1
+            conds.append(f"ping_t = ${param_idx}")
+            params.append(datetime.fromtimestamp(0))
         if 'status' in kwargs:
             param_idx += 1
             conds.append(f"status = ${param_idx}")
@@ -542,7 +546,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     return False
                 for sub in subtasks:
                     if all_subtask or sub['status'] != TaskStatus.SUCCEED:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED)
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED, reset_ping_t=True)
                 await self.update_task(conn, task_id, status=TaskStatus.CREATED)
                 return True
         except:

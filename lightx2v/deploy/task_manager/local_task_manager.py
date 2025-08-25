@@ -241,6 +241,7 @@ class LocalTaskManager(BaseTaskManager):
             if all_subtask or sub['status'] != TaskStatus.SUCCEED:
                 sub['status'] = TaskStatus.CREATED
                 sub['update_t'] = current_time()
+                sub['ping_t'] = 0.0
         task['status'] = TaskStatus.CREATED
         task['update_t'] = current_time()
         self.save(task, subtasks)
