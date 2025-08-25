@@ -87,7 +87,7 @@ class VAReader:
                     logger.warning("FFmpeg process exited, audio worker thread stopped")
                     break
                 self.fetch_audio_data()
-                time.sleep(0.01)
+                time.sleep(0.1)
         except:
             logger.error(f"Audio worker error: {traceback.format_exc()}")
         finally:
@@ -96,7 +96,7 @@ class VAReader:
     def fetch_audio_data(self):
         """Fetch audio data from ffmpeg process"""
         try:
-            audio_bytes = self.ffmpeg_process.stdout.read(1024)
+            audio_bytes = self.ffmpeg_process.stdout.read(self.chunk_size)
             if not audio_bytes:
                 return
             self.bytes_buffer.extend(audio_bytes)
@@ -105,11 +105,12 @@ class VAReader:
             while len(self.bytes_buffer) >= self.chunk_size:
                 audio_data = self.bytes_buffer[:self.chunk_size]
                 try:
-                    self.audio_queue.put(audio_data, timeout=1.0)
+                    self.audio_queue.put(audio_data)
+                    logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}")
                 except queue.Full:
                     logger.warning("Audio queue full, discarded oldest chunk")
                     self.audio_queue.get_nowait()
-                    self.audio_queue.put(audio_data, timeout=1.0)
+                    self.audio_queue.put(audio_data)
                 self.bytes_buffer = self.bytes_buffer[self.chunk_size:]
 
         except:
@@ -207,11 +208,10 @@ if __name__ == "__main__":
 
     try:
         while True:
-            audio_data = reader.get_audio_segment(timeout=5.0)
+            audio_data = reader.get_audio_segment(timeout=6)
             if audio_data is not None:
                 # logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
                 fail_count = 0
-                time.sleep(5)
             else:
                 fail_count += 1
                 if fail_count > max_fail_count:

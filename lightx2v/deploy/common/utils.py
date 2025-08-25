@@ -101,11 +101,12 @@ async def preload_data(inp, inp_type, typ, val):
             image = Image.open(io.BytesIO(data))
             logger.info(f"load image: {image.size}")
             assert image.size[0] > 0 and image.size[1] > 0, "image is empty"
-        elif inp_type == "AUDIO" and typ != "stream":
-            waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
-            logger.info(f"load audio: {waveform.size()}, {sample_rate}")
-            assert waveform.size(0) > 0, "audio is empty"
-            assert sample_rate > 0, "audio sample rate is not valid"
+        elif inp_type == "AUDIO":
+            if typ != "stream":
+                waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
+                logger.info(f"load audio: {waveform.size()}, {sample_rate}")
+                assert waveform.size(0) > 0, "audio is empty"
+                assert sample_rate > 0, "audio sample rate is not valid"
         else:
             raise Exception(f"cannot parse inp_type={inp_type} data")
         return data

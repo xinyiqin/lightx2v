@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+import time
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -27,6 +28,7 @@ from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import find_torch_model_path, save_to_video, vae_to_comfyui_image
 from lightx2v.deploy.common.va_recorder import VARecorder
+from lightx2v.deploy.common.va_reader import VAReader
 
 
 @contextmanager
@@ -474,6 +476,90 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 sample_rate=sample_rate,
             )
 
+    def init_va_reader(self, sample_rate):
+        audio_path = self.config.get("audio_path", None)
+        self.va_reader = None
+        if isinstance(audio_path, dict):
+            assert audio_path["type"] == "stream", f"unexcept audio_path: {audio_path}"
+            rank = 0
+            world_size = 1
+            if dist.is_initialized():
+                rank = dist.get_rank()
+                world_size = dist.get_world_size()
+            target_fps = self.config.get("target_fps", 16)
+            max_num_frames = self.config.get("target_video_length", 81)
+            self.va_reader = VAReader(
+                rank=rank,
+                world_size=world_size,
+                stream_url=audio_path["data"],
+                sample_rate=sample_rate,
+                segment_duration=max_num_frames / target_fps,
+            )
+
+    def run_with_stream_audio(self):
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 0"
+        self.va_reader.start()
+
+        target_fps = self.config.get("target_fps", 16)
+        self._video_generator.total_segments = 1e9
+        fetch_timeout = self.va_reader.segment_duration + 1
+        prev_video = None
+        idx = 0
+        fail_count = 0
+        max_fail_count = 10
+
+        while True:
+            if hasattr(self, "worker_end") and self.worker_end:
+                logger.info("worker_end, wan audio runner run segment break")
+                break
+            audio_array = self.va_reader.get_audio_segment(timeout=fetch_timeout)
+            if audio_array is None:
+                fail_count += 1
+                logger.warning(f"Failed to get audio chunk {fail_count} times")
+                if fail_count > max_fail_count:
+                    logger.error(f"Failed to get audio chunk {fail_count} times, stop reader")
+                    break
+                time.sleep(0.1)
+                continue
+
+            fail_count = 0
+            self.config.seed = self.config.seed + idx
+            torch.manual_seed(self.config.seed)
+            logger.info(f"Processing segment {idx + 1}/unlimited, seed: {self.config.seed}")
+
+            # Process audio features
+            audio_features = self._audio_preprocess(audio_array, sampling_rate=self._audio_processor.audio_sr, return_tensors="pt").input_values.squeeze(0).to(self.model.device)
+
+            # Generate video segment
+            with memory_efficient_inference():
+                gen_video = self._video_generator.generate_segment(
+                    self.inputs.copy(),  # Copy to avoid modifying original
+                    audio_features,
+                    prev_video=prev_video,
+                    prev_frame_length=5,
+                    segment_idx=idx,
+                )
+
+            # Extract relevant frames
+            start_frame = 0 if idx == 0 else 5
+            start_audio_frame = 0 if idx == 0 else int(6 * self._audio_processor.audio_sr / target_fps)
+            if self.va_recorder:
+                cur_video = vae_to_comfyui_image(gen_video[:, :, start_frame:].cpu())
+                self.va_recorder.pub_livestream(cur_video, audio_array[start_audio_frame:])
+
+            # Update prev_video for next iteration
+            prev_video = gen_video
+
+            # Clean up GPU memory after each segment
+            del gen_video
+            torch.cuda.empty_cache()
+            idx += 1
+
+        # Final cleanup
+        self.end_run()
+        return None, None
+
     def run_pipeline(self, save_video=True):
         """Optimized pipeline with modular components"""
 
@@ -497,7 +583,14 @@ class WanAudioRunner(WanRunner):  # type:ignore
             # Re-create video generator with updated model/scheduler
             self._video_generator = VideoGenerator(self.model, self.vae_encoder, self.vae_decoder, self.config, self.progress_callback)
 
-            # Process audio
+            # Init va_reader and va_recorder
+            self.init_va_recorder(self._audio_processor.audio_sr)
+            self.init_va_reader(self._audio_processor.audio_sr)
+            logger.info(f"init va_reader: {self.va_reader}, va_recorder: {self.va_recorder}")
+            if self.va_reader:
+                return self.run_with_stream_audio()
+
+            # # Process audio
             audio_array = self._audio_processor.load_audio(self.config["audio_path"])
             video_duration = self.config.get("video_duration", 5)
             target_fps = self.config.get("target_fps", 16)
@@ -515,8 +608,6 @@ class WanAudioRunner(WanRunner):  # type:ignore
             gen_video_list = []
             cut_audio_list = []
             prev_video = None
-            self.init_va_recorder(self._audio_processor.audio_sr)
-            logger.info(f"init va_recorder: {self.va_recorder}")
 
             for idx, segment in enumerate(audio_segments):
                 self.config.seed = self.config.seed + idx
@@ -601,6 +692,9 @@ class WanAudioRunner(WanRunner):  # type:ignore
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            if self.va_reader:
+                self.va_reader.stop()
+                self.va_reader = None
             if self.va_recorder:
                 self.va_recorder.stop(wait=False)
                 self.va_recorder = None

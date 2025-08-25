@@ -161,7 +161,7 @@ class PipelineWorker(BaseWorker):
                 with open(tmp_image_path, 'wb') as fout:
                     fout.write(img_data)
 
-            if self.runner.config.model_cls in ["wan2.1_audio", "wan2.2_moe_audio"]:
+            if self.runner.config.model_cls in ["wan2.1_audio", "wan2.2_moe_audio"] and isinstance(tmp_audio_path, str):
                 audio_data = await data_manager.load_bytes(input_audio_path)
                 with open(tmp_audio_path, 'wb') as fout:
                     fout.write(audio_data)
