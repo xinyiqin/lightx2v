@@ -45,19 +45,24 @@ class VAReader:
 
     def start(self):
         if self.rank == 0:
-            self.start_ffmpeg_process()
+            if self.stream_url.startswith("rtmp://"):
+                self.start_ffmpeg_process_rtmp()
+            elif self.stream_url.startswith("http"):
+                self.start_ffmpeg_process_whep()
+            else:
+                raise Exception(f"Unsupported stream URL: {self.stream_url}")
             self.audio_thread = threading.Thread(target=self.audio_worker, daemon=True)
-            self.audio_thread.start()    
+            self.audio_thread.start()
             logger.info(f"VAReader {self.rank}/{self.world_size} started successfully")
         else:
             logger.info(f"VAReader {self.rank}/{self.world_size} wait only")
         if self.world_size > 1:
             dist.barrier()
 
-    def start_ffmpeg_process(self):
+    def start_ffmpeg_process_rtmp(self):
         """Start ffmpeg process read audio from stream"""
         ffmpeg_cmd = [
-            "ffmpeg",
+            "/opt/conda/bin/ffmpeg",
             "-i",
             self.stream_url,
             "-vn",
@@ -79,6 +84,34 @@ class VAReader:
                 bufsize=0
             )
             logger.info(f"FFmpeg audio pull process started with PID: {self.ffmpeg_process.pid}")
+            logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        except Exception as e:
+            logger.error(f"Failed to start FFmpeg process: {e}")
+            raise
+
+    def start_ffmpeg_process_whep(self):
+        """Start gstream process read audio from stream"""
+        ffmpeg_cmd = [
+            "gst-launch-1.0",
+            "-q",
+            f"whepsrc whep-endpoint={self.stream_url}",
+            "video-caps='none'",
+            "! rtpopusdepay",
+            "! opusdec plc=false",
+            "! audioconvert",
+            "! audioresample",
+            f"! audio/x-raw,format=S16LE,channels={self.audio_channels},rate={self.sample_rate}",
+            "! fdsink fd=1",
+        ]
+        try:    
+            self.ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0
+            )
+            logger.info(f"FFmpeg audio pull process started with PID: {self.ffmpeg_process.pid}")
+            logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
         except Exception as e:
             logger.error(f"Failed to start FFmpeg process: {e}")
             raise
@@ -120,12 +153,12 @@ class VAReader:
                 self.prev_chunk = audio_data[-self.prev_size:]
 
                 try:
-                    self.audio_queue.put(audio_data)
-                    logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}, chunk_size:{self.chunk_size}")
+                    self.audio_queue.put_nowait(audio_data)
                 except queue.Full:
-                    logger.warning("Audio queue full, discarded oldest chunk")
+                    logger.warning(f"Audio queue full:{self.audio_queue.qsize()}, discarded oldest chunk")
                     self.audio_queue.get_nowait()
-                    self.audio_queue.put(audio_data)
+                    self.audio_queue.put_nowait(audio_data)
+                logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}, chunk_size:{self.chunk_size}")
 
         except:
             logger.error(f"Fetch audio data error: {traceback.format_exc()}")
@@ -212,6 +245,7 @@ if __name__ == "__main__":
         RANK,
         WORLD_SIZE,
         "rtmp://localhost/live/test_audio",
+        # "http://10.8.98.2:1985/rtc/v1/whep/?app=ll&stream=test_audio&eip=10.8.98.2",
         segment_duration=5.0,
         sample_rate=16000,
         audio_channels=1,
@@ -232,5 +266,6 @@ if __name__ == "__main__":
                     logger.warning("Failed to get audio chunk, stop reader")
                     reader.stop()
                     break
+            time.sleep(12)
     finally:
         reader.stop()

@@ -94,10 +94,10 @@ class VARecorder:
         finally:
             logger.info("Video worker thread stopped")
 
-    def start_ffmpeg_process(self):
+    def start_ffmpeg_process_rtmp(self):
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
-            "ffmpeg",
+            "/opt/conda/bin/ffmpeg",
             "-re",
             "-f",
             "s16le",
@@ -146,6 +146,66 @@ class VARecorder:
         except Exception as e:
             logger.error(f"Failed to start FFmpeg: {e}")
 
+    def start_ffmpeg_process_whip(self):
+        """Start ffmpeg process that connects to our TCP sockets"""
+        ffmpeg_cmd = [
+            "/opt/conda/bin/ffmpeg",
+            "-re",
+            "-f",
+            "s16le",
+            "-ar",
+            str(self.sample_rate),
+            "-ac",
+            "1",
+            "-i",
+            f"tcp://127.0.0.1:{self.audio_port}",
+            "-f",
+            "rawvideo",
+            "-re",
+            "-pix_fmt",
+            "rgb24",
+            "-r",
+            str(self.fps),
+            "-s",
+            f"{self.width}x{self.height}",
+            "-i",
+            f"tcp://127.0.0.1:{self.video_port}",
+            "-ar",
+            "48000",
+            "-c:a",
+            "libopus",
+            "-ac",
+            "2",
+            "-b:v",
+            "4M",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            f"{self.fps}",
+            "-pix_fmt",
+            "yuv420p",
+            "-threads",
+            "1",
+            "-bf",
+            "0",
+            "-f",
+            "whip",
+            self.livestream_url,
+            "-y",
+            "-loglevel",
+            "debug"
+        ]
+        try:
+            self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
+            logger.info(f"FFmpeg streaming started with PID: {self.ffmpeg_process.pid}")
+            logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        except Exception as e:
+            logger.error(f"Failed to start FFmpeg: {e}")
+
     def set_video_size(self, width: int, height: int):
         if self.width is not None and self.height is not None:
             assert self.width == width and self.height == height, "Video size already set"
@@ -153,7 +213,12 @@ class VARecorder:
         self.width = width
         self.height = height
         self.init_sockets()
-        self.start_ffmpeg_process()
+        if self.livestream_url.startswith("rtmp://"):
+            self.start_ffmpeg_process_rtmp()
+        elif self.livestream_url.startswith("http"):
+            self.start_ffmpeg_process_whip()
+        else:
+            raise Exception(f"Unsupported livestream URL: {self.livestream_url}")
         self.audio_thread = threading.Thread(target=self.audio_worker)
         self.video_thread = threading.Thread(target=self.video_worker)
         self.audio_thread.start()
@@ -265,7 +330,7 @@ if __name__ == "__main__":
 
     recorder = VARecorder(
         livestream_url="rtmp://localhost/live/test",
-        # livestream_url="test.flv",
+        # livestream_url="http://10.8.98.2:1985/rtc/v1/whip/?app=ll&stream=test_video&eip=10.8.98.2&handshake_timeout=20000",
         fps=fps,
         sample_rate=sample_rate,
     )
