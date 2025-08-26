@@ -65,12 +65,13 @@ async def ping_life(server_url, worker_identity, keys):
             await asyncio.sleep(10)
 
 
-async def ping_subtask(server_url, worker_identity, task_id, worker_name, running_task):
+async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue, running_task):
     url = server_url + "/api/v1/worker/ping/subtask"
     params = {
         "worker_identity": worker_identity,
         "task_id": task_id,
         "worker_name": worker_name,
+        "queue": queue,
     }
     while True:
         try:
@@ -233,7 +234,7 @@ async def main(args):
             ping_task = None
             try:
                 run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
-                ping_task = asyncio.create_task(ping_subtask(args.server, sub['worker_identity'], sub['task_id'], sub['worker_name'], run_task))
+                ping_task = asyncio.create_task(ping_subtask(args.server, sub['worker_identity'], sub['task_id'], sub['worker_name'], sub['queue'], run_task))
                 ret = await run_task
                 await sync_subtask()
                 if ret is True:

@@ -391,13 +391,14 @@ async def api_v1_worker_ping_subtask(request: Request, valid = Depends(verify_wo
         task_id = params.pop('task_id')
         worker_name = params.pop('worker_name')
         identity = params.pop('worker_identity')
+        queue = params.pop('queue')
 
         task = await task_manager.query_task(task_id)
         if task['status'] in [TaskStatus.FAILED, TaskStatus.CANCEL]:
             return {'msg': 'delete'}
 
         assert await task_manager.ping_subtask(task_id, worker_name, identity)
-        await server_monitor.worker_update(None, identity, WorkerStatus.PING)
+        await server_monitor.worker_update(queue, identity, WorkerStatus.PING)
         return {'msg': 'ok'}
 
     except Exception as e:
