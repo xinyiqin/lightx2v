@@ -147,7 +147,10 @@ class DefaultRunner(BaseRunner):
         gc.collect()
 
     def read_image_input(self, img_path):
-        img = Image.open(img_path).convert("RGB")
+        if isinstance(img_path, Image.Image):
+            img = img_path
+        else:
+            img = Image.open(img_path).convert("RGB")
         img = TF.to_tensor(img).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
         return img
 

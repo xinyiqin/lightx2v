@@ -27,7 +27,6 @@ from lightx2v.models.runners.wan.wan_vace_runner import WanVaceRunner  # noqa: F
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config, set_parallel_config
-from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image, cache_video
 from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.models.runners.graph_runner import GraphRunner
 from lightx2v.utils.envs import CHECK_ENABLE_GRAPH_MODE
@@ -60,11 +59,6 @@ class BaseWorker:
         self.runner.config["save_video_path"] = params.get("save_video_path", "")
         self.runner.config["seed"] = params.get("seed", self.fixed_config.get("seed", 42))
         self.runner.config["audio_path"] = params.get("audio_path", "")
-
-    async def read_image_input(self, input_image_path, data_manager):
-        img = await data_manager.load_image(input_image_path)
-        img = TF.to_tensor(img).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
-        return img
 
     async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
             input_image_path = inputs.get("input_image", "")
@@ -258,8 +252,9 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config["use_prompt_enhancer"]:
             prompt = self.runner.config["prompt_enhanced"]
 
-        if self.runner.config.task == "i2v":
-            img = await self.read_image_input(input_image_path, data_manager)
+        if self.runner.config.task == "i2v" and 'audio' not in self.runner.config.model_cls:
+            img = await data_manager.load_image(input_image_path)
+            img = self.runner.read_image_input(img)
 
         out = self.runner.run_text_encoder(prompt, img)
         if self.rank == 0:
@@ -281,7 +276,8 @@ class ImageEncoderWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        img = await self.read_image_input(inputs["input_image"], data_manager)
+        img = await data_manager.load_image(inputs["input_image"])
+        img = self.runner.read_image_input(img)
         out = self.runner.run_image_encoder(img)
         if self.rank == 0:
             await data_manager.save_object(out, outputs['clip_encoder_output'])
@@ -302,17 +298,17 @@ class VaeEncoderWorker(BaseWorker):
     async def run(self, inputs, outputs, params, data_manager):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
-
-        img = await self.read_image_input(inputs["input_image"], data_manager)
+        img = await data_manager.load_image(inputs["input_image"])
+        # could change config.lat_h, lat_w, tgt_h, tgt_w
+        img = self.runner.read_image_input(img)
         # run vae encoder changed the config, we use kwargs pass changes
         vals = self.runner.run_vae_encoder(img)
-        out = {
-            "vals": vals,
-            "kwargs": {
-                "lat_h": self.runner.config.lat_h,
-                "lat_w": self.runner.config.lat_w,
-            }
-        }
+        out = {"vals": vals, "kwargs": {}}
+
+        for key in ["lat_h", "lat_w", "tgt_h", "tgt_w"]:
+            if hasattr(self.runner.config, key):
+                out["kwargs"][key] = int(getattr(self.runner.config, key))
+
         if self.rank == 0:
             await data_manager.save_object(out, outputs['vae_encoder_output'])
 
@@ -385,13 +381,16 @@ class VaeDecoderWorker(BaseWorker):
             return True
 
 
-class SegmentDitWorker(BaseWorker):
+class SegmentDiTWorker(BaseWorker):
     def __init__(self, args):
         super().__init__(args)
         self.runner.model = self.runner.load_transformer()
-        vae_encoder, self.runner.vae_decoder = self.runner.load_vae()
+        self.runner.vae_encoder, self.runner.vae_decoder = self.runner.load_vae()
         self.runner.vfi_model = self.runner.load_vfi_model() if "video_frame_interpolation" in self.runner.config else None
-        del vae_encoder
+        if 'audio' in self.runner.config.model_cls:
+            self.runner.audio_encoder = self.runner.load_audio_encoder()
+            self.runner.audio_adapter = self.runner.load_audio_adapter()
+            self.runner.model.set_audio_adapter(self.runner.audio_adapter)
 
     @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
@@ -412,9 +411,9 @@ class SegmentDitWorker(BaseWorker):
             if not status:
                 return False
 
+            self.runner.process_images_after_vae_decoder(save_video=True)
             await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
-            del text_encoder_output , image_encoder_output
             torch.cuda.empty_cache()
             gc.collect()
             return True

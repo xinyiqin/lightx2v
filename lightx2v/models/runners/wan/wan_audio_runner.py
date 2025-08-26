@@ -180,7 +180,7 @@ class AudioProcessor:
     def get_audio_range(self, start_frame: int, end_frame: int) -> Tuple[int, int]:
         """Calculate audio range for given frame range"""
         audio_frame_rate = self.audio_sr / self.target_fps
-        return round(start_frame * audio_frame_rate), round((end_frame + 1) * audio_frame_rate)
+        return round(start_frame * audio_frame_rate), round(end_frame * audio_frame_rate)
 
     def segment_audio(self, audio_array: np.ndarray, expected_frames: int, max_num_frames: int, prev_frame_length: int = 5) -> List[AudioSegment]:
         """Segment audio based on frame requirements"""
@@ -272,7 +272,10 @@ class WanAudioRunner(WanRunner):  # type:ignore
         return audio_segments, expected_frames
 
     def read_image_input(self, img_path):
-        ref_img = Image.open(img_path).convert("RGB")
+        if isinstance(img_path, Image.Image):
+            ref_img = img_path
+        else:
+            ref_img = Image.open(img_path).convert("RGB")
         ref_img = TF.to_tensor(ref_img).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
 
         ref_img, h, w = adaptive_resize(ref_img)
@@ -510,7 +513,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 segment_idx += 1
 
         finally:
-            self.end_run()
+            if hasattr(self.model, "scheduler"):
+                self.end_run()
             if self.va_reader:
                 self.va_reader.stop()
                 self.va_reader = None

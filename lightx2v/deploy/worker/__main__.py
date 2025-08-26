@@ -11,7 +11,7 @@ from loguru import logger
 
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.task_manager import TaskStatus
-from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker
+from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker, SegmentDiTWorker
 
 import torch
 import torch.distributed as dist
@@ -23,6 +23,7 @@ RUNNER_MAP = {
     "vae_encoder": VaeEncoderWorker,
     "vae_decoder": VaeDecoderWorker,
     "dit": DiTWorker,
+    "segment_dit": SegmentDiTWorker,
 }
 
 # {task_id: {"server": xx, "worker_name": xx, "identity": xx}}
