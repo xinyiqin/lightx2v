@@ -184,7 +184,7 @@ def class_try_catch_async_with_thread(func):
             if hasattr(self, "thread"):
                 # self.thread.stop()
                 self.runner.stop_signal = True
-                self.thread.join()
+                self.thread.join(timeout=30)
             raise asyncio.CancelledError
         except Exception:
             logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")

@@ -117,7 +117,7 @@ class VAReader:
             raise
 
     def audio_worker(self):
-        logger.info("Audio worker thread started")
+        logger.info("Audio pull worker thread started")
         try:
             while True:
                 if not self.ffmpeg_process or self.ffmpeg_process.poll() is not None:
@@ -126,9 +126,9 @@ class VAReader:
                 self.fetch_audio_data()
                 time.sleep(0.1)
         except:
-            logger.error(f"Audio worker error: {traceback.format_exc()}")
+            logger.error(f"Audio pull worker error: {traceback.format_exc()}")
         finally:
-            logger.warning("Audio worker thread stopped")
+            logger.warning("Audio pull worker thread stopped")
 
     def fetch_audio_data(self):
         """Fetch audio data from ffmpeg process"""
@@ -215,18 +215,18 @@ class VAReader:
                 self.ffmpeg_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.ffmpeg_process.kill()
-            logger.warning("FFmpeg process stopped")
+            logger.warning("FFmpeg reader process stopped")
 
         # Wait for threads to finish
         if self.audio_thread and self.audio_thread.is_alive():
             self.audio_thread.join(timeout=5)
             if self.audio_thread.is_alive():
-                logger.error("Audio thread did not stop gracefully")
+                logger.error("Audio pull thread did not stop gracefully")
 
-        if self.audio_queue:
-            del self.audio_queue
-            self.audio_queue = None
-            logger.warning("Audio queue closed")
+        while self.audio_queue and self.audio_queue.qsize() > 0:
+            self.audio_queue.get_nowait()
+        self.audio_queue = None
+        logger.warning("Audio pull queue cleaned")
 
     def __del__(self):
         self.stop()

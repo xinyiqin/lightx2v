@@ -71,9 +71,9 @@ class VARecorder:
                 except:
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
         except:
-            logger.error(f"Audio worker thread error: {traceback.format_exc()}")
+            logger.error(f"Audio push worker thread error: {traceback.format_exc()}")
         finally:
-            logger.info("Audio worker thread stopped")
+            logger.info("Audio push worker thread stopped")
 
     def video_worker(self):
         try:
@@ -90,9 +90,9 @@ class VARecorder:
                 except:
                     logger.error(f"Send video data error: {traceback.format_exc()}")
         except:
-            logger.error(f"Video worker thread error: {traceback.format_exc()}")
+            logger.error(f"Video push worker thread error: {traceback.format_exc()}")
         finally:
-            logger.info("Video worker thread stopped")
+            logger.info("Video push worker thread stopped")
 
     def start_ffmpeg_process_rtmp(self):
         """Start ffmpeg process that connects to our TCP sockets"""
@@ -267,11 +267,11 @@ class VARecorder:
         if self.audio_thread and self.audio_thread.is_alive():
             self.audio_thread.join(timeout=5)
             if self.audio_thread.is_alive():
-                logger.warning("Audio thread did not stop gracefully")
+                logger.warning("Audio push thread did not stop gracefully")
         if self.video_thread and self.video_thread.is_alive():
             self.video_thread.join(timeout=5)
             if self.video_thread.is_alive():
-                logger.warning("Video thread did not stop gracefully")
+                logger.warning("Video push thread did not stop gracefully")
 
         # Stop ffmpeg process
         if self.ffmpeg_process:
@@ -280,7 +280,7 @@ class VARecorder:
                 self.ffmpeg_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.ffmpeg_process.kill()
-            logger.warning("FFmpeg process stopped")
+            logger.warning("FFmpeg recorder process stopped")
 
         # Close TCP connections, sockets
         if self.audio_conn:
@@ -291,6 +291,14 @@ class VARecorder:
             self.audio_socket.close()
         if self.video_socket:
             self.video_socket.close()
+
+        while self.audio_queue and self.audio_queue.qsize() > 0:
+            self.audio_queue.get_nowait()
+        while self.video_queue and self.video_queue.qsize() > 0:
+            self.video_queue.get_nowait()
+        self.audio_queue = None
+        self.video_queue = None
+        logger.warning("Cleaned audio and video queues")
 
     def __del__(self):
         self.stop(wait=False)
