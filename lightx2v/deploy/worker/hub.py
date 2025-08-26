@@ -189,7 +189,7 @@ def class_try_catch_async_with_thread(func):
             logger.warning(f"RunnerThread inside {func.__name__} cancelled")
             if hasattr(self, "thread"):
                 # self.thread.stop()
-                self.runner.worker_end = True
+                self.runner.stop_signal = True
                 self.thread.join()
             raise asyncio.CancelledError
         except Exception:
@@ -229,7 +229,7 @@ class PipelineWorker(BaseWorker):
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.set_inputs(params)
-            self.runner.worker_end = False
+            self.runner.stop_signal = False
 
             future = asyncio.Future()
             self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_func, self.rank)
@@ -333,7 +333,7 @@ class DiTWorker(BaseWorker):
         self.set_inputs(params)
 
         await self.prepare_dit_inputs(inputs, data_manager)
-        self.runner.worker_end = False
+        self.runner.stop_signal = False
         future = asyncio.Future()
         self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_dit, self.rank)
         self.thread.start()
@@ -404,7 +404,7 @@ class SegmentDitWorker(BaseWorker):
             self.set_inputs(params)
 
             await self.prepare_dit_inputs(inputs, data_manager)
-            self.runner.worker_end = False
+            self.runner.stop_signal = False
             future = asyncio.Future()
             self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner.run_main, self.rank)
             self.thread.start()

@@ -413,7 +413,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
         # Extract relevant frames
         start_frame = 0 if self.segment_idx == 0 else 5
-        start_audio_frame = 0 if self.segment_idx == 0 else int(6 * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
+        start_audio_frame = 0 if self.segment_idx == 0 else int(5 * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
 
         if self.segment.is_last and self.segment.useful_length:
             end_frame = self.segment.end_frame - self.segment.start_frame
@@ -471,6 +471,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 stream_url=audio_path["data"],
                 sample_rate=audio_sr,
                 segment_duration=max_num_frames / target_fps,
+                prev_duration=5 / target_fps,
             )
 
     def run_main(self, total_steps=None):
@@ -495,16 +496,13 @@ class WanAudioRunner(WanRunner):  # type:ignore
             max_fail_count = 10
 
             while True:
-                if hasattr(self, "worker_end") and self.worker_end:
-                    logger.info("worker_end, wan audio runner run segment break")
-                    break
+                self.check_stop()
                 audio_array = self.va_reader.get_audio_segment(timeout=fetch_timeout)
                 if audio_array is None:
                     fail_count += 1
                     logger.warning(f"Failed to get audio chunk {fail_count} times")
                     if fail_count > max_fail_count:
-                        logger.error(f"Failed to get audio chunk {fail_count} times, stop reader")
-                        break
+                        raise Exception(f"Failed to get audio chunk {fail_count} times, stop reader")
                     time.sleep(0.1)
                     continue
 
@@ -515,18 +513,16 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 self.end_run_segment()
                 segment_idx += 1
 
-            self.end_run()
-            return None, None
-
         finally:
-            torch.cuda.empty_cache()
-            gc.collect()
+            self.end_run()
             if self.va_reader:
                 self.va_reader.stop()
                 self.va_reader = None
             if self.va_recorder:
                 self.va_recorder.stop(wait=False)
                 self.va_recorder = None
+            if dist.is_initialized() and dist.get_world_size() > 1:
+                dist.barrier()
 
     def process_images_after_vae_decoder(self, save_video=True):
         # Merge results

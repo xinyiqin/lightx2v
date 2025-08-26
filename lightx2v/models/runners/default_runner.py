@@ -111,9 +111,7 @@ class DefaultRunner(BaseRunner):
         if total_steps is None:
             total_steps = self.model.scheduler.infer_steps
         for step_index in range(total_steps):
-            if hasattr(self, "worker_end") and self.worker_end:
-                logger.warning("worker_end, default runner run step break")
-                break
+            self.check_stop()
             logger.info(f"==> step_index: {step_index + 1} / {total_steps}")
 
             with ProfilingContext4Debug("step_pre"):
@@ -229,9 +227,7 @@ class DefaultRunner(BaseRunner):
             self.gen_video = self.run_vae_decoder(latents, generator)
             # 4. default do nothing
             self.end_run_segment()
-            if hasattr(self, "worker_end") and self.worker_end:
-                logger.warning("worker_end, default runner run main break")
-                break
+            self.check_stop()
         self.end_run()
 
     @ProfilingContext("Run VAE Decoder")

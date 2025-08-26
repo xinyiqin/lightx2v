@@ -146,3 +146,7 @@ class BaseRunner(ABC):
 
     def end_run(self):
         pass
+
+    def check_stop(self):
+        if hasattr(self, "stop_signal") and self.stop_signal:
+            raise Exception("find stop_signal, stop running, it's an expected behavior")

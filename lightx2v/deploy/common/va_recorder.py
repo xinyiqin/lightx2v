@@ -169,16 +169,20 @@ class VARecorder:
         assert images.dim() == 4 and images.shape[-1] == 3, "Input must be [N, H, W, C] with C=3"
         frames = (images * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
         N, height, width, _ = frames.shape
+        M = audios.reshape(-1).shape[0]
 
-        logger.info(f"Publishing video [{N}x{width}x{height}], audio: [{audios.shape}]")
+        logger.info(f"Publishing video [{N}x{width}x{height}], audio: [{M}]")
+        audio_frames = round(M * self.fps / self.sample_rate)
+        if audio_frames != N:
+            logger.warning(f"Video and audio frames mismatch, {N} vs {audio_frames}")
+
         self.set_video_size(width, height)
         self.audio_queue.put(audios)
         for frame in frames:
             self.video_queue.put(frame)
         logger.info(f"Published {N} frames and {len(audios)} audio samples")
 
-        secs = audios.reshape(-1).shape[0] / self.sample_rate
-        self.stoppable_t = time.time() + secs + 3
+        self.stoppable_t = time.time() + M / self.sample_rate + 3
 
     def stop(self, wait=True):
         if wait and self.stoppable_t:
@@ -187,16 +191,6 @@ class VARecorder:
                 logger.warning(f"Waiting for {t} seconds to stop ...")
                 time.sleep(t)
             self.stoppable_t = None
-
-        # Close TCP connections, sockets
-        if self.audio_conn:
-            self.audio_conn.close()
-        if self.video_conn:
-            self.video_conn.close()
-        if self.audio_socket:
-            self.audio_socket.close()
-        if self.video_socket:
-            self.video_socket.close()
 
         # Send stop signals to queues
         if self.audio_queue:
@@ -223,8 +217,18 @@ class VARecorder:
                 self.ffmpeg_process.kill()
             logger.warning("FFmpeg process stopped")
 
+        # Close TCP connections, sockets
+        if self.audio_conn:
+            self.audio_conn.close()
+        if self.video_conn:
+            self.video_conn.close()
+        if self.audio_socket:
+            self.audio_socket.close()
+        if self.video_socket:
+            self.video_socket.close()
+
     def __del__(self):
-        self.stop()
+        self.stop(wait=False)
 
 
 def create_simple_video(frames=10, height=480, width=640):

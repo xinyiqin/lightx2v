@@ -20,6 +20,7 @@ class VAReader:
         sample_rate: int = 16000,
         audio_channels: int = 1,
         buffer_size: int = 5,
+        prev_duration: float = 0.3125,
     ):
         self.rank = rank
         self.world_size = world_size
@@ -27,8 +28,11 @@ class VAReader:
         self.segment_duration = segment_duration
         self.sample_rate = sample_rate
         self.audio_channels = audio_channels
+        self.prev_duration = prev_duration
         # int16 = 2 bytes
         self.chunk_size = int(self.segment_duration * self.sample_rate) * 2
+        self.prev_size = int(self.prev_duration * self.sample_rate) * 2
+        self.prev_chunk = None
         self.buffer_size = buffer_size
 
         self.audio_queue = queue.Queue(maxsize=self.buffer_size)
@@ -102,16 +106,26 @@ class VAReader:
             self.bytes_buffer.extend(audio_bytes)
             # logger.info(f"Fetch audio data: {len(audio_bytes)} bytes, bytes_buffer: {len(self.bytes_buffer)} bytes")
 
-            while len(self.bytes_buffer) >= self.chunk_size:
+            if len(self.bytes_buffer) >= self.chunk_size:
                 audio_data = self.bytes_buffer[:self.chunk_size]
+                self.bytes_buffer = self.bytes_buffer[self.chunk_size:]
+
+                # first chunk, read original 81 frames
+                # for other chunks, read 81 - 5 = 76 frames, concat with previous 5 frames
+                if self.prev_chunk is None:
+                    logger.info(f"change chunk_size: from {self.chunk_size} to {self.chunk_size - self.prev_size}")
+                    self.chunk_size -= self.prev_size
+                else:
+                    audio_data = self.prev_chunk + audio_data
+                self.prev_chunk = audio_data[-self.prev_size:]
+
                 try:
                     self.audio_queue.put(audio_data)
-                    logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}")
+                    logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}, chunk_size:{self.chunk_size}")
                 except queue.Full:
                     logger.warning("Audio queue full, discarded oldest chunk")
                     self.audio_queue.get_nowait()
                     self.audio_queue.put(audio_data)
-                self.bytes_buffer = self.bytes_buffer[self.chunk_size:]
 
         except:
             logger.error(f"Fetch audio data error: {traceback.format_exc()}")
@@ -204,7 +218,7 @@ if __name__ == "__main__":
     )
     reader.start()
     fail_count = 0
-    max_fail_count = 10
+    max_fail_count = 2
 
     try:
         while True:
