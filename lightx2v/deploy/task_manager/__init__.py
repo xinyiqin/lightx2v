@@ -1,3 +1,4 @@
+from re import T
 import uuid
 from enum import Enum
 from loguru import logger
@@ -11,6 +12,9 @@ class TaskStatus(Enum):
     SUCCEED = 4
     FAILED = 5
     CANCEL = 6
+
+ActiveStatus = [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]
+FinishedStatus = [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]
 
 
 class BaseTaskManager:
@@ -141,31 +145,26 @@ class BaseTaskManager:
         task['extra_info']['active_elapse'] = end_t - start_t
         return task['extra_info']
 
-    def mark_subtask_start(self, subtask, status):
+    def mark_subtask(self, subtask, old_status, new_status):
         t = current_time()
         if not isinstance(subtask['extra_info'], dict):
             subtask['extra_info'] = {}
-        key = f'{status.name}_start_t'
-        subtask['extra_info'][key] = t
-        subtask['elapse_key'] = None
-        return subtask['extra_info']
-
-    def mark_subtask_end(self, subtask):
-        if not isinstance(subtask['extra_info'], dict):
-            subtask['extra_info'] = {}
-        status_name = subtask['status'].name
-        start_key = f'{status_name}_start_t'
-        end_key = f'{status_name}_end_t'
-        elapse_key = f'{status_name}_elapse'
-        if start_key not in subtask['extra_info']:
-            logger.warning(f"Subtask {subtask['task_id']} {subtask['worker_name']} has no start time, status: {status_name}")
-            subtask['extra_info']['elapse_key'] = None
+        if old_status == new_status:
+            logger.warning(f"Subtask {subtask} update same status: {old_status} vs {new_status}")
             return subtask['extra_info']
-        start_t = subtask['extra_info'][start_key]
-        end_t = current_time()
-        subtask['extra_info'][end_key] = end_t
-        subtask['extra_info'][elapse_key] = end_t - start_t
-        subtask['extra_info']['elapse_key'] = elapse_key
+
+        if old_status in ActiveStatus:
+            if 'start_t' not in subtask['extra_info']:
+                logger.warning(f"Subtask {subtask} has no start time, status: {old_status}")
+            else:
+                elapse = t - subtask['extra_info']['start_t']
+                elapse_key = f"{old_status.name}-{new_status.name}"
+                subtask['extra_info'][elapse_key] = elapse
+                subtask['extra_info']['elapse_key'] = elapse_key
+                del subtask['extra_info']['start_t']
+
+        if new_status in ActiveStatus:
+            subtask['extra_info']['start_t'] = t
         return subtask['extra_info']
 
 
