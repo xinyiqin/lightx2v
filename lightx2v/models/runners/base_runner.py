@@ -1,5 +1,4 @@
 from abc import ABC
-import time
 import torch
 import torch.distributed as dist
 from lightx2v.utils.utils import save_videos_grid
