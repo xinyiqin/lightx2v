@@ -111,7 +111,9 @@ class DefaultRunner(BaseRunner):
         if total_steps is None:
             total_steps = self.model.scheduler.infer_steps
         for step_index in range(total_steps):
-            self.check_stop()
+            # only for single segment, check stop signal every step
+            if self.video_segment_num == 1:
+                self.check_stop()
             logger.info(f"==> step_index: {step_index + 1} / {total_steps}")
 
             with ProfilingContext4Debug("step_pre"):
@@ -222,6 +224,7 @@ class DefaultRunner(BaseRunner):
     def run_main(self, total_steps=None):
         self.init_run()
         for segment_idx in range(self.video_segment_num):
+            self.check_stop()
             # 1. default do nothing
             self.init_run_segment(segment_idx)
             # 2. main inference loop
@@ -230,7 +233,6 @@ class DefaultRunner(BaseRunner):
             self.gen_video = self.run_vae_decoder(latents, generator)
             # 4. default do nothing
             self.end_run_segment()
-            self.check_stop()
         self.end_run()
 
     @ProfilingContext("Run VAE Decoder")

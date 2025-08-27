@@ -502,7 +502,6 @@ class WanAudioRunner(WanRunner):  # type:ignore
                     logger.warning(f"Failed to get audio chunk {fail_count} times")
                     if fail_count > max_fail_count:
                         raise Exception(f"Failed to get audio chunk {fail_count} times, stop reader")
-                    time.sleep(0.1)
                     continue
 
                 fail_count = 0
@@ -521,8 +520,6 @@ class WanAudioRunner(WanRunner):  # type:ignore
             if self.va_recorder:
                 self.va_recorder.stop(wait=False)
                 self.va_recorder = None
-            if dist.is_initialized() and dist.get_world_size() > 1:
-                dist.barrier()
 
     def process_images_after_vae_decoder(self, save_video=True):
         # Merge results

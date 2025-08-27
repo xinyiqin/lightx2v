@@ -1,5 +1,7 @@
 from abc import ABC
-
+import time
+import torch
+import torch.distributed as dist
 from lightx2v.utils.utils import save_videos_grid
 
 
@@ -148,5 +150,25 @@ class BaseRunner(ABC):
         pass
 
     def check_stop(self):
-        if hasattr(self, "stop_signal") and self.stop_signal:
-            raise Exception("find stop_signal, stop running, it's an expected behavior")
+        """Check if the stop signal is received"""
+
+        rank, world_size = 0, 1
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+
+        stopped = 0
+        if rank == 0 and hasattr(self, "stop_signal") and self.stop_signal:
+            stopped = 1
+
+        if world_size > 1:
+            if rank == 0:
+                t = torch.tensor([stopped], dtype=torch.int32).to(device='cuda')
+            else:
+                t = torch.zeros(1, dtype=torch.int32, device='cuda')
+            dist.broadcast(t, src=0)
+            stopped = t.item()
+
+        print(f"rank {rank} recv stopped: {stopped}")
+        if stopped == 1:
+            raise Exception(f"find rank: {rank} stop_signal, stop running, it's an expected behavior")

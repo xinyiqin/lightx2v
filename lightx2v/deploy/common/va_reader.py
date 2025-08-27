@@ -57,7 +57,9 @@ class VAReader:
         else:
             logger.info(f"VAReader {self.rank}/{self.world_size} wait only")
         if self.world_size > 1:
+            logger.info(f"VAReader {self.rank}/{self.world_size} wait barrier")
             dist.barrier()
+            logger.info(f"VAReader {self.rank}/{self.world_size} end barrier")
 
     def start_ffmpeg_process_rtmp(self):
         """Start ffmpeg process read audio from stream"""

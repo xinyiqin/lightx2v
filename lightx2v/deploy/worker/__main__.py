@@ -65,7 +65,7 @@ async def ping_life(server_url, worker_identity, keys):
             await asyncio.sleep(10)
 
 
-async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue, running_task):
+async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue, running_task, ping_interval):
     url = server_url + "/api/v1/worker/ping/subtask"
     params = {
         "worker_identity": worker_identity,
@@ -85,7 +85,7 @@ async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue,
                             logger.warning(f"{worker_identity} subtask {task_id} {worker_name} deleted")
                             running_task.cancel()
                             return
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(ping_interval)
                     else:
                         error_text = await ret.text()
                         raise Exception(f"{worker_identity} ping subtask fail: [{ret.status}], error: {error_text}")
@@ -192,8 +192,9 @@ async def sync_subtask():
     if WORLD_SIZE <= 1:
         return
     try:
+        logger.info(f"Sync subtask {RANK}/{WORLD_SIZE} wait barrier")
         dist.barrier()
-        logger.info(f"Sync subtask ok")
+        logger.info(f"Sync subtask {RANK}/{WORLD_SIZE} ok")
     except:
         logger.error(f"Sync subtask failed: {traceback.format_exc()}")
 
@@ -220,8 +221,7 @@ async def main(args):
     runner = RUNNER_MAP[args.worker](args)
     if WORLD_SIZE > 1:
         dist.barrier()
-    # if RANK == 0:
-    #    asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
+   # asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
 
     while True:
         subtasks = None
@@ -234,9 +234,12 @@ async def main(args):
             ping_task = None
             try:
                 run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
-                ping_task = asyncio.create_task(ping_subtask(args.server, sub['worker_identity'], sub['task_id'], sub['worker_name'], sub['queue'], run_task))
+                if RANK == 0:
+                    ping_task = asyncio.create_task(ping_subtask(
+                        args.server, sub['worker_identity'], sub['task_id'],
+                        sub['worker_name'], sub['queue'], run_task, args.ping_interval
+                    ))
                 ret = await run_task
-                await sync_subtask()
                 if ret is True:
                     status = TaskStatus.SUCCEED.name
 
@@ -254,6 +257,7 @@ async def main(args):
                         logger.warning(f"Report failed: {traceback.format_exc()}")
                 if ping_task:
                     ping_task.cancel()
+                await sync_subtask()
 
 
 async def shutdown(loop):
@@ -306,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument("--identity", type=str, default='')
     parser.add_argument("--max_batch", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--ping_interval", type=int, default=10)
 
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--config_json", type=str, required=True)
