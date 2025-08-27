@@ -1,5 +1,6 @@
 import uuid
 from enum import Enum
+from loguru import logger
 from lightx2v.deploy.common.utils import current_time, data_name
 
 
@@ -98,7 +99,7 @@ class BaseTaskManager:
             "create_t": cur_t,
             "update_t": cur_t,
             "status": TaskStatus.CREATED,
-            "extra_info": "",
+            "extra_info": {"active_start_t": cur_t},
             "tag": "",
             "inputs": {x: data_name(x, task_id) for x in inputs},
             "outputs": {x: data_name(x, task_id) for x in outputs},
@@ -117,7 +118,7 @@ class BaseTaskManager:
                 "worker_identity": "",
                 "result": "",
                 "fail_time": 0,
-                "extra_info": "",
+                "extra_info": {"CREATED_start_t": cur_t},
                 "create_t": cur_t,
                 "update_t": cur_t,
                 "ping_t": 0.0,
@@ -125,6 +126,47 @@ class BaseTaskManager:
             })
         assert await self.insert_task(task, subtasks), f"create task {task_id} failed"
         return task_id
+
+    def mark_task_start(self, task):
+        t = current_time()
+        if not isinstance(task['extra_info'], dict):
+            task['extra_info'] = {}
+        task['extra_info']['active_start_t'] = t
+        return task['extra_info']
+
+    def mark_task_end(self, task):
+        start_t = task['extra_info']['active_start_t']
+        end_t = current_time()
+        task['extra_info']['active_end_t'] = end_t
+        task['extra_info']['active_elapse'] = end_t - start_t
+        return task['extra_info']
+
+    def mark_subtask_start(self, subtask, status):
+        t = current_time()
+        if not isinstance(subtask['extra_info'], dict):
+            subtask['extra_info'] = {}
+        key = f'{status.name}_start_t'
+        subtask['extra_info'][key] = t
+        subtask['elapse_key'] = None
+        return subtask['extra_info']
+
+    def mark_subtask_end(self, subtask):
+        if not isinstance(subtask['extra_info'], dict):
+            subtask['extra_info'] = {}
+        status_name = subtask['status'].name
+        start_key = f'{status_name}_start_t'
+        end_key = f'{status_name}_end_t'
+        elapse_key = f'{status_name}_elapse'
+        if start_key not in subtask['extra_info']:
+            logger.warning(f"Subtask {subtask['task_id']} {subtask['worker_name']} has no start time, status: {status_name}")
+            subtask['extra_info']['elapse_key'] = None
+            return subtask['extra_info']
+        start_t = subtask['extra_info'][start_key]
+        end_t = current_time()
+        subtask['extra_info'][end_key] = end_t
+        subtask['extra_info'][elapse_key] = end_t - start_t
+        subtask['extra_info']['elapse_key'] = elapse_key
+        return subtask['extra_info']
 
 
 # Import task manager implementations

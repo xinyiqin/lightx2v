@@ -119,7 +119,9 @@ async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
     for sub in subtasks:
-        logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']})")
+        elapse_key = sub['extra_info']['elapse_key']
+        elapse = sub['extra_info'][elapse_key]
+        logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']}), {elapse_key}: {elapse}")
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
 
@@ -268,7 +270,8 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
         if msg is not True:
             return error_response(msg, 400)
         task_id = request.query_params['task_id']
-        ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
+        ret, active_elapse = await task_manager.cancel_task(task_id, user_id=user['user_id'])
+        logger.warning(f"Task {task_id} cancelled, active_elapse: {active_elapse}")
         return {'msg': 'ok' if ret else 'failed'}
     except Exception as e:
         traceback.print_exc()
@@ -329,11 +332,13 @@ async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_ac
 
         subtasks = [] if subtasks is None else subtasks
         valid_subtasks = await task_manager.run_subtasks(subtasks, identity)
-        valids = [sub['task_id'] for sub in valid_subtasks]
 
         if len(valid_subtasks) > 0:
             await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHED)
-            logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
+            for v in valid_subtasks:
+                elapse_key = v['extra_info']['elapse_key']
+                elapse = v['extra_info'][elapse_key]
+                logger.info(f"Worker {identity} {keys} {request.client} fetched {v['task_id']} {elapse_key}: {elapse}")
         else:
             await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.DISCONNECT)
         return {'subtasks': valid_subtasks}
@@ -355,16 +360,21 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
         queue = params.pop('queue')
         await server_monitor.worker_update(queue, identity, WorkerStatus.REPORT)
 
-        ret = await task_manager.finish_subtasks(
+        ret, active_elapse, end_subs = await task_manager.finish_subtasks(
             task_id, status, worker_identity=identity, worker_name=worker_name
         )
+        for sub in end_subs:
+            elapse_key = sub['extra_info']['elapse_key']
+            elapse = sub['extra_info'][elapse_key]
+            logger.info(f"Subtask {task_id} {sub['worker_name']} end with {sub['status']}, {elapse_key}: {elapse}")
+
         # not all subtasks finished, prepare new ready subtasks
         if ret not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
             await prepare_subtasks(task_id)
 
         # all subtasks succeed, delete temp data
         elif ret == TaskStatus.SUCCEED:
-            logger.info(f"Task {task_id} succeed")
+            logger.info(f"Task {task_id} succeed, active_elapse: {active_elapse}")
             task = await task_manager.query_task(task_id)
             keys = [task['task_type'], task['model_cls'], task['stage']]
             temps = model_pipelines.get_temps(keys)
@@ -374,7 +384,7 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
                 await data_manager.get_delete_func(type)(name)
 
         elif ret == TaskStatus.FAILED:
-            logger.warning(f"Task {task_id} failed")
+            logger.warning(f"Task {task_id} failed, active_elapse: {active_elapse}")
 
         return {'msg': 'ok'}
 

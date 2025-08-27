@@ -218,9 +218,9 @@ class ServerMonitor:
             if t['task_id'] in fails:
                 continue
             if t['ping_t'] > 0:
-                ping_elpase = time.time() - t['ping_t']
-                if ping_elpase >= self.ping_timeout:
-                    logger.warning(f"Subtask {fmt_subtask(t)} PING timeout: {ping_elpase:.2f} s")
+                ping_elapse = time.time() - t['ping_t']
+                if ping_elapse >= self.ping_timeout:
+                    logger.warning(f"Subtask {fmt_subtask(t)} PING timeout: {ping_elapse:.2f} s")
                     await self.task_manager.finish_subtasks(
                         t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name']
                     )

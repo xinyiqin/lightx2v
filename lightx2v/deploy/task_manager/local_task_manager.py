@@ -122,6 +122,8 @@ class LocalTaskManager(BaseTaskManager):
                         dep_ok = False
                         break
                 if dep_ok:
+                    sub['extra_info'] = self.mark_subtask_end(sub)
+                    sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.PENDING)
                     sub['params'] = task['params']
                     sub['status'] = TaskStatus.PENDING
                     sub['update_t'] = current_time()
@@ -143,9 +145,12 @@ class LocalTaskManager(BaseTaskManager):
                 continue
             for sub in subtasks:
                 if sub['worker_name'] == worker_name:
+                    sub['extra_info'] = self.mark_subtask_end(sub)
+                    sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.RUNNING)
                     sub['status'] = TaskStatus.RUNNING
                     sub['worker_identity'] = worker_identity
                     sub['update_t'] = current_time()
+                    cand['extra_info'] = sub['extra_info']
                     task['status'] = TaskStatus.RUNNING
                     task['update_t'] = current_time()
                     task['ping_t'] = current_time()
@@ -182,13 +187,15 @@ class LocalTaskManager(BaseTaskManager):
         assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
         for sub in subs:
             pre_t = sub['update_t']
+            sub['extra_info'] = self.mark_subtask_end(sub)
             sub['status'] = status
             sub['update_t'] = current_time()
             if status == TaskStatus.SUCCEED:
                 sub['infer_cost'] = sub['update_t'] - pre_t
 
         if task['status'] == TaskStatus.CANCEL:
-            return TaskStatus.CANCEL
+            self.save(task, subtasks)
+            return TaskStatus.CANCEL, -1, subs
 
         running_subs = []
         failed_sub = False
@@ -202,31 +209,35 @@ class LocalTaskManager(BaseTaskManager):
         if failed_sub:
             task['status'] = TaskStatus.FAILED
             task['update_t'] = current_time()
+            task['extra_info'] = self.mark_task_end(task)
             for sub in running_subs:
+                sub['extra_info'] = self.mark_subtask_end(sub)
                 sub['status'] = TaskStatus.FAILED
                 sub['update_t'] = current_time()
             self.save(task, subtasks)
-            return TaskStatus.FAILED
+            return TaskStatus.FAILED, task['extra_info']['active_elapse'], subs + running_subs
 
         # all subtasks finished and all succeed
         elif len(running_subs) == 0:
             task['status'] = TaskStatus.SUCCEED
             task['update_t'] = current_time()
+            task['extra_info'] = self.mark_task_end(task)
             self.save(task, subtasks)
-            return TaskStatus.SUCCEED
+            return TaskStatus.SUCCEED, task['extra_info']['active_elapse'], subs
 
         self.save(task, subtasks)
-        return None
+        return None, -1, subs
 
     @class_try_catch_async
     async def cancel_task(self, task_id, user_id=None):
         task, subtasks = self.load(task_id, user_id)
         if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
-            return False
+            return False, -1
         task['status'] = TaskStatus.CANCEL
         task['update_t'] = current_time()
+        task['extra_info'] = self.mark_task_end(task)
         self.save(task, subtasks)
-        return True
+        return True, task['extra_info']['active_elapse']
 
     @class_try_catch_async
     async def resume_task(self, task_id, all_subtask=False, user_id=None):
@@ -239,11 +250,13 @@ class LocalTaskManager(BaseTaskManager):
             return False
         for sub in subtasks:
             if all_subtask or sub['status'] != TaskStatus.SUCCEED:
+                sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.CREATED)
                 sub['status'] = TaskStatus.CREATED
                 sub['update_t'] = current_time()
                 sub['ping_t'] = 0.0
         task['status'] = TaskStatus.CREATED
         task['update_t'] = current_time()
+        task['extra_info'] = self.mark_task_start(task)
         self.save(task, subtasks)
         return True
 

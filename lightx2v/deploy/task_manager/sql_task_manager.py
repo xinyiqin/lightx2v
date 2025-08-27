@@ -172,7 +172,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         finally:
             await self.release_conn(conn)
 
-    async def load(self, conn, task_id, user_id=None, only_task=False):
+    async def load(self, conn, task_id, user_id=None, only_task=False, worker_name=None):
         query = f"SELECT * FROM {self.table_tasks} WHERE task_id = $1"
         params = [task_id]
         if user_id is not None:
@@ -184,7 +184,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.parse_dict(task)
         if only_task:
             return task
-        rows = await conn.fetch(f"SELECT * FROM {self.table_subtasks} WHERE task_id = $1", task_id)
+        query2 = f"SELECT * FROM {self.table_subtasks} WHERE task_id = $1"
+        params2 = [task_id]
+        if worker_name is not None:
+            query2 += " AND worker_name = $2"
+            params2.append(worker_name)
+        rows = await conn.fetch(query2, *params2)
         subtasks = []
         for row in rows:
             sub = dict(row)
@@ -201,6 +206,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             param_idx += 1
             conds.append(f"status = ${param_idx}")
             params.append(kwargs['status'].name)
+        if 'extra_info' in kwargs:
+            param_idx += 1
+            conds.append(f"extra_info = ${param_idx}")
+            params.append(json.dumps(kwargs['extra_info'], ensure_ascii=False))
         query += " ,".join(conds)
         query += f" WHERE task_id = ${param_idx + 1}"
         params.append(task_id)
@@ -235,6 +244,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             param_idx += 1
             conds.append(f"infer_cost = ${param_idx}")
             params.append(kwargs['infer_cost'])
+        if 'extra_info' in kwargs:
+            param_idx += 1
+            conds.append(f"extra_info = ${param_idx}")
+            params.append(json.dumps(kwargs['extra_info'], ensure_ascii=False))
         query += " ,".join(conds)
         query += f" WHERE task_id = ${param_idx + 1} AND worker_name = ${param_idx + 2}"
         params.extend([task_id, worker_name])
@@ -409,7 +422,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
                                 break
                         if dep_ok:
                             sub['params'] = task['params']
-                            await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.PENDING)
+                            sub['extra_info'] = self.mark_subtask_end(sub)
+                            sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.PENDING)
+                            await self.update_subtask(conn, task_id, sub['worker_name'],
+                                status=TaskStatus.PENDING, extra_info=sub['extra_info'])
                             nexts.append(sub)
                 if len(nexts) > 0:
                     await self.update_task(conn, task_id, status=TaskStatus.PENDING)
@@ -429,10 +445,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 for cand in cands:
                     task_id = cand['task_id']
                     worker_name = cand['worker_name']
-                    task = await self.load(conn, task_id, only_task=True)
+                    task, subs = await self.load(conn, task_id, worker_name=worker_name)
+                    assert len(subs) == 1, f"task {task_id} has multiple subtasks: {subs} with worker_name: {worker_name}"
                     if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                         continue
-                    await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING, worker_identity=worker_identity, ping_t=True)
+
+                    subs[0]['extra_info'] = self.mark_subtask_end(subs[0])
+                    subs[0]['extra_info'] = self.mark_subtask_start(subs[0], TaskStatus.RUNNING)
+                    cand['extra_info'] = subs[0]['extra_info']
+                    await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING,
+                        worker_identity=worker_identity, ping_t=True, extra_info=subs[0]['extra_info'])
                     await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
                     valids.append(cand)
                     break
@@ -480,15 +502,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
                 for sub in subs:
                     infer_cost = current_time() - sub['update_t']
+                    sub['extra_info'] = self.mark_subtask_end(sub)
                     if status == TaskStatus.SUCCEED:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, infer_cost=infer_cost)
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, infer_cost=infer_cost, extra_info=sub['extra_info'])
                         sub['infer_cost'] = infer_cost
                     else:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status)
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, extra_info=sub['extra_info'])
                     sub['status'] = status
 
                 if task['status'] == TaskStatus.CANCEL:
-                    return TaskStatus.CANCEL
+                    return TaskStatus.CANCEL, -1, subs
 
                 running_subs = []
                 failed_sub = False
@@ -500,19 +523,24 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
                 # some subtask failed, we should fail all other subtasks
                 if failed_sub:
-                    await self.update_task(conn, task_id, status=TaskStatus.FAILED)
+                    extra_info = self.mark_task_end(task)
+                    await self.update_task(conn, task_id, status=TaskStatus.FAILED, extra_info=extra_info)
                     for sub in running_subs:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.FAILED)
-                    return TaskStatus.FAILED
+                        sub['extra_info'] = self.mark_subtask_end(sub)
+                        sub['status'] = TaskStatus.FAILED
+                        await self.update_subtask(conn, task_id, sub['worker_name'],
+                            status=TaskStatus.FAILED, extra_info=sub['extra_info'])
+                    return TaskStatus.FAILED, extra_info['active_elapse'], subs + running_subs
 
                 # all subtasks finished and all succeed
                 elif len(running_subs) == 0:
-                    await self.update_task(conn, task_id, status=TaskStatus.SUCCEED)
-                    return TaskStatus.SUCCEED
-                return None
+                    extra_info = self.mark_task_end(task)
+                    await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=extra_info)
+                    return TaskStatus.SUCCEED, extra_info['active_elapse'], subs
+                return None, -1, subs
         except:
             logger.error(f"finish_subtasks error: {traceback.format_exc()}")
-            return None
+            return None, -1, []
         finally:
             await self.release_conn(conn)
 
@@ -523,12 +551,13 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
-                    return False
-                await self.update_task(conn, task_id, status=TaskStatus.CANCEL)
-                return True
+                    return False, -1
+                extra_info = self.mark_task_end(task)
+                await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=extra_info)
+                return True, extra_info['active_elapse']
         except:
             logger.error(f"cancel_task error: {traceback.format_exc()}")
-            return False
+            return False, -1
         finally:
             await self.release_conn(conn)
 
@@ -546,8 +575,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     return False
                 for sub in subtasks:
                     if all_subtask or sub['status'] != TaskStatus.SUCCEED:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED, reset_ping_t=True)
-                await self.update_task(conn, task_id, status=TaskStatus.CREATED)
+                        sub_extra_info = self.mark_subtask_start(sub, TaskStatus.CREATED)
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED,
+                            reset_ping_t=True, extra_info=sub_extra_info)
+                await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=self.mark_task_start(task))
                 return True
         except:
             logger.error(f"resume_task error: {traceback.format_exc()}")
