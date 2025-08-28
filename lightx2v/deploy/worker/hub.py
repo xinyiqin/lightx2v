@@ -14,16 +14,8 @@ import torchvision.transforms.functional as TF
 from lightx2v.utils.utils import seed_all
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 
-from lightx2v.models.runners.cogvideox.cogvidex_runner import CogvideoxRunner  # noqa: F401
+from lightx2v.infer import init_runner
 from lightx2v.models.runners.graph_runner import GraphRunner
-from lightx2v.models.runners.hunyuan.hunyuan_runner import HunyuanRunner  # noqa: F401
-from lightx2v.models.runners.qwen_image.qwen_image_runner import QwenImageRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_audio_runner import Wan22AudioRunner, Wan22MoeAudioRunner, WanAudioRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_causvid_runner import WanCausVidRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_distill_runner import WanDistillRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_runner import Wan22MoeRunner, WanRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_skyreels_v2_df_runner import WanSkyreelsV2DFRunner  # noqa: F401
-from lightx2v.models.runners.wan.wan_vace_runner import WanVaceRunner  # noqa: F401
 
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.set_config import set_config, set_parallel_config
@@ -255,6 +247,8 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config.task == "i2v" and 'audio' not in self.runner.config.model_cls:
             img = await data_manager.load_image(input_image_path)
             img = self.runner.read_image_input(img)
+            if isinstance(img, tuple):
+                img = img[0]
 
         out = self.runner.run_text_encoder(prompt, img)
         if self.rank == 0:
@@ -278,6 +272,8 @@ class ImageEncoderWorker(BaseWorker):
 
         img = await data_manager.load_image(inputs["input_image"])
         img = self.runner.read_image_input(img)
+        if isinstance(img, tuple):
+            img = img[0]
         out = self.runner.run_image_encoder(img)
         if self.rank == 0:
             await data_manager.save_object(out, outputs['clip_encoder_output'])
@@ -301,6 +297,8 @@ class VaeEncoderWorker(BaseWorker):
         img = await data_manager.load_image(inputs["input_image"])
         # could change config.lat_h, lat_w, tgt_h, tgt_w
         img = self.runner.read_image_input(img)
+        if isinstance(img, tuple):
+            img = img[1] if self.runner.vae_encoder_need_img_original else img[0]
         # run vae encoder changed the config, we use kwargs pass changes
         vals = self.runner.run_vae_encoder(img)
         out = {"vals": vals, "kwargs": {}}
@@ -370,7 +368,7 @@ class VaeDecoderWorker(BaseWorker):
 
             device = torch.device("cuda", self.rank)
             latents = await data_manager.load_tensor(inputs["latents"], device)
-            self.runner.gen_video = self.runner.run_vae_decoder(latents, None)
+            self.runner.gen_video = self.runner.run_vae_decoder(latents)
             self.runner.process_images_after_vae_decoder(save_video=True)
 
             await self.save_output_video(tmp_video_path, output_video_path, data_manager)
@@ -405,15 +403,18 @@ class SegmentDiTWorker(BaseWorker):
             await self.prepare_dit_inputs(inputs, data_manager)
             self.runner.stop_signal = False
             future = asyncio.Future()
-            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.runner.run_main, self.rank)
+            self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_dit, self.rank)
             self.thread.start()
             status, _ = await future
             if not status:
                 return False
 
-            self.runner.process_images_after_vae_decoder(save_video=True)
             await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
             torch.cuda.empty_cache()
             gc.collect()
             return True
+    
+    def run_dit(self):
+        self.runner.run_main()
+        self.runner.process_images_after_vae_decoder(save_video=True)

@@ -534,7 +534,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 fail_count = 0
                 self.init_run_segment(segment_idx, audio_array)
                 latents, generator = self.run_segment(total_steps=None)
-                self.gen_video = self.run_vae_decoder(latents, generator)
+                self.gen_video = self.run_vae_decoder(latents)
                 self.end_run_segment()
                 segment_idx += 1
 
