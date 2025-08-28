@@ -21,6 +21,7 @@ from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManage
 from lightx2v.deploy.task_manager import TaskStatus
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.server.auth import AuthManager
+from lightx2v.deploy.server.metrics import MetricMonitor
 
 # =========================
 # FastAPI Related Code
@@ -32,11 +33,13 @@ data_manager = None
 queue_manager = None
 server_monitor = None
 auth_manager = None
+metrics_monitor = MetricMonitor()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await task_manager.init()
+    await task_manager.mark_server_restart()
     await data_manager.init()
     await queue_manager.init()
     asyncio.create_task(server_monitor.init())
@@ -119,9 +122,7 @@ async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
     for sub in subtasks:
-        elapse_key = sub['extra_info']['elapse_key']
-        elapse = sub['extra_info'][elapse_key]
-        logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']}), {elapse_key}: {elapse}")
+        logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']})")
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
 
@@ -180,7 +181,7 @@ async def api_v1_task_submit(request: Request, user = Depends(verify_user_access
     except Exception as e:
         traceback.print_exc()
         if task_id:
-            await task_manager.finish_subtasks(task_id, TaskStatus.FAILED)
+            await task_manager.finish_subtasks(task_id, TaskStatus.FAILED, fail_msg=f"submit failed: {e}")
         return error_response(str(e), 500)
 
 
@@ -270,9 +271,9 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
         if msg is not True:
             return error_response(msg, 400)
         task_id = request.query_params['task_id']
-        ret, active_elapse = await task_manager.cancel_task(task_id, user_id=user['user_id'])
-        logger.warning(f"Task {task_id} cancelled, active_elapse: {active_elapse}")
-        return {'msg': 'ok' if ret else 'failed'}
+        ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
+        logger.warning(f"Task {task_id} cancelled: {ret}")
+        assert ret, f"Task {task_id} cancel failed"
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -332,13 +333,11 @@ async def api_v1_worker_fetch(request: Request, valid = Depends(verify_worker_ac
 
         subtasks = [] if subtasks is None else subtasks
         valid_subtasks = await task_manager.run_subtasks(subtasks, identity)
+        valids = [sub['task_id'] for sub in valid_subtasks]
 
         if len(valid_subtasks) > 0:
             await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.FETCHED)
-            for v in valid_subtasks:
-                elapse_key = v['extra_info']['elapse_key']
-                elapse = v['extra_info'][elapse_key]
-                logger.info(f"Worker {identity} {keys} {request.client} fetched {v['task_id']} {elapse_key}: {elapse}")
+            logger.info(f"Worker {identity} {keys} {request.client} fetched {valids}")
         else:
             await server_monitor.worker_update(worker['queue'], identity, WorkerStatus.DISCONNECT)
         return {'subtasks': valid_subtasks}
@@ -358,15 +357,12 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
         status = TaskStatus[params.pop('status')]
         identity = params.pop('worker_identity')
         queue = params.pop('queue')
+        fail_msg = params.pop('fail_msg', None)
         await server_monitor.worker_update(queue, identity, WorkerStatus.REPORT)
 
-        ret, active_elapse, end_subs = await task_manager.finish_subtasks(
-            task_id, status, worker_identity=identity, worker_name=worker_name
+        ret = await task_manager.finish_subtasks(
+            task_id, status, worker_identity=identity, worker_name=worker_name, fail_msg=fail_msg
         )
-        for sub in end_subs:
-            elapse_key = sub['extra_info']['elapse_key']
-            elapse = sub['extra_info'][elapse_key]
-            logger.info(f"Subtask {task_id} {sub['worker_name']} end with {sub['status']}, {elapse_key}: {elapse}")
 
         # not all subtasks finished, prepare new ready subtasks
         if ret not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
@@ -374,7 +370,7 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
 
         # all subtasks succeed, delete temp data
         elif ret == TaskStatus.SUCCEED:
-            logger.info(f"Task {task_id} succeed, active_elapse: {active_elapse}")
+            logger.info(f"Task {task_id} succeed")
             task = await task_manager.query_task(task_id)
             keys = [task['task_type'], task['model_cls'], task['stage']]
             temps = model_pipelines.get_temps(keys)
@@ -384,7 +380,7 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
                 await data_manager.get_delete_func(type)(name)
 
         elif ret == TaskStatus.FAILED:
-            logger.warning(f"Task {task_id} failed, active_elapse: {active_elapse}")
+            logger.warning(f"Task {task_id} failed")
 
         return {'msg': 'ok'}
 
@@ -447,11 +443,10 @@ async def api_v1_worker_ping_life(request: Request, valid = Depends(verify_worke
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/metrics")
-async def api_v1_monitor_metrics(request: Request, valid = Depends(verify_worker_access)):
+@app.get("/metrics")
+async def api_v1_monitor_metrics():
     try:
-        metrics = await server_monitor.cal_metrics()
-        return {'metrics': metrics}
+        return Response(content=metrics_monitor.get_metrics(), media_type="text/plain")
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -485,9 +480,9 @@ if __name__ == "__main__":
         model_pipelines = Pipeline(args.pipeline_json)
         auth_manager = AuthManager()
         if args.task_url.startswith('/'):
-            task_manager = LocalTaskManager(args.task_url)
+            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
         elif args.task_url.startswith('postgresql://'):
-            task_manager = PostgresSQLTaskManager(args.task_url)
+            task_manager = PostgresSQLTaskManager(args.task_url, metrics_monitor)
         else:
             raise NotImplementedError
         if args.data_url.startswith('/'):

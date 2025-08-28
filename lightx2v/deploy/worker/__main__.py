@@ -138,6 +138,7 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity,
         "status": status,
         "worker_identity": worker_identity,
         "queue": queue,
+        "fail_msg": "" if status == TaskStatus.SUCCEED.name else "worker failed",
     }
     try:
         async with aiohttp.ClientSession() as session:

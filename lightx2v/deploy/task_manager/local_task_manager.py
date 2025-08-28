@@ -1,15 +1,16 @@
 import os
 import json
 import asyncio
-from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus
+from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus, ActiveStatus, FinishedStatus
 from lightx2v.deploy.common.utils import current_time, class_try_catch_async, time2str, str2time
 
 
 class LocalTaskManager(BaseTaskManager):
-    def __init__(self, local_dir):
-       self.local_dir = local_dir
-       if not os.path.exists(self.local_dir):
-           os.makedirs(self.local_dir)
+    def __init__(self, local_dir, metrics_monitor=None):
+        self.local_dir = local_dir
+        if not os.path.exists(self.local_dir):
+            os.makedirs(self.local_dir)
+        self.metrics_monitor = metrics_monitor
 
     def get_task_filename(self, task_id):
         return os.path.join(self.local_dir, f"task_{task_id}.json")
@@ -107,7 +108,7 @@ class LocalTaskManager(BaseTaskManager):
     @class_try_catch_async
     async def next_subtasks(self, task_id):
         task, subtasks = self.load(task_id)
-        if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.PENDING]:
+        if task['status'] not in ActiveStatus:
             return []
         succeeds = set()
         for sub in subtasks:
@@ -122,8 +123,7 @@ class LocalTaskManager(BaseTaskManager):
                         dep_ok = False
                         break
                 if dep_ok:
-                    sub['extra_info'] = self.mark_subtask_end(sub)
-                    sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.PENDING)
+                    self.mark_subtask_change(sub, sub['status'], TaskStatus.PENDING)
                     sub['params'] = task['params']
                     sub['status'] = TaskStatus.PENDING
                     sub['update_t'] = current_time()
@@ -145,12 +145,10 @@ class LocalTaskManager(BaseTaskManager):
                 continue
             for sub in subtasks:
                 if sub['worker_name'] == worker_name:
-                    sub['extra_info'] = self.mark_subtask_end(sub)
-                    sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.RUNNING)
+                    self.mark_subtask_change(sub, sub['status'], TaskStatus.RUNNING)
                     sub['status'] = TaskStatus.RUNNING
                     sub['worker_identity'] = worker_identity
                     sub['update_t'] = current_time()
-                    cand['extra_info'] = sub['extra_info']
                     task['status'] = TaskStatus.RUNNING
                     task['update_t'] = current_time()
                     task['ping_t'] = current_time()
@@ -172,7 +170,7 @@ class LocalTaskManager(BaseTaskManager):
         return False
 
     @class_try_catch_async
-    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
+    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None):
         task, subtasks = self.load(task_id)
         subs = subtasks
 
@@ -186,77 +184,82 @@ class LocalTaskManager(BaseTaskManager):
 
         assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
         for sub in subs:
-            pre_t = sub['update_t']
-            sub['extra_info'] = self.mark_subtask_end(sub)
-            sub['status'] = status
-            sub['update_t'] = current_time()
-            if status == TaskStatus.SUCCEED:
-                sub['infer_cost'] = sub['update_t'] - pre_t
+            if sub['status'] not in FinishedStatus:
+                self.mark_subtask_change(sub, sub['status'], status, fail_msg=fail_msg)
+                sub['status'] = status
+                sub['update_t'] = current_time()
 
         if task['status'] == TaskStatus.CANCEL:
             self.save(task, subtasks)
-            return TaskStatus.CANCEL, -1, subs
+            return TaskStatus.CANCEL
 
         running_subs = []
         failed_sub = False
         for sub in subtasks:
-            if sub['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
+            if sub['status'] not in FinishedStatus:
                 running_subs.append(sub)
             if sub['status'] == TaskStatus.FAILED:
                 failed_sub = True
 
         # some subtask failed, we should fail all other subtasks
         if failed_sub:
-            task['status'] = TaskStatus.FAILED
-            task['update_t'] = current_time()
-            task['extra_info'] = self.mark_task_end(task)
+            if task['status'] != TaskStatus.FAILED:
+                self.mark_task_end(task, TaskStatus.FAILED)
+                task['status'] = TaskStatus.FAILED
+                task['update_t'] = current_time()
             for sub in running_subs:
-                sub['extra_info'] = self.mark_subtask_end(sub)
+                self.mark_subtask_change(sub, sub['status'], TaskStatus.FAILED, fail_msg="other subtask failed")
                 sub['status'] = TaskStatus.FAILED
                 sub['update_t'] = current_time()
             self.save(task, subtasks)
-            return TaskStatus.FAILED, task['extra_info']['active_elapse'], subs + running_subs
+            return TaskStatus.FAILED
 
         # all subtasks finished and all succeed
         elif len(running_subs) == 0:
-            task['status'] = TaskStatus.SUCCEED
-            task['update_t'] = current_time()
-            task['extra_info'] = self.mark_task_end(task)
+            if task['status'] != TaskStatus.SUCCEED:
+                self.mark_task_end(task, TaskStatus.SUCCEED)
+                task['status'] = TaskStatus.SUCCEED
+                task['update_t'] = current_time()
             self.save(task, subtasks)
-            return TaskStatus.SUCCEED, task['extra_info']['active_elapse'], subs
+            return TaskStatus.SUCCEED
 
         self.save(task, subtasks)
-        return None, -1, subs
+        return None
 
     @class_try_catch_async
     async def cancel_task(self, task_id, user_id=None):
         task, subtasks = self.load(task_id, user_id)
-        if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
-            return False, -1
+        if task['status'] not in ActiveStatus:
+            return False
+        for sub in subtasks:
+            if sub['status'] not in FinishedStatus:
+                self.mark_subtask_change(sub, sub['status'], TaskStatus.CANCEL)
+                sub['status'] = TaskStatus.CANCEL
+                sub['update_t'] = current_time()
+        self.mark_task_end(task, TaskStatus.CANCEL)
         task['status'] = TaskStatus.CANCEL
         task['update_t'] = current_time()
-        task['extra_info'] = self.mark_task_end(task)
         self.save(task, subtasks)
-        return True, task['extra_info']['active_elapse']
+        return True
 
     @class_try_catch_async
     async def resume_task(self, task_id, all_subtask=False, user_id=None):
         task, subtasks = self.load(task_id, user_id)
         # the task is not finished
-        if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+        if task['status'] not in FinishedStatus:
             return False
         # the task is no need to resume
         if not all_subtask and task['status'] == TaskStatus.SUCCEED:
             return False
         for sub in subtasks:
             if all_subtask or sub['status'] != TaskStatus.SUCCEED:
-                sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.CREATED)
+                self.mark_subtask_change(sub, None, TaskStatus.CREATED)
                 sub['status'] = TaskStatus.CREATED
                 sub['update_t'] = current_time()
                 sub['ping_t'] = 0.0
+        self.mark_task_start(task)
         task['status'] = TaskStatus.CREATED
         task['update_t'] = current_time()
-        task['extra_info'] = self.mark_task_start(task)
         self.save(task, subtasks)
         return True
 

@@ -206,7 +206,8 @@ class ServerMonitor:
             elapse = time.time() - t['update_t']
             logger.warning(f"Subtask {fmt_subtask(t)} CREATED / PENDING timeout: {elapse:.2f} s")
             await self.task_manager.finish_subtasks(
-                t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name']
+                t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
+                fail_msg=f"CREATED / PENDING timeout: {elapse:.2f} s"
             )
             fails.add(t['task_id'])
 
@@ -222,7 +223,8 @@ class ServerMonitor:
                 if ping_elapse >= self.ping_timeout:
                     logger.warning(f"Subtask {fmt_subtask(t)} PING timeout: {ping_elapse:.2f} s")
                     await self.task_manager.finish_subtasks(
-                        t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name']
+                        t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
+                        fail_msg=f"PING timeout: {ping_elapse:.2f} s"
                     )
                     fails.add(t['task_id'])
             elapse = time.time() - t['update_t']
@@ -230,7 +232,8 @@ class ServerMonitor:
             if elapse >= limit:
                 logger.warning(f"Subtask {fmt_subtask(t)} RUNNING timeout: {elapse:.2f} s")
                 await self.task_manager.finish_subtasks(
-                    t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name']
+                    t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
+                    fail_msg=f"RUNNING timeout: {elapse:.2f} s"
                 )
                 fails.add(t['task_id'])
 

@@ -4,19 +4,22 @@ import asyncpg
 import traceback
 from loguru import logger
 from datetime import datetime
-from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus
+from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus, ActiveStatus, FinishedStatus
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time
+
+ASYNC_LOCK = asyncio.Lock()
 
 
 class PostgresSQLTaskManager(BaseTaskManager):
 
-    def __init__(self, db_url):
+    def __init__(self, db_url, metrics_monitor=None):
         self.db_url = db_url
         self.table_tasks = "tasks"
         self.table_subtasks = "subtasks"
         self.table_users = "users"
         self.table_versions = "versions"
         self.pool = None
+        self.metrics_monitor = metrics_monitor
 
     async def init(self):
         await self.upgrade_db()
@@ -404,9 +407,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def next_subtasks(self, task_id):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
-                if task['status'] not in [TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.PENDING]:
+                if task['status'] not in ActiveStatus:
                     return []
                 succeeds = set()
                 for sub in subtasks:
@@ -422,8 +426,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                                 break
                         if dep_ok:
                             sub['params'] = task['params']
-                            sub['extra_info'] = self.mark_subtask_end(sub)
-                            sub['extra_info'] = self.mark_subtask_start(sub, TaskStatus.PENDING)
+                            self.mark_subtask_change(sub, sub['status'], TaskStatus.PENDING)
                             await self.update_subtask(conn, task_id, sub['worker_name'],
                                 status=TaskStatus.PENDING, extra_info=sub['extra_info'])
                             nexts.append(sub)
@@ -434,12 +437,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
             logger.error(f"next_subtasks error: {traceback.format_exc()}")
             return None
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
     async def run_subtasks(self, cands, worker_identity):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 valids = []
                 for cand in cands:
@@ -450,9 +455,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                         continue
 
-                    subs[0]['extra_info'] = self.mark_subtask_end(subs[0])
-                    subs[0]['extra_info'] = self.mark_subtask_start(subs[0], TaskStatus.RUNNING)
-                    cand['extra_info'] = subs[0]['extra_info']
+                    self.mark_subtask_change(subs[0], subs[0]['status'], TaskStatus.RUNNING)
                     await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING,
                         worker_identity=worker_identity, ping_t=True, extra_info=subs[0]['extra_info'])
                     await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
@@ -463,12 +466,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
             logger.error(f"run_subtasks error: {traceback.format_exc()}")
             return []
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
     async def ping_subtask(self, task_id, worker_name, worker_identity):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
                 for sub in subtasks:
@@ -482,12 +487,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
             logger.error(f"ping_subtask error: {traceback.format_exc()}")
             return False
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None):
+    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id)
                 subs = subtasks
@@ -501,89 +508,100 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
                 assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
                 for sub in subs:
-                    infer_cost = current_time() - sub['update_t']
-                    sub['extra_info'] = self.mark_subtask_end(sub)
-                    if status == TaskStatus.SUCCEED:
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, infer_cost=infer_cost, extra_info=sub['extra_info'])
-                        sub['infer_cost'] = infer_cost
-                    else:
+                    if sub['status'] not in FinishedStatus:
+                        self.mark_subtask_change(sub, sub['status'], status, fail_msg=fail_msg)
                         await self.update_subtask(conn, task_id, sub['worker_name'], status=status, extra_info=sub['extra_info'])
-                    sub['status'] = status
+                        sub['status'] = status
 
                 if task['status'] == TaskStatus.CANCEL:
-                    return TaskStatus.CANCEL, -1, subs
+                    return TaskStatus.CANCEL
 
                 running_subs = []
                 failed_sub = False
                 for sub in subtasks:
-                    if sub['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED]:
+                    if sub['status'] not in FinishedStatus:
                         running_subs.append(sub)
                     if sub['status'] == TaskStatus.FAILED:
                         failed_sub = True
 
                 # some subtask failed, we should fail all other subtasks
                 if failed_sub:
-                    extra_info = self.mark_task_end(task)
-                    await self.update_task(conn, task_id, status=TaskStatus.FAILED, extra_info=extra_info)
+                    if task['status'] != TaskStatus.FAILED:
+                        self.mark_task_end(task, TaskStatus.FAILED)
+                        await self.update_task(conn, task_id, status=TaskStatus.FAILED, extra_info=task['extra_info'])
                     for sub in running_subs:
-                        sub['extra_info'] = self.mark_subtask_end(sub)
-                        sub['status'] = TaskStatus.FAILED
-                        await self.update_subtask(conn, task_id, sub['worker_name'],
-                            status=TaskStatus.FAILED, extra_info=sub['extra_info'])
-                    return TaskStatus.FAILED, extra_info['active_elapse'], subs + running_subs
+                        self.mark_subtask_change(sub, sub['status'], TaskStatus.FAILED, fail_msg="other subtask failed")
+                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.FAILED, extra_info=sub['extra_info'])
+                    return TaskStatus.FAILED
 
                 # all subtasks finished and all succeed
                 elif len(running_subs) == 0:
-                    extra_info = self.mark_task_end(task)
-                    await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=extra_info)
-                    return TaskStatus.SUCCEED, extra_info['active_elapse'], subs
-                return None, -1, subs
+                    if task['status'] != TaskStatus.SUCCEED:
+                        self.mark_task_end(task, TaskStatus.SUCCEED)
+                        await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=task['extra_info'])
+                    return TaskStatus.SUCCEED
+                return None
         except:
             logger.error(f"finish_subtasks error: {traceback.format_exc()}")
-            return None, -1, []
+            return None
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
     async def cancel_task(self, task_id, user_id=None):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id, user_id)
-                if task['status'] not in [TaskStatus.CREATED, TaskStatus.PENDING, TaskStatus.RUNNING]:
-                    return False, -1
-                extra_info = self.mark_task_end(task)
-                await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=extra_info)
-                return True, extra_info['active_elapse']
+                if task['status'] not in ActiveStatus:
+                    return False
+
+                for sub in subtasks:
+                    if sub['status'] not in FinishedStatus:
+                        self.mark_subtask_change(sub, sub['status'], TaskStatus.CANCEL)
+                        await self.update_subtask(conn, task_id, sub['worker_name'],
+                                                  status=TaskStatus.CANCEL, extra_info=sub['extra_info'])
+
+                self.mark_task_end(task, TaskStatus.CANCEL)
+                await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=task['extra_info'])
+                return True
         except:
             logger.error(f"cancel_task error: {traceback.format_exc()}")
-            return False, -1
+            return False
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
     async def resume_task(self, task_id, all_subtask=False, user_id=None):
         conn = await self.get_conn()
         try:
+            await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 # the task is not finished
-                if task['status'] not in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+                if task['status'] not in FinishedStatus:
                     return False
                 # the task is no need to resume
                 if not all_subtask and task['status'] == TaskStatus.SUCCEED:
                     return False
+
                 for sub in subtasks:
                     if all_subtask or sub['status'] != TaskStatus.SUCCEED:
-                        sub_extra_info = self.mark_subtask_start(sub, TaskStatus.CREATED)
+                        self.mark_subtask_change(sub, None, TaskStatus.CREATED)
                         await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED,
-                            reset_ping_t=True, extra_info=sub_extra_info)
-                await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=self.mark_task_start(task))
+                                                  reset_ping_t=True, extra_info=sub['extra_info'])
+
+                self.mark_task_start(task)
+                await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=task['extra_info'])
                 return True
         except:
             logger.error(f"resume_task error: {traceback.format_exc()}")
             return False
         finally:
+            ASYNC_LOCK.release()
             await self.release_conn(conn)
 
     @class_try_catch_async
