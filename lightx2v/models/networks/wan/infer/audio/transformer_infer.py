@@ -3,7 +3,6 @@ import torch.distributed as dist
 
 from lightx2v.models.input_encoders.hf.seko_audio.audio_adapter import get_q_lens_audio_range
 from lightx2v.models.networks.wan.infer.offload.transformer_infer import WanOffloadTransformerInfer
-from lightx2v.models.networks.wan.infer.utils import compute_freqs_audio, compute_freqs_audio_dist
 
 
 class WanAudioTransformerInfer(WanOffloadTransformerInfer):
@@ -16,20 +15,14 @@ class WanAudioTransformerInfer(WanOffloadTransformerInfer):
         self.audio_adapter = audio_adapter
 
     @torch.no_grad()
-    def compute_freqs(self, q, grid_sizes, freqs):
-        if self.config["seq_parallel"]:
-            freqs_i = compute_freqs_audio_dist(q.size(0), q.size(2) // 2, grid_sizes, freqs, self.seq_p_group)
-        else:
-            freqs_i = compute_freqs_audio(q.size(2) // 2, grid_sizes, freqs)
-        return freqs_i
-
-    @torch.no_grad()
     def post_process(self, x, y, c_gate_msa, pre_infer_out):
         x = super().post_process(x, y, c_gate_msa, pre_infer_out)
 
+        audio_grid_sizes = [row.clone() for row in pre_infer_out.grid_sizes]
+        audio_grid_sizes[0][0] -= 1
         x = self.modify_hidden_states(
-            hidden_states=x,
-            grid_sizes=pre_infer_out.grid_sizes,
+            hidden_states=x.to(self.infer_dtype),
+            grid_sizes=audio_grid_sizes,
             ca_block=self.audio_adapter.ca[self.block_idx],
             audio_encoder_output=pre_infer_out.adapter_output["audio_encoder_output"],
             t_emb=self.scheduler.audio_adapter_t_emb,
@@ -87,8 +80,11 @@ class WanAudioTransformerInfer(WanOffloadTransformerInfer):
         k_lens = torch.tensor([self.num_tokens_x4] * (t1 - t0) * bs, device=device, dtype=torch.int32)
         assert q_lens.shape == k_lens.shape
         # ca_block:CrossAttention函数
+        if self.audio_adapter.cpu_offload:
+            ca_block.to("cuda")
         residual = ca_block(audio_encoder_output, hidden_states_aligned, t_emb, q_lens, k_lens) * weight
-
+        if self.audio_adapter.cpu_offload:
+            ca_block.to("cpu")
         residual = residual.to(ori_dtype)  # audio做了CrossAttention之后以Residual的方式注入
         if n_query_tokens == 0:
             residual = residual * 0.0

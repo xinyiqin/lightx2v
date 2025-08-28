@@ -77,6 +77,7 @@ class WanOffloadTransformerInfer(WanTransformerInfer):
         self.weights_stream_mgr.prefetch_weights_from_disk(blocks)
 
         for block_idx in range(len(blocks)):
+            self.block_idx = block_idx
             if block_idx == 0:
                 block = self.weights_stream_mgr.pin_memory_buffer.get(block_idx)
                 block.to_cuda()
@@ -97,9 +98,7 @@ class WanOffloadTransformerInfer(WanTransformerInfer):
 
         if self.clean_cuda_cache:
             del (
-                pre_infer_out.grid_sizes,
                 pre_infer_out.embed0,
-                pre_infer_out.seq_lens,
                 pre_infer_out.freqs,
                 pre_infer_out.context,
             )
@@ -235,9 +234,7 @@ class WanOffloadTransformerInfer(WanTransformerInfer):
             self.phase_params["c_gate_msa"],
         )
         del (
-            pre_infer_out.grid_sizes,
             pre_infer_out.embed0,
-            pre_infer_out.seq_lens,
             pre_infer_out.freqs,
             pre_infer_out.context,
         )
