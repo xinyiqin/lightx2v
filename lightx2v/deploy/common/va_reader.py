@@ -8,6 +8,7 @@ import traceback
 import numpy as np
 import torch.distributed as dist
 import torch
+import signal
 
 
 class VAReader:
@@ -212,7 +213,7 @@ class VAReader:
     def stop(self):
         # Stop ffmpeg process
         if self.ffmpeg_process:
-            self.ffmpeg_process.terminate()
+            self.ffmpeg_process.send_signal(signal.SIGINT)
             try:
                 self.ffmpeg_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -246,8 +247,8 @@ if __name__ == "__main__":
     reader = VAReader(
         RANK,
         WORLD_SIZE,
-        "rtmp://localhost/live/test_audio",
-        # "http://10.8.98.2:1985/rtc/v1/whep/?app=ll&stream=test_audio&eip=10.8.98.2",
+        # "rtmp://localhost/live/test_audio",
+        "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_video&eip=127.0.0.1:8000",
         segment_duration=5.0,
         sample_rate=16000,
         audio_channels=1,
@@ -268,6 +269,6 @@ if __name__ == "__main__":
                     logger.warning("Failed to get audio chunk, stop reader")
                     reader.stop()
                     break
-            time.sleep(12)
+            # time.sleep(1)
     finally:
         reader.stop()

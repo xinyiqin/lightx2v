@@ -8,6 +8,7 @@ from loguru import logger
 import traceback
 import queue
 import time
+import signal
 
 
 class VARecorder:
@@ -197,7 +198,7 @@ class VARecorder:
             self.livestream_url,
             "-y",
             "-loglevel",
-            "debug"
+            "info"
         ]
         try:
             self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
@@ -273,15 +274,6 @@ class VARecorder:
             if self.video_thread.is_alive():
                 logger.warning("Video push thread did not stop gracefully")
 
-        # Stop ffmpeg process
-        if self.ffmpeg_process:
-            self.ffmpeg_process.terminate()
-            try:
-                self.ffmpeg_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.ffmpeg_process.kill()
-            logger.warning("FFmpeg recorder process stopped")
-
         # Close TCP connections, sockets
         if self.audio_conn:
             self.audio_conn.close()
@@ -299,6 +291,15 @@ class VARecorder:
         self.audio_queue = None
         self.video_queue = None
         logger.warning("Cleaned audio and video queues")
+
+        # Stop ffmpeg process
+        if self.ffmpeg_process:
+            self.ffmpeg_process.send_signal(signal.SIGINT)
+            try:
+                self.ffmpeg_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.ffmpeg_process.kill()
+            logger.warning("FFmpeg recorder process stopped")
 
     def __del__(self):
         self.stop(wait=False)
@@ -337,8 +338,8 @@ if __name__ == "__main__":
     height = 480
 
     recorder = VARecorder(
-        livestream_url="rtmp://localhost/live/test",
-        # livestream_url="http://10.8.98.2:1985/rtc/v1/whip/?app=ll&stream=test_video&eip=10.8.98.2&handshake_timeout=20000",
+        # livestream_url="rtmp://localhost/live/test",
+        livestream_url="https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whip/?app=live&stream=ll_test_video&eip=127.0.0.1:8000",
         fps=fps,
         sample_rate=sample_rate,
     )
