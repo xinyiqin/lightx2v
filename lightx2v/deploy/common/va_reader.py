@@ -20,7 +20,7 @@ class VAReader:
         segment_duration: float = 5.0,
         sample_rate: int = 16000,
         audio_channels: int = 1,
-        buffer_size: int = 5,
+        buffer_size: int = 1,
         prev_duration: float = 0.3125,
     ):
         self.rank = rank

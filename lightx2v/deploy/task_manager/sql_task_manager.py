@@ -392,11 +392,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def query_task(self, task_id, user_id=None):
+    async def query_task(self, task_id, user_id=None, only_task=True):
         conn = await self.get_conn()
         try:
-            task = await self.load(conn, task_id, user_id, only_task=True)
-            return task
+            return await self.load(conn, task_id, user_id, only_task=only_task)
         except:
             logger.error(f"query_task error: {traceback.format_exc()}")
             return None
@@ -491,7 +490,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None):
+    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None, should_running=False):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
@@ -509,6 +508,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
                 for sub in subs:
                     if sub['status'] not in FinishedStatus:
+                        if should_running and sub['status'] != TaskStatus.RUNNING:
+                            logger.warning(f"task {task_id} is not running, skip finish subtask: {sub}")
+                            continue
                         self.mark_subtask_change(sub, sub['status'], status, fail_msg=fail_msg)
                         await self.update_subtask(conn, task_id, sub['worker_name'], status=status, extra_info=sub['extra_info'])
                         sub['status'] = status

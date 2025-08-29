@@ -39,7 +39,7 @@ class BaseTaskManager:
     async def list_tasks(self, **kwargs):
         raise NotImplementedError
 
-    async def query_task(self,task_id, user_id=None):
+    async def query_task(self, task_id, user_id=None, only_task=True):
         raise NotImplementedError
 
     async def next_subtasks(self, task_id):
@@ -51,7 +51,7 @@ class BaseTaskManager:
     async def ping_subtask(self, task_id, worker_name, worker_identity):
         raise NotImplementedError
 
-    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None):
+    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None, should_running=False):
         raise NotImplementedError
 
     async def cancel_task(self, task_id, user_id=None):

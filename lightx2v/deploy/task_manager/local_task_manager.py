@@ -39,13 +39,15 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, 'w') as fout:
             fout.write(json.dumps(info, indent=4, ensure_ascii=False))
 
-    def load(self, task_id, user_id=None):
+    def load(self, task_id, user_id=None, only_task=False):
         fpath = self.get_task_filename(task_id)
         info = json.load(open(fpath))
         task, subtasks = info['task'], info['subtasks']
         if user_id is not None and task['user_id'] != user_id:
             raise Exception(f"Task {task_id} is not belong to user {user_id}")
         self.parse_dict(task)
+        if only_task:
+            return task
         for sub in subtasks:
             self.parse_dict(sub)
         return task, subtasks
@@ -101,9 +103,8 @@ class LocalTaskManager(BaseTaskManager):
         return tasks
 
     @class_try_catch_async
-    async def query_task(self, task_id, user_id=None):
-        task, subtasks = self.load(task_id, user_id)
-        return task
+    async def query_task(self, task_id, user_id=None, only_task=True):
+        return self.load(task_id, user_id, only_task)
 
     @class_try_catch_async
     async def next_subtasks(self, task_id):
@@ -170,7 +171,7 @@ class LocalTaskManager(BaseTaskManager):
         return False
 
     @class_try_catch_async
-    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None):
+    async def finish_subtasks(self, task_id, status, worker_identity=None, worker_name=None, fail_msg=None, should_running=False):
         task, subtasks = self.load(task_id)
         subs = subtasks
 
@@ -185,6 +186,9 @@ class LocalTaskManager(BaseTaskManager):
         assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
         for sub in subs:
             if sub['status'] not in FinishedStatus:
+                if should_running and sub['status'] != TaskStatus.RUNNING:
+                    print(f"task {task_id} is not running, skip finish subtask: {sub}")
+                    continue
                 self.mark_subtask_change(sub, sub['status'], status, fail_msg=fail_msg)
                 sub['status'] = status
                 sub['update_t'] = current_time()

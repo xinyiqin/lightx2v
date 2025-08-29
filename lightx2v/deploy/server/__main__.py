@@ -193,9 +193,10 @@ async def api_v1_task_query(request: Request, user = Depends(verify_user_access)
         if msg is not True:
             return error_response(msg, 400)
         task_id = request.query_params['task_id']
-        task = await task_manager.query_task(task_id, user['user_id'])
-        if task is None:
-            return {'msg': 'task not found'}
+        task, subtasks = await task_manager.query_task(task_id, user['user_id'], only_task=False)
+        for sub in subtasks:
+            sub['status'] = sub['status'].name
+        task['subtasks'] = subtasks
         task['status'] = task['status'].name
         return task
     except Exception as e:
@@ -362,7 +363,7 @@ async def api_v1_worker_report(request: Request, valid = Depends(verify_worker_a
         await server_monitor.worker_update(queue, identity, WorkerStatus.REPORT)
 
         ret = await task_manager.finish_subtasks(
-            task_id, status, worker_identity=identity, worker_name=worker_name, fail_msg=fail_msg
+            task_id, status, worker_identity=identity, worker_name=worker_name, fail_msg=fail_msg, should_running=True
         )
 
         # not all subtasks finished, prepare new ready subtasks
@@ -401,7 +402,7 @@ async def api_v1_worker_ping_subtask(request: Request, valid = Depends(verify_wo
         queue = params.pop('queue')
 
         task = await task_manager.query_task(task_id)
-        if task['status'] in [TaskStatus.FAILED, TaskStatus.CANCEL]:
+        if task['status'] != TaskStatus.RUNNING:
             return {'msg': 'delete'}
 
         assert await task_manager.ping_subtask(task_id, worker_name, identity)
