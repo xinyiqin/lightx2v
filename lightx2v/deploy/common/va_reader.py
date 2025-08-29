@@ -97,16 +97,19 @@ class VAReader:
         ffmpeg_cmd = [
             "gst-launch-1.0",
             "-q",
-            f"whepsrc whep-endpoint={self.stream_url}",
-            "video-caps='none'",
-            "! rtpopusdepay",
-            "! opusdec plc=false",
-            "! audioconvert",
-            "! audioresample",
-            f"! audio/x-raw,format=S16LE,channels={self.audio_channels},rate={self.sample_rate}",
-            "! fdsink fd=1",
+            "whepsrc",
+            f"whep-endpoint={self.stream_url}",
+            "video-caps=none",
+            "!rtpopusdepay",
+            "!opusdec",
+            "plc=false",
+            "!audioconvert",
+            "!audioresample",
+            f"!audio/x-raw,format=S16LE,channels={self.audio_channels},rate={self.sample_rate}",
+            "!fdsink",
+            "fd=1"
         ]
-        try:    
+        try:
             self.ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
@@ -248,7 +251,7 @@ if __name__ == "__main__":
         RANK,
         WORLD_SIZE,
         # "rtmp://localhost/live/test_audio",
-        "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_video&eip=127.0.0.1:8000",
+        "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_audio&eip=10.120.114.76:8000",
         segment_duration=5.0,
         sample_rate=16000,
         audio_channels=1,

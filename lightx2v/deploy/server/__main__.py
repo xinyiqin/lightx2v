@@ -14,7 +14,7 @@ from loguru import logger
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
-from lightx2v.deploy.common.utils import load_inputs, data_name
+from lightx2v.deploy.common.utils import load_inputs, data_name, check_params
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
@@ -155,6 +155,7 @@ async def api_v1_task_submit(request: Request, user = Depends(verify_user_access
         inputs = model_pipelines.get_inputs(keys)
         outputs = model_pipelines.get_outputs(keys)
         types = model_pipelines.get_types(keys)
+        check_params(params, inputs, outputs, types)
 
         # check if task can be published to queues
         queues = [v['queue'] for v in workers.values()]

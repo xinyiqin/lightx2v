@@ -125,3 +125,14 @@ async def load_inputs(params, raw_inputs, types):
         else:
             params[inp] = item
     return inputs_data
+
+
+def check_params(params, raw_inputs, raw_outputs, types):
+    stream_audio = os.getenv("STREAM_AUDIO", "0") == "1"
+    stream_video = os.getenv("STREAM_VIDEO", "0") == "1"
+    for x in raw_inputs + raw_outputs:
+        if x in params and 'type' in params[x] and params[x]['type'] == "stream":
+            if types[x] == "AUDIO":
+                assert stream_audio, "stream audio is not supported, please set env STREAM_AUDIO=1"
+            elif types[x] == "VIDEO":
+                assert stream_video, "stream video is not supported, please set env STREAM_VIDEO=1"
