@@ -642,7 +642,10 @@
                 });
 
                 const isAudioModel = computed(() => {
-                    return taskForm.value.model_cls && (taskForm.value.model_cls.includes('audio') || taskForm.value.model_cls.includes('Audio'));
+                    return taskForm.value.model_cls && 
+                    (taskForm.value.model_cls.includes('audio') 
+                    || taskForm.value.model_cls.includes('Audio')
+                    || taskForm.value.model_cls.includes('SekoTalk'));
                 });
 
                 // 分页相关计算属性

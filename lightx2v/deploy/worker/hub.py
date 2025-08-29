@@ -73,7 +73,7 @@ class BaseWorker:
         if stream_audio_path is not None:
             tmp_audio_path = stream_audio_path
 
-        if input_audio_path and 'audio' in self.runner.config.model_cls and isinstance(tmp_audio_path, str):
+        if input_audio_path and self.is_audio_model() and isinstance(tmp_audio_path, str):
             audio_data = await data_manager.load_bytes(input_audio_path)
             with open(tmp_audio_path, 'wb') as fout:
                 fout.write(audio_data)
@@ -117,7 +117,7 @@ class BaseWorker:
             "image_encoder_output": image_encoder_output,
         }
 
-        if 'audio' in self.runner.config.model_cls:
+        if self.is_audio_model():
             audio_segments, expected_frames = self.runner.read_audio_input()
             self.runner.inputs["audio_segments"] = audio_segments
             self.runner.inputs["expected_frames"] = expected_frames
@@ -127,6 +127,9 @@ class BaseWorker:
         if data_manager.name != "local" and self.rank == 0 and isinstance(tmp_video_path, str):
             video_data = open(tmp_video_path, 'rb').read()
             await data_manager.save_bytes(video_data, output_video_path)
+
+    def is_audio_model(self):
+        return 'audio' in self.runner.config.model_cls or 'seko_talk' in self.runner.config.model_cls
 
 
 class RunnerThread(threading.Thread):
@@ -202,7 +205,7 @@ class PipelineWorker(BaseWorker):
         self.runner.config['prompt'] = "The video features a old lady is saying something and knitting a sweater."
         if self.runner.config.task == "i2v":
             self.runner.config['image_path'] = os.path.join(base_dir, "assets", "inputs", "audio", "15.png")
-        if self.runner.config.model_cls in ["wan2.1_audio", "wan2.2_moe_audio"]:
+        if self.is_audio_model():
             self.runner.config['audio_path'] = os.path.join(base_dir, "assets", "inputs", "audio", "15.wav")
 
     @class_try_catch_async_with_thread
@@ -244,7 +247,7 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config["use_prompt_enhancer"]:
             prompt = self.runner.config["prompt_enhanced"]
 
-        if self.runner.config.task == "i2v" and 'audio' not in self.runner.config.model_cls:
+        if self.runner.config.task == "i2v" and not self.is_audio_model():
             img = await data_manager.load_image(input_image_path)
             img = self.runner.read_image_input(img)
             if isinstance(img, tuple):
@@ -385,7 +388,7 @@ class SegmentDiTWorker(BaseWorker):
         self.runner.model = self.runner.load_transformer()
         self.runner.vae_encoder, self.runner.vae_decoder = self.runner.load_vae()
         self.runner.vfi_model = self.runner.load_vfi_model() if "video_frame_interpolation" in self.runner.config else None
-        if 'audio' in self.runner.config.model_cls:
+        if self.is_audio_model():
             self.runner.audio_encoder = self.runner.load_audio_encoder()
             self.runner.audio_adapter = self.runner.load_audio_adapter()
             self.runner.model.set_audio_adapter(self.runner.audio_adapter)
