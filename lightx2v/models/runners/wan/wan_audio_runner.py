@@ -370,7 +370,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
 
             frames_n = (nframe - 1) * 4 + 1
             prev_mask = torch.ones((1, frames_n, height, width), device=device, dtype=dtype)
-            prev_mask[:, prev_len:] = 0
+            prev_frame_len = max((prev_len - 1) * 4 + 1, 0)
+            prev_mask[:, prev_frame_len:] = 0
             prev_mask = self._wan_mask_rearrange(prev_mask)
 
         if prev_latents is not None:
@@ -633,7 +634,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         return base_model
 
     def load_audio_encoder(self):
-        audio_encoder_path = os.path.join(self.config["model_path"], "audio_encoder")
+        audio_encoder_path = os.path.join(self.config["model_path"], "TencentGameMate-chinese-hubert-large")
         audio_encoder_offload = self.config.get("audio_encoder_cpu_offload", self.config.get("cpu_offload", False))
         model = SekoAudioEncoderModel(audio_encoder_path, self.config["audio_sr"], audio_encoder_offload)
         return model
@@ -660,13 +661,13 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_adapter.to(device)
         if self.config.get("adapter_quantized", False):
             if self.config.get("adapter_quant_scheme", None) in ["fp8", "fp8-q8f"]:
-                model_name = "audio_adapter_fp8.safetensors"
+                model_name = "audio_adapter_model_fp8.safetensors"
             elif self.config.get("adapter_quant_scheme", None) == "int8":
-                model_name = "audio_adapter_int8.safetensors"
+                model_name = "audio_adapter_model_int8.safetensors"
             else:
                 raise ValueError(f"Unsupported quant_scheme: {self.config.get('adapter_quant_scheme', None)}")
         else:
-            model_name = "audio_adapter.safetensors"
+            model_name = "audio_adapter_model.safetensors"
 
         weights_dict = load_weights(os.path.join(self.config["model_path"], model_name), cpu_offload=audio_adapter_offload)
         audio_adapter.load_state_dict(weights_dict, strict=False)
