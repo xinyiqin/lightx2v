@@ -701,9 +701,9 @@
                                     <span :class="getTaskStatusColor(task.status)" class="font-medium">
                                         {{ getTaskStatusDisplay(task.status) }}
                                     </span>
-                                </div>
                             </div>
                         </div>
+                    </div>
                         
                         <!-- 任务进度条（仅显示进行中的任务） -->
                         <div v-if="task.status === 'RUNNING'" class="mt-2">
@@ -1520,7 +1520,23 @@
 
                 // 计算属性
                 const availableTaskTypes = computed(() => {
-                    return [...new Set(models.value.map(m => m.task))];
+                    const types = [...new Set(models.value.map(m => m.task))];
+                    // 重新排序，确保数字人在最左边
+                    const orderedTypes = [];
+                    
+                    // 优先添加数字人
+                    if (types.includes('digital_human')) {
+                        orderedTypes.push('digital_human');
+                    }
+                    
+                    // 然后添加其他类型
+                    types.forEach(type => {
+                        if (type !== 'digital_human') {
+                            orderedTypes.push(type);
+                        }
+                    });
+                    
+                    return orderedTypes;
                 });
 
                 const availableModelClasses = computed(() => {
@@ -1541,10 +1557,10 @@
                     // 搜索过滤
                     if (searchQuery.value) {
                         filtered = filtered.filter(task => 
-                            task.params.prompt?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                            task.task_id.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                            task.task_type.toLowerCase().includes(searchQuery.value.toLowerCase())
-                        );
+                        task.params.prompt?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+                        task.task_id.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+                        task.task_type.toLowerCase().includes(searchQuery.value.toLowerCase())
+                    );
                     }
                     
                     return filtered;
@@ -1642,6 +1658,14 @@
                     audioPreview.value = null;
                     taskForm.value.imageFile = null;
                     taskForm.value.audioFile = null;
+                    
+                    // 自动选择第一个可用的模型
+                    const availableModels = models.value.filter(m => m.task === taskType);
+                    if (availableModels.length > 0) {
+                        const firstModel = availableModels[0];
+                        taskForm.value.model_cls = firstModel.model_cls;
+                        taskForm.value.stage = firstModel.stage;
+                    }
                 };
 
                 const selectModel = (model) => {
@@ -2291,10 +2315,27 @@
                     
                     // 加载提示词历史记录
                     loadPromptHistory();
+                    
+                    // 默认选择数字人任务类型
+                    if (availableTaskTypes.value.includes('digital_human')) {
+                        selectTask('digital_human');
+                    }
                 });
 
                 // 提示词模板管理
                 const promptTemplates = {
+                    'digital_human': [
+                        {
+                            id: 'dh_1',
+                            title: '商务演讲',
+                            prompt: '数字人进行商务演讲，表情自然，手势得体，背景为现代化的会议室，整体风格专业商务。'
+                        },
+                        {
+                            id: 'dh_2',
+                            title: '产品介绍',
+                            prompt: '数字人介绍产品特点，语气亲切，动作自然，背景为产品展示区，突出产品的科技感和实用性。'
+                        }
+                    ],
                     't2v': [
                         {
                             id: 't2v_1',
@@ -2322,18 +2363,6 @@
                             id: 'i2v_2',
                             title: '场景转换',
                             prompt: '保持参考图片中的人物形象，将背景转换为不同的季节或环境，如从室内到户外，从白天到夜晚。'
-                        }
-                    ],
-                    'digital_human': [
-                        {
-                            id: 'dh_1',
-                            title: '商务演讲',
-                            prompt: '数字人进行商务演讲，表情自然，手势得体，背景为现代化的会议室，整体风格专业商务。'
-                        },
-                        {
-                            id: 'dh_2',
-                            title: '产品介绍',
-                            prompt: '数字人介绍产品特点，语气亲切，动作自然，背景为产品展示区，突出产品的科技感和实用性。'
                         }
                     ]
                 };
