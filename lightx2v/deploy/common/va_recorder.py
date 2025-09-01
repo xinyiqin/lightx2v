@@ -62,15 +62,23 @@ class VARecorder:
             logger.info("Waiting for ffmpeg to connect to audio socket...")
             self.audio_conn, _ = self.audio_socket.accept()
             logger.info(f"Audio connection established from {self.audio_conn.getpeername()}")
+            fail_time, max_fail_time = 0, 10
             while True:
                 try:
+                    if self.audio_queue is None:
+                        break
                     data = self.audio_queue.get()
                     if data is None:
                         logger.info("Audio thread received stop signal")
                         break
                     self.audio_conn.send(data.tobytes())
+                    fail_time = 0
                 except:
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
+                    fail_time += 1
+                    if fail_time > max_fail_time:
+                        logger.error(f"Audio push worker thread failed {fail_time} times, stopping...")
+                        break
         except:
             logger.error(f"Audio push worker thread error: {traceback.format_exc()}")
         finally:
@@ -81,15 +89,23 @@ class VARecorder:
             logger.info("Waiting for ffmpeg to connect to video socket...")
             self.video_conn, _ = self.video_socket.accept()
             logger.info(f"Video connection established from {self.video_conn.getpeername()}")
+            fail_time, max_fail_time = 0, 10
             while True:
                 try:
+                    if self.video_queue is None:
+                        break
                     data = self.video_queue.get()
                     if data is None:
                         logger.info("Video thread received stop signal")
                         break
                     self.video_conn.send(data.tobytes())
+                    fail_time = 0
                 except:
                     logger.error(f"Send video data error: {traceback.format_exc()}")
+                    fail_time += 1
+                    if fail_time > max_fail_time:
+                        logger.error(f"Video push worker thread failed {fail_time} times, stopping...")
+                        break
         except:
             logger.error(f"Video push worker thread error: {traceback.format_exc()}")
         finally:
