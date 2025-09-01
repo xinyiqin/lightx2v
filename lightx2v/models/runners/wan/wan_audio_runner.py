@@ -312,7 +312,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
         expected_frames = min(max(1, int(video_duration * target_fps)), audio_len)
 
         # Segment audio
-        audio_segments = self._audio_processor.segment_audio(audio_array, expected_frames, self.config.get("target_video_length", 81))
+        audio_segments = self._audio_processor.segment_audio(
+            audio_array,
+            expected_frames,
+            self.config.get("target_video_length", 81),
+            self.config.get("prev_frames", 5),
+        )
 
         return audio_segments, expected_frames
 
@@ -474,7 +479,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_features = self.audio_adapter.forward_audio_proj(audio_features, self.model.scheduler.latents.shape[1])
 
         self.inputs["audio_encoder_output"] = audio_features
-        self.inputs["previmg_encoder_output"] = self.prepare_prev_latents(self.prev_video, prev_frame_length=5)
+        prev_frames = self.config.get("prev_frames", 5)
+        self.inputs["previmg_encoder_output"] = self.prepare_prev_latents(self.prev_video, prev_frame_length=prev_frames)
 
         # Reset scheduler for non-first segments
         if segment_idx > 0:
@@ -485,8 +491,9 @@ class WanAudioRunner(WanRunner):  # type:ignore
         self.gen_video = torch.clamp(self.gen_video, -1, 1).to(torch.float)
 
         # Extract relevant frames
-        start_frame = 0 if self.segment_idx == 0 else 5
-        start_audio_frame = 0 if self.segment_idx == 0 else int(5 * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
+        prev_frames = self.config.get("prev_frames", 5)
+        start_frame = 0 if self.segment_idx == 0 else prev_frames
+        start_audio_frame = 0 if self.segment_idx == 0 else int(prev_frames * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
 
         if self.segment.is_last and self.segment.useful_length:
             end_frame = self.segment.end_frame - self.segment.start_frame
@@ -538,13 +545,14 @@ class WanAudioRunner(WanRunner):  # type:ignore
             target_fps = self.config.get("target_fps", 16)
             max_num_frames = self.config.get("target_video_length", 81)
             audio_sr = self.config.get("audio_sr", 16000)
+            prev_frames = self.config.get("prev_frames", 5)
             self.va_reader = VAReader(
                 rank=rank,
                 world_size=world_size,
                 stream_url=audio_path["data"],
                 sample_rate=audio_sr,
                 segment_duration=max_num_frames / target_fps,
-                prev_duration=5 / target_fps,
+                prev_duration=prev_frames / target_fps,
             )
 
     def run_main(self, total_steps=None):
