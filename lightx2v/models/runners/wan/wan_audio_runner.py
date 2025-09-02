@@ -509,6 +509,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         if self.va_recorder:
             cur_video = vae_to_comfyui_image(self.gen_video_list[-1])
             self.va_recorder.pub_livestream(cur_video, self.cut_audio_list[-1])
+
+        if self.va_reader:
             self.gen_video_list.pop()
             self.cut_audio_list.pop()
 
