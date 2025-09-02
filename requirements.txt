@@ -3,6 +3,7 @@ ninja
 vllm
 torch
 torchvision
+torchaudio
 diffusers
 transformers
 tokenizers

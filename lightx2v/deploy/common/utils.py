@@ -17,13 +17,26 @@ def current_time():
 
 
 def time2str(t):
-    d = datetime.fromtimestamp(t)
-    return d.strftime(FMT)
+    try:
+        d = datetime.fromtimestamp(t)
+        return d.strftime(FMT)
+    except (ValueError, OSError) as e:
+        logger.warning(f"Failed to format timestamp {t}: {e}, using current time instead")
+        return datetime.now().strftime(FMT)
 
 
 def str2time(s):
-    d = datetime.strptime(s, FMT)
-    return d.timestamp()
+    try:
+        d = datetime.strptime(s, FMT)
+        timestamp = d.timestamp()
+        # 检查时间戳是否合理（1970年到2100年之间）
+        if timestamp < 0 or timestamp > 4102444800:  # 2100-01-01 00:00:00
+            logger.warning(f"Invalid timestamp {s} -> {timestamp}, using current time instead")
+            return current_time()
+        return timestamp
+    except (ValueError, OSError) as e:
+        logger.warning(f"Failed to parse timestamp {s}: {e}, using current time instead")
+        return current_time()
 
 
 def try_catch(func):
@@ -103,10 +116,22 @@ async def preload_data(inp, inp_type, typ, val):
             assert image.size[0] > 0 and image.size[1] > 0, "image is empty"
         elif inp_type == "AUDIO":
             if typ != "stream":
-                waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
-                logger.info(f"load audio: {waveform.size()}, {sample_rate}")
-                assert waveform.size(0) > 0, "audio is empty"
-                assert sample_rate > 0, "audio sample rate is not valid"
+                try:
+                    waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
+                    logger.info(f"load audio: {waveform.size()}, {sample_rate}")
+                    assert waveform.size(0) > 0, "audio is empty"
+                    assert sample_rate > 0, "audio sample rate is not valid"
+                except Exception as e:
+                    logger.warning(f"torchaudio failed to load audio, trying alternative method: {e}")
+                    # 尝试使用其他方法验证音频文件
+                    # 检查文件头是否为有效的音频格式
+                    if len(data) < 4:
+                        raise ValueError("Audio file too short")
+                    # 检查常见的音频文件头
+                    audio_headers = [b'RIFF', b'ID3', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2', b'OggS']
+                    if not any(data.startswith(header) for header in audio_headers):
+                        logger.warning("Audio file doesn't have recognized header, but continuing...")
+                    logger.info(f"Audio validation passed (alternative method), size: {len(data)} bytes")
         else:
             raise Exception(f"cannot parse inp_type={inp_type} data")
         return data

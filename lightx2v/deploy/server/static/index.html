@@ -1678,7 +1678,8 @@
                                     v-model="getCurrentForm().stage"
                                     class="w-full bg-dark-light border border-laser-purple/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-laser-purple/60 transition-all"
                                 >
-                                    <option value="step_distill">蒸馏阶段</option>
+                                    <option value="single_stage">单阶段</option>
+                                    <option value="multi_stage">多阶段</option>
                                     <option value="original">原始阶段</option>
                                 </select>
                             </div> -->
@@ -1708,7 +1709,7 @@
                         </div>
 
                         <!-- 输出视频 -->
-                        <div v-if="selectedTask.outputs && Object.keys(selectedTask.outputs).length > 0" class="bg-secondary/30 rounded-xl p-4 mb-6 task-completed-panel">
+                        <div v-if="selectedTask.status === 'SUCCEED' && selectedTask.outputs && Object.keys(selectedTask.outputs).length > 0" class="bg-secondary/30 rounded-xl p-4 mb-6 task-completed-panel">
                             <h4 class="text-sm font-medium mb-3 flex items-center">
                                 <i class="fas fa-video text-gradient-icon mr-2"></i>
                                 输出结果
@@ -2126,7 +2127,7 @@
                 const t2vForm = ref({
                     task: 't2v',
                     model_cls: '',
-                    stage: 'step_distill',
+                    stage: 'single_stage',
                     prompt: '',
                     seed: 42
                 });
@@ -2134,7 +2135,7 @@
                 const i2vForm = ref({
                     task: 'i2v',
                     model_cls: '',
-                    stage: 'step_distill',
+                    stage: 'multi_stage',
                     imageFile: null,
                     prompt: '',
                     seed: 42
@@ -2143,7 +2144,7 @@
                 const digitalHumanForm = ref({
                     task: 'digital_human',
                     model_cls: '',
-                    stage: 'step_distill',
+                    stage: 'single_stage',
                     imageFile: null,
                     audioFile: null,
                     prompt: '',
@@ -2366,14 +2367,20 @@
 
                 const loadModels = async () => {
                     try {
+                        console.log('开始加载模型列表...');
                         const response = await apiCall('./api/v1/model/list');
+                        console.log('模型列表API响应:', response);
                         if (response.ok) {
                             const data = await response.json();
+                            console.log('模型列表数据:', data);
                             models.value = data.models || [];
+                            console.log('设置后的models.value:', models.value);
                         } else {
+                            console.error('模型列表API响应失败:', response);
                             showAlert('加载模型列表失败', 'danger');
                         }
                     } catch (error) {
+                        console.error('加载模型失败:', error);
                         showAlert(`加载模型失败: ${error.message}`, 'danger');
                     }
                 };
@@ -2660,6 +2667,7 @@
                                     type: 'base64',
                                     data: base64
                                 };
+                                formData.negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
                             }
                         }
 
@@ -2676,21 +2684,25 @@
                             addPromptToHistory(currentForm.prompt);
                             
                             await refreshTasks();
-                            selectedTaskId.value = null;
                             showCreator.value = true;
+                            
+                            // 重新选择数字人任务（如果可用）
+                            if (availableTaskTypes.value.includes('digital_human')) {
+                                selectTask('digital_human');
+                            }
                             
                             // 重置所有表单
                             t2vForm.value = {
                                 task: 't2v',
                                 model_cls: '',
-                                stage: 'step_distill',
+                                stage: 'single_stage',
                                 prompt: '',
                                 seed: Math.floor(Math.random() * 1000000)
                             };
                             i2vForm.value = {
                                 task: 'i2v',
                                 model_cls: '',
-                                stage: 'step_distill',
+                                stage: 'multi_stage',
                                 imageFile: null,
                                 prompt: '',
                                 seed: Math.floor(Math.random() * 1000000)
@@ -2698,7 +2710,7 @@
                             digitalHumanForm.value = {
                                 task: 'digital_human',
                                 model_cls: '',
-                                stage: 'step_distill',
+                                stage: 'single_stage',
                                 imageFile: null,
                                 audioFile: null,
                                 prompt: '',
@@ -3283,7 +3295,7 @@
                 // });
 
                 // 生命周期
-                onMounted(() => {
+                onMounted(async () => {
                     // 检查是否已登录
                     const savedToken = localStorage.getItem('accessToken');
                     const savedUser = localStorage.getItem('currentUser');
@@ -3291,7 +3303,6 @@
                     if (savedToken && savedUser) {
                         currentUser.value = JSON.parse(savedUser);
                         isLoggedIn.value = true;
-                        initModelAndTasks();
                     } else {
                         // 检查是否是GitHub回调
                         const urlParams = new URLSearchParams(window.location.search);
@@ -3300,8 +3311,13 @@
                             handleGitHubCallback(code);
                         }
                     }
+                    
+                    // 无论是否登录都要加载模型数据
+                    await initModelAndTasks();
                     loadPromptHistory();
                     loadTemplates();
+                    
+                    // 等待模型数据加载完成后再检查任务类型
                     if (availableTaskTypes.value.includes('digital_human')) {
                         selectTask('digital_human');
                     }
@@ -3553,6 +3569,8 @@
                     audioTemplates,
                     showImageTemplates,
                     showAudioTemplates,
+                    showTemplates,
+                    showHistory,
                     submitTask,
                     fileToBase64,
                     formatTime,

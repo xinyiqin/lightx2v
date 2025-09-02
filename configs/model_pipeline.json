@@ -59,7 +59,9 @@
                         "outputs": ["output_video"]
                     }
                 }
-            },
+            }
+        },
+        "digital_human": {
             "SekoTalk-Distill": {
                 "single_stage": {
                     "pipeline": {

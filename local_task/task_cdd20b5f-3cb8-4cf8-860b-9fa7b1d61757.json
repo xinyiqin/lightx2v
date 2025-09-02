@@ -1,0 +1,56 @@
+{
+    "task": {
+        "task_id": "cdd20b5f-3cb8-4cf8-860b-9fa7b1d61757",
+        "task_type": "t2v",
+        "model_cls": "wan2.1-1.3B",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "未来科技城市，飞行汽车穿梭，全息投影随处可见，建筑具有流线型设计，充满科技感和未来感。",
+            "seed": 42,
+            "negative_prompt": "镜头晃动，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-02 13:29:38",
+        "update_t": "2025-09-02 13:29:38",
+        "status": "PENDING",
+        "extra_info": {
+            "start_t": 1756790978.670497
+        },
+        "tag": "",
+        "inputs": {},
+        "outputs": {
+            "output_video": "cdd20b5f-3cb8-4cf8-860b-9fa7b1d61757-output_video.mp4"
+        },
+        "user_id": "github_92484403"
+    },
+    "subtasks": [
+        {
+            "task_id": "cdd20b5f-3cb8-4cf8-860b-9fa7b1d61757",
+            "worker_name": "pipeline",
+            "inputs": {},
+            "outputs": {
+                "output_video": "cdd20b5f-3cb8-4cf8-860b-9fa7b1d61757-output_video.mp4"
+            },
+            "queue": "t2v-wan2.1-1.3B-single_stage-pipeline",
+            "previous": [],
+            "status": "PENDING",
+            "worker_identity": "",
+            "result": "",
+            "fail_time": 0,
+            "extra_info": {
+                "elapses": {
+                    "CREATED-PENDING": 0.023261070251464844
+                },
+                "start_t": 1756790978.698744
+            },
+            "create_t": "2025-09-02 13:29:38",
+            "update_t": "2025-09-02 13:29:38",
+            "ping_t": "2025-09-02 13:29:38",
+            "infer_cost": -1.0,
+            "params": {
+                "prompt": "未来科技城市，飞行汽车穿梭，全息投影随处可见，建筑具有流线型设计，充满科技感和未来感。",
+                "seed": 42,
+                "negative_prompt": "镜头晃动，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+            }
+        }
+    ]
+}
