@@ -53,7 +53,8 @@ class UlyssesAttnWeight(AttnWeightTemplate):
         img_q = all2all_seq2head(img_q, group=seq_p_group)
         img_k = all2all_seq2head(img_k, group=seq_p_group)
         img_v = all2all_seq2head(img_v, group=seq_p_group)
-        torch.cuda.synchronize()  # 确保CUDA操作完成
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # 确保CUDA操作完成
 
         # 处理文本的查询、键和值，选择当前进程的头
         txt_q = txt_q[:, cur_rank * shard_heads : (cur_rank + 1) * shard_heads, :]
@@ -91,7 +92,8 @@ class UlyssesAttnWeight(AttnWeightTemplate):
         img_attn = all2all_head2seq(img_attn, group=seq_p_group)  # 将头的格式转换回序列格式
         img_attn = img_attn.reshape(shard_seqlen, -1)  # 重塑为 [shard_seqlen, -1] 形状
 
-        torch.cuda.synchronize()  # 确保CUDA操作完成
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # 确保CUDA操作完成
         txt_attn = torch.cat(gathered_txt_attn, dim=1)  # 合并所有进程的文本注意力结果
 
         # 合并图像和文本的注意力结果

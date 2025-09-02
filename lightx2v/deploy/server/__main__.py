@@ -14,7 +14,7 @@ from loguru import logger
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
-from lightx2v.deploy.common.utils import load_inputs, data_name, check_params
+from lightx2v.deploy.common.utils import load_inputs, data_name, check_params, generate_video_thumbnail
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
@@ -194,6 +194,8 @@ async def api_v1_task_query(request: Request, user = Depends(verify_user_access)
             return error_response(msg, 400)
         task_id = request.query_params['task_id']
         task, subtasks = await task_manager.query_task(task_id, user['user_id'], only_task=False)
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
         for sub in subtasks:
             sub['status'] = sub['status'].name
         task['subtasks'] = subtasks
@@ -261,6 +263,65 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
             return error_response(f"Output {name} is a stream", 400)
         data = await data_manager.load_bytes(task['outputs'][name])
         return Response(content=data, media_type="application/octet-stream")
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+@app.get("/api/v1/task/input")
+async def api_v1_task_input(request: Request, user = Depends(verify_user_access)):
+    try:
+        msg = await server_monitor.check_user_busy(user['user_id'])
+        if msg is not True:
+            return error_response(msg, 400)
+        name = request.query_params['name']
+        task_id = request.query_params['task_id']
+        task = await task_manager.query_task(task_id, user_id=user['user_id'])
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
+        if task['status'] != TaskStatus.SUCCEED:
+            return error_response(f"Task {task_id} not succeed", 400)
+        if name not in task['inputs']:
+            return error_response(f"Input {name} not found in task {task_id}", 404)
+        if name in task['params']:
+            return error_response(f"Input {name} is a stream", 400)
+        data = await data_manager.load_bytes(task['inputs'][name])
+        return Response(content=data, media_type="application/octet-stream")
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+@app.get("/api/v1/task/thumbnail")
+async def api_v1_task_thumbnail(task_id: str, name: str, user = Depends(verify_user_access)):
+    """获取视频缩略图"""
+    try:
+        task = await task_manager.query_task(task_id, user_id=user['user_id'])
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
+        if task['status'] != TaskStatus.SUCCEED:
+            return error_response(f"Task {task_id} not succeed", 400)
+        if name not in task['outputs']:
+            return error_response(f"Output {name} not found in task {task_id}", 404)
+        
+        # 检查是否已经有缩略图
+        thumbnail_name = f"{name}_thumbnail"
+        if thumbnail_name in task['outputs']:
+            # 如果已有缩略图，直接返回
+            data = await data_manager.load_bytes(task['outputs'][thumbnail_name])
+            return Response(content=data, media_type="image/jpeg")
+        else:
+            # 生成缩略图
+            video_data = await data_manager.load_bytes(task['outputs'][name])
+            thumbnail_data = await generate_video_thumbnail(video_data)
+            
+            # 保存缩略图
+            thumbnail_filename = f"{task_id}-{thumbnail_name}.jpg"
+            await data_manager.save_bytes(thumbnail_data, thumbnail_filename)
+            
+            # 更新任务的outputs
+            task['outputs'][thumbnail_name] = thumbnail_filename
+            await task_manager.update_task(task)
+            
+            return Response(content=thumbnail_data, media_type="image/jpeg")
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -453,6 +514,85 @@ async def api_v1_monitor_metrics():
         traceback.print_exc()
         return error_response(str(e), 500)
 
+# Template API endpoints
+@app.get("/api/v1/template/{template_type}/{filename}")
+async def api_v1_template(template_type: str, filename: str):
+    """获取模板文件"""
+    try:
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        file_path = os.path.join(template_dir, template_type, filename)
+        
+        # 安全检查：确保文件在template目录内
+        if not os.path.exists(file_path) or not file_path.startswith(template_dir):
+            return error_response(f"Template file not found", 404)
+        
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        
+        # 根据文件类型设置媒体类型
+        if template_type == "images":
+            if filename.lower().endswith('.png'):
+                media_type = "image/png"
+            elif filename.lower().endswith(('.jpg', '.jpeg')):
+                media_type = "image/jpeg"
+            else:
+                media_type = "application/octet-stream"
+        elif template_type == "audios":
+            if filename.lower().endswith('.mp3'):
+                media_type = "audio/mpeg"
+            elif filename.lower().endswith('.wav'):
+                media_type = "audio/wav"
+            else:
+                media_type = "application/octet-stream"
+        else:
+            media_type = "application/octet-stream"
+        
+        return Response(content=data, media_type=media_type)
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+@app.get("/api/v1/template/list")
+async def api_v1_template_list():
+    """获取模板文件列表"""
+    try:
+        import os
+        import glob
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        
+        templates = {
+            "images": [],
+            "audios": []
+        }
+        
+        # 获取图片模板
+        image_dir = os.path.join(template_dir, "images")
+        if os.path.exists(image_dir):
+            for file_path in glob.glob(os.path.join(image_dir, "*")):
+                if os.path.isfile(file_path):
+                    filename = os.path.basename(file_path)
+                    templates["images"].append({
+                        "filename": filename,
+                        "url": f"/api/v1/template/images/{filename}"
+                    })
+        
+        # 获取音频模板
+        audio_dir = os.path.join(template_dir, "audios")
+        if os.path.exists(audio_dir):
+            for file_path in glob.glob(os.path.join(audio_dir, "*")):
+                if os.path.isfile(file_path):
+                    filename = os.path.basename(file_path)
+                    templates["audios"].append({
+                        "filename": filename,
+                        "url": f"/api/v1/template/audios/{filename}"
+                    })
+        
+        return {"templates": templates}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
 
 # =========================
 # Main Entry
@@ -481,24 +621,21 @@ if __name__ == "__main__":
     with ProfilingContext("Init Server Cost"):
         model_pipelines = Pipeline(args.pipeline_json)
         auth_manager = AuthManager()
-        if args.task_url.startswith('/'):
-            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
-        elif args.task_url.startswith('postgresql://'):
+        if args.task_url.startswith('postgresql://'):
             task_manager = PostgresSQLTaskManager(args.task_url, metrics_monitor)
         else:
-            raise NotImplementedError
-        if args.data_url.startswith('/'):
-            data_manager = LocalDataManager(args.data_url)
-        elif args.data_url.startswith('{'):
+            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
+        if args.data_url.startswith('{'):
             data_manager = S3DataManager(args.data_url)
         else:
-            raise NotImplementedError
+            data_manager = LocalDataManager(args.data_url)
         if args.queue_url.startswith('/'):
             queue_manager = LocalQueueManager(args.queue_url)
         elif args.queue_url.startswith('amqp://'):
             queue_manager = RabbitMQQueueManager(args.queue_url)
         else:
-            raise NotImplementedError
+            queue_manager = LocalQueueManager(args.queue_url)
+            
         server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
 
     uvicorn.run(app, host=args.ip, port=args.port, reload=False, workers=1)

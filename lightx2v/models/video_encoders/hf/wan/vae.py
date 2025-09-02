@@ -928,7 +928,8 @@ class WanVAE:
         full_encoded = [torch.empty_like(encoded_chunk) for _ in range(world_size)]
         dist.all_gather(full_encoded, encoded_chunk)
 
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         encoded = torch.cat(full_encoded, dim=split_dim)
 
@@ -1010,7 +1011,8 @@ class WanVAE:
         full_images = [torch.empty_like(images) for _ in range(world_size)]
         dist.all_gather(full_images, images)
 
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         images = torch.cat(full_images, dim=split_dim + 1)
 

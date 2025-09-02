@@ -297,7 +297,7 @@ class WanModel:
             else:
                 dist.broadcast(distributed_weight_dict[key], src=global_src_rank)
 
-        if target_device == "cuda":
+        if target_device == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize()
         else:
             for tensor in distributed_weight_dict.values():
