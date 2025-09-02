@@ -36,6 +36,7 @@ HEADERS = {
 STOPPED = False
 WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
 RANK = int(os.environ.get('RANK', 0))
+TARGET_RANK = WORLD_SIZE - 1
 
 
 async def ping_life(server_url, worker_identity, keys):
@@ -164,7 +165,7 @@ async def boradcast_subtasks(subtasks):
     if WORLD_SIZE <= 1:
         return subtasks
     try:
-        if RANK == 0:
+        if RANK == TARGET_RANK:
             subtasks_data = json.dumps(subtasks, ensure_ascii=False).encode('utf-8')
             subtasks_tensor = torch.frombuffer(bytearray(subtasks_data), dtype=torch.uint8).to(device='cuda')
             data_size = subtasks_tensor.shape[0]
@@ -173,12 +174,12 @@ async def boradcast_subtasks(subtasks):
         else:
             size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
 
-        dist.broadcast(size_tensor, src=0)
-        if RANK != 0:
+        dist.broadcast(size_tensor, src=TARGET_RANK)
+        if RANK != TARGET_RANK:
             subtasks_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
-        dist.broadcast(subtasks_tensor, src=0)
+        dist.broadcast(subtasks_tensor, src=TARGET_RANK)
 
-        if RANK != 0:
+        if RANK != TARGET_RANK:
             subtasks_data = subtasks_tensor.cpu().numpy().tobytes()
             subtasks = json.loads(subtasks_data.decode('utf-8'))
             logger.info(f"rank {RANK} recv subtasks: {subtasks}")
@@ -226,7 +227,7 @@ async def main(args):
 
     while True:
         subtasks = None
-        if RANK == 0:
+        if RANK == TARGET_RANK:
             subtasks = await fetch_subtasks(args.server, worker_keys, args.identity, args.max_batch, args.timeout)
         subtasks = await boradcast_subtasks(subtasks)
 
@@ -235,7 +236,7 @@ async def main(args):
             ping_task = None
             try:
                 run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
-                if RANK == 0:
+                if RANK == TARGET_RANK:
                     ping_task = asyncio.create_task(ping_subtask(
                         args.server, sub['worker_identity'], sub['task_id'],
                         sub['worker_name'], sub['queue'], run_task, args.ping_interval
@@ -251,7 +252,7 @@ async def main(args):
                 logger.warning("Main loop cancelled, do not shut down")
 
             finally:
-                if RANK == 0 and sub['task_id'] in RUNNING_SUBTASKS:
+                if RANK == TARGET_RANK and sub['task_id'] in RUNNING_SUBTASKS:
                     try:
                         await report_task(status=status, **sub)
                     except:
@@ -272,7 +273,7 @@ async def shutdown(loop):
             t.cancel()
 
     # Report remaining running subtasks failed
-    if RANK == 0:
+    if RANK == TARGET_RANK:
         task_ids = list(RUNNING_SUBTASKS.keys())
         for task_id in task_ids:
             try:
