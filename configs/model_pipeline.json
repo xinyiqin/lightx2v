@@ -59,10 +59,8 @@
                         "outputs": ["output_video"]
                     }
                 }
-            }
-        },
-        "digital_human": {
-            "SekoTalk-Distill": {
+            },
+            "seko_talk": {
                 "single_stage": {
                     "pipeline": {
                         "inputs": ["input_image", "input_audio"],
@@ -110,8 +108,9 @@
                 "t2v-wan2.1-1.3B-single_stage-pipeline": 300,
                 "i2v-wan2.1-14B-480P-multi_stage-dit": 600,
                 "i2v-wan2.1-14B-480P-single_stage-pipeline": 600,
-                "i2v-SekoTalk-Distill-single_stage-pipeline": 3600,
-                "i2v-SekoTalk-Distill-multi_stage-segment_dit": 3600
+                "i2v-seko_talk-single_stage-pipeline": 3600,
+                "digital_human-seko_talk-single_stage-pipeline": 3600,
+                "digital_human-seko_talk-multi_stage-segment_dit": 3600
             },
             "worker_avg_window": 20,
             "worker_offline_timeout": 5,

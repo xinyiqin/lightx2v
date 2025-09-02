@@ -2232,8 +2232,13 @@
                     // 重新排序，确保数字人在最左边
                     const orderedTypes = [];
                     
-                    // 优先添加数字人
-                    if (types.includes('digital_human')) {
+                    // 检查是否有包含audio或seko的i2v模型，如果有则添加digital_human类型
+                    const hasDigitalHumanModels = models.value.some(m => 
+                        m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko'))
+                    );
+                    
+                    // 优先添加数字人（如果存在相关模型）
+                    if (hasDigitalHumanModels) {
                         orderedTypes.push('digital_human');
                     }
                     
@@ -2249,6 +2254,22 @@
 
                 const availableModelClasses = computed(() => {
                     if (!selectedTaskId.value) return [];
+                    
+                    // 如果是数字人任务类型，显示包含audio或seko的i2v模型
+                    if (selectedTaskId.value === 'digital_human') {
+                        return [...new Set(models.value
+                            .filter(m => m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko')))
+                            .map(m => m.model_cls))];
+                    }
+                    
+                    // 如果是i2v任务类型，剔除包含audio或seko的模型
+                    if (selectedTaskId.value === 'i2v') {
+                        return [...new Set(models.value
+                            .filter(m => m.task === 'i2v' && !m.model_cls.toLowerCase().includes('audio') && !m.model_cls.toLowerCase().includes('seko'))
+                            .map(m => m.model_cls))];
+                    }
+                    
+                    // 其他任务类型正常处理
                     return [...new Set(models.value
                         .filter(m => m.task === selectedTaskId.value)
                         .map(m => m.model_cls))];
@@ -2633,8 +2654,14 @@
                         setLoading(true);
                         submitting.value = true;
                         
+                        // 确定实际提交的任务类型
+                        let actualTaskType = selectedTaskId.value;
+                        if (selectedTaskId.value === 'digital_human') {
+                            actualTaskType = 'i2v'; // 数字人任务实际提交为i2v
+                        }
+                        
                         var formData = {
-                            task: selectedTaskId.value,
+                            task: actualTaskType,
                             model_cls: currentForm.model_cls,
                             stage: currentForm.stage,
                             prompt: currentForm.prompt.trim(),
@@ -2705,7 +2732,7 @@
                                 stage: 'multi_stage',
                                 imageFile: null,
                                 prompt: '',
-                                seed: Math.floor(Math.random() * 1000000)
+                                seed: 42
                             };
                             digitalHumanForm.value = {
                                 task: 'digital_human',
@@ -2722,7 +2749,7 @@
                             digitalHumanAudioPreview.value = null;
                         } else {
                             const error = await response.json();
-                            showAlert(`任务提交失败: ${error.message}`, 'danger');
+                            showAlert(`任务提交失败: ${error.message},${error.detail}`, 'danger');
                         }
                     } catch (error) {
                         showAlert(`提交任务失败: ${error.message}`, 'danger');
@@ -3237,9 +3264,24 @@
                     
                     // 只有当当前表单没有选择模型时，才自动选择第一个可用的模型
                     if (!currentForm.model_cls) {
-                        const availableModels = models.value.filter(m => m.task === selectedTaskId.value);
-                    if (availableModels.length > 0) {
-                        const firstModel = availableModels[0];
+                        let availableModels;
+                        
+                        // 如果是数字人任务，从i2v模型中筛选包含audio或seko的模型
+                        if (selectedTaskId.value === 'digital_human') {
+                            availableModels = models.value.filter(m => 
+                                m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko'))
+                            );
+                        } else if (selectedTaskId.value === 'i2v') {
+                            // 如果是i2v任务，排除包含audio或seko的模型
+                            availableModels = models.value.filter(m => 
+                                m.task === 'i2v' && !m.model_cls.toLowerCase().includes('audio') && !m.model_cls.toLowerCase().includes('seko')
+                            );
+                        } else {
+                            availableModels = models.value.filter(m => m.task === selectedTaskId.value);
+                        }
+                        
+                        if (availableModels.length > 0) {
+                            const firstModel = availableModels[0];
                             currentForm.model_cls = firstModel.model_cls;
                             currentForm.stage = firstModel.stage;
                         }
@@ -3254,10 +3296,25 @@
                     
                     // 只有当当前表单没有选择阶段时，才自动选择第一个可用的阶段
                     if (!currentForm.stage) {
-                    const availableStages = models.value
-                            .filter(m => m.task === selectedTaskId.value && m.model_cls === currentForm.model_cls)
-                        .map(m => m.stage);
-                    if (availableStages.length > 0) {
+                        let availableStages;
+                        
+                        // 如果是数字人任务，从i2v模型中筛选
+                        if (selectedTaskId.value === 'digital_human') {
+                            availableStages = models.value
+                                .filter(m => m.task === 'i2v' && m.model_cls === currentForm.model_cls)
+                                .map(m => m.stage);
+                        } else if (selectedTaskId.value === 'i2v') {
+                            // 如果是i2v任务，排除包含audio或seko的模型
+                            availableStages = models.value
+                                .filter(m => m.task === 'i2v' && m.model_cls === currentForm.model_cls && !m.model_cls.toLowerCase().includes('audio') && !m.model_cls.toLowerCase().includes('seko'))
+                                .map(m => m.stage);
+                        } else {
+                            availableStages = models.value
+                                .filter(m => m.task === selectedTaskId.value && m.model_cls === currentForm.model_cls)
+                                .map(m => m.stage);
+                        }
+                        
+                        if (availableStages.length > 0) {
                             currentForm.stage = availableStages[0];
                         }
                     }
