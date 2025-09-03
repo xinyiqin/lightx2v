@@ -165,7 +165,7 @@ class AudioSegment:
     useful_length: Optional[int] = None
 
 
-class FramePreprocessor:
+class FramePreprocessorTorchVersion:
     """Handles frame preprocessing including noise and masking"""
 
     def __init__(self, noise_mean: float = -3.0, noise_std: float = 0.5, mask_rate: float = 0.1):
@@ -173,40 +173,39 @@ class FramePreprocessor:
         self.noise_std = noise_std
         self.mask_rate = mask_rate
 
-    def add_noise(self, frames: np.ndarray, rnd_state: Optional[np.random.RandomState] = None) -> np.ndarray:
+    def add_noise(self, frames: torch.Tensor, generator: Optional[torch.Generator] = None) -> torch.Tensor:
         """Add noise to frames"""
-        if self.noise_mean is None or self.noise_std is None:
-            return frames
 
-        if rnd_state is None:
-            rnd_state = np.random.RandomState()
-
+        device = frames.device
         shape = frames.shape
         bs = 1 if len(shape) == 4 else shape[0]
-        sigma = rnd_state.normal(loc=self.noise_mean, scale=self.noise_std, size=(bs,))
-        sigma = np.exp(sigma)
-        sigma = np.expand_dims(sigma, axis=tuple(range(1, len(shape))))
-        noise = rnd_state.randn(*shape) * sigma
+
+        # Generate sigma values on the same device
+        sigma = torch.normal(mean=self.noise_mean, std=self.noise_std, size=(bs,), device=device, generator=generator)
+        sigma = torch.exp(sigma)
+
+        for _ in range(1, len(shape)):
+            sigma = sigma.unsqueeze(-1)
+
+        # Generate noise on the same device
+        noise = torch.randn(*shape, device=device, generator=generator) * sigma
         return frames + noise
 
-    def add_mask(self, frames: np.ndarray, rnd_state: Optional[np.random.RandomState] = None) -> np.ndarray:
+    def add_mask(self, frames: torch.Tensor, generator: Optional[torch.Generator] = None) -> torch.Tensor:
         """Add mask to frames"""
-        if self.mask_rate is None:
-            return frames
 
-        if rnd_state is None:
-            rnd_state = np.random.RandomState()
-
+        device = frames.device
         h, w = frames.shape[-2:]
-        mask = rnd_state.rand(h, w) > self.mask_rate
+
+        # Generate mask on the same device
+        mask = torch.rand(h, w, device=device, generator=generator) > self.mask_rate
         return frames * mask
 
     def process_prev_frames(self, frames: torch.Tensor) -> torch.Tensor:
         """Process previous frames with noise and masking"""
-        frames_np = frames.cpu().detach().numpy()
-        frames_np = self.add_noise(frames_np)
-        frames_np = self.add_mask(frames_np)
-        return torch.from_numpy(frames_np).to(dtype=frames.dtype, device=frames.device)
+        frames = self.add_noise(frames, torch.Generator(device=frames.device))
+        frames = self.add_mask(frames, torch.Generator(device=frames.device))
+        return frames
 
 
 class AudioProcessor:
@@ -240,7 +239,7 @@ class AudioProcessor:
         else:
             interval_num = max(int((expected_frames - max_num_frames) / (max_num_frames - prev_frame_length)) + 1, 1)
             res_frame_num = expected_frames - interval_num * (max_num_frames - prev_frame_length)
-            if res_frame_num > 5:
+            if res_frame_num > prev_frame_length:
                 interval_num += 1
 
         # Create segments
@@ -258,7 +257,7 @@ class AudioProcessor:
 
                 segments.append(AudioSegment(segment_audio, 0, max_num_frames, False, useful_length))
 
-            elif res_frame_num > 5 and idx == interval_num - 1:
+            elif res_frame_num > prev_frame_length and idx == interval_num - 1:
                 # Last segment (might be shorter)
                 start_frame = idx * max_num_frames - idx * prev_frame_length
                 audio_start, audio_end = self.get_audio_range(start_frame, expected_frames)
@@ -286,7 +285,8 @@ class AudioProcessor:
 class WanAudioRunner(WanRunner):  # type:ignore
     def __init__(self, config):
         super().__init__(config)
-        self.frame_preprocessor = FramePreprocessor()
+        self.prev_frame_length = self.config.get("prev_frame_length", 5)
+        self.frame_preprocessor = FramePreprocessorTorchVersion()
 
     def init_scheduler(self):
         """Initialize consistency model scheduler"""
@@ -312,12 +312,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         expected_frames = min(max(1, int(video_duration * target_fps)), audio_len)
 
         # Segment audio
-        audio_segments = self._audio_processor.segment_audio(
-            audio_array,
-            expected_frames,
-            self.config.get("target_video_length", 81),
-            self.config.get("prev_frames", 5),
-        )
+        audio_segments = self._audio_processor.segment_audio(audio_array, expected_frames, self.config.get("target_video_length", 81), self.prev_frame_length)
 
         return audio_segments, expected_frames
 
@@ -411,14 +406,15 @@ class WanAudioRunner(WanRunner):  # type:ignore
             self.vae_encoder = self.load_vae_encoder()
 
         _, nframe, height, width = self.model.scheduler.latents.shape
-        if self.config.model_cls == "wan2.2_audio":
-            if prev_video is not None:
-                prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
+        with ProfilingContext4Debug("vae_encoder in init run segment"):
+            if self.config.model_cls == "wan2.2_audio":
+                if prev_video is not None:
+                    prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
+                else:
+                    prev_latents = None
+                prev_mask = self.model.scheduler.mask
             else:
-                prev_latents = None
-            prev_mask = self.model.scheduler.mask
-        else:
-            prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
+                prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
 
             frames_n = (nframe - 1) * 4 + 1
             prev_mask = torch.ones((1, frames_n, height, width), device=device, dtype=dtype)
@@ -479,8 +475,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_features = self.audio_adapter.forward_audio_proj(audio_features, self.model.scheduler.latents.shape[1])
 
         self.inputs["audio_encoder_output"] = audio_features
-        prev_frames = self.config.get("prev_frames", 5)
-        self.inputs["previmg_encoder_output"] = self.prepare_prev_latents(self.prev_video, prev_frame_length=prev_frames)
+        self.inputs["previmg_encoder_output"] = self.prepare_prev_latents(self.prev_video, prev_frame_length=self.prev_frame_length)
 
         # Reset scheduler for non-first segments
         if segment_idx > 0:
@@ -491,9 +486,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         self.gen_video = torch.clamp(self.gen_video, -1, 1).to(torch.float)
 
         # Extract relevant frames
-        prev_frames = self.config.get("prev_frames", 5)
-        start_frame = 0 if self.segment_idx == 0 else prev_frames
-        start_audio_frame = 0 if self.segment_idx == 0 else int(prev_frames * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
+        start_frame = 0 if self.segment_idx == 0 else self.prev_frame_length
+        start_audio_frame = 0 if self.segment_idx == 0 else int(self.prev_frame_length * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
 
         if self.segment.is_last and self.segment.useful_length:
             end_frame = self.segment.end_frame - self.segment.start_frame
