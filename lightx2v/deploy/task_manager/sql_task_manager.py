@@ -558,7 +558,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 if task['status'] not in ActiveStatus:
-                    return False
+                    return f"Task {task_id} is not in active status (current status: {task['status']}). Only tasks with status CREATED, PENDING, or RUNNING can be cancelled."
 
                 for sub in subtasks:
                     if sub['status'] not in FinishedStatus:
@@ -571,7 +571,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return True
         except:  # noqa
             logger.error(f"cancel_task error: {traceback.format_exc()}")
-            return False
+            return "unknown cancel error"
         finally:
             ASYNC_LOCK.release()
             await self.release_conn(conn)

@@ -3,6 +3,7 @@ import asyncio
 import uvicorn
 import argparse
 import traceback
+import mimetypes
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response, HTMLResponse
@@ -58,6 +59,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail} for {request.url}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"message": exc.detail}
+    )
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 security = HTTPBearer()
@@ -76,11 +85,33 @@ async def verify_user_access(credentials: HTTPAuthorizationCredentials = Depends
     return user
 
 
+async def verify_user_access_from_query(request: Request):
+    """从查询参数中验证用户访问权限"""
+    # 首先尝试从 Authorization 头部获取 token
+    auth_header = request.headers.get("Authorization")
+    token = None
+
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # 移除 "Bearer " 前缀
+    else:
+        # 如果没有 Authorization 头部，尝试从查询参数获取
+        token = request.query_params.get("token")
+
+    payload = auth_manager.verify_jwt_token(token)
+    user_id = payload.get('user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    user = await task_manager.query_user(user_id)
+    if user is None or user['user_id'] != user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    return user
+
+
 async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     if not auth_manager.verify_worker_token(token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
-    return True 
+    return True
 
 
 def error_response(e, code):
@@ -194,6 +225,8 @@ async def api_v1_task_query(request: Request, user = Depends(verify_user_access)
             return error_response(msg, 400)
         task_id = request.query_params['task_id']
         task, subtasks = await task_manager.query_task(task_id, user['user_id'], only_task=False)
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
         for sub in subtasks:
             sub['status'] = sub['status'].name
         task['subtasks'] = subtasks
@@ -244,7 +277,7 @@ async def api_v1_task_list(request: Request, user = Depends(verify_user_access))
 
 
 @app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request, user = Depends(verify_user_access)):
+async def api_v1_task_result(request: Request, user = Depends(verify_user_access_from_query)):
     try:
         msg = await server_monitor.check_user_busy(user['user_id'])
         if msg is not True:
@@ -260,7 +293,112 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
         if name in task['params']:
             return error_response(f"Output {name} is a stream", 400)
         data = await data_manager.load_bytes(task['outputs'][name])
-        return Response(content=data, media_type="application/octet-stream")
+
+        #  set correct Content-Type
+        content_type, _ = mimetypes.guess_type(name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{name}\""
+        }
+        return Response(content=data, media_type=content_type, headers=headers)
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/input")
+async def api_v1_task_input(request: Request, user = Depends(verify_user_access_from_query)):
+    try:
+        # msg = await server_monitor.check_user_busy(user['user_id'])
+        # if msg is not True:
+        #     return error_response(msg, 400)
+        name = request.query_params['name']
+        task_id = request.query_params['task_id']
+        task = await task_manager.query_task(task_id, user_id=user['user_id'])
+        if task is None:
+            return error_response(f"Task {task_id} not found", 404)
+        if name not in task['inputs']:
+            return error_response(f"Input {name} not found in task {task_id}", 404)
+        if name in task['params']:
+            return error_response(f"Input {name} is a stream", 400)
+        data = await data_manager.load_bytes(task['inputs'][name])
+        
+        #  set correct Content-Type
+        content_type, _ = mimetypes.guess_type(name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{name}\""
+        }
+        return Response(content=data, media_type=content_type, headers=headers)
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/thumbnails")
+async def api_v1_task_thumbnails(request: Request, user = Depends(verify_user_access)):
+    """一次性获取所有任务的缩略图"""
+    try:
+        user_id = user['user_id']        
+        msg = await server_monitor.check_user_busy(user_id)
+        if msg is not True:
+            return error_response(msg, 400)
+
+        # 获取所有任务
+        tasks = await task_manager.list_tasks(user_id=user_id, limit=1000)  # 限制最多1000个任务
+        logger.info(f"获取到 {len(tasks)} 个任务")
+        
+        # 转换任务状态为字符串
+        for task in tasks:
+            task['status'] = task['status'].name
+        
+        thumbnails = {}
+        
+        for task in tasks:
+            task_id = task['task_id']
+            if task.get('inputs'):
+                # 查找输入中的图片文件
+                image_inputs = []
+                for key, value in task['inputs'].items():
+                    if (key.lower().find('image') != -1 or 
+                        str(value).lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'))):
+                        image_inputs.append(key)
+                
+                if image_inputs:
+                    # 使用第一个图片作为缩略图
+                    first_image_key = image_inputs[0]
+                    try:
+                        # 获取图片数据
+                        image_data = await data_manager.load_bytes(task['inputs'][first_image_key])
+                        
+                        # 转换为base64
+                        import base64
+                        image_base64 = base64.b64encode(image_data).decode('utf-8')
+                        
+                        # 根据文件扩展名确定MIME类型
+                        content_type, _ = mimetypes.guess_type(first_image_key)
+                        if content_type is None:
+                            content_type = "image/jpeg"  # 默认类型
+                        
+                        # 构建data URL
+                        data_url = f"data:{content_type};base64,{image_base64}"
+                        thumbnails[task_id] = data_url
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to load thumbnail for task {task_id}: {e}")
+                        # 如果加载失败，不添加到结果中
+        
+        result = {
+            'thumbnails': thumbnails,
+            'total_tasks': len(tasks),
+            'total_thumbnails': len(thumbnails)
+        }
+        return result
+        
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -275,7 +413,10 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
         task_id = request.query_params['task_id']
         ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
         logger.warning(f"Task {task_id} cancelled: {ret}")
-        assert ret, f"Task {task_id} cancel failed"
+        if ret is True:
+            return {'msg': 'Task cancelled successfully'}
+        else:
+            return error_response({'error': f"Task {task_id} cancel failed: {ret}"}, 400)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -449,6 +590,85 @@ async def api_v1_worker_ping_life(request: Request, valid = Depends(verify_worke
 async def api_v1_monitor_metrics():
     try:
         return Response(content=metrics_monitor.get_metrics(), media_type="text/plain")
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+# Template API endpoints
+@app.get("/api/v1/template/{template_type}/{filename}")
+async def api_v1_template(template_type: str, filename: str):
+    """获取模板文件"""
+    try:
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        file_path = os.path.join(template_dir, template_type, filename)
+        
+        # 安全检查：确保文件在template目录内
+        if not os.path.exists(file_path) or not file_path.startswith(template_dir):
+            return error_response(f"Template file not found", 404)
+        
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        
+        # 根据文件类型设置媒体类型
+        if template_type == "images":
+            if filename.lower().endswith('.png'):
+                media_type = "image/png"
+            elif filename.lower().endswith(('.jpg', '.jpeg')):
+                media_type = "image/jpeg"
+            else:
+                media_type = "application/octet-stream"
+        elif template_type == "audios":
+            if filename.lower().endswith('.mp3'):
+                media_type = "audio/mpeg"
+            elif filename.lower().endswith('.wav'):
+                media_type = "audio/wav"
+            else:
+                media_type = "application/octet-stream"
+        else:
+            media_type = "application/octet-stream"
+        
+        return Response(content=data, media_type=media_type)
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+@app.get("/api/v1/template/list")
+async def api_v1_template_list():
+    """获取模板文件列表"""
+    try:
+        import os
+        import glob
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        
+        templates = {
+            "images": [],
+            "audios": []
+        }
+        
+        # 获取图片模板
+        image_dir = os.path.join(template_dir, "images")
+        if os.path.exists(image_dir):
+            for file_path in glob.glob(os.path.join(image_dir, "*")):
+                if os.path.isfile(file_path):
+                    filename = os.path.basename(file_path)
+                    templates["images"].append({
+                        "filename": filename,
+                        "url": f"/api/v1/template/images/{filename}"
+                    })
+        
+        # 获取音频模板
+        audio_dir = os.path.join(template_dir, "audios")
+        if os.path.exists(audio_dir):
+            for file_path in glob.glob(os.path.join(audio_dir, "*")):
+                if os.path.isfile(file_path):
+                    filename = os.path.basename(file_path)
+                    templates["audios"].append({
+                        "filename": filename,
+                        "url": f"/api/v1/template/audios/{filename}"
+                    })
+        
+        return {"templates": templates}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
