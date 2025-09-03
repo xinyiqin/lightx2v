@@ -129,7 +129,7 @@ class BaseDataManager:
         return maps[type]
 
 # Import data manager implementations
-from .local_data_manager import LocalDataManager
-from .s3_data_manager import S3DataManager
+from .local_data_manager import LocalDataManager # noqa
+from .s3_data_manager import S3DataManager # noqa
 
 __all__ = ['BaseDataManager', 'LocalDataManager', 'S3DataManager']

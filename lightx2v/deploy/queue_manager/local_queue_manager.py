@@ -71,7 +71,7 @@ class LocalQueueManager(BaseQueueManager):
         except asyncio.CancelledError:
             logger.warning(f"local queue get_subtasks for {queue} cancelled")
             return None
-        except:
+        except:  # noqa
             logger.warning(f"local queue get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 

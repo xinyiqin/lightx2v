@@ -71,15 +71,17 @@ class VARecorder:
                     if data is None:
                         logger.info("Audio thread received stop signal")
                         break
-                    self.audio_conn.send(data.tobytes())
+                    # Convert audio data to 16-bit integer format
+                    audios = np.clip(np.round(data * 32767), -32768, 32767).astype(np.int16)
+                    self.audio_conn.send(audios.tobytes())
                     fail_time = 0
-                except:
+                except:  # noqa
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Audio push worker thread failed {fail_time} times, stopping...")
                         break
-        except:
+        except:  # noqa
             logger.error(f"Audio push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Audio push worker thread stopped")
@@ -98,15 +100,17 @@ class VARecorder:
                     if data is None:
                         logger.info("Video thread received stop signal")
                         break
-                    self.video_conn.send(data.tobytes())
+                    # Convert to numpy and scale to [0, 255], convert RGB to BGR for OpenCV/FFmpeg
+                    frames = (data * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                    self.video_conn.send(frames.tobytes())
                     fail_time = 0
-                except:
+                except:  # noqa
                     logger.error(f"Send video data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Video push worker thread failed {fail_time} times, stopping...")
                         break
-        except:
+        except:  # noqa
             logger.error(f"Video push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Video push worker thread stopped")
@@ -242,16 +246,10 @@ class VARecorder:
         self.video_thread.start()
 
     # Publish ComfyUI Image tensor and audio tensor to livestream
-    def pub_livestream(self, images: torch.Tensor, audios: np.ndarray):
-
-        # Convert audio data to 16-bit integer format
-        audios = np.clip(np.round(audios * 32767), -32768, 32767).astype(np.int16)
-
-        # Convert to numpy and scale to [0, 255], convert RGB to BGR for OpenCV/FFmpeg
-        assert images.dim() == 4 and images.shape[-1] == 3, "Input must be [N, H, W, C] with C=3"
-        frames = (images * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
-        N, height, width, _ = frames.shape
+    def pub_livestream(self, images: torch.Tensor, audios: np.ndarray):        
+        N, height, width, C = images.shape
         M = audios.reshape(-1).shape[0]
+        assert C == 3, "Input must be [N, H, W, C] with C=3"
 
         logger.info(f"Publishing video [{N}x{width}x{height}], audio: [{M}]")
         audio_frames = round(M * self.fps / self.sample_rate)
@@ -260,9 +258,8 @@ class VARecorder:
 
         self.set_video_size(width, height)
         self.audio_queue.put(audios)
-        for frame in frames:
-            self.video_queue.put(frame)
-        logger.info(f"Published {N} frames and {len(audios)} audio samples")
+        self.video_queue.put(images)
+        logger.info(f"Published {N} frames and {M} audio samples")
 
         self.stoppable_t = time.time() + M / self.sample_rate + 3
 
@@ -360,7 +357,7 @@ if __name__ == "__main__":
         sample_rate=sample_rate,
     )
 
-    audio_path = "/mtc/liuliang1/lightx2v/test_deploy/test_b_2min.wav"
+    audio_path = "/mtc/liuliang1/lightx2v/test_deploy/media_test/test_b_2min.wav"
     audio_array, ori_sr = ta.load(audio_path)
     audio_array = ta.functional.resample(audio_array.mean(0), orig_freq=ori_sr, new_freq=16000)
     audio_array = audio_array.numpy().reshape(-1)

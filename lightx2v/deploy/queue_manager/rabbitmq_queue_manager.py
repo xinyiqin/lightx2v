@@ -88,7 +88,7 @@ class RabbitMQQueueManager(BaseQueueManager):
         except asyncio.CancelledError:
             logger.warning(f"rabbitmq get_subtasks for {queue} cancelled")
             return None
-        except:
+        except:  # noqa
             logger.warning(f"rabbitmq get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 
@@ -105,7 +105,7 @@ class RabbitMQQueueManager(BaseQueueManager):
 
 
 async def test():
-    conn_url = "amqp://mtc:Sensetime666@127.0.0.1:5672"
+    conn_url = "amqp://username:password@127.0.0.1:5672"
     q = RabbitMQQueueManager(conn_url)
     await q.init()
     subtask = {

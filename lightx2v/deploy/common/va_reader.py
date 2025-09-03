@@ -22,6 +22,7 @@ class VAReader:
         audio_channels: int = 1,
         buffer_size: int = 1,
         prev_duration: float = 0.3125,
+        target_rank: int = 0,
     ):
         self.rank = rank
         self.world_size = world_size
@@ -41,11 +42,16 @@ class VAReader:
         self.ffmpeg_process = None
         self.bytes_buffer = bytearray()
 
-        logger.info(f"VAReader initialized for stream: {stream_url}")
+        self.target_rank = target_rank % self.world_size
+
+        self.flag_tensor = torch.tensor([0], dtype=torch.int32).to(device='cuda')
+        self.audio_tensor = torch.zeros(self.chunk_size, dtype=torch.uint8, device='cuda')
+
+        logger.info(f"VAReader initialized for stream: {stream_url} target_rank: {self.target_rank}")
         logger.info(f"Audio duration per chunk: {segment_duration}s, sample rate: {sample_rate}Hz")
 
     def start(self):
-        if self.rank == 0:
+        if self.rank == self.target_rank:
             if self.stream_url.startswith("rtmp://"):
                 self.start_ffmpeg_process_rtmp()
             elif self.stream_url.startswith("http"):
@@ -113,7 +119,7 @@ class VAReader:
             self.ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                # stderr=subprocess.PIPE,
                 bufsize=0
             )
             logger.info(f"FFmpeg audio pull process started with PID: {self.ffmpeg_process.pid}")
@@ -130,8 +136,8 @@ class VAReader:
                     logger.warning("FFmpeg process exited, audio worker thread stopped")
                     break
                 self.fetch_audio_data()
-                time.sleep(0.1)
-        except:
+                time.sleep(0.01)
+        except:  # noqa
             logger.error(f"Audio pull worker error: {traceback.format_exc()}")
         finally:
             logger.warning("Audio pull worker thread stopped")
@@ -166,31 +172,26 @@ class VAReader:
                     self.audio_queue.put_nowait(audio_data)
                 logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}, chunk_size:{self.chunk_size}")
 
-        except:
+        except:  # noqa
             logger.error(f"Fetch audio data error: {traceback.format_exc()}")
 
     def braodcast_audio_data(self, audio_data):
-        if self.rank == 0:
+        if self.rank == self.target_rank:
             if audio_data is None:
-                data_size = 0
+                self.flag_tensor.fill_(0)
             else:
-                audio_tensor = torch.frombuffer(bytearray(audio_data), dtype=torch.uint8).to(device='cuda')
-                data_size = audio_tensor.shape[0]
-            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device='cuda')
-            logger.info(f"rank {self.rank} send audio_data size: {size_tensor.item()} bytes")
-        else:
-            size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
+                self.flag_tensor.fill_(1)
+                self.audio_tensor.copy_(torch.frombuffer(bytearray(audio_data), dtype=torch.uint8))
+                logger.info(f"rank {self.rank} send audio_tensor: {self.audio_tensor.shape}")
 
-        dist.broadcast(size_tensor, src=0)
-        if size_tensor.item() == 0:
+        dist.broadcast(self.flag_tensor, src=self.target_rank)
+        if self.flag_tensor.item() == 0:
             return None
-        if self.rank != 0:
-            audio_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
-            logger.info(f"rank {self.rank} recv audio_data size: {size_tensor.item()} bytes")
-        dist.broadcast(audio_tensor, src=0)
 
-        if self.rank != 0:
-            audio_data = audio_tensor.cpu().numpy().tobytes()
+        dist.broadcast(self.audio_tensor, src=self.target_rank)
+        if self.rank != self.target_rank:
+            logger.info(f"rank {self.rank} recv audio_tensor: {self.audio_tensor.shape}")
+            audio_data = self.audio_tensor.cpu().numpy().tobytes()
         return audio_data
 
     def bytes_to_ndarray(self, audio_data):
@@ -203,10 +204,10 @@ class VAReader:
 
     def get_audio_segment(self, timeout: float = 1.0):
         audio_data = None
-        if self.rank == 0:
+        if self.rank == self.target_rank:
             try:
                 audio_data = self.audio_queue.get(timeout=timeout)
-            except:
+            except:  # noqa
                 logger.warning(f"Failed to get audio segment: {traceback.format_exc()}")
         if self.world_size > 1:
             audio_data = self.braodcast_audio_data(audio_data)
@@ -252,9 +253,10 @@ if __name__ == "__main__":
         WORLD_SIZE,
         # "rtmp://localhost/live/test_audio",
         "https://reverse.st-oc-01.chielo.org/10.5.64.49:8000/rtc/v1/whep/?app=live&stream=ll_test_audio&eip=10.120.114.76:8000",
-        segment_duration=5.0,
+        segment_duration=1.0,
         sample_rate=16000,
         audio_channels=1,
+        prev_duration=1/16,
     )
     reader.start()
     fail_count = 0
@@ -262,7 +264,7 @@ if __name__ == "__main__":
 
     try:
         while True:
-            audio_data = reader.get_audio_segment(timeout=6)
+            audio_data = reader.get_audio_segment(timeout=2)
             if audio_data is not None:
                 # logger.info(f"Got audio chunk, shape: {audio_data.shape}, range: [{audio_data.min()}, {audio_data.max()}]")
                 fail_count = 0
@@ -272,6 +274,6 @@ if __name__ == "__main__":
                     logger.warning("Failed to get audio chunk, stop reader")
                     reader.stop()
                     break
-            # time.sleep(1)
+            time.sleep(0.95)
     finally:
         reader.stop()

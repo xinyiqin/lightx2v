@@ -148,7 +148,7 @@ class RunnerThread(threading.Thread):
             torch.cuda.set_device(self.rank)
             res = self.run_func(*self.args, **self.kwargs)
             status = True
-        except:
+        except:  # noqa
             logger.error(f"RunnerThread run failed: {traceback.format_exc()}")
             res = None
             status = False
