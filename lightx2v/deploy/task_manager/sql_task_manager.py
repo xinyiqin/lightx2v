@@ -200,24 +200,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
             subtasks.append(sub)
         return task, subtasks
 
-    async def update_task(self, conn, task_id, **kwargs):
-        query = f"UPDATE {self.table_tasks} SET "
-        conds = ["update_t = $1"]
-        params = [datetime.now()]
-        param_idx = 1
-        if 'status' in kwargs:
-            param_idx += 1
-            conds.append(f"status = ${param_idx}")
-            params.append(kwargs['status'].name)
-        if 'extra_info' in kwargs:
-            param_idx += 1
-            conds.append(f"extra_info = ${param_idx}")
-            params.append(json.dumps(kwargs['extra_info'], ensure_ascii=False))
-        query += " ,".join(conds)
-        query += f" WHERE task_id = ${param_idx + 1}"
-        params.append(task_id)
-        await conn.execute(query, *params)
-
     async def update_subtask(self, conn, task_id, worker_name, **kwargs):
         query = f"UPDATE {self.table_subtasks} SET "
         conds = []
@@ -558,7 +540,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation='read_uncommitted'):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 if task['status'] not in ActiveStatus:
-                    return False
+                    status_name = task['status'].name if hasattr(task['status'], 'name') else str(task['status'])
+                    error_msg = f"Task {task_id} is not in active status (current status: {status_name}). Only tasks with status CREATED, PENDING, or RUNNING can be cancelled."
+                    logger.warning(error_msg)
+                    return {'success': False, 'error': error_msg}
 
                 for sub in subtasks:
                     if sub['status'] not in FinishedStatus:
@@ -568,7 +553,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
                 self.mark_task_end(task, TaskStatus.CANCEL)
                 await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=task['extra_info'])
-                return True
+                return {'success': True, 'message': f'Task {task_id} cancelled successfully'}
         except:
             logger.error(f"cancel_task error: {traceback.format_exc()}")
             return False

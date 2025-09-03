@@ -14,7 +14,7 @@ from loguru import logger
 from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 from lightx2v.deploy.common.pipeline import Pipeline
-from lightx2v.deploy.common.utils import load_inputs, data_name, check_params, generate_video_thumbnail
+from lightx2v.deploy.common.utils import load_inputs, data_name, check_params
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
@@ -58,30 +58,89 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail} for {request.url}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"message": exc.detail}
+    )
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 security = HTTPBearer()
 
 
 async def verify_user_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = auth_manager.verify_jwt_token(token)
-    user_id = payload.get('user_id', None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid user")
-    user = await task_manager.query_user(user_id)
-    # logger.info(f"Verfiy user access: {payload}")
-    if user is None or user['user_id'] != user_id:
-        raise HTTPException(status_code=401, detail="Invalid user")
-    return user
+    try:
+        if credentials is None:
+            logger.warning("No authorization credentials provided")
+            raise HTTPException(status_code=401, detail="Authorization header is required")
+        
+        token = credentials.credentials
+        if not token:
+            logger.warning("Empty token provided")
+            raise HTTPException(status_code=401, detail="Token is required")
+            
+        logger.info(f"Verifying user access with token: {token[:20]}...")
+        payload = auth_manager.verify_jwt_token(token)
+        user_id = payload.get('user_id', None)
+        if not user_id:
+            logger.warning("No user_id found in token payload")
+            raise HTTPException(status_code=401, detail="Invalid user")
+        user = await task_manager.query_user(user_id)
+        logger.info(f"User query result: {user}")
+        if user is None or user['user_id'] != user_id:
+            logger.warning(f"User not found or mismatch: user_id={user_id}, user={user}")
+            raise HTTPException(status_code=401, detail="Invalid user")
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in verify_user_access: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+async def verify_user_access_from_query(request: Request):
+    """从查询参数中验证用户访问权限"""
+    try:
+        # 首先尝试从 Authorization 头部获取 token
+        auth_header = request.headers.get("Authorization")
+        token = None
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # 移除 "Bearer " 前缀
+        else:
+            # 如果没有 Authorization 头部，尝试从查询参数获取
+            token = request.query_params.get("token")
+        
+        if not token:
+            logger.warning("No token found in Authorization header or query params")
+            raise HTTPException(status_code=401, detail="Token is required")
+            
+        logger.info(f"Verifying user access with token from query: {token[:20]}...")
+        payload = auth_manager.verify_jwt_token(token)
+        user_id = payload.get('user_id', None)
+        if not user_id:
+            logger.warning("No user_id found in token payload")
+            raise HTTPException(status_code=401, detail="Invalid user")
+        user = await task_manager.query_user(user_id)
+        logger.info(f"User query result: {user}")
+        if user is None or user['user_id'] != user_id:
+            logger.warning(f"User not found or mismatch: user_id={user_id}, user={user}")
+            raise HTTPException(status_code=401, detail="Invalid user")
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in verify_user_access_from_query: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 
 async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     if not auth_manager.verify_worker_token(token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
-    return True 
-
+    return True
 
 def error_response(e, code):
     return JSONResponse({"message": f"error: {e}!"}, status_code=code)
@@ -246,7 +305,7 @@ async def api_v1_task_list(request: Request, user = Depends(verify_user_access))
 
 
 @app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request, user = Depends(verify_user_access)):
+async def api_v1_task_result(request: Request, user = Depends(verify_user_access_from_query)):
     try:
         msg = await server_monitor.check_user_busy(user['user_id'])
         if msg is not True:
@@ -262,13 +321,25 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
         if name in task['params']:
             return error_response(f"Output {name} is a stream", 400)
         data = await data_manager.load_bytes(task['outputs'][name])
-        return Response(content=data, media_type="application/octet-stream")
+        
+        # 根据文件扩展名设置正确的Content-Type
+        import mimetypes
+        content_type, _ = mimetypes.guess_type(name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        
+        # 设置文件名
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{name}\""
+        }
+        
+        return Response(content=data, media_type=content_type, headers=headers)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
 
 @app.get("/api/v1/task/input")
-async def api_v1_task_input(request: Request, user = Depends(verify_user_access)):
+async def api_v1_task_input(request: Request, user = Depends(verify_user_access_from_query)):
     try:
         msg = await server_monitor.check_user_busy(user['user_id'])
         if msg is not True:
@@ -278,54 +349,93 @@ async def api_v1_task_input(request: Request, user = Depends(verify_user_access)
         task = await task_manager.query_task(task_id, user_id=user['user_id'])
         if task is None:
             return error_response(f"Task {task_id} not found", 404)
-        if task['status'] != TaskStatus.SUCCEED:
-            return error_response(f"Task {task_id} not succeed", 400)
+        # 允许所有状态的任务访问输入文件，不只是成功的任务
         if name not in task['inputs']:
             return error_response(f"Input {name} not found in task {task_id}", 404)
         if name in task['params']:
             return error_response(f"Input {name} is a stream", 400)
         data = await data_manager.load_bytes(task['inputs'][name])
-        return Response(content=data, media_type="application/octet-stream")
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-@app.get("/api/v1/task/thumbnail")
-async def api_v1_task_thumbnail(task_id: str, name: str, user = Depends(verify_user_access)):
-    """获取视频缩略图"""
-    try:
-        task = await task_manager.query_task(task_id, user_id=user['user_id'])
-        if task is None:
-            return error_response(f"Task {task_id} not found", 404)
-        if task['status'] != TaskStatus.SUCCEED:
-            return error_response(f"Task {task_id} not succeed", 400)
-        if name not in task['outputs']:
-            return error_response(f"Output {name} not found in task {task_id}", 404)
         
-        # 检查是否已经有缩略图
-        thumbnail_name = f"{name}_thumbnail"
-        if thumbnail_name in task['outputs']:
-            # 如果已有缩略图，直接返回
-            data = await data_manager.load_bytes(task['outputs'][thumbnail_name])
-            return Response(content=data, media_type="image/jpeg")
-        else:
-            # 生成缩略图
-            video_data = await data_manager.load_bytes(task['outputs'][name])
-            thumbnail_data = await generate_video_thumbnail(video_data)
-            
-            # 保存缩略图
-            thumbnail_filename = f"{task_id}-{thumbnail_name}.jpg"
-            await data_manager.save_bytes(thumbnail_data, thumbnail_filename)
-            
-            # 更新任务的outputs
-            task['outputs'][thumbnail_name] = thumbnail_filename
-            await task_manager.update_task(task)
-            
-            return Response(content=thumbnail_data, media_type="image/jpeg")
+        # 根据文件扩展名设置正确的Content-Type
+        import mimetypes
+        content_type, _ = mimetypes.guess_type(name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        
+        # 设置文件名
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{name}\""
+        }
+        
+        return Response(content=data, media_type=content_type, headers=headers)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
 
+@app.get("/api/v1/task/thumbnails")
+async def api_v1_task_thumbnails(request: Request, user = Depends(verify_user_access)):
+    """一次性获取所有任务的缩略图"""
+    try:
+        user_id = user['user_id']        
+        msg = await server_monitor.check_user_busy(user_id)
+        if msg is not True:
+            return error_response(msg, 400)
+
+        # 获取所有任务
+        tasks = await task_manager.list_tasks(user_id=user_id, limit=1000)  # 限制最多1000个任务
+        logger.info(f"获取到 {len(tasks)} 个任务")
+        
+        # 转换任务状态为字符串
+        for task in tasks:
+            task['status'] = task['status'].name
+        
+        thumbnails = {}
+        
+        for task in tasks:
+            task_id = task['task_id']
+            if task.get('inputs'):
+                # 查找输入中的图片文件
+                image_inputs = []
+                for key, value in task['inputs'].items():
+                    if (key.lower().find('image') != -1 or 
+                        str(value).lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'))):
+                        image_inputs.append(key)
+                
+                if image_inputs:
+                    # 使用第一个图片作为缩略图
+                    first_image_key = image_inputs[0]
+                    try:
+                        # 获取图片数据
+                        image_data = await data_manager.load_bytes(task['inputs'][first_image_key])
+                        
+                        # 转换为base64
+                        import base64
+                        image_base64 = base64.b64encode(image_data).decode('utf-8')
+                        
+                        # 根据文件扩展名确定MIME类型
+                        import mimetypes
+                        content_type, _ = mimetypes.guess_type(first_image_key)
+                        if content_type is None:
+                            content_type = "image/jpeg"  # 默认类型
+                        
+                        # 构建data URL
+                        data_url = f"data:{content_type};base64,{image_base64}"
+                        thumbnails[task_id] = data_url
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to load thumbnail for task {task_id}: {e}")
+                        # 如果加载失败，不添加到结果中
+        
+        result = {
+            'thumbnails': thumbnails,
+            'total_tasks': len(tasks),
+            'total_thumbnails': len(thumbnails)
+        }
+        return result
+        
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
 
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access)):
@@ -336,7 +446,18 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
         task_id = request.query_params['task_id']
         ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
         logger.warning(f"Task {task_id} cancelled: {ret}")
-        assert ret, f"Task {task_id} cancel failed"
+        
+        # Handle new return format (dict) or legacy format (bool)
+        if isinstance(ret, dict):
+            if ret.get('success', False):
+                return {'msg': ret.get('message', 'Task cancelled successfully')}
+            else:
+                return error_response({'error': ret.get('error', 'Task cancel failed')}, 400)
+        else:
+            # Legacy format for backward compatibility
+            if not ret:
+                return error_response({'error': f"Task {task_id} cancel failed"}, 400)
+            return {'msg': 'ok'}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)

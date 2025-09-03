@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from loguru import logger
 from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus, ActiveStatus, FinishedStatus
 from lightx2v.deploy.common.utils import current_time, class_try_catch_async, time2str, str2time
 
@@ -234,7 +235,11 @@ class LocalTaskManager(BaseTaskManager):
     async def cancel_task(self, task_id, user_id=None):
         task, subtasks = self.load(task_id, user_id)
         if task['status'] not in ActiveStatus:
-            return False
+            status_name = task['status'].name if hasattr(task['status'], 'name') else str(task['status'])
+            error_msg = f"Task {task_id} is not in active status (current status: {status_name}). Only tasks with status CREATED, PENDING, or RUNNING can be cancelled."
+            print(error_msg)
+            logger.warning(error_msg)
+            return {'success': False, 'error': error_msg}
         for sub in subtasks:
             if sub['status'] not in FinishedStatus:
                 self.mark_subtask_change(sub, sub['status'], TaskStatus.CANCEL)
@@ -244,7 +249,7 @@ class LocalTaskManager(BaseTaskManager):
         task['status'] = TaskStatus.CANCEL
         task['update_t'] = current_time()
         self.save(task, subtasks)
-        return True
+        return {'success': True, 'message': f'Task {task_id} cancelled successfully'}
 
     @class_try_catch_async
     async def resume_task(self, task_id, all_subtask=False, user_id=None):

@@ -218,7 +218,7 @@ class AudioProcessor:
 
     def load_audio(self, audio_path: str) -> np.ndarray:
         """Load and resample audio"""
-        audio_array, ori_sr = ta.load(audio_path)
+        audio_array, ori_sr = ta.load(audio_path, backend="ffmpeg")
         audio_array = ta.functional.resample(audio_array.mean(0), orig_freq=ori_sr, new_freq=self.audio_sr)
         return audio_array.numpy()
 
