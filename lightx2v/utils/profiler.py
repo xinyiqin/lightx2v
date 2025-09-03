@@ -16,33 +16,26 @@ class _ProfilingContext:
         if dist.is_initialized():
             self.rank_info = f"Rank {dist.get_rank()}"
         else:
-            if torch.cuda.is_available():
-                self.rank_info = "Single GPU"
-            else:
-                self.rank_info = "CPU"
+            self.rank_info = "Single GPU"
 
     def __enter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        torch.cuda.synchronize()
         self.start_time = time.perf_counter()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        torch.cuda.synchronize()
         elapsed = time.perf_counter() - self.start_time
         logger.info(f"[Profile] {self.rank_info} - {self.name} cost {elapsed:.6f} seconds")
         return False
 
     async def __aenter__(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        torch.cuda.synchronize()
         self.start_time = time.perf_counter()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        torch.cuda.synchronize()
         elapsed = time.perf_counter() - self.start_time
         logger.info(f"[Profile] {self.rank_info} - {self.name} cost {elapsed:.6f} seconds")
         return False

@@ -127,28 +127,19 @@ def benchmark(func: Callable, shape: List[int], tflops: float, steps: int, *args
     for _ in range(10):  # Warm-up
         func(*args, **kwargs)
 
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()  # Ensure no pending operations
+    torch.cuda.synchronize()  # Ensure no pending operations
 
-        # Benchmark the function
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+    # Benchmark the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
 
-        start_event.record()
-        for _ in range(steps):
-            func(*args, **kwargs)
-        end_event.record()
+    start_event.record()
+    for _ in range(steps):
+        func(*args, **kwargs)
+    end_event.record()
 
-        torch.cuda.synchronize()  # Ensure all operations are finished
-        elapsed_time_ms = start_event.elapsed_time(end_event)  # Time in milliseconds
-    else:
-        # CPU mode - use time.perf_counter instead
-        import time
-        start_time = time.perf_counter()
-        for _ in range(steps):
-            func(*args, **kwargs)
-        end_time = time.perf_counter()
-        elapsed_time_ms = (end_time - start_time) * 1000  # Convert to milliseconds
+    torch.cuda.synchronize()  # Ensure all operations are finished
+    elapsed_time_ms = start_event.elapsed_time(end_event)  # Time in milliseconds
 
     # Calculate performance metrics
     elapsed_time_s = elapsed_time_ms / 1000  # Convert to seconds

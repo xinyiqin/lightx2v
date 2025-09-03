@@ -82,15 +82,14 @@ class GPUManager:
         if not torch.cuda.is_available():
             return
 
-        if torch.cuda.is_available():
-            if device and device.startswith("cuda:"):
-                gpu_id = int(device.split(":")[1])
-                with torch.cuda.device(gpu_id):
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-            else:
+        if device and device.startswith("cuda:"):
+            gpu_id = int(device.split(":")[1])
+            with torch.cuda.device(gpu_id):
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
+        else:
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
         logger.info(f"GPU cache cleared for device: {device or 'current'}")
 

@@ -1,6 +1,5 @@
 packaging
 ninja
-torchaudio
 diffusers
 transformers
 tokenizers
