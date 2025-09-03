@@ -8,7 +8,6 @@ import torchaudio
 from PIL import Image
 from loguru import logger
 from datetime import datetime
-from typing import Union
 
 FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -18,26 +17,13 @@ def current_time():
 
 
 def time2str(t):
-    try:
-        d = datetime.fromtimestamp(t)
-        return d.strftime(FMT)
-    except (ValueError, OSError) as e:
-        logger.warning(f"Failed to format timestamp {t}: {e}, using current time instead")
-        return datetime.now().strftime(FMT)
+    d = datetime.fromtimestamp(t)
+    return d.strftime(FMT)
 
 
 def str2time(s):
-    try:
-        d = datetime.strptime(s, FMT)
-        timestamp = d.timestamp()
-        # 检查时间戳是否合理（1970年到2100年之间）
-        if timestamp < 0 or timestamp > 4102444800:  # 2100-01-01 00:00:00
-            logger.warning(f"Invalid timestamp {s} -> {timestamp}, using current time instead")
-            return current_time()
-        return timestamp
-    except (ValueError, OSError) as e:
-        logger.warning(f"Failed to parse timestamp {s}: {e}, using current time instead")
-        return current_time()
+    d = datetime.strptime(s, FMT)
+    return d.timestamp()
 
 
 def try_catch(func):

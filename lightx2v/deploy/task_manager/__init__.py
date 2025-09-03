@@ -60,10 +60,6 @@ class BaseTaskManager:
     async def resume_task(self, task_id, all_subtask=False, user_id=None):
         raise NotImplementedError
 
-    async def generate_thumbnails_for_task(self, task_id, user_id=None):
-        """为任务生成缩略图"""
-        raise NotImplementedError
-
     def fmt_dict(self, data):
         for k in ['status']:
             if k in data:

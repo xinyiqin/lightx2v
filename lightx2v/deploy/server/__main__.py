@@ -3,6 +3,7 @@ import asyncio
 import uvicorn
 import argparse
 import traceback
+import mimetypes
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response, HTMLResponse
@@ -72,68 +73,38 @@ security = HTTPBearer()
 
 
 async def verify_user_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        if credentials is None:
-            logger.warning("No authorization credentials provided")
-            raise HTTPException(status_code=401, detail="Authorization header is required")
-        
-        token = credentials.credentials
-        if not token:
-            logger.warning("Empty token provided")
-            raise HTTPException(status_code=401, detail="Token is required")
-            
-        logger.info(f"Verifying user access with token: {token[:20]}...")
-        payload = auth_manager.verify_jwt_token(token)
-        user_id = payload.get('user_id', None)
-        if not user_id:
-            logger.warning("No user_id found in token payload")
-            raise HTTPException(status_code=401, detail="Invalid user")
-        user = await task_manager.query_user(user_id)
-        logger.info(f"User query result: {user}")
-        if user is None or user['user_id'] != user_id:
-            logger.warning(f"User not found or mismatch: user_id={user_id}, user={user}")
-            raise HTTPException(status_code=401, detail="Invalid user")
-        return user
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in verify_user_access: {e}")
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    token = credentials.credentials
+    payload = auth_manager.verify_jwt_token(token)
+    user_id = payload.get('user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    user = await task_manager.query_user(user_id)
+    # logger.info(f"Verfiy user access: {payload}")
+    if user is None or user['user_id'] != user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    return user
+
 
 async def verify_user_access_from_query(request: Request):
     """从查询参数中验证用户访问权限"""
-    try:
-        # 首先尝试从 Authorization 头部获取 token
-        auth_header = request.headers.get("Authorization")
-        token = None
-        
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]  # 移除 "Bearer " 前缀
-        else:
-            # 如果没有 Authorization 头部，尝试从查询参数获取
-            token = request.query_params.get("token")
-        
-        if not token:
-            logger.warning("No token found in Authorization header or query params")
-            raise HTTPException(status_code=401, detail="Token is required")
-            
-        logger.info(f"Verifying user access with token from query: {token[:20]}...")
-        payload = auth_manager.verify_jwt_token(token)
-        user_id = payload.get('user_id', None)
-        if not user_id:
-            logger.warning("No user_id found in token payload")
-            raise HTTPException(status_code=401, detail="Invalid user")
-        user = await task_manager.query_user(user_id)
-        logger.info(f"User query result: {user}")
-        if user is None or user['user_id'] != user_id:
-            logger.warning(f"User not found or mismatch: user_id={user_id}, user={user}")
-            raise HTTPException(status_code=401, detail="Invalid user")
-        return user
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in verify_user_access_from_query: {e}")
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    # 首先尝试从 Authorization 头部获取 token
+    auth_header = request.headers.get("Authorization")
+    token = None
+
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # 移除 "Bearer " 前缀
+    else:
+        # 如果没有 Authorization 头部，尝试从查询参数获取
+        token = request.query_params.get("token")
+
+    payload = auth_manager.verify_jwt_token(token)
+    user_id = payload.get('user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    user = await task_manager.query_user(user_id)
+    if user is None or user['user_id'] != user_id:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    return user
 
 
 async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -141,6 +112,7 @@ async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depen
     if not auth_manager.verify_worker_token(token):
         raise HTTPException(status_code=403, detail="Invalid worker token")
     return True
+
 
 def error_response(e, code):
     return JSONResponse({"message": f"error: {e}!"}, status_code=code)
@@ -321,56 +293,51 @@ async def api_v1_task_result(request: Request, user = Depends(verify_user_access
         if name in task['params']:
             return error_response(f"Output {name} is a stream", 400)
         data = await data_manager.load_bytes(task['outputs'][name])
-        
-        # 根据文件扩展名设置正确的Content-Type
-        import mimetypes
+
+        #  set correct Content-Type
         content_type, _ = mimetypes.guess_type(name)
         if content_type is None:
             content_type = "application/octet-stream"
-        
-        # 设置文件名
         headers = {
             "Content-Disposition": f"attachment; filename=\"{name}\""
         }
-        
         return Response(content=data, media_type=content_type, headers=headers)
+
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
 
+
 @app.get("/api/v1/task/input")
 async def api_v1_task_input(request: Request, user = Depends(verify_user_access_from_query)):
     try:
-        msg = await server_monitor.check_user_busy(user['user_id'])
-        if msg is not True:
-            return error_response(msg, 400)
+        # msg = await server_monitor.check_user_busy(user['user_id'])
+        # if msg is not True:
+        #     return error_response(msg, 400)
         name = request.query_params['name']
         task_id = request.query_params['task_id']
         task = await task_manager.query_task(task_id, user_id=user['user_id'])
         if task is None:
             return error_response(f"Task {task_id} not found", 404)
-        # 允许所有状态的任务访问输入文件，不只是成功的任务
         if name not in task['inputs']:
             return error_response(f"Input {name} not found in task {task_id}", 404)
         if name in task['params']:
             return error_response(f"Input {name} is a stream", 400)
         data = await data_manager.load_bytes(task['inputs'][name])
         
-        # 根据文件扩展名设置正确的Content-Type
-        import mimetypes
+        #  set correct Content-Type
         content_type, _ = mimetypes.guess_type(name)
         if content_type is None:
             content_type = "application/octet-stream"
-        
-        # 设置文件名
         headers = {
             "Content-Disposition": f"attachment; filename=\"{name}\""
         }
-        
         return Response(content=data, media_type=content_type, headers=headers)
+
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
+
 
 @app.get("/api/v1/task/thumbnails")
 async def api_v1_task_thumbnails(request: Request, user = Depends(verify_user_access)):
@@ -413,7 +380,6 @@ async def api_v1_task_thumbnails(request: Request, user = Depends(verify_user_ac
                         image_base64 = base64.b64encode(image_data).decode('utf-8')
                         
                         # 根据文件扩展名确定MIME类型
-                        import mimetypes
                         content_type, _ = mimetypes.guess_type(first_image_key)
                         if content_type is None:
                             content_type = "image/jpeg"  # 默认类型
@@ -437,6 +403,7 @@ async def api_v1_task_thumbnails(request: Request, user = Depends(verify_user_ac
         traceback.print_exc()
         return error_response(str(e), 500)
 
+
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access)):
     try:
@@ -446,18 +413,10 @@ async def api_v1_task_cancel(request: Request, user = Depends(verify_user_access
         task_id = request.query_params['task_id']
         ret = await task_manager.cancel_task(task_id, user_id=user['user_id'])
         logger.warning(f"Task {task_id} cancelled: {ret}")
-        
-        # Handle new return format (dict) or legacy format (bool)
-        if isinstance(ret, dict):
-            if ret.get('success', False):
-                return {'msg': ret.get('message', 'Task cancelled successfully')}
-            else:
-                return error_response({'error': ret.get('error', 'Task cancel failed')}, 400)
+        if ret is True:
+            return {'msg': 'Task cancelled successfully'}
         else:
-            # Legacy format for backward compatibility
-            if not ret:
-                return error_response({'error': f"Task {task_id} cancel failed"}, 400)
-            return {'msg': 'ok'}
+            return error_response({'error': f"Task {task_id} cancel failed: {ret}"}, 400)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -742,21 +701,24 @@ if __name__ == "__main__":
     with ProfilingContext("Init Server Cost"):
         model_pipelines = Pipeline(args.pipeline_json)
         auth_manager = AuthManager()
-        if args.task_url.startswith('postgresql://'):
+        if args.task_url.startswith('/'):
+            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
+        elif args.task_url.startswith('postgresql://'):
             task_manager = PostgresSQLTaskManager(args.task_url, metrics_monitor)
         else:
-            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
-        if args.data_url.startswith('{'):
+            raise NotImplementedError
+        if args.data_url.startswith('/'):
+            data_manager = LocalDataManager(args.data_url)
+        elif args.data_url.startswith('{'):
             data_manager = S3DataManager(args.data_url)
         else:
-            data_manager = LocalDataManager(args.data_url)
+            raise NotImplementedError
         if args.queue_url.startswith('/'):
             queue_manager = LocalQueueManager(args.queue_url)
         elif args.queue_url.startswith('amqp://'):
             queue_manager = RabbitMQQueueManager(args.queue_url)
         else:
-            queue_manager = LocalQueueManager(args.queue_url)
-            
+            raise NotImplementedError
         server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
 
     uvicorn.run(app, host=args.ip, port=args.port, reload=False, workers=1)
