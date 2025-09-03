@@ -156,17 +156,18 @@ class BaseRunner(ABC):
         if dist.is_initialized():
             rank = dist.get_rank()
             world_size = dist.get_world_size()
+        signal_rank = world_size - 1
 
         stopped = 0
-        if rank == 0 and hasattr(self, "stop_signal") and self.stop_signal:
+        if rank == signal_rank and hasattr(self, "stop_signal") and self.stop_signal:
             stopped = 1
 
         if world_size > 1:
-            if rank == 0:
+            if rank == signal_rank:
                 t = torch.tensor([stopped], dtype=torch.int32).to(device='cuda')
             else:
                 t = torch.zeros(1, dtype=torch.int32, device='cuda')
-            dist.broadcast(t, src=0)
+            dist.broadcast(t, src=signal_rank)
             stopped = t.item()
 
         print(f"rank {rank} recv stopped: {stopped}")

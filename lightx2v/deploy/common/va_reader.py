@@ -44,6 +44,9 @@ class VAReader:
 
         self.target_rank = target_rank % self.world_size
 
+        self.flag_tensor = torch.tensor([0], dtype=torch.int32).to(device='cuda')
+        self.audio_tensor = torch.zeros(self.chunk_size, dtype=torch.uint8, device='cuda')
+
         logger.info(f"VAReader initialized for stream: {stream_url} target_rank: {self.target_rank}")
         logger.info(f"Audio duration per chunk: {segment_duration}s, sample rate: {sample_rate}Hz")
 
@@ -175,25 +178,20 @@ class VAReader:
     def braodcast_audio_data(self, audio_data):
         if self.rank == self.target_rank:
             if audio_data is None:
-                data_size = 0
+                self.flag_tensor.fill_(0)
             else:
-                audio_tensor = torch.frombuffer(bytearray(audio_data), dtype=torch.uint8).to(device='cuda')
-                data_size = audio_tensor.shape[0]
-            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device='cuda')
-            logger.info(f"rank {self.rank} send audio_data size: {size_tensor.item()} bytes")
-        else:
-            size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
+                self.flag_tensor.fill_(1)
+                self.audio_tensor.copy_(torch.frombuffer(bytearray(audio_data), dtype=torch.uint8))
+                logger.info(f"rank {self.rank} send audio_tensor: {self.audio_tensor.shape}")
 
-        dist.broadcast(size_tensor, src=self.target_rank)
-        if size_tensor.item() == 0:
+        dist.broadcast(self.flag_tensor, src=self.target_rank)
+        if self.flag_tensor.item() == 0:
             return None
-        if self.rank != self.target_rank:
-            audio_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
-            logger.info(f"rank {self.rank} recv audio_data size: {size_tensor.item()} bytes")
-        dist.broadcast(audio_tensor, src=self.target_rank)
 
+        dist.broadcast(self.audio_tensor, src=self.target_rank)
         if self.rank != self.target_rank:
-            audio_data = audio_tensor.cpu().numpy().tobytes()
+            logger.info(f"rank {self.rank} recv audio_tensor: {self.audio_tensor.shape}")
+            audio_data = self.audio_tensor.cpu().numpy().tobytes()
         return audio_data
 
     def bytes_to_ndarray(self, audio_data):
