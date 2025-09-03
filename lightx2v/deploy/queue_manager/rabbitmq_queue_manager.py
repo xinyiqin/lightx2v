@@ -88,7 +88,7 @@ class RabbitMQQueueManager(BaseQueueManager):
         except asyncio.CancelledError:
             logger.warning(f"rabbitmq get_subtasks for {queue} cancelled")
             return None
-        except:
+        except:  # noqa
             logger.warning(f"rabbitmq get_subtasks for {queue} failed: {traceback.format_exc()}")
             return None
 

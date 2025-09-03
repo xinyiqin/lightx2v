@@ -208,7 +208,7 @@ class BaseTaskManager:
 
 
 # Import task manager implementations
-from .local_task_manager import LocalTaskManager
-from .sql_task_manager import PostgresSQLTaskManager
+from .local_task_manager import LocalTaskManager # noqa
+from .sql_task_manager import PostgresSQLTaskManager # noqa
 
 __all__ = ['BaseTaskManager', 'LocalTaskManager', 'PostgresSQLTaskManager']

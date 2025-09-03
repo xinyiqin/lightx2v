@@ -61,7 +61,7 @@ async def ping_life(server_url, worker_identity, keys):
         except asyncio.CancelledError:
             logger.warning("Ping life cancelled, shutting down...")
             raise asyncio.CancelledError
-        except:
+        except:  # noqa
             logger.warning(f"Ping life failed: {traceback.format_exc()}")
             await asyncio.sleep(10)
 
@@ -93,7 +93,7 @@ async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue,
         except asyncio.CancelledError:
             logger.warning(f"Ping subtask {task_id} {worker_name} cancelled")
             raise asyncio.CancelledError
-        except:
+        except:  # noqa
             logger.warning(f"Ping subtask failed: {traceback.format_exc()}")
             await asyncio.sleep(10)
 
@@ -126,7 +126,7 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
     except asyncio.CancelledError:
         logger.warning("Fetch subtasks cancelled, shutting down...")
         raise asyncio.CancelledError
-    except:
+    except:  # noqa
         logger.warning(f"Fetch subtasks failed: {traceback.format_exc()}")
         await asyncio.sleep(10)
 
@@ -156,7 +156,7 @@ async def report_task(server_url, task_id, worker_name, status, worker_identity,
     except asyncio.CancelledError:
         logger.warning("Report task cancelled, shutting down...")
         raise asyncio.CancelledError
-    except:
+    except:  # noqa
         logger.warning(f"Report task failed: {traceback.format_exc()}")
 
 
@@ -185,7 +185,7 @@ async def boradcast_subtasks(subtasks):
             logger.info(f"rank {RANK} recv subtasks: {subtasks}")
         return subtasks
 
-    except:
+    except:  # noqa
         logger.error(f"Broadcast subtasks failed: {traceback.format_exc()}")
         return []
 
@@ -197,7 +197,7 @@ async def sync_subtask():
         logger.info(f"Sync subtask {RANK}/{WORLD_SIZE} wait barrier")
         dist.barrier()
         logger.info(f"Sync subtask {RANK}/{WORLD_SIZE} ok")
-    except:
+    except:  # noqa
         logger.error(f"Sync subtask failed: {traceback.format_exc()}")
 
 
@@ -255,7 +255,7 @@ async def main(args):
                 if RANK == TARGET_RANK and sub['task_id'] in RUNNING_SUBTASKS:
                     try:
                         await report_task(status=status, **sub)
-                    except:
+                    except:  # noqa
                         logger.warning(f"Report failed: {traceback.format_exc()}")
                 if ping_task:
                     ping_task.cancel()
@@ -280,7 +280,7 @@ async def shutdown(loop):
                 s = RUNNING_SUBTASKS[task_id]
                 logger.warning(f"Report {task_id} {s['worker_name']} {TaskStatus.FAILED.name} ...")
                 await report_task(status=TaskStatus.FAILED.name, **s)
-            except:
+            except:  # noqa
                 logger.warning(f"Report task {task_id} failed: {traceback.format_exc()}")
 
     if WORLD_SIZE > 1:

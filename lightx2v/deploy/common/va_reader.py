@@ -137,7 +137,7 @@ class VAReader:
                     break
                 self.fetch_audio_data()
                 time.sleep(0.01)
-        except:
+        except:  # noqa
             logger.error(f"Audio pull worker error: {traceback.format_exc()}")
         finally:
             logger.warning("Audio pull worker thread stopped")
@@ -172,7 +172,7 @@ class VAReader:
                     self.audio_queue.put_nowait(audio_data)
                 logger.info(f"Put audio data: {len(audio_data)} bytes, audio_queue: {self.audio_queue.qsize()}, chunk_size:{self.chunk_size}")
 
-        except:
+        except:  # noqa
             logger.error(f"Fetch audio data error: {traceback.format_exc()}")
 
     def braodcast_audio_data(self, audio_data):
@@ -207,7 +207,7 @@ class VAReader:
         if self.rank == self.target_rank:
             try:
                 audio_data = self.audio_queue.get(timeout=timeout)
-            except:
+            except:  # noqa
                 logger.warning(f"Failed to get audio segment: {traceback.format_exc()}")
         if self.world_size > 1:
             audio_data = self.braodcast_audio_data(audio_data)

@@ -60,7 +60,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             row = await conn.fetchrow(f"SELECT version FROM {self.table_versions} ORDER BY create_t DESC LIMIT 1")
             row = dict(row)
             return row['version'] if row else 0
-        except:
+        except:  # noqa
             logger.error(f"query_version error: {traceback.format_exc()}")
             return 0
         finally:
@@ -169,7 +169,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     version, description, datetime.now()
                 )
                 return True
-        except:
+        except:  # noqa
             logger.error(f"upgrade_v1 error: {traceback.format_exc()}")
             return False
         finally:
@@ -288,7 +288,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         sub['update_t'], sub['ping_t'], sub['infer_cost']
                     )
                 return True
-        except:
+        except:  # noqa
             logger.error(f"insert_task error: {traceback.format_exc()}")
             return False
         finally:
@@ -385,7 +385,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 self.parse_dict(task)
                 tasks.append(task)
             return tasks
-        except:
+        except:  # noqa
             logger.error(f"list_tasks error: {traceback.format_exc()}")
             return []
         finally:
@@ -396,7 +396,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             return await self.load(conn, task_id, user_id, only_task=only_task)
-        except:
+        except:  # noqa
             logger.error(f"query_task error: {traceback.format_exc()}")
             return None
         finally:
@@ -432,7 +432,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 if len(nexts) > 0:
                     await self.update_task(conn, task_id, status=TaskStatus.PENDING)
                 return nexts
-        except:
+        except:  # noqa
             logger.error(f"next_subtasks error: {traceback.format_exc()}")
             return None
         finally:
@@ -461,7 +461,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     valids.append(cand)
                     break
                 return valids
-        except:
+        except:  # noqa
             logger.error(f"run_subtasks error: {traceback.format_exc()}")
             return []
         finally:
@@ -482,7 +482,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         await self.update_subtask(conn, task_id, worker_name, ping_t=True, update_t=False)
                         return True
                 return False
-        except:
+        except:  # noqa
             logger.error(f"ping_subtask error: {traceback.format_exc()}")
             return False
         finally:
@@ -543,7 +543,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=task['extra_info'])
                     return TaskStatus.SUCCEED
                 return None
-        except:
+        except:  # noqa
             logger.error(f"finish_subtasks error: {traceback.format_exc()}")
             return None
         finally:
@@ -569,7 +569,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 self.mark_task_end(task, TaskStatus.CANCEL)
                 await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=task['extra_info'])
                 return True
-        except:
+        except:  # noqa
             logger.error(f"cancel_task error: {traceback.format_exc()}")
             return False
         finally:
@@ -599,7 +599,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 self.mark_task_start(task)
                 await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=task['extra_info'])
                 return True
-        except:
+        except:  # noqa
             logger.error(f"resume_task error: {traceback.format_exc()}")
             return False
         finally:
@@ -628,7 +628,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     user_info['extra_info'], user_info['tag']
                 )
                 return True
-        except:
+        except:  # noqa
             logger.error(f"insert_user_if_not_exists error: {traceback.format_exc()}")
             return False
         finally:
@@ -642,7 +642,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             user = dict(row)
             self.parse_dict(user)
             return user
-        except:
+        except:  # noqa
             logger.error(f"query_user error: {traceback.format_exc()}")
             return None
         finally:

@@ -75,13 +75,13 @@ class VARecorder:
                     audios = np.clip(np.round(data * 32767), -32768, 32767).astype(np.int16)
                     self.audio_conn.send(audios.tobytes())
                     fail_time = 0
-                except:
+                except:  # noqa
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Audio push worker thread failed {fail_time} times, stopping...")
                         break
-        except:
+        except:  # noqa
             logger.error(f"Audio push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Audio push worker thread stopped")
@@ -104,13 +104,13 @@ class VARecorder:
                     frames = (data * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
                     self.video_conn.send(frames.tobytes())
                     fail_time = 0
-                except:
+                except:  # noqa
                     logger.error(f"Send video data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Video push worker thread failed {fail_time} times, stopping...")
                         break
-        except:
+        except:  # noqa
             logger.error(f"Video push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Video push worker thread stopped")
