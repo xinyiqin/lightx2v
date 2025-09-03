@@ -549,7 +549,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             target_fps = self.config.get("target_fps", 16)
             max_num_frames = self.config.get("target_video_length", 81)
             audio_sr = self.config.get("audio_sr", 16000)
-            prev_frames = self.config.get("prev_frames", 5)
+            prev_frames = self.config.get("prev_frame_length", 5)
             self.va_reader = VAReader(
                 rank=rank,
                 world_size=world_size,
