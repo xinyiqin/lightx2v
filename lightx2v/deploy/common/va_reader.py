@@ -1,14 +1,15 @@
+import os
+import queue
+import signal
 import subprocess
 import threading
-import queue
 import time
-import os
-from loguru import logger
 import traceback
+
 import numpy as np
-import torch.distributed as dist
 import torch
-import signal
+import torch.distributed as dist
+from loguru import logger
 
 
 class VAReader:
@@ -44,8 +45,8 @@ class VAReader:
 
         self.target_rank = target_rank % self.world_size
 
-        self.flag_tensor = torch.tensor([0], dtype=torch.int32).to(device='cuda')
-        self.audio_tensor = torch.zeros(self.chunk_size, dtype=torch.uint8, device='cuda')
+        self.flag_tensor = torch.tensor([0], dtype=torch.int32).to(device="cuda")
+        self.audio_tensor = torch.zeros(self.chunk_size, dtype=torch.uint8, device="cuda")
 
         logger.info(f"VAReader initialized for stream: {stream_url} target_rank: {self.target_rank}")
         logger.info(f"Audio duration per chunk: {segment_duration}s, sample rate: {sample_rate}Hz")
@@ -83,15 +84,10 @@ class VAReader:
             str(self.audio_channels),
             "-f",
             "s16le",
-            "-"
+            "-",
         ]
-        try:    
-            self.ffmpeg_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0
-            )
+        try:
+            self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
             logger.info(f"FFmpeg audio pull process started with PID: {self.ffmpeg_process.pid}")
             logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
         except Exception as e:
@@ -113,14 +109,14 @@ class VAReader:
             "!audioresample",
             f"!audio/x-raw,format=S16LE,channels={self.audio_channels},rate={self.sample_rate}",
             "!fdsink",
-            "fd=1"
+            "fd=1",
         ]
         try:
             self.ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
                 # stderr=subprocess.PIPE,
-                bufsize=0
+                bufsize=0,
             )
             logger.info(f"FFmpeg audio pull process started with PID: {self.ffmpeg_process.pid}")
             logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
@@ -152,8 +148,8 @@ class VAReader:
             # logger.info(f"Fetch audio data: {len(audio_bytes)} bytes, bytes_buffer: {len(self.bytes_buffer)} bytes")
 
             if len(self.bytes_buffer) >= self.chunk_size:
-                audio_data = self.bytes_buffer[:self.chunk_size]
-                self.bytes_buffer = self.bytes_buffer[self.chunk_size:]
+                audio_data = self.bytes_buffer[: self.chunk_size]
+                self.bytes_buffer = self.bytes_buffer[self.chunk_size :]
 
                 # first chunk, read original 81 frames
                 # for other chunks, read 81 - 5 = 76 frames, concat with previous 5 frames
@@ -162,7 +158,7 @@ class VAReader:
                     self.chunk_size -= self.prev_size
                 else:
                     audio_data = self.prev_chunk + audio_data
-                self.prev_chunk = audio_data[-self.prev_size:]
+                self.prev_chunk = audio_data[-self.prev_size :]
 
                 try:
                     self.audio_queue.put_nowait(audio_data)
@@ -240,11 +236,10 @@ class VAReader:
 
 
 if __name__ == "__main__":
-
-    WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
-    RANK = int(os.environ.get('RANK', 0))
+    WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
+    RANK = int(os.environ.get("RANK", 0))
     if WORLD_SIZE > 1:
-        dist.init_process_group(backend='nccl')
+        dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
         logger.info(f"Distributed initialized: rank={RANK}, world_size={WORLD_SIZE}")
 
@@ -256,7 +251,7 @@ if __name__ == "__main__":
         segment_duration=1.0,
         sample_rate=16000,
         audio_channels=1,
-        prev_duration=1/16,
+        prev_duration=1 / 16,
     )
     reader.start()
     fail_count = 0

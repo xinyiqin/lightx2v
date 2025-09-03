@@ -1,5 +1,6 @@
 import json
 import sys
+
 from loguru import logger
 
 
@@ -7,8 +8,8 @@ class Pipeline:
     def __init__(self, pipeline_json_file):
         self.pipeline_json_file = pipeline_json_file
         x = json.load(open(pipeline_json_file))
-        self.data = x['data']
-        self.meta = x['meta']
+        self.data = x["data"]
+        self.meta = x["meta"]
         self.inputs = {}
         self.outputs = {}
         self.temps = {}
@@ -31,9 +32,8 @@ class Pipeline:
         cur_temps = set()
         cur_types = {}
         for worker_name, worker_item in v3.items():
-
             prevs = []
-            for inp in worker_item['inputs']:
+            for inp in worker_item["inputs"]:
                 cur_types[inp] = self.get_type(inp)
                 if inp in out2worker:
                     prevs.append(out2worker[inp])
@@ -42,9 +42,9 @@ class Pipeline:
                         cur_temps.add(inp)
                 else:
                     cur_inps.add(inp)
-            worker_item['previous'] = prevs
+            worker_item["previous"] = prevs
 
-            for out in worker_item['outputs']:
+            for out in worker_item["outputs"]:
                 cur_types[out] = self.get_type(out)
                 out2worker[out] = worker_name
                 if out not in out2num:
@@ -52,8 +52,8 @@ class Pipeline:
                 out2num[out] += 1
 
             if "queue" not in worker_item:
-                worker_item['queue'] = "-".join([task, model_cls, stage, worker_name])
-            self.queues.add(worker_item['queue'])
+                worker_item["queue"] = "-".join([task, model_cls, stage, worker_name])
+            self.queues.add(worker_item["queue"])
 
         cur_outs = [out for out, num in out2num.items() if num > 0]
         self.inputs[task][model_cls][stage] = list(cur_inps)
@@ -136,10 +136,10 @@ class Pipeline:
         return self.model_lists
 
     def get_type(self, name):
-        return self.meta['special_types'].get(name, "OBJECT")
+        return self.meta["special_types"].get(name, "OBJECT")
 
     def get_monitor_config(self):
-        return self.meta['monitor']
+        return self.meta["monitor"]
 
     def get_queues(self):
         return self.queues
@@ -147,5 +147,5 @@ class Pipeline:
 
 if __name__ == "__main__":
     pipeline = Pipeline(sys.argv[1])
-    print(pipeline.get_workers(['t2v', 'wan2.1', 'multi_stage']))
-    print(pipeline.get_worker(['i2v', 'wan2.1', 'multi_stage', 'dit']))
+    print(pipeline.get_workers(["t2v", "wan2.1", "multi_stage"]))
+    print(pipeline.get_worker(["i2v", "wan2.1", "multi_stage", "dit"]))

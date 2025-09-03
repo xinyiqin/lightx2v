@@ -1,18 +1,20 @@
+import asyncio
+import json
 import os
 import time
-import json
 import traceback
+
 from loguru import logger
-import asyncio
-from lightx2v.deploy.queue_manager import BaseQueueManager 
+
 from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.queue_manager import BaseQueueManager
 
 
 class LocalQueueManager(BaseQueueManager):
     def __init__(self, local_dir):
-       self.local_dir = local_dir
-       if not os.path.exists(self.local_dir):
-           os.makedirs(self.local_dir)
+        self.local_dir = local_dir
+        if not os.path.exists(self.local_dir):
+            os.makedirs(self.local_dir)
 
     async def get_conn(self):
         pass
@@ -25,11 +27,11 @@ class LocalQueueManager(BaseQueueManager):
 
     @class_try_catch_async
     async def put_subtask(self, subtask):
-        out_name = self.get_filename(subtask['queue'])
-        keys = ['queue', 'task_id', 'worker_name', 'inputs', 'outputs', 'params']
+        out_name = self.get_filename(subtask["queue"])
+        keys = ["queue", "task_id", "worker_name", "inputs", "outputs", "params"]
         msg = json.dumps({k: subtask[k] for k in keys}) + "\n"
         logger.info(f"Local published subtask: ({subtask['task_id']}, {subtask['worker_name']}) to {subtask['queue']}")
-        with open(out_name, 'a') as fout:
+        with open(out_name, "a") as fout:
             fout.write(msg)
             return True
 
@@ -44,7 +46,7 @@ class LocalQueueManager(BaseQueueManager):
             return None
         subtask = json.loads(lines[0])
         msgs = "".join(lines[1:])
-        fout = open(out_name, 'w')
+        fout = open(out_name, "w")
         fout.write(msgs)
         fout.close()
         return subtask

@@ -1,13 +1,14 @@
-import os
-import io
-import time
-import httpx
 import base64
+import io
+import os
+import time
 import traceback
+from datetime import datetime
+
+import httpx
 import torchaudio
 from PIL import Image
 from loguru import logger
-from datetime import datetime
 
 FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -34,6 +35,7 @@ def try_catch(func):
             logger.error(f"Error in {func.__name__}:")
             traceback.print_exc()
             return None
+
     return wrapper
 
 
@@ -45,6 +47,7 @@ def class_try_catch(func):
             logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
+
     return wrapper
 
 
@@ -56,11 +59,12 @@ def class_try_catch_async(func):
             logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
+
     return wrapper
 
 
 def data_name(x, task_id):
-    if x == 'input_image':
+    if x == "input_image":
         x = x + ".png"
     elif x == "output_video":
         x = x + ".mp4"
@@ -115,7 +119,7 @@ async def preload_data(inp, inp_type, typ, val):
                     if len(data) < 4:
                         raise ValueError("Audio file too short")
                     # 检查常见的音频文件头
-                    audio_headers = [b'RIFF', b'ID3', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2', b'OggS']
+                    audio_headers = [b"RIFF", b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"OggS"]
                     if not any(data.startswith(header) for header in audio_headers):
                         logger.warning("Audio file doesn't have recognized header, but continuing...")
                     logger.info(f"Audio validation passed (alternative method), size: {len(data)} bytes")
@@ -131,7 +135,7 @@ async def load_inputs(params, raw_inputs, types):
     inputs_data = {}
     for inp in raw_inputs:
         item = params.pop(inp)
-        bytes_data = await preload_data(inp, types[inp], item['type'], item['data'])
+        bytes_data = await preload_data(inp, types[inp], item["type"], item["data"])
         if bytes_data is not None:
             inputs_data[inp] = bytes_data
         else:
@@ -143,7 +147,7 @@ def check_params(params, raw_inputs, raw_outputs, types):
     stream_audio = os.getenv("STREAM_AUDIO", "0") == "1"
     stream_video = os.getenv("STREAM_VIDEO", "0") == "1"
     for x in raw_inputs + raw_outputs:
-        if x in params and 'type' in params[x] and params[x]['type'] == "stream":
+        if x in params and "type" in params[x] and params[x]["type"] == "stream":
             if types[x] == "AUDIO":
                 assert stream_audio, "stream audio is not supported, please set env STREAM_AUDIO=1"
             elif types[x] == "VIDEO":

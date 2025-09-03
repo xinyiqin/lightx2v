@@ -51,7 +51,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: 
+            background:
                 radial-gradient(circle at 20% 80%, rgba(154, 114, 255, 0.1) 0%, transparent 50%),
                 radial-gradient(circle at 80% 20%, rgba(183, 139, 255, 0.1) 0%, transparent 50%),
                 radial-gradient(circle at 40% 40%, rgba(124, 106, 255, 0.05) 0%, transparent 50%);
@@ -77,7 +77,7 @@
             backdrop-filter: blur(20px);
             border: 1px solid rgba(154, 114, 255, 0.2);
             border-radius: 24px;
-            box-shadow: 
+            box-shadow:
                 0 20px 40px rgba(0, 0, 0, 0.3),
                 0 0 40px rgba(154, 114, 255, 0.1),
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -105,7 +105,7 @@
 
         .login-card:hover {
             transform: translateY(-5px);
-            box-shadow: 
+            box-shadow:
                 0 25px 50px rgba(0, 0, 0, 0.4),
                 0 0 60px rgba(154, 114, 255, 0.2),
                 inset 0 1px 0 rgba(255, 255, 255, 0.15);
@@ -123,10 +123,10 @@
         }
 
         @keyframes logoGlow {
-            0% { 
+            0% {
                 filter: drop-shadow(0 0 10px rgba(154, 114, 255, 0.5));
             }
-            100% { 
+            100% {
                 filter: drop-shadow(0 0 20px rgba(154, 114, 255, 0.8));
             }
         }
@@ -141,17 +141,17 @@
         .btn-github {
             background: linear-gradient(135deg, #d2c1ff, #a88bff, #8e88ff);
             border: 1px solid rgba(154, 114, 255, 0.3);
-            font-weight: 500; 
+            font-weight: 500;
             font-size: 16px;
-            letter-spacing: 0.2px; 
+            letter-spacing: 0.2px;
             font-family: 'Inter', sans-serif;
             padding: 20px 30px;
             border-radius: 14px;
             position: relative;
             overflow: hidden;
             text-decoration: none;
-            box-shadow: 0 10px 30px rgba(140, 110, 255, 0.4); 
-            transition: transform 0.5s ease, box-shadow 0.15s ease; 
+            box-shadow: 0 10px 30px rgba(140, 110, 255, 0.4);
+            transition: transform 0.5s ease, box-shadow 0.15s ease;
         }
 
         .btn-github::before {
@@ -361,16 +361,16 @@
             .login-logo {
                 font-size: 2.5rem;
             }
-            
+
             .login-subtitle {
                 font-size: 1rem;
             }
-            
+
             .btn-github {
                 padding: 14px 28px;
                 font-size: 1rem;
             }
-            
+
             .login-card {
                 margin: 20px;
                 border-radius: 20px;
@@ -381,16 +381,16 @@
             .login-logo {
                 font-size: 2rem;
             }
-            
+
             .login-subtitle {
                 font-size: 0.9rem;
             }
-            
+
             .btn-github {
                 padding: 12px 24px;
                 font-size: 0.95rem;
             }
-            
+
             .login-card .card-body {
                 padding: 2rem !important;
             }
@@ -425,13 +425,13 @@
         }
     </script>
     <style type="text/tailwindcss">
-        
+
         [v-cloak] { display: none; }
         /* 确保html和body能够正确填充 */
         html {
             height: 100%;
         }
-        
+
         /* 确保body和app容器能够正确填充 */
         body {
             margin: 0;
@@ -445,7 +445,7 @@
             transform-origin: top left;
         }
 
-        
+
         @layer utilities {
             .content-auto {
                 content-visibility: auto;
@@ -478,54 +478,54 @@
                 background-color: rgba(210, 193, 255, 0.6);
                 border-radius: 2px;
             }
-            
+
             /* 历史任务区域滚动条样式 - 与主内容区域保持一致 */
             .history-tasks-scroll::-webkit-scrollbar {
                 width: 8px !important;
             }
-            
+
             .history-tasks-scroll::-webkit-scrollbar-track {
                 background: rgba(27, 18, 64, 0.3) !important;
                 border-radius: 4px;
             }
-            
+
             .history-tasks-scroll::-webkit-scrollbar-thumb {
                 background: linear-gradient(135deg, rgba(210, 193, 255, 0.8), rgba(168, 139, 255, 0.8)) !important;
                 border-radius: 4px;
                 border: 1px solid rgba(210, 193, 255, 0.3);
             }
-            
+
             .history-tasks-scroll::-webkit-scrollbar-thumb:hover {
                 background: linear-gradient(135deg, rgba(210, 193, 255, 1), rgba(168, 139, 255, 1)) !important;
             }
-            
+
             /* 确保历史任务区域可以正常滚动 */
             .history-tasks-scroll {
                 scroll-behavior: smooth;
                 -webkit-overflow-scrolling: touch;
                 /* 移除max-height限制，让flex-1占据所有可用空间 */
             }
-            
+
             /* 主内容区域滚动条样式 */
             .content-area::-webkit-scrollbar {
                 width: 8px;
             }
-            
+
             .content-area::-webkit-scrollbar-track {
                 background: rgba(27, 18, 64, 0.3);
                 border-radius: 4px;
             }
-            
+
             .content-area::-webkit-scrollbar-thumb {
                 background: linear-gradient(135deg, rgba(210, 193, 255, 0.8), rgba(168, 139, 255, 0.8));
                 border-radius: 4px;
                 border: 1px solid rgba(210, 193, 255, 0.3);
             }
-            
+
             .content-area::-webkit-scrollbar-thumb:hover {
                 background: linear-gradient(135deg, rgba(210, 193, 255, 1), rgba(168, 139, 255, 1));
             }
-            
+
             /* 确保内容可以正常滚动 */
             .content-area {
                 scroll-behavior: smooth;
@@ -552,35 +552,35 @@
                 100% { transform: translateY(0px); }
             }
             @keyframes laserGlow {
-                0% { 
+                0% {
                     box-shadow: 0 0 10px rgba(210, 193, 255, 0.8), 0 0 40px rgba(210, 193, 255, 0.6), 0 0 60px rgba(210, 193, 255, 0.4);
                     filter: brightness(0.8) saturate(0.7);
                 }
-                100% { 
+                100% {
                     box-shadow: 0 0 20px rgba(210, 193, 255, 1), 0 0 60px rgba(210, 193, 255, 0.8), 0 0 90px rgba(210, 193, 255, 0.6);
                     filter: brightness(1) saturate(1);
                 }
             }
             @keyframes electricPulse {
-                0%, 100% { 
+                0%, 100% {
                     box-shadow: 0 0 15px rgba(142, 136, 255, 0.8), 0 0 30px rgba(142, 136, 255, 0.6);
                     transform: scale(1);
                 }
-                50% { 
+                50% {
                     box-shadow: 0 0 25px rgba(142, 136, 255, 1), 0 0 50px rgba(142, 136, 255, 0.8), 0 0 75px rgba(142, 136, 255, 0.4);
                     transform: scale(1.02);
                 }
             }
             @keyframes neonFlicker {
-                0%, 100% { 
+                0%, 100% {
                     box-shadow: 0 0 20px rgba(183, 139, 255, 0.8), 0 0 40px rgba(183, 139, 255, 0.6);
                     opacity: 1;
                 }
-                25% { 
+                25% {
                     box-shadow: 0 0 15px rgba(183, 139, 255, 0.6), 0 0 30px rgba(183, 139, 255, 0.4);
                     opacity: 0.8;
                 }
-                75% { 
+                75% {
                     box-shadow: 0 0 25px rgba(183, 139, 255, 1), 0 0 50px rgba(183, 139, 255, 0.8);
                     opacity: 1.1;
                 }
@@ -601,24 +601,24 @@
                 border-color: #d2c1ff;
                 box-shadow: 0 0 15px rgba(154, 114, 255, 0.6), inset 0 0 15px rgba(154, 114, 255, 0.1);
             }
-            .btn-primary{ 
-                padding: 15px 25px; 
-                border-radius: 14px; 
-                font-weight: 500; 
+            .btn-primary{
+                padding: 15px 25px;
+                border-radius: 14px;
+                font-weight: 500;
                 font-size: 14px;
-                letter-spacing: 0.2px; 
+                letter-spacing: 0.2px;
                 font-family: 'Inter', sans-serif;
-                background: linear-gradient(135deg, #d2c1ff, #a88bff, #8e88ff); 
-                border: 0; 
+                background: linear-gradient(135deg, #d2c1ff, #a88bff, #8e88ff);
+                border: 0;
                 text-decoration: none;
-                box-shadow: 0 10px 30px rgba(140, 110, 255, 0.4); 
-                transition: transform 0.15s ease, box-shadow 0.15s ease; 
+                box-shadow: 0 10px 30px rgba(140, 110, 255, 0.4);
+                transition: transform 0.15s ease, box-shadow 0.15s ease;
             }
-            .btn-primary:hover{ 
-                transform: translateY(-1px); 
-                box-shadow: 0 14px 40px rgba(140, 110, 255, 0.55); 
+            .btn-primary:hover{
+                transform: translateY(-1px);
+                box-shadow: 0 14px 40px rgba(140, 110, 255, 0.55);
             }
-            
+
             /* 修复布局问题 */
             .task-type-btn {
                 padding: 0.75rem 1rem;
@@ -628,30 +628,30 @@
                 transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
                 transition-duration: 150ms;
             }
-            
+
             .task-type-btn:hover {
                 background-color: rgba(154, 114, 255, 0.1);
             }
-            
+
             .model-selection {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 0.5rem;
             }
-            
+
             .upload-section {
                 display: grid;
                 grid-template-columns: repeat(1, minmax(0, 1fr));
                 gap: 1.5rem;
                 margin-bottom: 1.5rem;
             }
-            
+
             @media (min-width: 768px) {
                 .upload-section {
                     grid-template-columns: repeat(2, minmax(0, 1fr));
                 }
             }
-            
+
             .upload-area {
                 position: relative;
                 border: 2px dashed rgba(154, 114, 255, 0.4);
@@ -665,12 +665,12 @@
                 background-color: rgba(27, 18, 64, 0.1);
                 min-height: 250px; /* 确保上传区域有最小高度，防止预览时高度收缩 */
             }
-            
+
             .upload-area:hover {
                 border-color: rgba(154, 114, 255, 0.7);
                 box-shadow: 0 0 20px rgba(154, 114, 255, 0.8), 0 0 40px rgba(154, 114, 255, 0.6), 0 0 60px rgba(154, 114, 255, 0.4), 0 0 80px rgba(154, 114, 255, 0.2);
             }
-            
+
             .upload-icon {
                 margin: 0 auto;
                 width: 4rem;
@@ -685,11 +685,11 @@
                 transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
                 transition-duration: 150ms;
             }
-            
+
             .upload-area:hover .upload-icon {
                 background-color: rgba(154, 114, 255, 0.3);
             }
-            
+
             /* 图片预览占据整个上传区域 */
             .image-preview {
                 position: absolute;
@@ -704,7 +704,7 @@
                 justify-content: center;
                 cursor: pointer;
             }
-            
+
             .image-preview img {
                 height: 100%;
                 width: auto;
@@ -714,7 +714,7 @@
                 object-fit: contain;
                 transition: all 0.3s ease;
             }
-            
+
             /* 音频预览占据整个上传区域 */
             .audio-preview {
                 position: absolute;
@@ -732,7 +732,7 @@
                 border: 2px solid rgba(154, 114, 255, 0.3);
                 cursor: pointer;
             }
-            
+
             .audio-preview audio {
                 width: 90%;
                 height: 60px;
@@ -741,13 +741,13 @@
                 background-color: rgba(27, 18, 64, 0.3);
                 display: block;
             }
-            
+
             /* 确保音频控件在容器中正确显示 */
             .audio-preview audio::-webkit-media-controls {
                 background-color: rgba(27, 18, 64, 0.5);
                 border-radius: 0.5rem;
             }
-            
+
             /* 上传内容样式 */
             .upload-content {
                 width: 100%;
@@ -757,7 +757,7 @@
                 align-items: center;
                 justify-content: center;
             }
-            
+
             .btn-close {
                 position: absolute;
                 top: 0.5rem;
@@ -775,7 +775,7 @@
                 z-index: 20;
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
             }
-            
+
             /* 确保flexbox布局正确 */
             #app {
                 display: flex;
@@ -786,7 +786,7 @@
             .bg-linear-dark {
                 background-color: linear-gradient(135deg, #0b0a20 0%, #1b1240 50%, #0f0e22 100%);
             }
-            
+
             aside {
                 flex-shrink: 0;
                 width: 280px; /* 默认展开宽度 */
@@ -833,7 +833,7 @@
             .resizing * {
                 pointer-events: none;
             }
-            
+
             main {
                 flex: 1;
                 display: flex;
@@ -842,7 +842,7 @@
                 width: calc(100% - 280px); /* 主内容区域占据剩余宽度，适应展开的侧边栏 */
                 height: 100%;
             }
-            
+
             /* 内容区域全屏显示 */
             .content-area {
                 flex: 1;
@@ -852,21 +852,21 @@
                 width: 100%;
                 min-height: 0; /* 确保flex子元素可以收缩 */
             }
-            
+
             /* 任务创建面板全屏 */
             #task-creator {
                 max-width: none;
                 width: 80%;
                 padding: 0 1rem;
             }
-            
+
             /* 任务详情面板全屏 */
             .task-detail-panel {
                 max-width: none;
                 width: 80%;
                 padding: 0 0rem;
             }
-            
+
             /* 上传区域全屏布局 */
             .upload-section {
                 display: grid;
@@ -875,19 +875,19 @@
                 margin-bottom: 2rem;
                 width: 100%;
             }
-            
+
             /* 任务类型选择全屏 */
             .task-type-selection {
                 width: 100%;
                 margin-bottom: 2rem;
             }
-            
+
             .task-type-buttons {
                 display: flex;
                 width: 100%;
                 border-bottom: 1px solid rgba(154, 114, 255, 0.3);
             }
-            
+
             .task-type-btn {
                 flex: 1;
                 padding: 1rem 1.5rem;
@@ -898,7 +898,7 @@
                 transition-duration: 150ms;
                 text-align: center;
             }
-            
+
             /* 模型选择全屏 */
             .model-selection {
                 display: flex;
@@ -907,78 +907,78 @@
                 width: 100%;
                 justify-content: flex-start;
             }
-            
+
             /* 提示词输入全屏 */
             .prompt-input-section {
                 width: 100%;
                 margin-bottom: 2rem;
             }
-            
+
             .prompt-textarea {
                 width: 100%;
                 min-height: 150px;
                 resize: vertical;
             }
-            
+
             /* 侧边栏折叠样式 */
             .sidebar-collapsed {
                 width: 3rem !important;
             }
-            
+
             /* 侧边栏展开样式 */
             aside:not(.sidebar-collapsed) {
                 width: 280px !important;
             }
-            
+
             .sidebar-collapsed .sidebar-content {
                 display: none !important;
             }
-            
+
             .sidebar-collapsed .resize-handle {
                 display: none !important;
             }
-            
+
             .sidebar-collapsed .user-info-section {
                 display: none !important;
             }
-            
+
             .sidebar-collapsed .sidebar-header {
                 justify-content: center;
                 padding: 1rem 0.5rem;
             }
-            
+
             .sidebar-collapsed .sidebar-header h1 {
                 display: none;
             }
-            
+
             /* 展开状态下显示所有内容 */
             aside:not(.sidebar-collapsed) .sidebar-content {
                 display: flex !important;
             }
-            
+
             aside:not(.sidebar-collapsed) .resize-handle {
                 display: block !important;
             }
-            
+
             aside:not(.sidebar-collapsed) .sidebar-header {
                 justify-content: space-between;
                 padding: 1rem;
             }
-            
+
             aside:not(.sidebar-collapsed) .sidebar-header h1 {
                 display: flex;
             }
-            
+
             aside:not(.sidebar-collapsed) .sidebar-header .toggle-btn {
                 display: flex !important;
                 align-items: center;
                 justify-content: center;
             }
-            
+
             aside:not(.sidebar-collapsed) .user-info-section {
                 display: block !important;
             }
-            
+
             .sidebar-collapsed .sidebar-header .toggle-btn {
                 display: flex !important;
                 align-items: center;
@@ -990,50 +990,50 @@
                 border: 1px solid rgba(154, 114, 255, 0.3);
                 margin: 0 auto;
             }
-            
+
             /* 当侧边栏折叠时，主内容区域调整 */
             .sidebar-collapsed + main {
                 width: calc(100% - 3rem);
             }
-            
+
             /* 当侧边栏展开时，主内容区域调整 */
             aside:not(.sidebar-collapsed) + main {
                 width: calc(100% - 280px);
             }
-            
+
             /* 响应式设计 */
             @media (max-width: 1200px) {
                 aside:not(.sidebar-collapsed) {
                     width: 250px !important;
                 }
-                
+
                 .sidebar-collapsed + main {
                     width: calc(100% - 3rem);
                 }
-                
+
                 aside:not(.sidebar-collapsed) + main {
                     width: calc(100% - 250px);
                 }
             }
-            
+
             @media (max-width: 768px) {
                 aside:not(.sidebar-collapsed) {
                     width: 200px !important;
                 }
-                
+
                 .sidebar-collapsed + main {
                     width: calc(100% - 3rem);
                 }
-                
+
                 aside:not(.sidebar-collapsed) + main {
                     width: calc(100% - 200px);
                 }
-                
+
                 .upload-section {
                     grid-template-columns: 1fr;
                 }
             }
-            
+
             /* 修复任务项样式 */
             .task-item {
                 padding: 0.75rem;
@@ -1043,12 +1043,12 @@
                 transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
                 transition-duration: 200ms;
             }
-            
+
             .task-item:hover {
                 background-color: rgba(154, 114, 255, 0.15);
                 box-shadow: 0 0 20px rgba(154, 114, 255, 0.8), 0 0 40px rgba(154, 114, 255, 0.6), 0 0 60px rgba(154, 114, 255, 0.4), 0 0 80px rgba(154, 114, 255, 0.2);
             }
-            
+
             /* 修复状态指示器 */
             .status-indicator {
                 width: 0.75rem;
@@ -1056,7 +1056,7 @@
                 border-radius: 9999px;
                 box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
             }
-            
+
             /* 修复按钮样式 */
             .btn-primary {
                 padding: 12px 22px;
@@ -1072,12 +1072,12 @@
                 cursor: pointer;
                 display: inline-block;
             }
-            
+
             .btn-primary:hover {
                 transform: translateY(-1px);
                 box-shadow: 0 14px 40px rgba(140, 110, 255, 0.55);
             }
-            
+
             /* 修复模型按钮样式 */
             .model-btn {
                 padding: 0.5rem 1rem;
@@ -1089,60 +1089,60 @@
                 cursor: pointer;
                 border: 1px solid;
             }
-            
+
             .model-btn.active {
                 background-color: rgba(154, 114, 255, 0.2);
                 border-color: rgba(154, 114, 255, 0.4);
                 box-shadow: 0 0 20px rgba(154, 114, 255, 0.8), 0 0 40px rgba(154, 114, 255, 0.6), 0 0 60px rgba(154, 114, 255, 0.4), 0 0 80px rgba(154, 114, 255, 0.2);
                 animation: electricPulse 1.5s ease-in-out infinite;
             }
-            
+
             /* 确保内容区域正确滚动 */
             .content-scroll {
                 flex: 1;
                 overflow-y: auto;
             }
-            
-            
+
+
             /* 任务进行中面板样式 */
             .task-running-panel .animate-pulse-slow {
                 animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 0.5) infinite;
             }
-            
+
             /* 任务失败面板样式 */
             .task-failed-panel .bg-red-500\/10 {
                 background-color: rgba(239, 68, 68, 0.1);
             }
-            
-            
+
+
             .task-detail-panel video {
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
             }
-            
+
             /* 素材预览样式 */
             .material-preview {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 0.75rem;
             }
-            
+
             .material-preview img {
                 border-radius: 0.5rem;
                 transition: all 0.2s ease;
             }
-            
+
             .material-preview img:hover {
                 transform: scale(1.05);
                 box-shadow: 0 0 20px rgba(154, 114, 255, 0.6);
             }
-            
+
             /* 任务状态指示器增强 */
             .status-indicator {
                 position: relative;
             }
-            
+
             .status-indicator::after {
                 content: '';
                 position: absolute;
@@ -1155,35 +1155,35 @@
                 border-radius: 50%;
                 opacity: 0.8;
             }
-            
+
             /* 任务面板切换动画 */
             .task-panel-enter-active,
             .task-panel-leave-active {
                 transition: all 0.3s ease;
             }
-            
+
             .task-panel-enter-from {
                 opacity: 0;
                 transform: translateY(20px);
             }
-            
+
             .task-panel-leave-to {
                 opacity: 0;
                 transform: translateY(-20px);
             }
-            
+
             /* 响应式任务面板 */
             @media (max-width: 768px) {
                 .task-detail-panel {
                     padding: 0 0.5rem;
                 }
             }
-            
+
             /* 提示消息动画 */
             .animate-slide-down {
                 animation: slideDown 0.3s ease-out;
             }
-            
+
             @keyframes slideDown {
                 0% {
                     opacity: 0;
@@ -1194,7 +1194,7 @@
                     transform: translate(-50%, 0);
                 }
             }
-            
+
             /* 提示消息样式 - 统一浅色透明背景 */
             .alert {
                 backdrop-filter: blur(15px);
@@ -1206,7 +1206,7 @@
         }
     </style>
 </head>
-<body 
+<body
     class="bg-dark text-gray-100 font-inter"
 >
     <div id="app">
@@ -1235,7 +1235,7 @@
             <div class="particle"></div>
             <div class="particle"></div>
         </div>
-        
+
         <div class="login-card">
                         <div class="card-body text-center p-5">
                             <!-- Logo和标题 -->
@@ -1246,13 +1246,13 @@
                                 </div>
                                 <p class="login-subtitle">一个强大的视频生成平台</p>
                             </div>
-                            
+
                             <!-- 登录按钮 -->
                             <button @click="loginWithGitHub" class="btn btn-github btn-lg w-100 mb-4" :disabled="loading">
                                 <i class="fab fa-github me-2"></i>
                                 {{ loading ? '登录中...' : '使用GitHub登录' }}
                             </button>
-                            
+
                             <!-- 功能特性 -->
                             <div class="login-features">
                                 <div class="feature-item">
@@ -1309,7 +1309,7 @@
             <div class="particle"></div>
             <div class="particle"></div>
         </div>
-        
+
         <!-- 侧边栏 - 历史任务 -->
         <aside class="w-64 bg-linear-dark border-r border-laser-purple/40 flex flex-col transition-all duration-300 ease-in-out z-10" ref="sidebar" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
             <!-- 拖拽调整器 -->
@@ -1320,8 +1320,8 @@
                         <i class="fas fa-video text-gradient-icon mr-2"></i>
                         <span>LightX2V</span>
                     </h1>
-                    <button 
-                        @click="toggleSidebar" 
+                    <button
+                        @click="toggleSidebar"
                         class="text-gray-400 hover:text-gradient-icon transition-colors flex-shrink-0 toggle-btn"
                         title="展开/折叠侧边栏">
                         <i class="fas fa-bars"></i>
@@ -1330,8 +1330,8 @@
             </div>
             <div class="sidebar-content flex flex-col flex-1 min-h-0">
                 <div class="p-3 border-b border-laser-purple/40">
-                    <button 
-                        @click="showTaskCreator" 
+                    <button
+                        @click="showTaskCreator"
                         class="w-full btn-primary py-2 rounded-lg flex items-center justify-center transition-all duration-200 font-medium text-sm">
                         <i class="fas fa-plus mr-2"></i>
                         新建任务
@@ -1345,33 +1345,33 @@
                     />
                     <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
                 </div>
-                
+
                 <!-- 状态过滤和刷新 -->
                 <div class="mt-3">
                     <div class="flex flex-wrap gap-1 justify-between items-center">
                     <div class="flex flex-wrap gap-1">
-                        <button 
+                        <button
                             @click="statusFilter = 'ALL'"
                             class="px-2 py-1 text-xs rounded transition-all"
                                 :class="statusFilter === 'ALL' ? 'bg-dark-light bg-laser-purple/40' : 'bg-dark-light text-gray-400 hover:bg-laser-purple/20'"
                         >
                             全部
                         </button>
-                        <button 
+                        <button
                             @click="statusFilter = 'SUCCEED'"
                             class="px-2 py-1 text-xs rounded transition-all"
                             :class="statusFilter === 'SUCCEED' ? 'bg-green-500/30 text-green-400' : 'bg-dark-light text-gray-400 hover:bg-green-500/20'"
                         >
                             成功
                         </button>
-                        <button 
+                        <button
                             @click="statusFilter = 'RUNNING'"
                             class="px-2 py-1 text-xs rounded transition-all"
                             :class="statusFilter === 'RUNNING' ? 'bg-yellow-500/30 text-yellow-400' : 'bg-dark-light text-gray-400 hover:bg-yellow-500/20'"
                         >
                             进行中
                         </button>
-                        <button 
+                        <button
                             @click="statusFilter = 'FAILED'"
                             class="px-2 py-1 text-xs rounded transition-all"
                             :class="statusFilter === 'FAILED' ? 'bg-red-500/30 text-red-400' : 'bg-dark-light text-gray-400 hover:bg-red-500/20'"
@@ -1379,7 +1379,7 @@
                             失败
                         </button>
                     </div>
-                        <button 
+                        <button
                             @click="refreshTasks"
                             class="text-gray-400 hover:text-gradient-icon transition-colors flex-shrink-0"
                             title="刷新任务列表"
@@ -1400,9 +1400,9 @@
                         <p class="text-gray-500 text-xs mt-1">开始创建你的第一个AI视频吧</p>
                     </div>
                     <!-- 任务项 -->
-                    <div 
-                        v-for="task in filteredTasks" 
-                        :key="task.task_id" 
+                    <div
+                        v-for="task in filteredTasks"
+                        :key="task.task_id"
                         class="task-item p-2 rounded-lg cursor-pointer hover:bg-laser-purple/15 hover:shadow-laser transition-all duration-200"
                         :class="getTaskItemClass(task.status)"
                         @click="viewTaskDetail(task)"
@@ -1425,7 +1425,7 @@
                             <div class="flex-1 min-w-0">
                                 <div class="flex justify-between items-start mb-1 gap-2">
                                     <h3 class="font-medium text-sm truncate max-w-[calc(100%-2rem)]">{{ task.params.prompt || '无标题任务' }}</h3>
-                                    <div 
+                                    <div
                                         :class="getStatusIndicatorClass(task.status)"
                                         :title="getTaskStatusDisplay(task.status)"
                                         class="flex-shrink-0"
@@ -1442,12 +1442,12 @@
                             </div>
                         </div>
                     </div>
-                        
+
                     </div>
                 </div>
             </div>
             </div>
-            
+
             <!-- 用户信息区域 - 任务栏底部分区 -->
             <div class="mt-auto p-3 border-t border-laser-purple/40 user-info-section">
                 <div class="flex items-center space-x-3">
@@ -1463,7 +1463,7 @@
                     <div v-else class="w-10 h-10 rounded-full border border-laser-purple/40 bg-laser-purple/20 flex items-center justify-center flex-shrink-0">
                         <i class="fas fa-user text-gradient-icon"></i>
                     </div>
-                    
+
                     <!-- 用户信息 -->
                     <div class="flex-1 min-w-0">
                         <div class="text-sm font-medium text-gray-100 truncate">
@@ -1473,7 +1473,7 @@
                             {{ currentUser.email }}
                         </div>
                     </div>
-                    
+
                     <!-- 退出按钮 -->
                     <button @click="logout" class="text-gray-400 hover:text-gradient-icon transition-colors flex-shrink-0" title="退出登录">
                         <i class="fas fa-sign-out-alt"></i>
@@ -1490,7 +1490,7 @@
             <div class="flex-1 overflow-y-auto bg-dark p-6 content-area">
                 <!-- 模板选择浮窗 -->
                  <div v-cloak>
-                    <div v-if="showImageTemplates || showAudioTemplates" 
+                    <div v-if="showImageTemplates || showAudioTemplates"
                         class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
                         @click="showImageTemplates = false; showAudioTemplates = false">
                         <div class="bg-secondary rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden"
@@ -1507,14 +1507,14 @@
                                     <i class="fas fa-times text-xl"></i>
                                 </button>
                             </div>
-                            
+
                             <!-- 图片模板网格 -->
                             <div v-if="showImageTemplates" class="overflow-y-auto max-h-[50vh]">
                                 <div v-if="imageTemplates.length > 0" class="grid grid-cols-4 gap-4">
                                     <div v-for="template in imageTemplates" :key="template.filename"
                                         @click="selectImageTemplate(template)"
                                         class="relative group cursor-pointer rounded-lg overflow-hidden border border-gray-700 hover:border-laser-purple/50 transition-all">
-                                        <img :src="template.url" :alt="template.filename" 
+                                        <img :src="template.url" :alt="template.filename"
                                             class="w-full h-32 object-cover">
                                         <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                             <i class="fas fa-check text-white text-2xl"></i>
@@ -1531,7 +1531,7 @@
                                     <p class="text-gray-400 text-lg mb-2">目前暂无图片模板</p>
                                 </div>
                             </div>
-                            
+
                             <!-- 音频模板列表 -->
                             <div v-if="showAudioTemplates" class="overflow-y-auto max-h-[50vh]">
                                 <div v-if="audioTemplates.length > 0" class="space-y-3">
@@ -1545,7 +1545,7 @@
                                             <div class="text-white font-medium">{{ template.filename }}</div>
                                             <div class="text-gray-400 text-sm">音频模板</div>
                                         </div>
-                                        <button @click.stop="previewAudioTemplate(template)" 
+                                        <button @click.stop="previewAudioTemplate(template)"
                                                 class="px-3 py-2 bg-laser-purple/20 hover:bg-laser-purple/30 text-gradient-icon rounded-lg transition-all">
                                             <i class="fas fa-play mr-2"></i>
                                             试听
@@ -1562,7 +1562,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- 任务创建面板 -->
                 <div v-if="showCreator" class="max-w-4xl mx-auto" id="task-creator">
                     <!-- 任务类型选择 -->
@@ -1610,29 +1610,29 @@
                             <p class="text-xs text-gray-400 mb-4">支持JPG、PNG格式，大小不超过10MB</p>
                             <div class="flex gap-2">
                                 <button class="btn-primary px-4 py-1.5 rounded-lg transition-all flex-1">上传图片</button>
-                                <button @click.stop="showImageTemplates = !showImageTemplates" 
+                                <button @click.stop="showImageTemplates = !showImageTemplates"
                                         class="px-4 py-1.5 rounded-lg bg-laser-purple/20 hover:bg-laser-purple/30 text-gradient-icon border border-laser-purple/40 rounded-lg transition-all">
                                     <i class="fas fa-images mr-1"></i>
                                     模板
                                 </button>
                             </div>
                             </div>
-                            
+
                             <!-- 图片预览 -->
                             <div v-if="getCurrentImagePreview()" class="image-preview group">
                                 <img :src="getCurrentImagePreview()" alt="预览图片" class="w-full h-full object-cover rounded-lg transition-all duration-300 group-hover:brightness-50">
-                                
+
                                 <!-- 悬停时显示的操作按钮，位置在中下方 -->
                                 <div class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                     <div class="flex space-x-3">
-                                        <button 
-                                            @click.stop="triggerImageUpload" 
+                                        <button
+                                            @click.stop="triggerImageUpload"
                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
                                             title="重新上传">
                                             <i class="fas fa-upload text-lg"></i>
                                         </button>
-                                        <button 
-                                            @click.stop="removeImage" 
+                                        <button
+                                            @click.stop="removeImage"
                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
                                             title="删除图片">
                                             <i class="fas fa-trash text-lg"></i>
@@ -1640,15 +1640,15 @@
                                     </div>
                                 </div>
                             </div>
-                            
-                            <input 
-                                type="file" 
-                                ref="imageInput" 
-                                @change="handleImageUpload" 
-                                accept="image/*" 
+
+                            <input
+                                type="file"
+                                ref="imageInput"
+                                @change="handleImageUpload"
+                                accept="image/*"
                                 style="display: none;">
                         </div>
-                        
+
                         <!-- 上传音频 -->
                         <div v-if="selectedTaskId === 'digital_human'" class="upload-area" @click="triggerAudioUpload">
                             <!-- 默认上传界面 -->
@@ -1659,31 +1659,31 @@
                                 <p class="text-xs text-gray-400 mb-4">支持MP4、WAV格式，最长支持120s</p>
                             <div class="flex gap-2">
                                 <button class="btn-primary px-4 py-1.5 rounded-lg transition-all flex-1">上传音频</button>
-                                <button @click.stop="showAudioTemplates = !showAudioTemplates" 
+                                <button @click.stop="showAudioTemplates = !showAudioTemplates"
                                         class="px-4 py-1.5 rounded-lg bg-laser-purple/20 hover:bg-laser-purple/30 text-gradient-icon border border-laser-purple/40 rounded-lg transition-all">
                                     <i class="fas fa-music mr-1"></i>
                                     模板
                                 </button>
                             </div>
                             </div>
-                            
+
                             <!-- 音频预览 -->
                             <div v-if="getCurrentAudioPreview()" class="audio-preview group" @click.stop>
                                 <audio controls class="w-full h-full">
                                     <source :src="getCurrentAudioPreview()" :type="getAudioMimeType()">
                                 </audio>
-                                
+
                                 <!-- 悬停时显示的操作按钮，位置在中下方 -->
                                 <div class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/20">
                                     <div class="flex space-x-3">
-                                        <button 
-                                            @click.stop="triggerAudioUpload" 
+                                        <button
+                                            @click.stop="triggerAudioUpload"
                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
                                             title="重新上传">
                                             <i class="fas fa-upload text-lg"></i>
                                         </button>
-                                        <button 
-                                            @click.stop="removeAudio" 
+                                        <button
+                                            @click.stop="removeAudio"
                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
                                             title="删除音频">
                                             <i class="fas fa-trash text-lg"></i>
@@ -1691,12 +1691,12 @@
                                     </div>
                                 </div>
                             </div>
-                            
-                            <input 
-                                type="file" 
-                                ref="audioInput" 
-                                @change="handleAudioUpload" 
-                                accept="audio/*" 
+
+                            <input
+                                type="file"
+                                ref="audioInput"
+                                @change="handleAudioUpload"
+                                accept="audio/*"
                                 style="display: none;">
                         </div>
                     </div>
@@ -1714,13 +1714,13 @@
                                 </button>
                             </div>
                         </div>
-                        
+
                         <!-- 提示词模板选择 -->
                         <div v-if="showTemplates" class="mb-4 p-4 bg-linear-dark/30 rounded-lg">
                             <h4 class="text-sm font-medium mb-3 text-gradient-icon">选择提示词模板</h4>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <button 
-                                    v-for="template in getPromptTemplates(selectedTaskId)" 
+                                <button
+                                    v-for="template in getPromptTemplates(selectedTaskId)"
                                     :key="template.id"
                                     @click="selectPromptTemplate(template)"
                                     class="p-3 text-left bg-dark-light rounded-lg hover:bg-laser-purple/20 transition-all border border-transparent hover:border-laser-purple/40"
@@ -1733,7 +1733,7 @@
                                 <i class="fas fa-times mr-1"></i>关闭模板
                             </button>
                         </div>
-                        
+
                         <!-- 提示词历史记录 -->
                         <div v-if="showHistory" class="mb-4 p-4 bg-secondary/30 rounded-lg">
                             <div class="flex justify-between items-center mb-3">
@@ -1746,8 +1746,8 @@
                                 暂无历史记录
                             </div>
                             <div v-else class="space-y-2 max-h-40 overflow-y-auto">
-                                <button 
-                                    v-for="(history, index) in getPromptHistory()" 
+                                <button
+                                    v-for="(history, index) in getPromptHistory()"
                                     :key="index"
                                     @click="selectPromptHistory(history)"
                                     class="w-full p-3 text-left bg-dark-light rounded-lg hover:bg-laser-purple/20 transition-all border border-transparent hover:border-laser-purple/40"
@@ -1759,7 +1759,7 @@
                                 <i class="fas fa-times mr-1"></i>关闭历史
                             </button>
                         </div>
-                        
+
                         <div class="relative">
                             <textarea
                                 v-model="getCurrentForm().prompt"
@@ -1769,7 +1769,7 @@
                                 required
                             ></textarea>
                         </div>
-                        
+
                         <!-- 高级配置选项 -->
                         <!-- <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -1793,7 +1793,7 @@
                                 </select>
                             </div> -->
                         </div>
-                        
+
                         <div class="flex justify-between items-center mt-4">
                             <p class="text-xs text-gray-500">最多支持500个字符</p>
                             <div class="flex space-x-2">
@@ -1808,7 +1808,7 @@
                         </div>
                     </div>
                 </div>
-                
+
 
                 <!-- 任务详情显示面板 -->
                 <div v-if="selectedTask && !showCreator" class="max-w-4xl mx-auto task-detail-panel">
@@ -1825,14 +1825,14 @@
                                     <div class="flex items-center">
                                         <i class="fas fa-file-video text-gradient-icon mr-2"></i>
                                         <span class="text-sm">{{ output }}</span>
-                                        <span v-if="selectedTaskFiles.outputs[key] && selectedTaskFiles.outputs[key].error" 
+                                        <span v-if="selectedTaskFiles.outputs[key] && selectedTaskFiles.outputs[key].error"
                                               class="ml-2 text-xs text-red-400">
                                             <i class="fas fa-exclamation-triangle"></i> 加载失败
                                         </span>
                                     </div>
                                     <div class="flex space-x-2">
                                         <button v-if="selectedTaskFiles.outputs[key] && selectedTaskFiles.outputs[key].url"
-                                                @click="downloadFile(selectedTaskFiles.outputs[key])" 
+                                                @click="downloadFile(selectedTaskFiles.outputs[key])"
                                                 class="text-xs btn-primary px-2 py-1 rounded">
                                             <i class="fas fa-download mr-1"></i>下载
                                         </button>
@@ -1848,7 +1848,7 @@
     <div class="relative w-full h-[400px] flex items-center justify-center rounded-xl bg-black border border-laser-purple/50 overflow-hidden">
         <div data-test-id="dragable-content" data-is-dragging="false" draggable="true" class="w-full h-full flex items-center justify-center">
             <div class="w-full flexitems-center justify-center">
-                <video 
+                <video
                     v-if="selectedTaskFiles.outputs.output_video && selectedTaskFiles.outputs.output_video.url"
                     class="object-contain bg-black"
                     style="object-fit: contain; height: 400px; visibility: visible;"
@@ -1890,9 +1890,9 @@
                                 <h3 class="text-xl font-medium mb-2">视频生成中</h3>
                                 <p class="text-gray-400 mb-6">AI正在努力生成您的视频，请稍候...</p>
                             </div>
-                            
+
                         </div>
-                        
+
                         <!-- 任务失败信息 -->
                         <div v-if="selectedTask && selectedTask.status === 'FAILED' && !showCreator" class="max-w-4xl mx-auto task-failed-panel">
                             <div class="text-center py-8">
@@ -1905,7 +1905,7 @@
                                 </p>
                             </div>
                         </div>
-                        
+
                         <!-- 任务取消信息 -->
                         <div v-if="selectedTask && selectedTask.status === 'CANCEL' && !showCreator" class="max-w-4xl mx-auto task-cancelled-panel">
                             <div class="text-center py-8">
@@ -1917,19 +1917,19 @@
                                     此任务已被取消，您可以重新生成或查看之前上传的素材。
                                 </p>
                             </div>
-                            
+
                         </div>
-                        
+
                         <!-- 任务操作 -->
                         <div class="flex justify-center space-x-3 p-4">
-                            <button v-if="['CREATED', 'PENDING', 'RUNNING'].includes(selectedTask.status)" 
-                                    @click="cancelTask(selectedTask.task_id)" 
+                            <button v-if="['CREATED', 'PENDING', 'RUNNING'].includes(selectedTask.status)"
+                                    @click="cancelTask(selectedTask.task_id)"
                                     class="px-4 py-2 btn-primary rounded-lg text-sm transition-all">
                                 <i class="fas fa-times mr-2"></i>
                                 取消任务
                             </button>
-                            <button v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(selectedTask.status)" 
-                                    @click="resumeTask(selectedTask.task_id)" 
+                            <button v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(selectedTask.status)"
+                                    @click="resumeTask(selectedTask.task_id)"
                                     class="px-4 py-2 btn-primary rounded-lg text-sm transition-all">
                                 <i class="fas fa-redo mr-2"></i>
                                 重新生成
@@ -1964,7 +1964,7 @@
                                 </li>
                             </ul>
                         </div>
-                        
+
                         <!-- 提示词 -->
                         <div class="bg-secondary/30 rounded-xl p-4 mb-6">
                             <h4 class="text-sm font-medium mb-3 flex items-center">
@@ -1975,7 +1975,7 @@
                                 <p>{{ selectedTask.params.prompt || '无提示词' }}</p>
                             </div>
                         </div>
-                        
+
                         <div v-if="selectedTask.inputs && Object.keys(selectedTask.inputs).length" class="bg-secondary/30 rounded-xl p-4 mb-6">
                             <h4 class="text-sm font-medium mb-3 flex items-center">
                                 <i class="fas fa-upload text-gradient-icon mr-2"></i>
@@ -1988,12 +1988,12 @@
                                         <template v-if="key.includes('image')">
                                             <i class="fas fa-image text-gradient-icon text-xl"></i>
                                             <div class="flex items-center gap-2">
-                                                <span v-if="!selectedTaskFiles.inputs[key] || !selectedTaskFiles.inputs[key].url" 
+                                                <span v-if="!selectedTaskFiles.inputs[key] || !selectedTaskFiles.inputs[key].url"
                                                       class="text-gray-400 text-sm">{{ typeof input === 'string' ? input : '图片' }}</span>
                                                 <div class="flex items-center gap-2 relative group">
-                                                    <img v-if="selectedTaskFiles.inputs[key] && selectedTaskFiles.inputs[key].url" 
-                                                         :src="selectedTaskFiles.inputs[key].url" 
-                                                         :alt="input" 
+                                                    <img v-if="selectedTaskFiles.inputs[key] && selectedTaskFiles.inputs[key].url"
+                                                         :src="selectedTaskFiles.inputs[key].url"
+                                                         :alt="input"
                                                          class="w-20 h-20 object-cover rounded bg-dark-light border border-gray-700">
                                                     <div v-else-if="selectedTaskFiles.inputs[key] && selectedTaskFiles.inputs[key].error"
                                                          class="w-20 h-20 rounded bg-red-900/20 border border-red-500/30 flex items-center justify-center">
@@ -2014,12 +2014,12 @@
                                         <template v-else-if="key.includes('audio')">
                                             <i class="fas fa-microphone text-gradient-icon text-xl"></i>
                                             <div class="flex items-center gap-2">
-                                                <span v-if="!selectedTaskFiles.inputs[key] || !selectedTaskFiles.inputs[key].url" 
+                                                <span v-if="!selectedTaskFiles.inputs[key] || !selectedTaskFiles.inputs[key].url"
                                                       class="text-gray-400 text-sm">{{ typeof input === 'string' ? input : '音频文件' }}</span>
                                                 <div class="flex items-center gap-2">
-                                                    <audio v-if="selectedTaskFiles.inputs[key] && selectedTaskFiles.inputs[key].url" 
-                                                           :src="selectedTaskFiles.inputs[key].url" 
-                                                           controls 
+                                                    <audio v-if="selectedTaskFiles.inputs[key] && selectedTaskFiles.inputs[key].url"
+                                                           :src="selectedTaskFiles.inputs[key].url"
+                                                           controls
                                                            class="h-8 text-gradient-icon">
                                                         您的浏览器不支持音频播放
                                                     </audio>
@@ -2044,7 +2044,7 @@
                                 </template>
                             </div>
                         </div>
-                        
+
                         </div>
                     </div>
                 </div>
@@ -2059,7 +2059,7 @@
 
         <!-- 增强的提示消息系统 -->
         <div v-cloak>
-            <div v-if="alert.show" 
+            <div v-if="alert.show"
                 class="fixed top-3 left-1/2 transform -translate-x-1/2 z-50 max-w-[16rem] w-full px-1"
                 :class="getAlertClass(alert.type)">
                 <div class="alert flex items-center p-2 rounded-md shadow-md border-l-4 transition-all duration-300 ease-out"
@@ -2073,7 +2073,7 @@
                         </p>
                     </div>
                     <div class="flex-shrink-0 ml-1">
-                        <button @click="alert.show = false" 
+                        <button @click="alert.show = false"
                                 class="text-gray-400 hover:text-gray-600 transition-colors">
                             <i class="fas fa-times text-xs"></i>
                         </button>
@@ -2094,19 +2094,19 @@
             testIcon.style.position = 'absolute';
             testIcon.style.left = '-9999px';
             document.body.appendChild(testIcon);
-            
+
             const computedStyle = window.getComputedStyle(testIcon, ':before');
             const content = computedStyle.getPropertyValue('content');
-            
+
             document.body.removeChild(testIcon);
-            
+
             // 如果图标没有正确显示，使用备用方案
             if (!content || content === 'none' || content === 'normal') {
                 console.warn('Font Awesome 图标加载失败，使用备用方案');
                 replaceIconsWithFallback();
             }
         }
-        
+
         // 使用备用图标替换失败的图标
         function replaceIconsWithFallback() {
             const iconMap = {
@@ -2149,7 +2149,7 @@
                 'fas fa-redo': '🔄',
                 'fas fa-pause': '⏸️'
             };
-            
+
             // 替换所有图标
             Object.keys(iconMap).forEach(iconClass => {
                 const icons = document.querySelectorAll(`.${iconClass.replace(/\s+/g, '.')}`);
@@ -2159,7 +2159,7 @@
                 });
             });
         }
-        
+
         // 页面加载完成后检查图标
         document.addEventListener('DOMContentLoaded', function() {
             setTimeout(checkFontAwesome, 1000); // 延迟1秒检查，确保CDN加载完成
@@ -2179,10 +2179,10 @@
                 const searchQuery = ref('');
                 const generatingThumbnails = ref(false);
                 const sidebarCollapsed = ref(false);
-                
+
                 const thumbnailCache = ref(new Map());
                 const thumbnailCacheLoaded = ref(false);
-                
+
                 const imageTemplates = ref([]);
                 const audioTemplates = ref([]);
                 const showImageTemplates = ref(false);
@@ -2247,7 +2247,7 @@
                 const i2vImagePreview = ref(null);
                 const digitalHumanImagePreview = ref(null);
                 const digitalHumanAudioPreview = ref(null);
-                
+
                 // 根据当前任务类型获取对应的预览变量
                 const getCurrentImagePreview = () => {
                     switch (selectedTaskId.value) {
@@ -2261,7 +2261,7 @@
                             return null;
                     }
                 };
-                
+
                 const getCurrentAudioPreview = () => {
                     switch (selectedTaskId.value) {
                         case 't2v':
@@ -2274,7 +2274,7 @@
                             return null;
                     }
                 };
-                
+
                 const setCurrentImagePreview = (value) => {
                     switch (selectedTaskId.value) {
                         case 't2v':
@@ -2287,7 +2287,7 @@
                             break;
                     }
                 };
-                
+
                 const setCurrentAudioPreview = (value) => {
                     switch (selectedTaskId.value) {
                         case 't2v':
@@ -2309,44 +2309,44 @@
                     const types = [...new Set(models.value.map(m => m.task))];
                     // 重新排序，确保数字人在最左边
                     const orderedTypes = [];
-                    
+
                     // 检查是否有包含audio或seko的i2v模型，如果有则添加digital_human类型
-                    const hasDigitalHumanModels = models.value.some(m => 
+                    const hasDigitalHumanModels = models.value.some(m =>
                         m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko'))
                     );
-                    
+
                     // 优先添加数字人（如果存在相关模型）
                     if (hasDigitalHumanModels) {
                         orderedTypes.push('digital_human');
                     }
-                    
+
                     // 然后添加其他类型
                     types.forEach(type => {
                         if (type !== 'digital_human') {
                             orderedTypes.push(type);
                         }
                     });
-                    
+
                     return orderedTypes;
                 });
 
                 const availableModelClasses = computed(() => {
                     if (!selectedTaskId.value) return [];
-                    
+
                     // 如果是数字人任务类型，显示包含audio或seko的i2v模型
                     if (selectedTaskId.value === 'digital_human') {
                         return [...new Set(models.value
                             .filter(m => m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko')))
                             .map(m => m.model_cls))];
                     }
-                    
+
                     // 如果是i2v任务类型，剔除包含audio或seko的模型
                     if (selectedTaskId.value === 'i2v') {
                         return [...new Set(models.value
                             .filter(m => m.task === 'i2v' && !m.model_cls.toLowerCase().includes('audio') && !m.model_cls.toLowerCase().includes('seko'))
                             .map(m => m.model_cls))];
                     }
-                    
+
                     // 其他任务类型正常处理
                     return [...new Set(models.value
                         .filter(m => m.task === selectedTaskId.value)
@@ -2355,28 +2355,28 @@
 
                 const filteredTasks = computed(() => {
                     let filtered = tasks.value;
-                    
+
                     // 状态过滤
                     if (statusFilter.value !== 'ALL') {
                         filtered = filtered.filter(task => task.status === statusFilter.value);
                     }
-                    
+
                     // 搜索过滤
                     if (searchQuery.value) {
-                        filtered = filtered.filter(task => 
+                        filtered = filtered.filter(task =>
                         task.params.prompt?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
                         task.task_id.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
                         task.task_type.toLowerCase().includes(searchQuery.value.toLowerCase())
                     );
                     }
-                    
+
                     // 按时间排序，最新的任务在前面
                     filtered = filtered.sort((a, b) => {
                         const timeA = parseInt(a.create_t) || 0;
                         const timeB = parseInt(b.create_t) || 0;
                         return timeB - timeA; // 降序排列，最新的在前
                     });
-                    
+
                     return filtered;
                 });
 
@@ -2445,7 +2445,7 @@
                             console.log(data);
                             localStorage.setItem('accessToken', data.access_token);
                             localStorage.setItem('currentUser', JSON.stringify(data.user_info));
-                            currentUser.value = data.user_info;                            
+                            currentUser.value = data.user_info;
                             isLoggedIn.value = true;
                         } else {
                             const error = await response.json();
@@ -2515,20 +2515,20 @@
                         if (response.ok) {
                             const blob = await response.blob();
                             const file = new File([blob], template.filename, { type: blob.type });
-                            
+
                             if (selectedTaskId.value === 'i2v') {
                                 i2vForm.value.imageFile = file;
                             } else if (selectedTaskId.value === 'digital_human') {
                                 digitalHumanForm.value.imageFile = file;
                             }
-                            
+
                             // 创建预览
                             const reader = new FileReader();
                             reader.onload = (e) => {
                                 setCurrentImagePreview(e.target.result);
                             };
                             reader.readAsDataURL(file);
-                            
+
                             showImageTemplates.value = false;
                             showAlert('图片模板已选择', 'success');
                         } else {
@@ -2546,16 +2546,16 @@
                         if (response.ok) {
                             const blob = await response.blob();
                             const file = new File([blob], template.filename, { type: blob.type });
-                            
+
                             digitalHumanForm.value.audioFile = file;
-                            
+
                             // 创建预览
                             const reader = new FileReader();
                             reader.onload = (e) => {
                                 setCurrentAudioPreview(e.target.result);
                             };
                             reader.readAsDataURL(file);
-                            
+
                             showAudioTemplates.value = false;
                             showAlert('音频模板已选择', 'success');
                         } else {
@@ -2596,7 +2596,7 @@
 
                 const selectTask = (taskType) => {
                     selectedTaskId.value = taskType;
-                    
+
                     // 根据任务类型恢复对应的预览
                     if (taskType === 'i2v' && i2vForm.value.imageFile) {
                         // 恢复图片预览
@@ -2622,7 +2622,7 @@
                             reader.readAsDataURL(digitalHumanForm.value.audioFile);
                         }
                     }
-                    
+
                     // 如果当前表单没有选择模型，自动选择第一个可用的模型
                     const currentForm = getCurrentForm();
                     if (!currentForm.model_cls) {
@@ -2683,7 +2683,7 @@
 
                 const handleAudioUpload = (event) => {
                     const file = event.target.files[0];
-                    
+
                     if (file) {
                         digitalHumanForm.value.audioFile = file;
                         const reader = new FileReader();
@@ -2700,52 +2700,52 @@
                 const submitTask = async () => {
                     try {
                         const currentForm = getCurrentForm();
-                        
+
                         // 表单验证
                         if (!selectedTaskId.value) {
                             showAlert('请选择任务类型', 'warning');
                             return;
                         }
-                        
+
                         if (!currentForm.model_cls) {
                             showAlert('请选择模型', 'warning');
                             return;
                         }
-                        
+
                         if (!currentForm.prompt || currentForm.prompt.trim().length === 0) {
                             showAlert('请输入提示词', 'warning');
                             return;
                         }
-                        
+
                         if (currentForm.prompt.length > 500) {
                             showAlert('提示词长度不能超过500个字符', 'warning');
                             return;
                         }
-                        
+
                         if (selectedTaskId.value === 'i2v' && !currentForm.imageFile) {
                             showAlert('图生视频任务需要上传参考图片', 'warning');
                             return;
                         }
-                        
+
                         if (selectedTaskId.value === 'digital_human' && !currentForm.imageFile) {
                             showAlert('数字人任务需要上传参考图片', 'warning');
                             return;
                         }
-                        
+
                         if (selectedTaskId.value === 'digital_human' && !currentForm.audioFile) {
                             showAlert('数字人任务需要上传音频文件', 'warning');
                             return;
                         }
-                        
+
                         setLoading(true);
                         submitting.value = true;
-                        
+
                         // 确定实际提交的任务类型
                         let actualTaskType = selectedTaskId.value;
                         if (selectedTaskId.value === 'digital_human') {
                             actualTaskType = 'i2v'; // 数字人任务实际提交为i2v
                         }
-                        
+
                         var formData = {
                             task: actualTaskType,
                             model_cls: currentForm.model_cls,
@@ -2753,7 +2753,7 @@
                             prompt: currentForm.prompt.trim(),
                             seed: currentForm.seed || Math.floor(Math.random() * 1000000)
                         };
-                        
+
                         if (currentForm.model_cls.startsWith('wan2.1')) {
                             formData.negative_prompt = "镜头晃动，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
                         }
@@ -2792,18 +2792,18 @@
                         if (response && response.ok) {
                             const result = await response.json();
                             showAlert(`任务提交成功！任务ID: ${result.task_id}`, 'success');
-                            
+
                             // 保存提示词到历史记录
                             addPromptToHistory(currentForm.prompt);
-                            
+
                             await refreshTasks();
                             showCreator.value = true;
-                            
+
                             // 重新选择数字人任务（如果可用）
                             if (availableTaskTypes.value.includes('digital_human')) {
                                 selectTask('digital_human');
                             }
-                            
+
                             // 重置所有表单
                             t2vForm.value = {
                                 task: 't2v',
@@ -2868,11 +2868,11 @@
                     for (const task of tasks) {
                         if (task.inputs) {
                             // 查找输入中的图片文件
-                            const imageInputs = Object.keys(task.inputs).filter(key => 
-                                key.includes('image') || 
+                            const imageInputs = Object.keys(task.inputs).filter(key =>
+                                key.includes('image') ||
                                 task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
                             );
-                            
+
                             // 预加载第一个输入图片
                             if (imageInputs.length > 0) {
                                 const firstImageKey = imageInputs[0];
@@ -2881,12 +2881,12 @@
                                     // 创建Image对象预加载输入图片
                                     const img = new Image();
                                     img.src = imageUrl;
-                                    
+
                                     // 监听加载完成事件
                                     img.onload = () => {
                                         console.log(`Input image preloaded for task ${task.task_id}: ${firstImageKey}`);
                                     };
-                                    
+
                                     img.onerror = () => {
                                         console.warn(`Failed to preload input image for task ${task.task_id}: ${firstImageKey}`);
                                     };
@@ -2905,11 +2905,11 @@
                             if (response && response.ok) {
                                 const data = await response.json();
                                 const thumbnails = data.thumbnails || {};
-                                
+
                                 for (const [taskId, thumbnailUrl] of Object.entries(thumbnails)) {
                                     thumbnailCache.value.set(taskId, thumbnailUrl);
                                 }
-                                
+
                                 thumbnailCacheLoaded.value = true;
                                 console.log(`缩略图一次性加载完成，共缓存${Object.keys(thumbnails).length}个任务`);
                             } else {
@@ -2927,19 +2927,19 @@
                     // 使用串行加载避免过快访问
                     for (let i = 0; i < tasksToCache.length; i++) {
                         const task = tasksToCache[i];
-                        
+
                         if (task.inputs) {
                             // 查找输入中的图片文件
-                            const imageInputs = Object.keys(task.inputs).filter(key => 
-                                key.includes('image') || 
+                            const imageInputs = Object.keys(task.inputs).filter(key =>
+                                key.includes('image') ||
                                 task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
                             );
-                            
+
                             if (imageInputs.length > 0) {
                                 const firstImageKey = imageInputs[0];
                                 try {
                                     const imageUrl = getTaskInputUrl(task.task_id, firstImageKey);
-                                    
+
                                     // 使用重试机制加载图片
                                     const success = await loadImageWithRetry(task.task_id, imageUrl, 3);
                                     if (success) {
@@ -2950,7 +2950,7 @@
                                 }
                             }
                         }
-                        
+
                         // 添加延迟避免过快访问
                         if (i < tasksToCache.length - 1) {
                             await new Promise(resolve => setTimeout(resolve, 200)); // 200ms延迟
@@ -2966,25 +2966,25 @@
                                 const img = new Image();
                                 img.onload = () => resolve(true);
                                 img.onerror = () => resolve(false);
-                                
+
                                 // 设置超时
                                 const timeout = setTimeout(() => {
                                     resolve(false);
                                 }, 10000); // 10秒超时
-                                
+
                                 img.onload = () => {
                                     clearTimeout(timeout);
                                     resolve(true);
                                 };
-                                
+
                                 img.onerror = () => {
                                     clearTimeout(timeout);
                                     resolve(false);
                                 };
-                                
+
                                 img.src = imageUrl;
                             });
-                            
+
                             if (success) {
                                 return true;
                             } else if (attempt < maxRetries) {
@@ -3015,7 +3015,7 @@
                             const data = await response.json();
                             tasks.value = data.tasks || [];
                             pagination.value = data.pagination || null;
-                            
+
                             if (!thumbnailCacheLoaded.value) {
                                 await preloadThumbnailCache(tasks.value);
                             } else {
@@ -3127,27 +3127,27 @@
                     }
                 };
 
-   
+
 
                 const loadTaskFiles = async (taskId) => {
                     try {
                         loadingTaskFiles.value = true;
-                        
+
                         // 通过API获取任务详情
                         const response = await apiRequest(`./api/v1/task/query?task_id=${taskId}`);
                         if (!response || !response.ok) {
                             showAlert('获取任务详情失败', 'danger');
                             return;
                         }
-                        
+
                         const task = await response.json();
                         if (!task) {
                             showAlert('任务不存在', 'danger');
                             return;
                         }
-                        
+
                         const files = { inputs: {}, outputs: {} };
-                        
+
                         // 获取输入文件（所有状态的任务都需要）
                         if (task.inputs) {
                             for (const [key, inputPath] of Object.entries(task.inputs)) {
@@ -3172,7 +3172,7 @@
                                 }
                             }
                         }
-                        
+
                         // 只对成功完成的任务获取输出文件
                         if (task.status === 'SUCCEED' && task.outputs) {
                             for (const [key, outputPath] of Object.entries(task.outputs)) {
@@ -3197,9 +3197,9 @@
                                 }
                             }
                         }
-                        
+
                         selectedTaskFiles.value = files;
-                        
+
                     } catch (error) {
                         console.error('Failed to load task files:', error);
                         showAlert('加载任务文件失败', 'danger');
@@ -3211,11 +3211,11 @@
                 const viewTaskDetail = async (task) => {
                     // 清理之前的文件缓存
                     clearTaskFiles();
-                    
+
                     selectedTask.value = task;
                     selectedTaskId.value = task.task_type;
                     showCreator.value = false;
-                    
+
                     // 一次性加载所有任务文件
                     await loadTaskFiles(task.task_id);
                 };
@@ -3225,7 +3225,7 @@
                         showAlert('文件不可用', 'danger');
                         return;
                     }
-                    
+
                     try {
                         const url = URL.createObjectURL(fileInfo.blob);
                         const a = document.createElement('a');
@@ -3246,7 +3246,7 @@
                         showAlert('文件不可用', 'danger');
                         return;
                     }
-                    
+
                     // 在新窗口中打开文件
                     window.open(fileInfo.url, '_blank');
                 };
@@ -3333,16 +3333,16 @@
                         };
                         return nameMap[task] || task;
                     }
-                    
+
                     // 如果传入的是任务对象，根据模型类型判断
                     if (task && task.model_cls) {
                         const modelCls = task.model_cls.toLowerCase();
-                        
+
                         // 检查是否是数字人模型（包含audio或seko）
                         if (modelCls.includes('audio') || modelCls.includes('seko')) {
                             return '数字人';
                         }
-                        
+
                         // 根据task_type判断
                         const nameMap = {
                             't2v': '文生视频',
@@ -3351,7 +3351,7 @@
                         };
                         return nameMap[task.task_type] || task.task_type;
                     }
-                    
+
                     // 默认返回task_type
                     return task.task_type || '未知';
                 };
@@ -3391,16 +3391,16 @@
 
                 const getTaskInputImage = (task) => {
                     if (!task || !task.inputs) return null;
-                    const imageInputs = Object.keys(task.inputs).filter(key => 
-                        key.includes('image') || 
+                    const imageInputs = Object.keys(task.inputs).filter(key =>
+                        key.includes('image') ||
                         task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
                     );
-                    
+
                     if (imageInputs.length > 0) {
                         const firstImageKey = imageInputs[0];
                         return getTaskInputUrl(task.task_id, firstImageKey);
                     }
-                    
+
                     return null;
                 };
 
@@ -3408,7 +3408,7 @@
                     if (thumbnailCache.value.has(taskId)) {
                         return thumbnailCache.value.get(taskId);
                     }
-                    
+
                     const task = tasks.value.find(t => t.task_id === taskId);
                     if (task) {
                         const inputImageUrl = getTaskInputImage(task);
@@ -3420,7 +3420,7 @@
                     } else {
                         console.log(`未找到任务: ${taskId}`);
                     }
-                    
+
                     // 如果没有输入图片，返回空字符串，让handleThumbnailError处理
                     return '';
                 };
@@ -3433,10 +3433,10 @@
                             hasThumbnail: true
                         };
                     }
-                    
+
                     // 如果缓存中没有，异步加载并更新缓存
                     loadThumbnailAsync(taskId, name);
-                    
+
                     // 返回空，让模板显示默认图标
                     return {
                         url: '',
@@ -3447,18 +3447,18 @@
                 const loadThumbnailAsync = async (taskId, name) => {
                     const task = tasks.value.find(t => t.task_id === taskId);
                     if (!task || !task.inputs) return;
-                    
+
                     // 查找输入中的图片文件
-                    const imageInputs = Object.keys(task.inputs).filter(key => 
-                        key.includes('image') || 
+                    const imageInputs = Object.keys(task.inputs).filter(key =>
+                        key.includes('image') ||
                         task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
                     );
-                    
+
                     if (imageInputs.length > 0) {
                         const firstImageKey = imageInputs[0];
                         try {
                             const imageUrl = getTaskInputUrl(taskId, firstImageKey);
-                            
+
                             // 使用重试机制加载图片
                             const success = await loadImageWithRetry(taskId, imageUrl, 3);
                             if (success) {
@@ -3533,14 +3533,14 @@
                     try {
                         const url = getTaskInputUrl(taskId, inputName);
                         const response = await apiRequest(url);
-                        
+
                         if (!response || !response.ok) {
                             throw new Error(`下载失败: ${response ? response.status : '认证失败'}`);
                         }
-                        
+
                         const blob = await response.blob();
                         const downloadUrl = window.URL.createObjectURL(blob);
-                        
+
                         // 创建下载链接
                         const link = document.createElement('a');
                         link.href = downloadUrl;
@@ -3549,11 +3549,11 @@
                         link.download = filename;
                         document.body.appendChild(link);
                         link.click();
-                        
+
                         // 清理
                         document.body.removeChild(link);
                         window.URL.revokeObjectURL(downloadUrl);
-                        
+
                         showAlert('文件下载成功', 'success');
                     } catch (error) {
                         console.error('下载失败:', error);
@@ -3621,13 +3621,13 @@
                     const now = new Date();
                     const time = new Date(timestamp * 1000);
                     const diff = now - time;
-                    
+
                     const minutes = Math.floor(diff / 60000);
                     const hours = Math.floor(diff / 3600000);
                     const days = Math.floor(diff / 86400000);
                     const months = Math.floor(diff / 2592000000); // 30天
                     const years = Math.floor(diff / 31536000000);
-                    
+
                     if (years > 0) {
                         return years === 1 ? '一年前' : `${years}年前`;
                     } else if (months > 0) {
@@ -3645,13 +3645,13 @@
 
                 // 任务历史记录管理
                 const getTaskHistory = () => {
-                    return tasks.value.filter(task => 
+                    return tasks.value.filter(task =>
                         ['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)
                     );
                 };
 
                 const getActiveTasks = () => {
-                    return tasks.value.filter(task => 
+                    return tasks.value.filter(task =>
                         ['CREATED', 'PENDING', 'RUNNING'].includes(task.status)
                     );
                 };
@@ -3726,43 +3726,43 @@
                 // 监听器 - 监听任务类型变化
                 watch(() => selectedTaskId.value, () => {
                     const currentForm = getCurrentForm();
-                    
+
                     // 只有当当前表单没有选择模型时，才自动选择第一个可用的模型
                     if (!currentForm.model_cls) {
                         let availableModels;
-                        
+
                         // 如果是数字人任务，从i2v模型中筛选包含audio或seko的模型
                         if (selectedTaskId.value === 'digital_human') {
-                            availableModels = models.value.filter(m => 
+                            availableModels = models.value.filter(m =>
                                 m.task === 'i2v' && (m.model_cls.toLowerCase().includes('audio') || m.model_cls.toLowerCase().includes('seko'))
                             );
                         } else if (selectedTaskId.value === 'i2v') {
                             // 如果是i2v任务，排除包含audio或seko的模型
-                            availableModels = models.value.filter(m => 
+                            availableModels = models.value.filter(m =>
                                 m.task === 'i2v' && !m.model_cls.toLowerCase().includes('audio') && !m.model_cls.toLowerCase().includes('seko')
                             );
                         } else {
                             availableModels = models.value.filter(m => m.task === selectedTaskId.value);
                         }
-                        
+
                         if (availableModels.length > 0) {
                             const firstModel = availableModels[0];
                             currentForm.model_cls = firstModel.model_cls;
                             currentForm.stage = firstModel.stage;
                         }
                     }
-                    
+
                     // 注意：这里不需要重置预览，因为我们要保持每个任务的独立性
                     // 预览会在 selectTask 函数中根据文件状态恢复
                 });
 
                 watch(() => getCurrentForm().model_cls, () => {
                     const currentForm = getCurrentForm();
-                    
+
                     // 只有当当前表单没有选择阶段时，才自动选择第一个可用的阶段
                     if (!currentForm.stage) {
                         let availableStages;
-                        
+
                         // 如果是数字人任务，从i2v模型中筛选
                         if (selectedTaskId.value === 'digital_human') {
                             availableStages = models.value
@@ -3778,7 +3778,7 @@
                                 .filter(m => m.task === selectedTaskId.value && m.model_cls === currentForm.model_cls)
                                 .map(m => m.stage);
                         }
-                        
+
                         if (availableStages.length > 0) {
                             currentForm.stage = availableStages[0];
                         }
@@ -3787,7 +3787,7 @@
 
                 // 生命周期
                 onMounted(async () => {
-                    
+
                     // 检查是否已登录
                     const savedToken = localStorage.getItem('accessToken');
                     const savedUser = localStorage.getItem('currentUser');
@@ -3811,12 +3811,12 @@
                             handleGitHubCallback(code);
                         }
                     }
-                    
+
                     // 无论是否登录都要加载模型数据
                     await initModelAndTasks();
                     loadPromptHistory();
                     loadTemplates();
-                    
+
                     // 等待模型数据加载完成后再检查任务类型
                     if (availableTaskTypes.value.includes('digital_human')) {
                         selectTask('digital_human');
@@ -3902,21 +3902,21 @@
 
                 const addPromptToHistory = (prompt) => {
                     if (!prompt || prompt.trim().length === 0) return;
-                    
+
                     // 避免重复添加
                     const trimmedPrompt = prompt.trim();
                     if (promptHistory.value.includes(trimmedPrompt)) {
                         // 将已存在的提示词移到最前面
                         promptHistory.value = promptHistory.value.filter(p => p !== trimmedPrompt);
                     }
-                    
+
                     promptHistory.value.push(trimmedPrompt);
-                    
+
                     // 限制历史记录数量
                     if (promptHistory.value.length > 50) {
                         promptHistory.value = promptHistory.value.slice(-50);
                     }
-                    
+
                     // 保存到本地存储
                     localStorage.setItem('promptHistory', JSON.stringify(promptHistory.value));
                 };
@@ -3944,12 +3944,12 @@
                         console.warn('加载提示词历史记录失败:', error);
                     }
                 };
-                
+
                 const getAuthHeaders = () => {
                     const headers = {
                         'Content-Type': 'application/json'
                     };
-                    
+
                     const token = localStorage.getItem('accessToken');
                     if (token) {
                         headers['Authorization'] = `Bearer ${token}`;
@@ -3980,7 +3980,7 @@
                 // 增强的API请求函数，自动处理认证错误
                 const apiRequest = async (url, options = {}) => {
                     const headers = getAuthHeaders();
-                    
+
                     try {
                         const response = await fetch(url, {
                             ...options,
@@ -4014,17 +4014,17 @@
 
                 const startResize = (e) => {
                     e.preventDefault();
-                    
+
                     // 在小屏幕时禁用拖拽调整
                     const windowWidth = window.innerWidth;
                     if (windowWidth <= 1200) {
                         return;
                     }
-                    
+
                     isResizing = true;
                     startX = e.clientX;
                     startWidth = sidebar.value.offsetWidth;
-                    
+
                     document.body.classList.add('resizing');
                     document.addEventListener('mousemove', handleResize);
                     document.addEventListener('mouseup', stopResize);
@@ -4032,19 +4032,19 @@
 
                 const handleResize = (e) => {
                     if (!isResizing) return;
-                    
+
                     // 在小屏幕时停止拖拽调整
                     const windowWidth = window.innerWidth;
                     if (windowWidth <= 1200) {
                         stopResize();
                         return;
                     }
-                    
+
                     const deltaX = e.clientX - startX;
                     const newWidth = startWidth + deltaX;
                     const minWidth = 200;
                     const maxWidth = 500;
-                    
+
                     if (newWidth >= minWidth && newWidth <= maxWidth) {
                         sidebar.value.style.width = newWidth + 'px';
                         // 同时调整主内容区域宽度
@@ -4060,7 +4060,7 @@
                     document.body.classList.remove('resizing');
                     document.removeEventListener('mousemove', handleResize);
                     document.removeEventListener('mouseup', stopResize);
-                    
+
                     // 保存当前宽度到localStorage
                     if (sidebar.value) {
                         localStorage.setItem('sidebarWidth', sidebar.value.offsetWidth);
@@ -4070,10 +4070,10 @@
                 // 应用响应式侧边栏宽度
                 const applyResponsiveWidth = () => {
                     if (!sidebar.value) return;
-                    
+
                     const windowWidth = window.innerWidth;
                     let sidebarWidth;
-                    
+
                     if (windowWidth <= 768) {
                         sidebarWidth = '200px';
                     } else if (windowWidth <= 1200) {
@@ -4092,7 +4092,7 @@
                             sidebarWidth = '256px'; // 默认 w-64
                         }
                     }
-                    
+
                     sidebar.value.style.width = sidebarWidth;
                     const mainContent = document.querySelector('main');
                     if (mainContent) {
@@ -4103,7 +4103,7 @@
                 // 恢复保存的侧边栏宽度
                 onMounted(() => {
                     applyResponsiveWidth();
-                    
+
                     // 监听窗口大小变化
                     window.addEventListener('resize', applyResponsiveWidth);
                 });

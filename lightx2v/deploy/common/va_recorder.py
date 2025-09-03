@@ -1,14 +1,15 @@
-import torch
-import torchaudio as ta
+import queue
+import signal
 import socket
 import subprocess
 import threading
-import numpy as np
-from loguru import logger
-import traceback
-import queue
 import time
-import signal
+import traceback
+
+import numpy as np
+import torch
+import torchaudio as ta
+from loguru import logger
 
 
 class VARecorder:
@@ -158,7 +159,7 @@ class VARecorder:
             self.livestream_url,
             "-y",
             "-loglevel",
-            "info"
+            "info",
         ]
         try:
             self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
@@ -218,7 +219,7 @@ class VARecorder:
             self.livestream_url,
             "-y",
             "-loglevel",
-            "info"
+            "info",
         ]
         try:
             self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
@@ -246,7 +247,7 @@ class VARecorder:
         self.video_thread.start()
 
     # Publish ComfyUI Image tensor and audio tensor to livestream
-    def pub_livestream(self, images: torch.Tensor, audios: np.ndarray):        
+    def pub_livestream(self, images: torch.Tensor, audios: np.ndarray):
         N, height, width, C = images.shape
         M = audios.reshape(-1).shape[0]
         assert C == 3, "Input must be [N, H, W, C] with C=3"
@@ -338,7 +339,7 @@ def create_simple_video(frames=10, height=480, width=640):
             end_y = min((j + 1) * stripe_height, height)
             frame[start_y:end_y, :] = color
         offset = int((i / frames) * width)
-        frame = np.roll(frame, offset, axis=1)        
+        frame = np.roll(frame, offset, axis=1)
         frame = torch.tensor(frame, dtype=torch.float32)
         video_data.append(frame)
     return torch.stack(video_data, dim=0)
@@ -368,7 +369,7 @@ if __name__ == "__main__":
         logger.info(f"{i} / {secs} s")
         start = i * sample_rate
         end = (i + interval) * sample_rate
-        cur_audio_array = audio_array[start: end]
+        cur_audio_array = audio_array[start:end]
         logger.info(f"audio: {cur_audio_array.shape} {cur_audio_array.dtype} {cur_audio_array.min()} {cur_audio_array.max()}")
 
         num_frames = int(interval * fps)

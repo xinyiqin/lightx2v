@@ -1,20 +1,20 @@
-import os
-import sys
-import signal
-import uuid
-import json
-import asyncio
 import argparse
-import aiohttp
+import asyncio
+import json
+import os
+import signal
+import sys
 import traceback
+import uuid
+
+import aiohttp
+import torch
+import torch.distributed as dist
 from loguru import logger
 
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.task_manager import TaskStatus
-from lightx2v.deploy.worker.hub import PipelineWorker, TextEncoderWorker, ImageEncoderWorker, VaeEncoderWorker, VaeDecoderWorker, DiTWorker, SegmentDiTWorker
-
-import torch
-import torch.distributed as dist
+from lightx2v.deploy.worker.hub import DiTWorker, ImageEncoderWorker, PipelineWorker, SegmentDiTWorker, TextEncoderWorker, VaeDecoderWorker, VaeEncoderWorker
 
 RUNNER_MAP = {
     "pipeline": PipelineWorker,
@@ -29,13 +29,10 @@ RUNNER_MAP = {
 # {task_id: {"server": xx, "worker_name": xx, "identity": xx}}
 RUNNING_SUBTASKS = {}
 WORKER_SECRET_KEY = os.getenv("WORKER_SECRET_KEY", "worker-secret-key-change-in-production")
-HEADERS = {
-    "Authorization": f"Bearer {WORKER_SECRET_KEY}",
-    "Content-Type": "application/json"
-}
+HEADERS = {"Authorization": f"Bearer {WORKER_SECRET_KEY}", "Content-Type": "application/json"}
 STOPPED = False
-WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
-RANK = int(os.environ.get('RANK', 0))
+WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
+RANK = int(os.environ.get("RANK", 0))
 TARGET_RANK = WORLD_SIZE - 1
 
 
@@ -50,7 +47,7 @@ async def ping_life(server_url, worker_identity, keys):
                     if ret.status == 200:
                         ret = await ret.json()
                         logger.info(f"{worker_identity} ping life: {ret}")
-                        if ret['msg'] == 'delete':
+                        if ret["msg"] == "delete":
                             logger.warning(f"{worker_identity} deleted")
                             # asyncio.create_task(shutdown(asyncio.get_event_loop()))
                             return
@@ -82,7 +79,7 @@ async def ping_subtask(server_url, worker_identity, task_id, worker_name, queue,
                     if ret.status == 200:
                         ret = await ret.json()
                         logger.info(f"{worker_identity} ping subtask {task_id} {worker_name}: {ret}")
-                        if ret['msg'] == 'delete':
+                        if ret["msg"] == "delete":
                             logger.warning(f"{worker_identity} subtask {task_id} {worker_name} deleted")
                             running_task.cancel()
                             return
@@ -109,14 +106,14 @@ async def fetch_subtasks(server_url, worker_keys, worker_identity, max_batch, ti
     try:
         logger.info(f"{worker_identity} fetching {worker_keys} with timeout: {timeout}s ...")
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=json.dumps(params), headers=HEADERS, timeout=timeout+1) as ret:
+            async with session.post(url, data=json.dumps(params), headers=HEADERS, timeout=timeout + 1) as ret:
                 if ret.status == 200:
                     ret = await ret.json()
-                    subtasks = ret['subtasks']
+                    subtasks = ret["subtasks"]
                     for sub in subtasks:
-                        sub['server_url'] = server_url
-                        sub['worker_identity'] = worker_identity
-                        RUNNING_SUBTASKS[sub['task_id']] = sub
+                        sub["server_url"] = server_url
+                        sub["worker_identity"] = worker_identity
+                        RUNNING_SUBTASKS[sub["task_id"]] = sub
                     logger.info(f"{worker_identity} fetch {worker_keys} ok: {subtasks}")
                     return subtasks
                 else:
@@ -166,22 +163,22 @@ async def boradcast_subtasks(subtasks):
         return subtasks
     try:
         if RANK == TARGET_RANK:
-            subtasks_data = json.dumps(subtasks, ensure_ascii=False).encode('utf-8')
-            subtasks_tensor = torch.frombuffer(bytearray(subtasks_data), dtype=torch.uint8).to(device='cuda')
+            subtasks_data = json.dumps(subtasks, ensure_ascii=False).encode("utf-8")
+            subtasks_tensor = torch.frombuffer(bytearray(subtasks_data), dtype=torch.uint8).to(device="cuda")
             data_size = subtasks_tensor.shape[0]
-            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device='cuda')
+            size_tensor = torch.tensor([data_size], dtype=torch.int32).to(device="cuda")
             logger.info(f"rank {RANK} send subtasks: {subtasks_tensor.shape}, {size_tensor}")
         else:
-            size_tensor = torch.zeros(1, dtype=torch.int32, device='cuda')
+            size_tensor = torch.zeros(1, dtype=torch.int32, device="cuda")
 
         dist.broadcast(size_tensor, src=TARGET_RANK)
         if RANK != TARGET_RANK:
-            subtasks_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device='cuda')
+            subtasks_tensor = torch.zeros(size_tensor.item(), dtype=torch.uint8, device="cuda")
         dist.broadcast(subtasks_tensor, src=TARGET_RANK)
 
         if RANK != TARGET_RANK:
             subtasks_data = subtasks_tensor.cpu().numpy().tobytes()
-            subtasks = json.loads(subtasks_data.decode('utf-8'))
+            subtasks = json.loads(subtasks_data.decode("utf-8"))
             logger.info(f"rank {RANK} recv subtasks: {subtasks}")
         return subtasks
 
@@ -223,7 +220,7 @@ async def main(args):
     runner = RUNNER_MAP[args.worker](args)
     if WORLD_SIZE > 1:
         dist.barrier()
-   # asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
+    # asyncio.create_task(ping_life(args.server, args.identity, worker_keys))
 
     while True:
         subtasks = None
@@ -235,12 +232,9 @@ async def main(args):
             status = TaskStatus.FAILED.name
             ping_task = None
             try:
-                run_task = asyncio.create_task(runner.run(sub['inputs'], sub['outputs'], sub['params'], data_manager))
+                run_task = asyncio.create_task(runner.run(sub["inputs"], sub["outputs"], sub["params"], data_manager))
                 if RANK == TARGET_RANK:
-                    ping_task = asyncio.create_task(ping_subtask(
-                        args.server, sub['worker_identity'], sub['task_id'],
-                        sub['worker_name'], sub['queue'], run_task, args.ping_interval
-                    ))
+                    ping_task = asyncio.create_task(ping_subtask(args.server, sub["worker_identity"], sub["task_id"], sub["worker_name"], sub["queue"], run_task, args.ping_interval))
                 ret = await run_task
                 if ret is True:
                     status = TaskStatus.SUCCEED.name
@@ -252,7 +246,7 @@ async def main(args):
                 logger.warning("Main loop cancelled, do not shut down")
 
             finally:
-                if RANK == TARGET_RANK and sub['task_id'] in RUNNING_SUBTASKS:
+                if RANK == TARGET_RANK and sub["task_id"] in RUNNING_SUBTASKS:
                     try:
                         await report_task(status=status, **sub)
                     except:  # noqa
@@ -290,6 +284,7 @@ async def shutdown(loop):
     def force_exit():
         logger.warning("Force exiting process...")
         sys.exit(0)
+
     loop.call_later(2, force_exit)
 
 
@@ -309,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--stage", type=str, required=True)
     parser.add_argument("--worker", type=str, required=True)
-    parser.add_argument("--identity", type=str, default='')
+    parser.add_argument("--identity", type=str, default="")
     parser.add_argument("--max_batch", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--ping_interval", type=int, default=10)
@@ -321,9 +316,9 @@ if __name__ == "__main__":
     parser.add_argument("--data_url", type=str, default=dft_data_url)
 
     args = parser.parse_args()
-    if args.identity == '':
+    if args.identity == "":
         # TODO: spec worker instance identity by k8s env
-        args.identity = 'worker-' + str(uuid.uuid4())[:8]
+        args.identity = "worker-" + str(uuid.uuid4())[:8]
     logger.info(f"args: {args}")
 
     loop = asyncio.new_event_loop()

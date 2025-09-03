@@ -1,31 +1,28 @@
-import os
+import asyncio
+import copy
+import ctypes
 import gc
 import json
-import ctypes
-import torch
+import os
 import tempfile
 import threading
-import asyncio
 import traceback
-import copy
-from loguru import logger
+
+import torch
 import torch.distributed as dist
-import torchvision.transforms.functional as TF
-from lightx2v.utils.utils import seed_all
-from lightx2v.utils.registry_factory import RUNNER_REGISTER
+from loguru import logger
 
-from lightx2v.infer import init_runner
-from lightx2v.models.runners.graph_runner import GraphRunner
-
-from lightx2v.utils.profiler import ProfilingContext
-from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.infer import init_runner  # noqa
 from lightx2v.models.runners.graph_runner import GraphRunner
 from lightx2v.utils.envs import CHECK_ENABLE_GRAPH_MODE
+from lightx2v.utils.profiler import ProfilingContext
+from lightx2v.utils.registry_factory import RUNNER_REGISTER
+from lightx2v.utils.set_config import set_config, set_parallel_config
+from lightx2v.utils.utils import seed_all
 
 
 class BaseWorker:
-
     @ProfilingContext("Init Worker Worker Cost:")
     def __init__(self, args):
         config = set_config(args)
@@ -53,16 +50,16 @@ class BaseWorker:
         self.runner.config["audio_path"] = params.get("audio_path", "")
 
     async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
-            input_image_path = inputs.get("input_image", "")
-            tmp_image_path = os.path.join(tmp_dir, input_image_path)
+        input_image_path = inputs.get("input_image", "")
+        tmp_image_path = os.path.join(tmp_dir, input_image_path)
 
-            # prepare tmp image
-            if self.runner.config.task == "i2v":
-                img_data = await data_manager.load_bytes(input_image_path)
-                with open(tmp_image_path, 'wb') as fout:
-                    fout.write(img_data)
+        # prepare tmp image
+        if self.runner.config.task == "i2v":
+            img_data = await data_manager.load_bytes(input_image_path)
+            with open(tmp_image_path, "wb") as fout:
+                fout.write(img_data)
 
-            params["image_path"] = tmp_image_path
+        params["image_path"] = tmp_image_path
 
     async def prepare_input_audio(self, params, inputs, tmp_dir, data_manager):
         input_audio_path = inputs.get("input_audio", "")
@@ -75,7 +72,7 @@ class BaseWorker:
 
         if input_audio_path and self.is_audio_model() and isinstance(tmp_audio_path, str):
             audio_data = await data_manager.load_bytes(input_audio_path)
-            with open(tmp_audio_path, 'wb') as fout:
+            with open(tmp_audio_path, "wb") as fout:
                 fout.write(audio_data)
 
         params["audio_path"] = tmp_audio_path
@@ -125,11 +122,11 @@ class BaseWorker:
     async def save_output_video(self, tmp_video_path, output_video_path, data_manager):
         # save output video
         if data_manager.name != "local" and self.rank == 0 and isinstance(tmp_video_path, str):
-            video_data = open(tmp_video_path, 'rb').read()
+            video_data = open(tmp_video_path, "rb").read()
             await data_manager.save_bytes(video_data, output_video_path)
 
     def is_audio_model(self):
-        return 'audio' in self.runner.config.model_cls or 'seko_talk' in self.runner.config.model_cls
+        return "audio" in self.runner.config.model_cls or "seko_talk" in self.runner.config.model_cls
 
 
 class RunnerThread(threading.Thread):
@@ -153,8 +150,10 @@ class RunnerThread(threading.Thread):
             res = None
             status = False
         finally:
+
             async def set_future_result():
                 self.future.set_result((status, res))
+
             # add the task of setting future to the loop queue
             asyncio.run_coroutine_threadsafe(set_future_result(), self.loop)
 
@@ -162,10 +161,7 @@ class RunnerThread(threading.Thread):
         if self.is_alive():
             try:
                 logger.warning(f"Force terminate thread {self.ident} ...")
-                ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                    ctypes.c_long(self.ident), 
-                    ctypes.py_object(SystemExit)
-                )
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(self.ident), ctypes.py_object(SystemExit))
             except Exception as e:
                 logger.error(f"Force terminate thread failed: {e}")
 
@@ -185,6 +181,7 @@ def class_try_catch_async_with_thread(func):
             logger.error(f"Error in {self.__class__.__name__}.{func.__name__}:")
             traceback.print_exc()
             return None
+
     return wrapper
 
 
@@ -198,20 +195,19 @@ class PipelineWorker(BaseWorker):
             self.run_func = self.graph_runner.run_pipeline
         else:
             self.run_func = self.runner.run_pipeline
-    
+
     def init_temp_params(self):
         cur_dir = os.path.dirname(os.path.abspath(__file__))
         base_dir = os.path.abspath(os.path.join(cur_dir, "../../.."))
-        self.runner.config['prompt'] = "The video features a old lady is saying something and knitting a sweater."
+        self.runner.config["prompt"] = "The video features a old lady is saying something and knitting a sweater."
         if self.runner.config.task == "i2v":
-            self.runner.config['image_path'] = os.path.join(base_dir, "assets", "inputs", "audio", "15.png")
+            self.runner.config["image_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "15.png")
         if self.is_audio_model():
-            self.runner.config['audio_path'] = os.path.join(base_dir, "assets", "inputs", "audio", "15.wav")
+            self.runner.config["audio_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "15.wav")
 
     @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
         with tempfile.TemporaryDirectory() as tmp_dir:
-
             await self.prepare_input_image(params, inputs, tmp_dir, data_manager)
             await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
             tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
@@ -255,9 +251,9 @@ class TextEncoderWorker(BaseWorker):
 
         out = self.runner.run_text_encoder(prompt, img)
         if self.rank == 0:
-            await data_manager.save_object(out, outputs['text_encoder_output'])
+            await data_manager.save_object(out, outputs["text_encoder_output"])
 
-        del out 
+        del out
         torch.cuda.empty_cache()
         gc.collect()
         return True
@@ -279,9 +275,9 @@ class ImageEncoderWorker(BaseWorker):
             img = img[0]
         out = self.runner.run_image_encoder(img)
         if self.rank == 0:
-            await data_manager.save_object(out, outputs['clip_encoder_output'])
+            await data_manager.save_object(out, outputs["clip_encoder_output"])
 
-        del out 
+        del out
         torch.cuda.empty_cache()
         gc.collect()
         return True
@@ -311,7 +307,7 @@ class VaeEncoderWorker(BaseWorker):
                 out["kwargs"][key] = int(getattr(self.runner.config, key))
 
         if self.rank == 0:
-            await data_manager.save_object(out, outputs['vae_encoder_output'])
+            await data_manager.save_object(out, outputs["vae_encoder_output"])
 
         del out, img, vals
         torch.cuda.empty_cache()
@@ -339,7 +335,7 @@ class DiTWorker(BaseWorker):
             return False
 
         if self.rank == 0:
-            await data_manager.save_tensor(out, outputs['latents'])
+            await data_manager.save_tensor(out, outputs["latents"])
 
         del out
         torch.cuda.empty_cache()
@@ -363,7 +359,6 @@ class VaeDecoderWorker(BaseWorker):
 
     @class_try_catch_async
     async def run(self, inputs, outputs, params, data_manager):
-
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
@@ -395,9 +390,7 @@ class SegmentDiTWorker(BaseWorker):
 
     @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-
             tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
@@ -417,7 +410,7 @@ class SegmentDiTWorker(BaseWorker):
             torch.cuda.empty_cache()
             gc.collect()
             return True
-    
+
     def run_dit(self):
         self.runner.run_main()
         self.runner.process_images_after_vae_decoder(save_video=True)

@@ -1,7 +1,9 @@
 import io
 import json
+
 import torch
 from PIL import Image
+
 from lightx2v.deploy.common.utils import class_try_catch_async
 
 
@@ -75,20 +77,20 @@ class BaseDataManager:
     @class_try_catch_async
     async def save_object(self, data, filename):
         data = await self.recurrent_save(data, filename)
-        bytes_data = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        bytes_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         await self.save_bytes(bytes_data, filename)
 
     @class_try_catch_async
     async def load_object(self, filename, device):
         bytes_data = await self.load_bytes(filename)
-        data = json.loads(bytes_data.decode('utf-8'))
+        data = json.loads(bytes_data.decode("utf-8"))
         data = await self.recurrent_load(data, device, filename)
         return data
 
     @class_try_catch_async
     async def delete_object(self, filename):
         bytes_data = await self.load_bytes(filename)
-        data = json.loads(bytes_data.decode('utf-8'))
+        data = json.loads(bytes_data.decode("utf-8"))
         await self.recurrent_delete(data, filename)
         await self.delete_bytes(filename)
 
@@ -128,8 +130,9 @@ class BaseDataManager:
         }
         return maps[type]
 
-# Import data manager implementations
-from .local_data_manager import LocalDataManager # noqa
-from .s3_data_manager import S3DataManager # noqa
 
-__all__ = ['BaseDataManager', 'LocalDataManager', 'S3DataManager']
+# Import data manager implementations
+from .local_data_manager import LocalDataManager  # noqa
+from .s3_data_manager import S3DataManager  # noqa
+
+__all__ = ["BaseDataManager", "LocalDataManager", "S3DataManager"]

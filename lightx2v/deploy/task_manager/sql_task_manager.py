@@ -1,17 +1,18 @@
-import json
 import asyncio
-import asyncpg
+import json
 import traceback
-from loguru import logger
 from datetime import datetime
-from lightx2v.deploy.task_manager import BaseTaskManager, TaskStatus, ActiveStatus, FinishedStatus
-from lightx2v.deploy.common.utils import class_try_catch_async, current_time
+
+import asyncpg
+from loguru import logger
+
+from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
 ASYNC_LOCK = asyncio.Lock()
 
 
 class PostgresSQLTaskManager(BaseTaskManager):
-
     def __init__(self, db_url, metrics_monitor=None):
         self.db_url = db_url
         self.table_tasks = "tasks"
@@ -30,19 +31,19 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
     def fmt_dict(self, data):
         super().fmt_dict(data)
-        for k in ['create_t', 'update_t', 'ping_t']:
+        for k in ["create_t", "update_t", "ping_t"]:
             if k in data and isinstance(data[k], float):
                 data[k] = datetime.fromtimestamp(data[k])
-        for k in ['params', 'extra_info', 'inputs', 'outputs', 'previous']:
+        for k in ["params", "extra_info", "inputs", "outputs", "previous"]:
             if k in data:
                 data[k] = json.dumps(data[k], ensure_ascii=False)
 
     def parse_dict(self, data):
         super().parse_dict(data)
-        for k in ['params', 'extra_info', 'inputs', 'outputs', 'previous']:
+        for k in ["params", "extra_info", "inputs", "outputs", "previous"]:
             if k in data:
                 data[k] = json.loads(data[k])
-        for k in ['create_t', 'update_t', 'ping_t']:
+        for k in ["create_t", "update_t", "ping_t"]:
             if k in data:
                 data[k] = data[k].timestamp()
 
@@ -59,7 +60,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         try:
             row = await conn.fetchrow(f"SELECT version FROM {self.table_versions} ORDER BY create_t DESC LIMIT 1")
             row = dict(row)
-            return row['version'] if row else 0
+            return row["version"] if row else 0
         except:  # noqa
             logger.error(f"query_version error: {traceback.format_exc()}")
             return 0
@@ -87,7 +88,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def upgrade_v1(self, version, description):
         conn = await self.get_conn()
         try:
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 # create users table
                 await conn.execute(f"""
                     CREATE TABLE IF NOT EXISTS {self.table_users} (
@@ -164,10 +165,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_subtasks}_status ON {self.table_subtasks}(status)")
 
                 # update version
-                await conn.execute(
-                    f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)",
-                    version, description, datetime.now()
-                )
+                await conn.execute(f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)", version, description, datetime.now())
                 return True
         except:  # noqa
             logger.error(f"upgrade_v1 error: {traceback.format_exc()}")
@@ -205,14 +203,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conds = ["update_t = $1"]
         params = [datetime.now()]
         param_idx = 1
-        if 'status' in kwargs:
+        if "status" in kwargs:
             param_idx += 1
             conds.append(f"status = ${param_idx}")
-            params.append(kwargs['status'].name)
-        if 'extra_info' in kwargs:
+            params.append(kwargs["status"].name)
+        if "extra_info" in kwargs:
             param_idx += 1
             conds.append(f"extra_info = ${param_idx}")
-            params.append(json.dumps(kwargs['extra_info'], ensure_ascii=False))
+            params.append(json.dumps(kwargs["extra_info"], ensure_ascii=False))
         query += " ,".join(conds)
         query += f" WHERE task_id = ${param_idx + 1}"
         params.append(task_id)
@@ -223,34 +221,34 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conds = []
         params = []
         param_idx = 0
-        if kwargs.get('update_t', True):
+        if kwargs.get("update_t", True):
             param_idx += 1
             conds.append(f"update_t = ${param_idx}")
             params.append(datetime.now())
-        if kwargs.get('ping_t', False):
+        if kwargs.get("ping_t", False):
             param_idx += 1
             conds.append(f"ping_t = ${param_idx}")
             params.append(datetime.now())
-        if kwargs.get('reset_ping_t', False):    
+        if kwargs.get("reset_ping_t", False):
             param_idx += 1
             conds.append(f"ping_t = ${param_idx}")
             params.append(datetime.fromtimestamp(0))
-        if 'status' in kwargs:
+        if "status" in kwargs:
             param_idx += 1
             conds.append(f"status = ${param_idx}")
-            params.append(kwargs['status'].name)
-        if 'worker_identity' in kwargs:
+            params.append(kwargs["status"].name)
+        if "worker_identity" in kwargs:
             param_idx += 1
             conds.append(f"worker_identity = ${param_idx}")
-            params.append(kwargs['worker_identity'])
-        if 'infer_cost' in kwargs:
+            params.append(kwargs["worker_identity"])
+        if "infer_cost" in kwargs:
             param_idx += 1
             conds.append(f"infer_cost = ${param_idx}")
-            params.append(kwargs['infer_cost'])
-        if 'extra_info' in kwargs:
+            params.append(kwargs["infer_cost"])
+        if "extra_info" in kwargs:
             param_idx += 1
             conds.append(f"extra_info = ${param_idx}")
-            params.append(json.dumps(kwargs['extra_info'], ensure_ascii=False))
+            params.append(json.dumps(kwargs["extra_info"], ensure_ascii=False))
         query += " ,".join(conds)
         query += f" WHERE task_id = ${param_idx + 1} AND worker_name = ${param_idx + 2}"
         params.extend([task_id, worker_name])
@@ -260,32 +258,54 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def insert_task(self, task, subtasks):
         conn = await self.get_conn()
         try:
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 self.fmt_dict(task)
-                await conn.execute(f"""
-                    INSERT INTO {self.table_tasks} 
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.table_tasks}
                     (task_id, task_type, model_cls, stage, params, create_t,
                         update_t, status, extra_info, tag, inputs, outputs, user_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     """,
-                    task['task_id'], task['task_type'], task['model_cls'],
-                    task['stage'], task['params'], task['create_t'],
-                    task['update_t'], task['status'], task['extra_info'],
-                    task['tag'], task['inputs'], task['outputs'], task['user_id']
+                    task["task_id"],
+                    task["task_type"],
+                    task["model_cls"],
+                    task["stage"],
+                    task["params"],
+                    task["create_t"],
+                    task["update_t"],
+                    task["status"],
+                    task["extra_info"],
+                    task["tag"],
+                    task["inputs"],
+                    task["outputs"],
+                    task["user_id"],
                 )
                 for sub in subtasks:
                     self.fmt_dict(sub)
-                    await conn.execute(f"""
+                    await conn.execute(
+                        f"""
                         INSERT INTO {self.table_subtasks}
                         (task_id, worker_name, inputs, outputs, queue, previous, status,
                             worker_identity, result, fail_time, extra_info, create_t, update_t,
                             ping_t, infer_cost)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                         """,
-                        sub['task_id'], sub['worker_name'], sub['inputs'], sub['outputs'],
-                        sub['queue'], sub['previous'], sub['status'], sub['worker_identity'],
-                        sub['result'], sub['fail_time'],sub['extra_info'], sub['create_t'],
-                        sub['update_t'], sub['ping_t'], sub['infer_cost']
+                        sub["task_id"],
+                        sub["worker_name"],
+                        sub["inputs"],
+                        sub["outputs"],
+                        sub["queue"],
+                        sub["previous"],
+                        sub["status"],
+                        sub["worker_identity"],
+                        sub["result"],
+                        sub["fail_time"],
+                        sub["extra_info"],
+                        sub["create_t"],
+                        sub["update_t"],
+                        sub["ping_t"],
+                        sub["infer_cost"],
                     )
                 return True
         except:  # noqa
@@ -298,87 +318,87 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def list_tasks(self, **kwargs):
         conn = await self.get_conn()
         try:
-            count = kwargs.get('count', False)
+            count = kwargs.get("count", False)
             query = f"SELECT * FROM "
             if count:
                 query = f"SELECT COUNT(*) FROM "
-                assert 'limit' not in kwargs, "limit is not allowed when count is True"
-                assert 'offset' not in kwargs, "offset is not allowed when count is True"
+                assert "limit" not in kwargs, "limit is not allowed when count is True"
+                assert "offset" not in kwargs, "offset is not allowed when count is True"
             params = []
             conds = []
             param_idx = 0
-            if kwargs.get('subtasks', False):
+            if kwargs.get("subtasks", False):
                 query += self.table_subtasks
-                assert 'user_id' not in kwargs, "user_id is not allowed when subtasks is True"
+                assert "user_id" not in kwargs, "user_id is not allowed when subtasks is True"
             else:
                 query += self.table_tasks
 
-            if 'status' in kwargs:
+            if "status" in kwargs:
                 param_idx += 1
-                if isinstance(kwargs['status'], list):
-                    next_idx = param_idx + len(kwargs['status'])
-                    placeholders = ','.join([f'${i}' for i in range(param_idx, next_idx)])
+                if isinstance(kwargs["status"], list):
+                    next_idx = param_idx + len(kwargs["status"])
+                    placeholders = ",".join([f"${i}" for i in range(param_idx, next_idx)])
                     conds.append(f"status IN ({placeholders})")
-                    params.extend([x.name for x in kwargs['status']])
+                    params.extend([x.name for x in kwargs["status"]])
                     param_idx = next_idx - 1
                 else:
                     conds.append(f"status = ${param_idx}")
-                    params.append(kwargs['status'].name)
+                    params.append(kwargs["status"].name)
 
-            if 'start_created_t' in kwargs:
+            if "start_created_t" in kwargs:
                 param_idx += 1
                 conds.append(f"create_t >= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['start_created_t']))
+                params.append(datetime.fromtimestamp(kwargs["start_created_t"]))
 
-            if 'end_created_t' in kwargs:
+            if "end_created_t" in kwargs:
                 param_idx += 1
                 conds.append(f"create_t <= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['end_created_t']))
+                params.append(datetime.fromtimestamp(kwargs["end_created_t"]))
 
-            if 'start_updated_t' in kwargs:
+            if "start_updated_t" in kwargs:
                 param_idx += 1
                 conds.append(f"update_t >= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['start_updated_t']))
+                params.append(datetime.fromtimestamp(kwargs["start_updated_t"]))
 
-            if 'end_updated_t' in kwargs:
+            if "end_updated_t" in kwargs:
                 param_idx += 1
                 conds.append(f"update_t <= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['end_updated_t']))
+                params.append(datetime.fromtimestamp(kwargs["end_updated_t"]))
 
-            if 'start_ping_t' in kwargs:
+            if "start_ping_t" in kwargs:
                 param_idx += 1
                 conds.append(f"ping_t >= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['start_ping_t']))
+                params.append(datetime.fromtimestamp(kwargs["start_ping_t"]))
 
-            if 'end_ping_t' in kwargs:
+            if "end_ping_t" in kwargs:
                 param_idx += 1
                 conds.append(f"ping_t <= ${param_idx}")
-                params.append(datetime.fromtimestamp(kwargs['end_ping_t']))
+                params.append(datetime.fromtimestamp(kwargs["end_ping_t"]))
 
-            if 'user_id' in kwargs:
+            if "user_id" in kwargs:
                 param_idx += 1
                 conds.append(f"user_id = ${param_idx}")
-                params.append(kwargs['user_id'])
+                params.append(kwargs["user_id"])
 
             if conds:
                 query += " WHERE " + " AND ".join(conds)
-            
+
             if not count:
                 query += " ORDER BY create_t DESC"
 
-            if 'limit' in kwargs:
+            if "limit" in kwargs:
                 param_idx += 1
                 query += f" LIMIT ${param_idx}"
-                params.append(kwargs['limit'])
+                params.append(kwargs["limit"])
 
-            if 'offset' in kwargs:
+            if "offset" in kwargs:
                 param_idx += 1
                 query += f" OFFSET ${param_idx}"
-                params.append(kwargs['offset'])
+                params.append(kwargs["offset"])
 
             rows = await conn.fetch(query, *params)
             if count:
-                return rows[0]['count']
+                return rows[0]["count"]
             tasks = []
             for row in rows:
                 task = dict(row)
@@ -407,27 +427,26 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 task, subtasks = await self.load(conn, task_id)
-                if task['status'] not in ActiveStatus:
+                if task["status"] not in ActiveStatus:
                     return []
                 succeeds = set()
                 for sub in subtasks:
-                    if sub['status'] == TaskStatus.SUCCEED:
-                        succeeds.add(sub['worker_name'])
+                    if sub["status"] == TaskStatus.SUCCEED:
+                        succeeds.add(sub["worker_name"])
                 nexts = []
                 for sub in subtasks:
-                    if sub['status'] == TaskStatus.CREATED:
+                    if sub["status"] == TaskStatus.CREATED:
                         dep_ok = True
-                        for prev in sub['previous']:
+                        for prev in sub["previous"]:
                             if prev not in succeeds:
                                 dep_ok = False
                                 break
                         if dep_ok:
-                            sub['params'] = task['params']
-                            self.mark_subtask_change(sub, sub['status'], TaskStatus.PENDING)
-                            await self.update_subtask(conn, task_id, sub['worker_name'],
-                                status=TaskStatus.PENDING, extra_info=sub['extra_info'])
+                            sub["params"] = task["params"]
+                            self.mark_subtask_change(sub, sub["status"], TaskStatus.PENDING)
+                            await self.update_subtask(conn, task_id, sub["worker_name"], status=TaskStatus.PENDING, extra_info=sub["extra_info"])
                             nexts.append(sub)
                 if len(nexts) > 0:
                     await self.update_task(conn, task_id, status=TaskStatus.PENDING)
@@ -444,19 +463,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 valids = []
                 for cand in cands:
-                    task_id = cand['task_id']
-                    worker_name = cand['worker_name']
+                    task_id = cand["task_id"]
+                    worker_name = cand["worker_name"]
                     task, subs = await self.load(conn, task_id, worker_name=worker_name)
                     assert len(subs) == 1, f"task {task_id} has multiple subtasks: {subs} with worker_name: {worker_name}"
-                    if task['status'] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
+                    if task["status"] in [TaskStatus.SUCCEED, TaskStatus.FAILED, TaskStatus.CANCEL]:
                         continue
 
-                    self.mark_subtask_change(subs[0], subs[0]['status'], TaskStatus.RUNNING)
-                    await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING,
-                        worker_identity=worker_identity, ping_t=True, extra_info=subs[0]['extra_info'])
+                    self.mark_subtask_change(subs[0], subs[0]["status"], TaskStatus.RUNNING)
+                    await self.update_subtask(conn, task_id, worker_name, status=TaskStatus.RUNNING, worker_identity=worker_identity, ping_t=True, extra_info=subs[0]["extra_info"])
                     await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
                     valids.append(cand)
                     break
@@ -473,11 +491,11 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 task, subtasks = await self.load(conn, task_id)
                 for sub in subtasks:
-                    if sub['worker_name'] == worker_name:
-                        pre = sub['worker_identity']
+                    if sub["worker_name"] == worker_name:
+                        pre = sub["worker_identity"]
                         assert pre == worker_identity, f"worker identity not matched: {pre} vs {worker_identity}"
                         await self.update_subtask(conn, task_id, worker_name, ping_t=True, update_t=False)
                         return True
@@ -494,53 +512,53 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 task, subtasks = await self.load(conn, task_id)
                 subs = subtasks
                 if worker_name:
-                    subs = [sub for sub in subtasks if sub['worker_name'] == worker_name]
+                    subs = [sub for sub in subtasks if sub["worker_name"] == worker_name]
                 assert len(subs) >= 1, f"no worker task_id={task_id}, name={worker_name}"
 
                 if worker_identity:
-                    pre = subs[0]['worker_identity']
+                    pre = subs[0]["worker_identity"]
                     assert pre == worker_identity, f"worker identity not matched: {pre} vs {worker_identity}"
 
                 assert status in [TaskStatus.SUCCEED, TaskStatus.FAILED], f"invalid finish status: {status}"
                 for sub in subs:
-                    if sub['status'] not in FinishedStatus:
-                        if should_running and sub['status'] != TaskStatus.RUNNING:
+                    if sub["status"] not in FinishedStatus:
+                        if should_running and sub["status"] != TaskStatus.RUNNING:
                             logger.warning(f"task {task_id} is not running, skip finish subtask: {sub}")
                             continue
-                        self.mark_subtask_change(sub, sub['status'], status, fail_msg=fail_msg)
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=status, extra_info=sub['extra_info'])
-                        sub['status'] = status
+                        self.mark_subtask_change(sub, sub["status"], status, fail_msg=fail_msg)
+                        await self.update_subtask(conn, task_id, sub["worker_name"], status=status, extra_info=sub["extra_info"])
+                        sub["status"] = status
 
-                if task['status'] == TaskStatus.CANCEL:
+                if task["status"] == TaskStatus.CANCEL:
                     return TaskStatus.CANCEL
 
                 running_subs = []
                 failed_sub = False
                 for sub in subtasks:
-                    if sub['status'] not in FinishedStatus:
+                    if sub["status"] not in FinishedStatus:
                         running_subs.append(sub)
-                    if sub['status'] == TaskStatus.FAILED:
+                    if sub["status"] == TaskStatus.FAILED:
                         failed_sub = True
 
                 # some subtask failed, we should fail all other subtasks
                 if failed_sub:
-                    if task['status'] != TaskStatus.FAILED:
+                    if task["status"] != TaskStatus.FAILED:
                         self.mark_task_end(task, TaskStatus.FAILED)
-                        await self.update_task(conn, task_id, status=TaskStatus.FAILED, extra_info=task['extra_info'])
+                        await self.update_task(conn, task_id, status=TaskStatus.FAILED, extra_info=task["extra_info"])
                     for sub in running_subs:
-                        self.mark_subtask_change(sub, sub['status'], TaskStatus.FAILED, fail_msg="other subtask failed")
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.FAILED, extra_info=sub['extra_info'])
+                        self.mark_subtask_change(sub, sub["status"], TaskStatus.FAILED, fail_msg="other subtask failed")
+                        await self.update_subtask(conn, task_id, sub["worker_name"], status=TaskStatus.FAILED, extra_info=sub["extra_info"])
                     return TaskStatus.FAILED
 
                 # all subtasks finished and all succeed
                 elif len(running_subs) == 0:
-                    if task['status'] != TaskStatus.SUCCEED:
+                    if task["status"] != TaskStatus.SUCCEED:
                         self.mark_task_end(task, TaskStatus.SUCCEED)
-                        await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=task['extra_info'])
+                        await self.update_task(conn, task_id, status=TaskStatus.SUCCEED, extra_info=task["extra_info"])
                     return TaskStatus.SUCCEED
                 return None
         except:  # noqa
@@ -555,19 +573,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 task, subtasks = await self.load(conn, task_id, user_id)
-                if task['status'] not in ActiveStatus:
+                if task["status"] not in ActiveStatus:
                     return f"Task {task_id} is not in active status (current status: {task['status']}). Only tasks with status CREATED, PENDING, or RUNNING can be cancelled."
 
                 for sub in subtasks:
-                    if sub['status'] not in FinishedStatus:
-                        self.mark_subtask_change(sub, sub['status'], TaskStatus.CANCEL)
-                        await self.update_subtask(conn, task_id, sub['worker_name'],
-                                                  status=TaskStatus.CANCEL, extra_info=sub['extra_info'])
+                    if sub["status"] not in FinishedStatus:
+                        self.mark_subtask_change(sub, sub["status"], TaskStatus.CANCEL)
+                        await self.update_subtask(conn, task_id, sub["worker_name"], status=TaskStatus.CANCEL, extra_info=sub["extra_info"])
 
                 self.mark_task_end(task, TaskStatus.CANCEL)
-                await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=task['extra_info'])
+                await self.update_task(conn, task_id, status=TaskStatus.CANCEL, extra_info=task["extra_info"])
                 return True
         except:  # noqa
             logger.error(f"cancel_task error: {traceback.format_exc()}")
@@ -581,23 +598,22 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             await ASYNC_LOCK.acquire()
-            async with conn.transaction(isolation='read_uncommitted'):
+            async with conn.transaction(isolation="read_uncommitted"):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 # the task is not finished
-                if task['status'] not in FinishedStatus:
+                if task["status"] not in FinishedStatus:
                     return False
                 # the task is no need to resume
-                if not all_subtask and task['status'] == TaskStatus.SUCCEED:
+                if not all_subtask and task["status"] == TaskStatus.SUCCEED:
                     return False
 
                 for sub in subtasks:
-                    if all_subtask or sub['status'] != TaskStatus.SUCCEED:
+                    if all_subtask or sub["status"] != TaskStatus.SUCCEED:
                         self.mark_subtask_change(sub, None, TaskStatus.CREATED)
-                        await self.update_subtask(conn, task_id, sub['worker_name'], status=TaskStatus.CREATED,
-                                                  reset_ping_t=True, extra_info=sub['extra_info'])
+                        await self.update_subtask(conn, task_id, sub["worker_name"], status=TaskStatus.CREATED, reset_ping_t=True, extra_info=sub["extra_info"])
 
                 self.mark_task_start(task)
-                await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=task['extra_info'])
+                await self.update_task(conn, task_id, status=TaskStatus.CREATED, extra_info=task["extra_info"])
                 return True
         except:  # noqa
             logger.error(f"resume_task error: {traceback.format_exc()}")
@@ -610,22 +626,30 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def insert_user_if_not_exists(self, user_info):
         conn = await self.get_conn()
         try:
-            async with conn.transaction(isolation='read_uncommitted'):
-                row = await conn.fetchrow(f"SELECT * FROM {self.table_users} WHERE user_id = $1", user_info['user_id'])
+            async with conn.transaction(isolation="read_uncommitted"):
+                row = await conn.fetchrow(f"SELECT * FROM {self.table_users} WHERE user_id = $1", user_info["user_id"])
                 if row:
                     logger.info(f"user already exists: {user_info['user_id']}")
                     return True
                 self.fmt_dict(user_info)
-                await conn.execute(f"""
+                await conn.execute(
+                    f"""
                     INSERT INTO {self.table_users}
                     (user_id, source, id, username, email, homepage,
                         avatar_url, create_t, update_t, extra_info, tag)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     """,
-                    user_info['user_id'], user_info['source'], user_info['id'],
-                    user_info['username'], user_info['email'], user_info['homepage'],
-                    user_info['avatar_url'], user_info['create_t'], user_info['update_t'],
-                    user_info['extra_info'], user_info['tag']
+                    user_info["user_id"],
+                    user_info["source"],
+                    user_info["id"],
+                    user_info["username"],
+                    user_info["email"],
+                    user_info["homepage"],
+                    user_info["avatar_url"],
+                    user_info["create_t"],
+                    user_info["update_t"],
+                    user_info["extra_info"],
+                    user_info["tag"],
                 )
                 return True
         except:  # noqa
@@ -651,6 +675,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
 async def test():
     from lightx2v.deploy.common.pipeline import Pipeline
+
     p = Pipeline("/data/nvme1/liuliang1/lightx2v/configs/model_pipeline.json")
     m = PostgresSQLTaskManager("postgresql://test:test@127.0.0.1:5432/lightx2v_test")
     await m.init()
@@ -693,14 +718,12 @@ async def test():
     subtasks = await m.next_subtasks(task_id)
     print(" - next_subtasks:", subtasks)
 
-    await m.run_subtasks(subtasks, 'fake-worker')
+    await m.run_subtasks(subtasks, "fake-worker")
     await m.finish_subtasks(task_id, TaskStatus.FAILED)
     await m.cancel_task(task_id)
     await m.resume_task(task_id)
     for sub in subtasks:
-        await m.finish_subtasks(
-            sub['task_id'], TaskStatus.SUCCEED, worker_name=sub['worker_name'], worker_identity='fake-worker'
-        )
+        await m.finish_subtasks(sub["task_id"], TaskStatus.SUCCEED, worker_name=sub["worker_name"], worker_identity="fake-worker")
 
     subtasks = await m.next_subtasks(task_id)
     print(" - final next_subtasks:", subtasks)

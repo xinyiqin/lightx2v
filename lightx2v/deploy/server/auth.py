@@ -1,7 +1,8 @@
 import os
-import jwt
 import time
+
 import aiohttp
+import jwt
 from fastapi import HTTPException
 from loguru import logger
 
@@ -25,10 +26,10 @@ class AuthManager:
 
     def create_jwt_token(self, data):
         data2 = {
-            "user_id": data['user_id'],
-            "username": data['username'],
-            "email": data['email'],
-            "homepage": data['homepage'],
+            "user_id": data["user_id"],
+            "username": data["username"],
+            "email": data["email"],
+            "homepage": data["homepage"],
         }
         expire = time.time() + (self.jwt_expiration_hours * 3600)
         data2.update({"exp": expire})
@@ -38,11 +39,7 @@ class AuthManager:
         try:
             logger.info(f"GitHub OAuth code: {code}")
             token_url = "https://github.com/login/oauth/access_token"
-            token_data = {
-                "client_id": self.github_client_id,
-                "client_secret": self.github_client_secret,
-                "code": code
-            }
+            token_data = {"client_id": self.github_client_id, "client_secret": self.github_client_secret, "code": code}
             headers = {"Accept": "application/json"}
 
             proxy = os.getenv("auth_https_proxy", None)
@@ -61,10 +58,7 @@ class AuthManager:
                 raise HTTPException(status_code=400, detail="Failed to get access token")
 
             user_url = "https://api.github.com/user"
-            user_headers = {
-                "Authorization": f"token {access_token}",
-                "Accept": "application/vnd.github.v3+json"
-            }
+            user_headers = {"Authorization": f"token {access_token}", "Accept": "application/vnd.github.v3+json"}
             async with aiohttp.ClientSession() as session:
                 async with session.get(user_url, headers=user_headers, proxy=proxy) as response:
                     response.raise_for_status()

@@ -19,7 +19,7 @@ class BaseQueueManager:
 
 
 # Import queue manager implementations
-from .local_queue_manager import LocalQueueManager # noqa
-from .rabbitmq_queue_manager import RabbitMQQueueManager # noqa
+from .local_queue_manager import LocalQueueManager  # noqa
+from .rabbitmq_queue_manager import RabbitMQQueueManager  # noqa
 
-__all__ = ['BaseQueueManager', 'LocalQueueManager', 'RabbitMQQueueManager']
+__all__ = ["BaseQueueManager", "LocalQueueManager", "RabbitMQQueueManager"]

@@ -1,9 +1,12 @@
-import time
 import asyncio
+import time
 from enum import Enum
+
 from loguru import logger
-from lightx2v.deploy.task_manager import TaskStatus
+
 from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.task_manager import TaskStatus
+
 
 class WorkerStatus(Enum):
     FETCHING = 1
@@ -106,23 +109,23 @@ class ServerMonitor:
         self.config = self.model_pipelines.get_monitor_config()
 
         for queue in self.all_queues:
-            self.subtask_run_timeouts[queue] = self.config['subtask_running_timeouts'].get(queue, 60)
-        self.subtask_created_timeout = self.config['subtask_created_timeout']
-        self.subtask_pending_timeout = self.config['subtask_pending_timeout']
-        self.worker_avg_window = self.config['worker_avg_window']
-        self.worker_offline_timeout = self.config['worker_offline_timeout']
-        self.worker_min_capacity = self.config['worker_min_capacity']
-        self.worker_min_cnt = self.config['worker_min_cnt']
-        self.worker_max_cnt = self.config['worker_max_cnt']
-        self.task_timeout = self.config['task_timeout']
-        self.schedule_ratio_high = self.config['schedule_ratio_high']
-        self.schedule_ratio_low = self.config['schedule_ratio_low']
-        self.ping_timeout = self.config['ping_timeout']
+            self.subtask_run_timeouts[queue] = self.config["subtask_running_timeouts"].get(queue, 60)
+        self.subtask_created_timeout = self.config["subtask_created_timeout"]
+        self.subtask_pending_timeout = self.config["subtask_pending_timeout"]
+        self.worker_avg_window = self.config["worker_avg_window"]
+        self.worker_offline_timeout = self.config["worker_offline_timeout"]
+        self.worker_min_capacity = self.config["worker_min_capacity"]
+        self.worker_min_cnt = self.config["worker_min_cnt"]
+        self.worker_max_cnt = self.config["worker_max_cnt"]
+        self.task_timeout = self.config["task_timeout"]
+        self.schedule_ratio_high = self.config["schedule_ratio_high"]
+        self.schedule_ratio_low = self.config["schedule_ratio_low"]
+        self.ping_timeout = self.config["ping_timeout"]
 
-        self.user_visits = {} # user_id -> last_visit_t
-        self.user_max_active_tasks = self.config['user_max_active_tasks']
-        self.user_max_daily_tasks = self.config['user_max_daily_tasks']
-        self.user_visit_frequency = self.config['user_visit_frequency']
+        self.user_visits = {}  # user_id -> last_visit_t
+        self.user_max_active_tasks = self.config["user_max_active_tasks"]
+        self.user_max_daily_tasks = self.config["user_max_daily_tasks"]
+        self.user_visit_frequency = self.config["user_visit_frequency"]
 
         assert self.worker_avg_window > 0
         assert self.worker_offline_timeout > 0
@@ -160,9 +163,7 @@ class ServerMonitor:
             self.worker_clients[queue] = {}
         if identity not in self.worker_clients[queue]:
             infer_timeout = self.subtask_run_timeouts[queue]
-            self.worker_clients[queue][identity] = WorkerClient(
-                queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window, self.ping_timeout
-            )
+            self.worker_clients[queue][identity] = WorkerClient(queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window, self.ping_timeout)
             self.identity_to_queue[identity] = queue
         return self.worker_clients[queue][identity]
 
@@ -190,52 +191,37 @@ class ServerMonitor:
         ping_end_t = time.time() - self.ping_timeout
         fails = set()
 
-        created_tasks = await self.task_manager.list_tasks(
-            status=TaskStatus.CREATED, subtasks=True, end_updated_t=created_end_t
-        )
-        pending_tasks = await self.task_manager.list_tasks(
-            status=TaskStatus.PENDING, subtasks=True, end_updated_t=pending_end_t
-        )
+        created_tasks = await self.task_manager.list_tasks(status=TaskStatus.CREATED, subtasks=True, end_updated_t=created_end_t)
+        pending_tasks = await self.task_manager.list_tasks(status=TaskStatus.PENDING, subtasks=True, end_updated_t=pending_end_t)
 
         def fmt_subtask(t):
             return f"({t['task_id']}, {t['worker_name']}, {t['queue']}, {t['worker_identity']})"
 
         for t in created_tasks + pending_tasks:
-            if t['task_id'] in fails:
+            if t["task_id"] in fails:
                 continue
-            elapse = time.time() - t['update_t']
+            elapse = time.time() - t["update_t"]
             logger.warning(f"Subtask {fmt_subtask(t)} CREATED / PENDING timeout: {elapse:.2f} s")
-            await self.task_manager.finish_subtasks(
-                t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
-                fail_msg=f"CREATED / PENDING timeout: {elapse:.2f} s"
-            )
-            fails.add(t['task_id'])
+            await self.task_manager.finish_subtasks(t["task_id"], TaskStatus.FAILED, worker_name=t["worker_name"], fail_msg=f"CREATED / PENDING timeout: {elapse:.2f} s")
+            fails.add(t["task_id"])
 
-        running_tasks = await self.task_manager.list_tasks(
-            status=TaskStatus.RUNNING, subtasks=True
-        )
+        running_tasks = await self.task_manager.list_tasks(status=TaskStatus.RUNNING, subtasks=True)
 
         for t in running_tasks:
-            if t['task_id'] in fails:
+            if t["task_id"] in fails:
                 continue
-            if t['ping_t'] > 0:
-                ping_elapse = time.time() - t['ping_t']
+            if t["ping_t"] > 0:
+                ping_elapse = time.time() - t["ping_t"]
                 if ping_elapse >= self.ping_timeout:
                     logger.warning(f"Subtask {fmt_subtask(t)} PING timeout: {ping_elapse:.2f} s")
-                    await self.task_manager.finish_subtasks(
-                        t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
-                        fail_msg=f"PING timeout: {ping_elapse:.2f} s"
-                    )
-                    fails.add(t['task_id'])
-            elapse = time.time() - t['update_t']
-            limit = self.subtask_run_timeouts[t['queue']]
+                    await self.task_manager.finish_subtasks(t["task_id"], TaskStatus.FAILED, worker_name=t["worker_name"], fail_msg=f"PING timeout: {ping_elapse:.2f} s")
+                    fails.add(t["task_id"])
+            elapse = time.time() - t["update_t"]
+            limit = self.subtask_run_timeouts[t["queue"]]
             if elapse >= limit:
                 logger.warning(f"Subtask {fmt_subtask(t)} RUNNING timeout: {elapse:.2f} s")
-                await self.task_manager.finish_subtasks(
-                    t['task_id'], TaskStatus.FAILED, worker_name=t['worker_name'],
-                    fail_msg=f"RUNNING timeout: {elapse:.2f} s"
-                )
-                fails.add(t['task_id'])
+                await self.task_manager.finish_subtasks(t["task_id"], TaskStatus.FAILED, worker_name=t["worker_name"], fail_msg=f"RUNNING timeout: {elapse:.2f} s")
+                fails.add(t["task_id"])
 
     def get_avg_worker_infer_cost(self, queue):
         if queue not in self.worker_clients:
@@ -250,7 +236,6 @@ class ServerMonitor:
 
     @class_try_catch_async
     async def check_user_busy(self, user_id, active_new_task=False):
-
         # check if user visit too frequently
         cur_t = time.time()
         if user_id in self.user_visits:
@@ -268,9 +253,7 @@ class ServerMonitor:
 
             # check if user has too many daily tasks
             daily_statuses = active_statuses + [TaskStatus.SUCCEED, TaskStatus.CANCEL, TaskStatus.FAILED]
-            daily_tasks = await self.task_manager.list_tasks(
-                status=daily_statuses, user_id=user_id, start_created_t=cur_t - 86400
-            )
+            daily_tasks = await self.task_manager.list_tasks(status=daily_statuses, user_id=user_id, start_created_t=cur_t - 86400)
             if len(daily_tasks) >= self.user_max_daily_tasks:
                 return f"User {user_id} has too many daily tasks, {len(daily_tasks)} vs {self.user_max_daily_tasks}"
 

@@ -4,7 +4,6 @@ import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-import time
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -16,6 +15,8 @@ from loguru import logger
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms.functional import resize
 
+from lightx2v.deploy.common.va_reader import VAReader
+from lightx2v.deploy.common.va_recorder import VARecorder
 from lightx2v.models.input_encoders.hf.seko_audio.audio_adapter import AudioAdapter
 from lightx2v.models.input_encoders.hf.seko_audio.audio_encoder import SekoAudioEncoderModel
 from lightx2v.models.networks.wan.audio_model import WanAudioModel
@@ -27,8 +28,6 @@ from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import find_torch_model_path, load_weights, save_to_video, vae_to_comfyui_image
-from lightx2v.deploy.common.va_recorder import VARecorder
-from lightx2v.deploy.common.va_reader import VAReader
 
 
 def get_optimal_patched_size_with_sp(patched_h, patched_w, sp_size):
@@ -302,7 +301,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_sr = self.config.get("audio_sr", 16000)
         target_fps = self.config.get("target_fps", 16)
         self._audio_processor = AudioProcessor(audio_sr, target_fps)
-        if not isinstance(self.config['audio_path'], str):
+        if not isinstance(self.config["audio_path"], str):
             return [], 0
         audio_array = self._audio_processor.load_audio(self.config["audio_path"])
 
@@ -629,7 +628,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 target_fps=target_fps,
             )
 
-        if save_video and isinstance(self.config['save_video_path'], str):
+        if save_video and isinstance(self.config["save_video_path"], str):
             if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
                 fps = self.config["video_frame_interpolation"]["target_fps"]
             else:

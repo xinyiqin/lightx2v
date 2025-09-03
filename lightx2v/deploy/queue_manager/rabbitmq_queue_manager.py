@@ -1,12 +1,12 @@
-import json
 import asyncio
-import time
-import aio_pika
+import json
 import traceback
+
+import aio_pika
 from loguru import logger
 
-from lightx2v.deploy.queue_manager import BaseQueueManager
 from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.queue_manager import BaseQueueManager
 
 
 class RabbitMQQueueManager(BaseQueueManager):
@@ -51,15 +51,11 @@ class RabbitMQQueueManager(BaseQueueManager):
 
     @class_try_catch_async
     async def put_subtask(self, subtask):
-        queue = subtask['queue']
+        queue = subtask["queue"]
         await self.declare_queue(queue)
-        keys = ['queue', 'task_id', 'worker_name', 'inputs', 'outputs', 'params']
-        msg = json.dumps({k: subtask[k] for k in keys}).encode('utf-8')
-        message = aio_pika.Message(
-            body=msg,
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            content_type='application/json'
-        )
+        keys = ["queue", "task_id", "worker_name", "inputs", "outputs", "params"]
+        msg = json.dumps({k: subtask[k] for k in keys}).encode("utf-8")
+        message = aio_pika.Message(body=msg, delivery_mode=aio_pika.DeliveryMode.PERSISTENT, content_type="application/json")
         await self.chan.default_exchange.publish(message, routing_key=queue)
         logger.info(f"Rabbitmq published subtask: ({subtask['task_id']}, {subtask['worker_name']}) to {queue}")
         return True
@@ -71,7 +67,7 @@ class RabbitMQQueueManager(BaseQueueManager):
             async with q.iterator() as qiter:
                 async for message in qiter:
                     await message.ack()
-                    subtask = json.loads(message.body.decode('utf-8'))
+                    subtask = json.loads(message.body.decode("utf-8"))
                     subtasks.append(subtask)
                     if len(subtasks) >= max_batch:
                         return subtasks
@@ -79,7 +75,7 @@ class RabbitMQQueueManager(BaseQueueManager):
                         message = await q.get(no_ack=False, fail=False)
                         if message:
                             await message.ack()
-                            subtask = json.loads(message.body.decode('utf-8'))
+                            subtask = json.loads(message.body.decode("utf-8"))
                             subtasks.append(subtask)
                             if len(subtasks) >= max_batch:
                                 return subtasks
@@ -122,6 +118,7 @@ async def test():
         subtask = await q.get_subtasks("test_queue", 3, 5)
         print("get subtask:", subtask)
     await q.close()
+
 
 if __name__ == "__main__":
     asyncio.run(test())
