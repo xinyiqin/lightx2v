@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import mimetypes
 import os
+import base64
+import json
 import traceback
 from contextlib import asynccontextmanager
 
@@ -117,6 +119,13 @@ async def verify_worker_access(credentials: HTTPAuthorizationCredentials = Depen
 
 def error_response(e, code):
     return JSONResponse({"message": f"error: {e}!"}, status_code=code)
+
+
+def guess_file_type(name, default_type):
+    content_type, _ = mimetypes.guess_type(name)
+    if content_type is None:
+        content_type = default_type
+    return content_type
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -275,9 +284,6 @@ async def api_v1_task_list(request: Request, user=Depends(verify_user_access)):
 @app.get("/api/v1/task/result")
 async def api_v1_task_result(request: Request, user=Depends(verify_user_access_from_query)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
@@ -291,9 +297,7 @@ async def api_v1_task_result(request: Request, user=Depends(verify_user_access_f
         data = await data_manager.load_bytes(task["outputs"][name])
 
         #  set correct Content-Type
-        content_type, _ = mimetypes.guess_type(name)
-        if content_type is None:
-            content_type = "application/octet-stream"
+        content_type = guess_file_type(name, "application/octet-stream")
         headers = {"Content-Disposition": f'attachment; filename="{name}"'}
         return Response(content=data, media_type=content_type, headers=headers)
 
@@ -305,9 +309,6 @@ async def api_v1_task_result(request: Request, user=Depends(verify_user_access_f
 @app.get("/api/v1/task/input")
 async def api_v1_task_input(request: Request, user=Depends(verify_user_access_from_query)):
     try:
-        # msg = await server_monitor.check_user_busy(user['user_id'])
-        # if msg is not True:
-        #     return error_response(msg, 400)
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
@@ -320,10 +321,9 @@ async def api_v1_task_input(request: Request, user=Depends(verify_user_access_fr
         data = await data_manager.load_bytes(task["inputs"][name])
 
         #  set correct Content-Type
-        content_type, _ = mimetypes.guess_type(name)
-        if content_type is None:
-            content_type = "application/octet-stream"
+        content_type = guess_file_type(name, "application/octet-stream")
         headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+        headers["Cache-Control"] = "public, max-age=3600"
         return Response(content=data, media_type=content_type, headers=headers)
 
     except Exception as e:
@@ -333,59 +333,21 @@ async def api_v1_task_input(request: Request, user=Depends(verify_user_access_fr
 
 @app.get("/api/v1/task/thumbnails")
 async def api_v1_task_thumbnails(request: Request, user=Depends(verify_user_access)):
-    """一次性获取所有任务的缩略图"""
     try:
-        user_id = user["user_id"]
-        msg = await server_monitor.check_user_busy(user_id)
-        if msg is not True:
-            return error_response(msg, 400)
-
-        # 获取所有任务
-        tasks = await task_manager.list_tasks(user_id=user_id, limit=1000)  # 限制最多1000个任务
-        logger.info(f"获取到 {len(tasks)} 个任务")
-
-        # 转换任务状态为字符串
-        for task in tasks:
-            task["status"] = task["status"].name
-
+        tasks = await task_manager.list_tasks(user_id=user["user_id"], limit=100)
         thumbnails = {}
-
         for task in tasks:
             task_id = task["task_id"]
-            if task.get("inputs"):
-                # 查找输入中的图片文件
-                image_inputs = []
-                for key, value in task["inputs"].items():
-                    if key.lower().find("image") != -1 or str(value).lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")):
-                        image_inputs.append(key)
-
-                if image_inputs:
-                    # 使用第一个图片作为缩略图
-                    first_image_key = image_inputs[0]
-                    try:
-                        # 获取图片数据
-                        image_data = await data_manager.load_bytes(task["inputs"][first_image_key])
-
-                        # 转换为base64
-                        import base64
-
-                        image_base64 = base64.b64encode(image_data).decode("utf-8")
-
-                        # 根据文件扩展名确定MIME类型
-                        content_type, _ = mimetypes.guess_type(first_image_key)
-                        if content_type is None:
-                            content_type = "image/jpeg"  # 默认类型
-
-                        # 构建data URL
-                        data_url = f"data:{content_type};base64,{image_base64}"
-                        thumbnails[task_id] = data_url
-
-                    except Exception as e:
-                        logger.warning(f"Failed to load thumbnail for task {task_id}: {e}")
-                        # 如果加载失败，不添加到结果中
-
-        result = {"thumbnails": thumbnails, "total_tasks": len(tasks), "total_thumbnails": len(thumbnails)}
-        return result
+            img_key = "input_image"
+            if img_key in task["inputs"]:
+                image_data = await data_manager.load_bytes(task["inputs"][img_key])
+                image_base64 = base64.b64encode(image_data).decode("utf-8")
+                content_type = guess_file_type(img_key, "image/jpeg")
+                data_url = f"data:{content_type};base64,{image_base64}"
+                thumbnails[task_id] = data_url
+        headers = {"Cache-Control": "public, max-age=3600"}
+        content = json.dumps({"thumbnails": thumbnails, "total_tasks": len(tasks), "total_thumbnails": len(thumbnails)})
+        return Response(content=content, media_type="application/json", headers=headers)
 
     except Exception as e:
         traceback.print_exc()
