@@ -23,7 +23,6 @@ from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus
-from lightx2v.utils.profiler import ProfilingContext
 from lightx2v.utils.service_utils import ProcessManager
 
 # =========================
@@ -641,27 +640,26 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
-    with ProfilingContext("Init Server Cost"):
-        model_pipelines = Pipeline(args.pipeline_json)
-        auth_manager = AuthManager()
-        if args.task_url.startswith("/"):
-            task_manager = LocalTaskManager(args.task_url, metrics_monitor)
-        elif args.task_url.startswith("postgresql://"):
-            task_manager = PostgresSQLTaskManager(args.task_url, metrics_monitor)
-        else:
-            raise NotImplementedError
-        if args.data_url.startswith("/"):
-            data_manager = LocalDataManager(args.data_url)
-        elif args.data_url.startswith("{"):
-            data_manager = S3DataManager(args.data_url)
-        else:
-            raise NotImplementedError
-        if args.queue_url.startswith("/"):
-            queue_manager = LocalQueueManager(args.queue_url)
-        elif args.queue_url.startswith("amqp://"):
-            queue_manager = RabbitMQQueueManager(args.queue_url)
-        else:
-            raise NotImplementedError
-        server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
+    model_pipelines = Pipeline(args.pipeline_json)
+    auth_manager = AuthManager()
+    if args.task_url.startswith("/"):
+        task_manager = LocalTaskManager(args.task_url, metrics_monitor)
+    elif args.task_url.startswith("postgresql://"):
+        task_manager = PostgresSQLTaskManager(args.task_url, metrics_monitor)
+    else:
+        raise NotImplementedError
+    if args.data_url.startswith("/"):
+        data_manager = LocalDataManager(args.data_url)
+    elif args.data_url.startswith("{"):
+        data_manager = S3DataManager(args.data_url)
+    else:
+        raise NotImplementedError
+    if args.queue_url.startswith("/"):
+        queue_manager = LocalQueueManager(args.queue_url)
+    elif args.queue_url.startswith("amqp://"):
+        queue_manager = RabbitMQQueueManager(args.queue_url)
+    else:
+        raise NotImplementedError
+    server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
 
     uvicorn.run(app, host=args.ip, port=args.port, reload=False, workers=1)

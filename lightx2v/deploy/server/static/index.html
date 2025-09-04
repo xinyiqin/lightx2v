@@ -3970,6 +3970,7 @@
                                 'Content-Type': 'application/json'
                             }
                         });
+                        await new Promise(resolve => setTimeout(resolve, 100));
                         return response.ok;
                     } catch (error) {
                         console.error('Token validation failed:', error);
@@ -3989,7 +3990,7 @@
                                 ...options.headers
                             }
                         });
-
+                        await new Promise(resolve => setTimeout(resolve, 100));
                         // 检查是否是认证错误
                         if (response.status === 401 || response.status === 403) {
                             // Token无效，清除本地存储并跳转到登录页
@@ -3997,7 +3998,6 @@
                             showAlert('登录已过期，请重新登录', 'warning');
                             return null;
                         }
-
                         return response;
                     } catch (error) {
                         console.error('API request failed:', error);
