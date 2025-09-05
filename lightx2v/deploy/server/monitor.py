@@ -395,9 +395,11 @@ class ServerMonitor:
                 cur["estimated_running_secs"] = self.get_avg_worker_infer_cost(sub["queue"])
                 cur["ready_worker_count"] = self.get_ready_worker_count(sub["queue"])
                 if sub["status"] == TaskStatus.PENDING:
-                    cur["estimated_pending_order"] = self.pending_subtasks_get_order(sub["queue"], sub["task_id"])
+                    order = self.pending_subtasks_get_order(sub["queue"], sub["task_id"])
                     worker_count = max(cur["ready_worker_count"], 1e-7)
-                    cur["estimated_pending_secs"] = cur["estimated_pending_order"] * cur["estimated_running_secs"] / worker_count
+                    if order is not None:
+                        cur["estimated_pending_order"] = order
+                        cur["estimated_pending_secs"] = order * cur["estimated_running_secs"] / worker_count
 
             if isinstance(sub["extra_info"], dict):
                 if "elapses" in sub["extra_info"]:
