@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
     await task_manager.mark_server_restart()
     await data_manager.init()
     await queue_manager.init()
+    await server_monitor.init_pending_subtasks()
     asyncio.create_task(server_monitor.init())
     yield
     await server_monitor.close()
@@ -165,6 +166,7 @@ async def prepare_subtasks(task_id):
         logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']})")
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
+        server_monitor.pending_subtasks_add(sub["queue"], sub["task_id"])
 
 
 @app.get("/api/v1/model/list")
@@ -234,9 +236,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
         task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
         if task is None:
             return error_response(f"Task {task_id} not found", 404)
-        for sub in subtasks:
-            sub["status"] = sub["status"].name
-        task["subtasks"] = subtasks
+        task["subtasks"] = server_monitor.format_subtask(subtasks)
         task["status"] = task["status"].name
         return task
     except Exception as e:
@@ -424,6 +424,8 @@ async def api_v1_worker_fetch(request: Request, valid=Depends(verify_worker_acce
         check_task.cancel()
 
         subtasks = [] if subtasks is None else subtasks
+        for sub in subtasks:
+            server_monitor.pending_subtasks_sub(sub["queue"], sub["task_id"])
         valid_subtasks = await task_manager.run_subtasks(subtasks, identity)
         valids = [sub["task_id"] for sub in valid_subtasks]
 

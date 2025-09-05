@@ -4,7 +4,7 @@ from enum import Enum
 
 from loguru import logger
 
-from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.common.utils import class_try_catch_async, class_try_catch
 from lightx2v.deploy.task_manager import TaskStatus
 
 
@@ -62,6 +62,7 @@ class WorkerClient:
                 self.fetched_t = None
                 if cur_cost < self.infer_timeout:
                     self.infer_cost.append(max(cur_cost, 1))
+                    logger.info(f"Worker {self.identity} {self.queue} avg infer cost update: {self.infer_cost.avg:.2f} s")
 
         elif status == WorkerStatus.FETCHED:
             self.fetched_t = time.time()
@@ -104,6 +105,7 @@ class ServerMonitor:
         self.worker_clients = {}
         self.identity_to_queue = {}
         self.subtask_run_timeouts = {}
+        self.pending_subtasks = {}
 
         self.all_queues = self.model_pipelines.get_queues()
         self.config = self.model_pipelines.get_monitor_config()
@@ -318,3 +320,91 @@ class ServerMonitor:
                             if len(data[queue]["del_worker_identities"]) >= data[queue]["need_del_worker"]:
                                 break
         return data
+
+    async def init_pending_subtasks(self):
+        # query all pending subtasks in task_manager
+        subtasks = {}
+        rows = await self.task_manager.list_tasks(status=TaskStatus.PENDING, subtasks=True, sort_by_update_t=True)
+        for row in rows:
+            if row["queue"] not in subtasks:
+                subtasks[row["queue"]] = []
+            subtasks[row["queue"]].append(row['task_id'])
+        for queue in self.all_queues:
+            if queue not in subtasks:
+                subtasks[queue] = []
+
+        # self.pending_subtasks = {queue: {"consume_count": int, "max_count": int, subtasks: {task_id: order}}
+        for queue, task_ids in subtasks.items():
+            pending_num = await self.queue_manager.pending_num(queue)
+            self.pending_subtasks[queue] = {"consume_count": 0, "max_count": pending_num, "subtasks": {}}
+            for i, task_id in enumerate(task_ids):
+                self.pending_subtasks[queue]["subtasks"][task_id] = max(pending_num - i - 1, 0)
+        logger.info(f"Init pending subtasks: {self.pending_subtasks}")
+
+    def pending_subtasks_add(self, queue, task_id):
+        if queue not in self.pending_subtasks:
+            logger.warning(f"Queue {queue} not found in self.pending_subtasks")
+            return
+        max_count = self.pending_subtasks[queue]["max_count"]
+        self.pending_subtasks[queue]["subtasks"][task_id] = max_count
+        self.pending_subtasks[queue]["max_count"] = max_count + 1
+        logger.warning(f"Pending subtasks {queue} add {task_id}: {self.pending_subtasks[queue]}")
+
+    def pending_subtasks_sub(self, queue, task_id):
+        if queue not in self.pending_subtasks:
+            logger.warning(f"Queue {queue} not found in self.pending_subtasks")
+            return
+        self.pending_subtasks[queue]["consume_count"] += 1
+        if task_id in self.pending_subtasks[queue]["subtasks"]:
+            self.pending_subtasks[queue]["subtasks"].pop(task_id)
+        logger.warning(f"Pending subtasks {queue} sub {task_id}: {self.pending_subtasks[queue]}")
+
+    def pending_subtasks_get_order(self, queue, task_id):
+        if queue not in self.pending_subtasks:
+            logger.warning(f"Queue {queue} not found in self.pending_subtasks")
+            return None
+        if task_id not in self.pending_subtasks[queue]["subtasks"]:
+            logger.warning(f"Task {task_id} not found in self.pending_subtasks[queue]['subtasks']")
+            return None
+        order = self.pending_subtasks[queue]["subtasks"][task_id]
+        consume = self.pending_subtasks[queue]["consume_count"]
+        real_order = max(order - consume, 0)
+        logger.warning(f"Pending subtasks {queue} get order {task_id}: real={real_order} order={order} consume={consume}")
+        return real_order + 1
+
+    def get_ready_worker_count(self, queue):
+        if queue not in self.worker_clients:
+            self.worker_clients[queue] = {}
+        return len(self.worker_clients[queue])
+
+    @class_try_catch
+    def format_subtask(self, subtasks):
+        ret = []
+        for sub in subtasks:
+            cur = {
+                "status": sub["status"].name,
+                "worker_name": sub["worker_name"],
+                "fail_msg": None,
+                "elapses": {},
+                "estimated_pending_order": None,
+                "estimated_pending_secs": None,
+                "estimated_running_secs": None,
+                "ready_worker_count": None,
+            }
+            if sub["status"] in [TaskStatus.PENDING, TaskStatus.RUNNING]:
+                cur["estimated_running_secs"] = self.get_avg_worker_infer_cost(sub["queue"])
+                cur["ready_worker_count"] = self.get_ready_worker_count(sub["queue"])
+                if sub["status"] == TaskStatus.PENDING:
+                    cur["estimated_pending_order"] = self.pending_subtasks_get_order(sub["queue"], sub["task_id"])
+                    worker_count = max(cur["ready_worker_count"], 1e-7)
+                    cur["estimated_pending_secs"] = cur["estimated_pending_order"] * cur["estimated_running_secs"] / worker_count
+
+            if isinstance(sub["extra_info"], dict):
+                if "elapses" in sub["extra_info"]:
+                    cur["elapses"] = sub["extra_info"]["elapses"]
+                if "start_t" in sub["extra_info"]:
+                    cur["elapses"][f"{cur['status']}-"] = time.time() - sub["extra_info"]["start_t"]
+                if "fail_msg" in sub["extra_info"]:
+                    cur["fail_msg"] = sub["extra_info"]["fail_msg"]
+            ret.append(cur)
+        return ret

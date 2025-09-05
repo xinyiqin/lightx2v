@@ -96,7 +96,10 @@ class LocalTaskManager(BaseTaskManager):
                 tasks.append(task)
         if "count" in kwargs:
             return len(tasks)
-        tasks = sorted(tasks, key=lambda x: x["create_t"], reverse=True)
+
+        sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
+        tasks = sorted(tasks, key=lambda x: x[sort_key], reverse=True)
+
         if "offset" in kwargs:
             tasks = tasks[kwargs["offset"] :]
         if "limit" in kwargs:

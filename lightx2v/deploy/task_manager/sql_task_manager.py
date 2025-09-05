@@ -384,7 +384,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 query += " WHERE " + " AND ".join(conds)
 
             if not count:
-                query += " ORDER BY create_t DESC"
+                sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
+                query += f" ORDER BY {sort_key} DESC"
 
             if "limit" in kwargs:
                 param_idx += 1

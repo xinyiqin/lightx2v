@@ -330,7 +330,7 @@ class DiTWorker(BaseWorker):
         future = asyncio.Future()
         self.thread = RunnerThread(asyncio.get_running_loop(), future, self.run_dit, self.rank)
         self.thread.start()
-        status, (out, _) = await future
+        status, out = await future
         if not status:
             return False
 
