@@ -485,7 +485,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
     def init_run_segment(self, segment_idx, audio_array=None):
         self.segment_idx = segment_idx
         if audio_array is not None:
-            self.segment = AudioSegment(audio_array, 0, audio_array.shape[0])
+            end_idx = audio_array.shape[0] // self._audio_processor.audio_frame_rate - self.prev_frame_length
+            self.segment = AudioSegment(audio_array, 0, end_idx)
         else:
             self.segment = self.inputs["audio_segments"][segment_idx]
 
