@@ -404,6 +404,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
             for row in rows:
                 task = dict(row)
                 self.parse_dict(task)
+                
+                # 如果不是查询子任务，则添加子任务信息到任务中
+                if not kwargs.get("subtasks", False):
+                    try:
+                        _, subtasks = await self.load(conn, task["task_id"], only_task=False)
+                        task["subtasks"] = subtasks
+                    except Exception as e:
+                        logger.warning(f"Failed to load subtasks for task {task['task_id']}: {e}")
+                        task["subtasks"] = []
+                
                 tasks.append(task)
             return tasks
         except:  # noqa
@@ -618,6 +628,39 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return True
         except:  # noqa
             logger.error(f"resume_task error: {traceback.format_exc()}")
+            return False
+        finally:
+            ASYNC_LOCK.release()
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def delete_task(self, task_id, user_id=None):
+        conn = await self.get_conn()
+        try:
+            await ASYNC_LOCK.acquire()
+            async with conn.transaction(isolation="read_uncommitted"):
+                # 首先检查任务是否存在且属于该用户
+                task, subtasks = await self.load(conn, task_id, user_id)
+                if not task:
+                    logger.warning(f"Task {task_id} not found or not accessible by user {user_id}")
+                    return False
+                
+                # 只允许删除已完成的任务（SUCCEED, FAILED, CANCEL）
+                print(task["status"])
+                if task["status"] not in FinishedStatus:
+                    logger.warning(f"Cannot delete task {task_id} with status {task['status']}, only finished tasks can be deleted")
+                    return False
+                
+                # 删除子任务
+                await conn.execute(f"DELETE FROM {self.table_subtasks} WHERE task_id = $1", task_id)
+                
+                # 删除主任务
+                await conn.execute(f"DELETE FROM {self.table_tasks} WHERE task_id = $1", task_id)
+                
+                logger.info(f"Task {task_id} and its subtasks deleted successfully")
+                return True
+        except:  # noqa
+            logger.error(f"delete_task error: {traceback.format_exc()}")
             return False
         finally:
             ASYNC_LOCK.release()

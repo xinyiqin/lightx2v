@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 
+from loguru import logger
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time, str2time, time2str
 from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
@@ -93,6 +94,11 @@ class LocalTaskManager(BaseTaskManager):
                     continue
                 if "end_ping_t" in kwargs and kwargs["end_ping_t"] < task["ping_t"]:
                     continue
+                
+                # 如果不是查询子任务，则添加子任务信息到任务中
+                if not kwargs.get("subtasks", False):
+                    task["subtasks"] = info.get("subtasks", [])
+                
                 tasks.append(task)
         if "count" in kwargs:
             return len(tasks)
@@ -271,6 +277,23 @@ class LocalTaskManager(BaseTaskManager):
         task["update_t"] = current_time()
         self.save(task, subtasks)
         return True
+
+    @class_try_catch_async
+    async def delete_task(self, task_id, user_id=None):
+        task, subtasks = self.load(task_id, user_id)
+        if not task:
+            return False
+        
+        # 只允许删除已完成的任务（SUCCEED, FAILED, CANCEL）
+        if task["status"] not in FinishedStatus:
+            return False
+        
+        # 删除任务文件
+        task_file = self.get_task_filename(task_id)
+        if os.path.exists(task_file):
+            os.remove(task_file)
+        return True
+
 
     @class_try_catch_async
     async def insert_user_if_not_exists(self, user_info):

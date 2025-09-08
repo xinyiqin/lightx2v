@@ -72,6 +72,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# 添加icon目录的静态文件服务
+icon_dir = os.path.join(os.path.dirname(__file__), "static", "icon")
+app.mount("/icon", StaticFiles(directory=icon_dir), name="icon")
 security = HTTPBearer()
 
 
@@ -232,6 +236,22 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
         msg = await server_monitor.check_user_busy(user["user_id"])
         if msg is not True:
             return error_response(msg, 400)
+        
+        # 检查是否有task_ids参数（批量查询）
+        if "task_ids" in request.query_params:
+            task_ids = request.query_params["task_ids"].split(',')
+            tasks = []
+            for task_id in task_ids:
+                task_id = task_id.strip()
+                if task_id:
+                    task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
+                    if task is not None:
+                        task["subtasks"] = server_monitor.format_subtask(subtasks)
+                        task["status"] = task["status"].name
+                        tasks.append(task)
+            return {"tasks": tasks}
+        
+        # 单个任务查询
         task_id = request.query_params["task_id"]
         task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
         if task is None:
@@ -330,29 +350,6 @@ async def api_v1_task_input(request: Request, user=Depends(verify_user_access_fr
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/task/thumbnails")
-async def api_v1_task_thumbnails(request: Request, user=Depends(verify_user_access)):
-    try:
-        tasks = await task_manager.list_tasks(user_id=user["user_id"], limit=100)
-        thumbnails = {}
-        for task in tasks:
-            task_id = task["task_id"]
-            img_key = "input_image"
-            if img_key in task["inputs"]:
-                image_data = await data_manager.load_bytes(task["inputs"][img_key])
-                image_base64 = base64.b64encode(image_data).decode("utf-8")
-                content_type = guess_file_type(img_key, "image/jpeg")
-                data_url = f"data:{content_type};base64,{image_base64}"
-                thumbnails[task_id] = data_url
-        headers = {"Cache-Control": "public, max-age=3600"}
-        content = json.dumps({"thumbnails": thumbnails, "total_tasks": len(tasks), "total_thumbnails": len(thumbnails)})
-        return Response(content=content, media_type="application/json", headers=headers)
-
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access)):
     try:
@@ -384,6 +381,63 @@ async def api_v1_task_resume(request: Request, user=Depends(verify_user_access))
             return {"msg": "ok"}
         else:
             return error_response(f"Task {task_id} resume failed", 400)
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.delete("/api/v1/task/delete")
+async def api_v1_task_delete(request: Request, user=Depends(verify_user_access)):
+    try:
+        task_id = request.query_params.get("task_id")
+        if not task_id:
+            return error_response("task_id is required", 400)
+        
+        msg = await server_monitor.check_user_busy(user["user_id"])
+        if msg is not True:
+            return error_response(msg, 400)
+        
+        # 先获取任务信息，用于删除相关数据文件
+        try:
+            task = await task_manager.query_task(task_id, user["user_id"], only_task=True)
+            if not task:
+                return error_response("Task not found", 404)
+            
+            # 只允许删除已完成的任务
+            from lightx2v.deploy.task_manager import FinishedStatus
+            if task["status"] not in FinishedStatus:
+                return error_response("Only finished tasks can be deleted", 400)
+            
+            # 删除相关的数据文件
+            try:
+                # 删除输入文件
+                for input_name, input_filename in task.get("inputs", {}).items():
+                    try:
+                        await data_manager.delete_bytes(input_filename)
+                        logger.info(f"Deleted input file: {input_filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete input file {input_filename}: {e}")
+                
+                # 删除输出文件
+                for output_name, output_filename in task.get("outputs", {}).items():
+                    try:
+                        await data_manager.delete_bytes(output_filename)
+                        logger.info(f"Deleted output file: {output_filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete output file {output_filename}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to delete some data files for task {task_id}: {e}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to get task info for data cleanup: {e}")
+        
+        # 调用任务管理器删除任务记录
+        success = await task_manager.delete_task(task_id, user["user_id"])
+        if success:
+            logger.info(f"Task {task_id} deleted by user {user['user_id']}")
+            return JSONResponse({"message": "Task deleted successfully"})
+        else:
+            return error_response("Failed to delete task", 400)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -576,6 +630,16 @@ async def api_v1_template(template_type: str, filename: str):
                 media_type = "audio/wav"
             else:
                 media_type = "application/octet-stream"
+        elif template_type == "videos":
+            # 根据文件扩展名设置媒体类型
+            if filename.lower().endswith(".mp4"):
+                media_type = "video/mp4"
+            elif filename.lower().endswith(".webm"):
+                media_type = "video/webm"
+            elif filename.lower().endswith(".avi"):
+                media_type = "video/x-msvideo"
+            else:
+                media_type = "video/mp4"  # 默认为mp4
         else:
             media_type = "application/octet-stream"
 
@@ -611,6 +675,36 @@ async def api_v1_template_list():
                 if os.path.isfile(file_path):
                     filename = os.path.basename(file_path)
                     templates["audios"].append({"filename": filename, "url": f"/api/v1/template/audios/{filename}"})
+
+        return {"templates": templates}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+@app.get("/api/v1/template/tasks")
+async def api_v1_template_tasks():
+    """获取模板任务列表"""
+    try:
+        import glob
+        import os
+        import json
+
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        tasks_dir = os.path.join(template_dir, "tasks")
+
+        templates = []
+
+        if os.path.exists(tasks_dir):
+            # 获取所有模板任务JSON文件
+            for file_path in glob.glob(os.path.join(tasks_dir, "*.json")):
+                if os.path.isfile(file_path):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            template_data = json.load(f)
+                            templates.append(template_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to load template file {file_path}: {e}")
+                        continue
 
         return {"templates": templates}
     except Exception as e:
