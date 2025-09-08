@@ -22,7 +22,7 @@ from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManage
 from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
-from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus
+from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus, FinishedStatus
 from lightx2v.utils.service_utils import ProcessManager
 
 # =========================
@@ -318,6 +318,7 @@ async def api_v1_task_result(request: Request, user=Depends(verify_user_access_f
         #  set correct Content-Type
         content_type = guess_file_type(name, "application/octet-stream")
         headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+        headers["Cache-Control"] = "public, max-age=3600"
         return Response(content=data, media_type=content_type, headers=headers)
 
     except Exception as e:
@@ -389,49 +390,29 @@ async def api_v1_task_resume(request: Request, user=Depends(verify_user_access))
 @app.delete("/api/v1/task/delete")
 async def api_v1_task_delete(request: Request, user=Depends(verify_user_access)):
     try:
-        task_id = request.query_params.get("task_id")
-        if not task_id:
-            return error_response("task_id is required", 400)
-        
         msg = await server_monitor.check_user_busy(user["user_id"])
         if msg is not True:
             return error_response(msg, 400)
-        
-        # 先获取任务信息，用于删除相关数据文件
-        try:
-            task = await task_manager.query_task(task_id, user["user_id"], only_task=True)
-            if not task:
-                return error_response("Task not found", 404)
-            
-            # 只允许删除已完成的任务
-            from lightx2v.deploy.task_manager import FinishedStatus
-            if task["status"] not in FinishedStatus:
-                return error_response("Only finished tasks can be deleted", 400)
-            
-            # 删除相关的数据文件
-            try:
-                # 删除输入文件
-                for input_name, input_filename in task.get("inputs", {}).items():
-                    try:
-                        await data_manager.delete_bytes(input_filename)
-                        logger.info(f"Deleted input file: {input_filename}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete input file {input_filename}: {e}")
-                
-                # 删除输出文件
-                for output_name, output_filename in task.get("outputs", {}).items():
-                    try:
-                        await data_manager.delete_bytes(output_filename)
-                        logger.info(f"Deleted output file: {output_filename}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete output file {output_filename}: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to delete some data files for task {task_id}: {e}")
-            
-        except Exception as e:
-            logger.warning(f"Failed to get task info for data cleanup: {e}")
-        
-        # 调用任务管理器删除任务记录
+        task_id = request.query_params["task_id"]
+
+        task = await task_manager.query_task(task_id, user["user_id"], only_task=True)
+        if not task:
+            return error_response("Task not found", 404)
+
+        if task["status"] not in FinishedStatus:
+            return error_response("Only finished tasks can be deleted", 400)
+
+        # delete input files
+        for _, input_filename in task["inputs"].items():
+            await data_manager.delete_bytes(input_filename)
+            logger.info(f"Deleted input file: {input_filename}")
+
+        # delete output files
+        for _, output_filename in task["outputs"].items():
+            await data_manager.delete_bytes(output_filename)
+            logger.info(f"Deleted output file: {output_filename}")
+
+        # delete task record
         success = await task_manager.delete_task(task_id, user["user_id"])
         if success:
             logger.info(f"Task {task_id} deleted by user {user['user_id']}")
@@ -643,7 +624,8 @@ async def api_v1_template(template_type: str, filename: str):
         else:
             media_type = "application/octet-stream"
 
-        return Response(content=data, media_type=media_type)
+        headers = {"Cache-Control": "public, max-age=3600"}
+        return Response(content=data, media_type=media_type, headers=headers)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
