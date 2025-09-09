@@ -163,6 +163,32 @@ async def github_callback(request: Request):
         return error_response(str(e), 500)
 
 
+@app.get("/auth/login/google")
+async def google_auth(request: Request):
+    client_id = auth_manager.google_client_id
+    redirect_uri = auth_manager.google_redirect_uri
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid%20email%20profile&access_type=offline"
+    logger.info(f"Google auth: auth_url: {auth_url}")
+    return {"auth_url": auth_url}
+
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    try:
+        code = request.query_params.get("code")
+        if not code:
+            return error_response("Missing authorization code", 400)
+        user_info = await auth_manager.auth_google(code)
+        user_id = await task_manager.create_user(user_info)
+        user_info["user_id"] = user_id
+        access_token = auth_manager.create_jwt_token(user_info)
+        logger.info(f"Google callback: user_info: {user_info}, access_token: {access_token}")
+        return {"access_token": access_token, "user_info": user_info}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
 async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)

@@ -77,7 +77,7 @@ class BaseTaskManager:
                 data[k] = TaskStatus[data[k]]
 
     async def create_user(self, user_info):
-        assert user_info["source"] == "github", f"do not support {user_info['source']} user!"
+        assert user_info["source"] in ["github", "google"], f"do not support {user_info['source']} user!"
         cur_t = current_time()
         user_id = f"{user_info['source']}_{user_info['id']}"
         data = {

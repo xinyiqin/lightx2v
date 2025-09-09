@@ -1147,10 +1147,20 @@
                                 </div>
 
                                 <!-- 登录按钮 -->
+                                <div class="mb-4">
                                 <button @click="loginWithGitHub" class="btn btn-github btn-lg w-100 mb-4" :disabled="loginLoading">
                                     <i class="fab fa-github me-2"></i>
                                     {{ loginLoading||initLoading ? '登录中...' : '使用GitHub登录' }}
                                 </button>
+                                </div>
+
+                                <!-- 登录按钮 -->
+                                <div class="mb-4">
+                                <button @click="loginWithGoogle" class="btn btn-github btn-lg w-100 mb-4" :disabled="loginLoading">
+                                    <i class="fab fa-github me-2"></i>
+                                    {{ loginLoading||initLoading ? '登录中...' : '使用Google登录' }}
+                                </button>
+                                </div>
 
                                 <!-- 功能特性 -->
                                 <div class="login-features">
@@ -3271,15 +3281,27 @@
                         loginLoading.value = true;
                         const response = await fetch('./auth/login/github');
                         const data = await response.json();
+                        localStorage.setItem('loginSource', 'github');
                         window.location.href = data.auth_url;
                     } catch (error) {
                         showAlert('获取GitHub认证URL失败', 'danger');
                     }
                 };
 
-                const handleGitHubCallback = async (code) => {
+                const loginWithGoogle = async () => {
                     try {
-                        const response = await fetch(`./auth/callback/github?code=${code}`);
+                        const response = await fetch('./auth/login/google');
+                        const data = await response.json();
+                        localStorage.setItem('loginSource', 'google');
+                        window.location.href = data.auth_url;
+                    } catch (error) {
+                        showAlert('获取Google认证URL失败', 'danger');
+                    }
+                };
+
+                const handleLoginCallback = async (code, source) => {
+                    try {
+                        const response = await fetch(`./auth/callback/${source}?code=${code}`);
                         if (response.ok) {
                             const data = await response.json();
                             console.log(data);
@@ -3302,8 +3324,6 @@
                         console.error(error);
                     }
                 };
-
-
 
                 const logout = () => {
                     localStorage.removeItem('accessToken');
@@ -5562,7 +5582,8 @@
                             const urlParams = new URLSearchParams(window.location.search);
                             const code = urlParams.get('code');
                             if (code) {
-                                await handleGitHubCallback(code);
+                                source = localStorage.getItem('loginSource');
+                                await handleLoginCallback(code, source);
                             }
                         }
                     } catch (error) {
@@ -6376,6 +6397,7 @@
                     initLoading,
                     downloadLoading,
                     loginWithGitHub,
+                    loginWithGoogle,
                     submitting,
                     searchQuery,
                     currentUser,
