@@ -4,6 +4,7 @@ import time
 import aiohttp
 import jwt
 from fastapi import HTTPException
+from lightx2v.deploy.common.aliyun import AlibabaCloudClient
 from loguru import logger
 
 
@@ -24,6 +25,9 @@ class AuthManager:
         self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         self.jwt_expiration_hours = os.getenv("JWT_EXPIRATION_HOURS", 24)
         self.jwt_secret_key = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+
+        # Aliyun SMS
+        self.aliyun_client = AlibabaCloudClient()
 
         logger.info(f"AuthManager: GITHUB_CLIENT_ID: {self.github_client_id}")
         logger.info(f"AuthManager: GITHUB_CLIENT_SECRET: {self.github_client_secret}")
@@ -141,6 +145,22 @@ class AuthManager:
         except Exception as e:
             logger.error(f"Google authentication error: {e}")
             raise HTTPException(status_code=500, detail="Google authentication failed")
+
+    async def send_sms(self, phone_number):
+        return await self.aliyun_client.send_sms(phone_number)
+
+    async def check_sms(self, phone_number, verify_code):
+        ok = await self.aliyun_client.check_sms(phone_number, verify_code)
+        if not ok:
+            return None
+        return {
+            "source": "phone",
+            "id": phone_number,
+            "username": phone_number,
+            "email": "",
+            "homepage": "",
+            "avatar_url": "",
+        }
 
     def verify_jwt_token(self, token):
         try:

@@ -189,6 +189,43 @@ async def google_callback(request: Request):
         return error_response(str(e), 500)
 
 
+@app.get("/auth/login/sms")
+async def sms_auth(request: Request):
+    try:
+        phone_number = request.query_params.get("phone_number")
+        if not phone_number:
+            return error_response("Missing phone number", 400)
+        ok = await auth_manager.send_sms(phone_number)
+        if not ok:
+            return error_response("SMS send failed", 400)
+        return {"msg": "SMS send successfully"}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/auth/callback/sms")
+async def sms_callback(request: Request):
+    try:
+        phone_number = request.query_params.get("phone_number")
+        verify_code = request.query_params.get("verify_code")
+        if not phone_number or not verify_code:
+            return error_response("Missing phone number or verify code", 400)
+        user_info = await auth_manager.check_sms(phone_number, verify_code)
+        if not user_info:
+            return error_response("SMS verify failed", 400)
+
+        user_id = await task_manager.create_user(user_info)
+        user_info["user_id"] = user_id
+        access_token = auth_manager.create_jwt_token(user_info)
+        logger.info(f"SMS callback: user_info: {user_info}, access_token: {access_token}")
+        return {"access_token": access_token, "user_info": user_info}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
 async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
