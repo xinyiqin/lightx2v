@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "e9ce6a68-d537-4284-8bff-375304b63fc2",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video feature the person is talking.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:31",
+        "update_t": "2025-09-11 03:23:31",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 19.766666999999998
+        },
+        "tags": [
+            "精选"
+        ],
+        "inputs": {
+            "input_image": "1.png",
+            "input_audio": "1.wav"
+        },
+        "outputs": {
+            "output_video": "1.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:31"
+    }
+}

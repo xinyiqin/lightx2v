@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "3e66dabb-d91b-4a86-a5da-a39d60b88529",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a solemn man framed closely, his eyes calm yet piercing as he begins to speak. His expression is serious, carrying a sense of quiet weight, and every word he delivers is precise, as though carefully chosen. The background is a vivid plain of color, stripped of distraction, placing full attention on his face. And the camera is fixed. His slightly furrowed brow and steady gaze draw the listener in, underscoring the gravity of his message. The camera remains fixed, unwavering, holding on his features as he speaks with measured conviction. Each phrase resonates with sincerity, turning the moment into a scene of focused intensity and thoughtful presence.And the camera is fixed.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:32",
+        "update_t": "2025-09-11 03:23:32",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 57.166666666666664
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "her.png",
+            "input_audio": "her.wav"
+        },
+        "outputs": {
+            "output_video": "her.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:32"
+    }
+}

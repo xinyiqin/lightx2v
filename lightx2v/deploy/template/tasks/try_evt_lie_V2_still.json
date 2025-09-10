@@ -1,0 +1,32 @@
+{
+    "task": {
+        "task_id": "f1e882d9-fa92-4dba-8518-f323d3c45e92",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a tranquil woman resting by the shore, her head unmoving as it still lay on the sand. Bathed in the glow of the setting sun, her face remains serene while her lips part to speak and the camera is fixed, her voice soft yet steady, carrying across the quiet air. The background is a golden horizon where the sea and sky blend, waves shimmering faintly in the fading light. The camera holds perfectly still, focusing only on her calm profile as the sun reflects warmly along her skin. With her head steady and the frame unwavering, her words emerge like a quiet narration of the moment, intertwining with the whisper of the sea to create a scene of timeless stillness and gentle resonance.The camera remains fixed and the person didn't move.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:35",
+        "update_t": "2025-09-11 03:23:35",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 17.0
+        },
+        "tags": [
+            "唱歌",
+            "精选"
+        ],
+        "inputs": {
+            "input_image": null,
+            "input_audio": "try_evt_lie_V2_still.wav"
+        },
+        "outputs": {
+            "output_video": "try_evt_lie_V2_still.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:35"
+    }
+}

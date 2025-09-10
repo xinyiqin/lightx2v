@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "5fe087f8-600c-4b02-be02-124b24bab744",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "In a dark, monotone environment, a man stands at a wooden podium, delivering a focused presentation. Clad in a gray, buttoned shirt with the collar slightly open, he sports a curly beard and wears a lanyard around his neck holding a name tag and a small device. He actively gestures with his hands, emphasizing his points, pointing towards the audience and then transitioning to more open movements. The man leans slightly forward, resting his right hand on the podium, and conveys a dynamic narrative flow with both hands. The laptop, positioned on the podium, prominently displays the Dell logo, serving as a focal element in this educational setup. The backdrop's plain green adds depth but remains unobtrusive, drawing attention solely to him and his passion for communication. The camera focuses on him, capturing his gestures and expressions, while the atmosphere is focused and dynamic.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:32",
+        "update_t": "2025-09-11 03:23:32",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 7.0
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "hSMhMWwELn74_000278-00000001-00000189.png",
+            "input_audio": "hSMhMWwELn74_000278-00000001-00000189.wav"
+        },
+        "outputs": {
+            "output_video": "hSMhMWwELn74_000278-00000001-00000189.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:32"
+    }
+}

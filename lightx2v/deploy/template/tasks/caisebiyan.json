@@ -1,0 +1,32 @@
+{
+    "task": {
+        "task_id": "37ebe171-31f9-469a-960b-143cbd8e5ca9",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a stately woman painted with regal calm, her face framed by a vivid headscarf of orange and gold. At first, her eyes remain closed, her expression serene, and then they slowly open, revealing a gaze filled with determination. Her lips begin to move, and her voice emerges steady and resonant, carrying an unshakable sense of strength. The background remains textured yet muted, ensuring the focus stays entirely on her face. Large golden earrings catch the light as if to punctuate her presence, while the camera stays fixed, holding her figure in full dignity. Each word she speaks resonates with conviction, her unwavering gaze making the moment feel timeless, powerful, and alive with certainty.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:32",
+        "update_t": "2025-09-11 03:23:32",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 16.625
+        },
+        "tags": [
+            "多风格支持",
+            "精选"
+        ],
+        "inputs": {
+            "input_image": "caisebiyan.jpg",
+            "input_audio": "caisebiyan.wav"
+        },
+        "outputs": {
+            "output_video": "caisebiyan.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:32"
+    }
+}

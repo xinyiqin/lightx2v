@@ -1,0 +1,32 @@
+{
+    "task": {
+        "task_id": "b81486a0-cb4c-4318-9bb7-b9613ded6964",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "In a contemporary, softly lit setting, the focus is on a young man seated comfortably in a modern armchair. He is dressed in a semi-casual yet stylish ensemble, consisting of a light lavender button-down shirt worn over a beige t-shirt, paired with beige trousers. His posture is upright and relaxed, indicating ease and engagement in conversation. His hands are gesturing animatedly, moving from an open, spread-out position near his body to clasping each other, then unfurling again, suggesting he is in the midst of a detailed and lively discussion. The background is a textured, neutral gray, providing a clean, distraction-free canvas that reinforces the subject's presence as the central protagonist. The scene conveys a calm and professional atmosphere, with subtle lighting accentuating the subject's facial expressions and gestures, enhancing the engagement and warmth of the interaction.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:31",
+        "update_t": "2025-09-11 03:23:31",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 18.875
+        },
+        "tags": [
+            "真人",
+            "精选"
+        ],
+        "inputs": {
+            "input_image": "000490_package_1690979656844-00006695-00007167.png",
+            "input_audio": "000490_package_1690979656844-00006695-00007167.wav"
+        },
+        "outputs": {
+            "output_video": "000490_package_1690979656844-00006695-00007167.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:31"
+    }
+}

@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "89dc5604-04dc-4053-af47-ef490f34b5fc",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a person standing against a green background. They are dressed in a light gray polo dress with short sleeves and a collar, adorned with a small logo on the left chest area. The person has long, straight hair that falls over their shoulders. Throughout the video, they make various hand gestures, including clasping their hands together in front of them, spreading their hands out to the sides, and moving their hands in different positions. The background remains consistently green throughout the video.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:33",
+        "update_t": "2025-09-11 03:23:33",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 12.5
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "lvmu.png",
+            "input_audio": "lvmu.wav"
+        },
+        "outputs": {
+            "output_video": "lvmu.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:33"
+    }
+}

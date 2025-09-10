@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "70189021-d491-4c8b-9af6-5cb4a25c00c4",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "In the video, a man is seated at a white table against a green background, with a solid green screen behind him. He is wearing a red T-shirt with a black 'GOOD' logo printed across the chest. The man has short, neatly styled black hair and begins speaking, making various hand gestures. His hands move from a relaxed position on the table to active gestures, including clasping, spreading his fingers, and pointing. He then gestures with his right hand, moving it in a circular motion and bringing it closer to his face before placing his hands back on the table. The scene is isolated, with even lighting that highlights the subject without casting harsh shadows, keeping the viewer's attention focused on his expressive actions.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:31",
+        "update_t": "2025-09-11 03:23:31",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 9.4375
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "2.png",
+            "input_audio": "2.wav"
+        },
+        "outputs": {
+            "output_video": "2.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:31"
+    }
+}

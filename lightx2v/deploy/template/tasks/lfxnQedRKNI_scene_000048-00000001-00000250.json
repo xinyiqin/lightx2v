@@ -1,0 +1,29 @@
+{
+    "task": {
+        "task_id": "91b81161-fc1c-471a-99b7-0dcb24f581ad",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a close-up of a woman seated in a comfortably casual room setting. She is wearing a light green pajama top with colorful animal prints, her hair neatly styled and pulled back. Engaged in a makeup demonstration, she uses a small makeup brush to apply makeup around her eye area with precise movements. The camera captures her hands as she dips the brush into a container and then applies it with deliberate care and attention to detail. She then removes the cap from a makeup pencil and holds it in her hands, gesturing with it as she explains something. The background features a neutral wood-paneled wall with a vase holding white and purple flowers on either side, and a purple orchid adds a hint of color to the scene. The lighting is soft and natural, highlighting the woman's features and conveying a serene environment with a vibrant mood.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:33",
+        "update_t": "2025-09-11 03:23:33",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 10.375
+        },
+        "tags": [],
+        "inputs": {
+            "input_image": "lfxnQedRKNI_scene_000048-00000001-00000250.png",
+            "input_audio": "lfxnQedRKNI_scene_000048-00000001-00000250.wav"
+        },
+        "outputs": {
+            "output_video": "lfxnQedRKNI_scene_000048-00000001-00000250.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:33"
+    }
+}

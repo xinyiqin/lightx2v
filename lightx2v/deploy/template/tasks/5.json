@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "bd8b0d2d-1b26-4ad3-af1d-618dd0a286d5",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "A woman in a black dress is seated at a table with a green background, holding a smartphone on a stand. She is wearing a sleek black sleeveless top with thin shoulder straps and a delicate necklace, with her dark hair tied back. She begins speaking and makes various hand gestures, including pointing, open-handed movements, and clapping, as her hands move fluidly and expressively, articulating her points and drawing attention to various aspects through subtle movements and changes in hand position. Her facial expressions shift to match the intensity and pace of her speech, showing engagement and enthusiasm. The camera remains focused on her throughout the video, capturing her actions and expressions.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:31",
+        "update_t": "2025-09-11 03:23:31",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 4.0625
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "5.png",
+            "input_audio": "5.wav"
+        },
+        "outputs": {
+            "output_video": "5.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:31"
+    }
+}

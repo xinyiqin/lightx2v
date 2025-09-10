@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "7e27a9eb-42b8-4e1f-a509-8bb985ae13ad",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a woman speaking with a smile, her right hand moving casually in front of her chest.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:36",
+        "update_t": "2025-09-11 03:23:36",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 9.8125
+        },
+        "tags": [
+            "多风格支持"
+        ],
+        "inputs": {
+            "input_image": "zisemei.png",
+            "input_audio": "zisemei.wav"
+        },
+        "outputs": {
+            "output_video": "zisemei.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:36"
+    }
+}

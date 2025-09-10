@@ -1,0 +1,29 @@
+{
+    "task": {
+        "task_id": "64833773-84db-488d-b95b-4a5862eb4141",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a woman standing in a well-lit bathroom with white tiled walls and a wooden door in the background. She has long, dark hair and is wearing a white top with yellow straps. The woman stretches her arm up and towards her face in a smooth, fluid motion, sliding her hand gently across her cheek. She then applies a cream to her face using her right hand, moving it in circular motions on her cheeks and jawline. Her expression is relaxed and confident as she continues to engage in deliberate motions, occasionally looking at the camera. The scene maintains a steady, intimate atmosphere, with the camera focusing closely on her hand movements and facial expressions.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:32",
+        "update_t": "2025-09-11 03:23:32",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 10.375
+        },
+        "tags": [],
+        "inputs": {
+            "input_image": "IwfiX7vgnLM_scene_000033-00000001-00000250.png",
+            "input_audio": "IwfiX7vgnLM_scene_000033-00000001-00000250.wav"
+        },
+        "outputs": {
+            "output_video": "IwfiX7vgnLM_scene_000033-00000001-00000250.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:32"
+    }
+}

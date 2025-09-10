@@ -1,0 +1,31 @@
+{
+    "task": {
+        "task_id": "3616e207-3d9a-42bc-8cca-10925186fe8a",
+        "task_type": "s2v",
+        "model_cls": "seko_talk",
+        "stage": "single_stage",
+        "params": {
+            "prompt": "The video features a man speaking, gently holding a presentation prop with his hands, fingers slightly spread, occasionally raising his hands to gesture, at other times naturally hanging down,配合 a steady stance and a smiling expression, seemingly clearly explaining product details. Finally, he raises his right hand, forming a '1' gesture. He is wearing a dark gray suit and black straight-cut trousers, with a black top underneath, standing in front of the 'MI' logo. The simple background highlights the subject, with gestures and posture exuding professionalism and confidence, vividly conveying the speech content, reinforcing his central role in the event, and creating an approachable yet highly persuasive atmosphere.",
+            "seed": 42,
+            "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+        },
+        "create_t": "2025-09-11 03:23:33",
+        "update_t": "2025-09-11 03:23:33",
+        "status": "SUCCESS",
+        "extra_info": {
+            "active_elapse": 12.0
+        },
+        "tags": [
+            "真人"
+        ],
+        "inputs": {
+            "input_image": "leijun.png",
+            "input_audio": "leijun.wav"
+        },
+        "outputs": {
+            "output_video": "leijun.mp4"
+        },
+        "user_id": "qinxinyi",
+        "ping_t": "2025-09-11 03:23:33"
+    }
+}
