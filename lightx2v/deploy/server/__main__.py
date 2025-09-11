@@ -239,9 +239,6 @@ async def prepare_subtasks(task_id):
 @app.get("/api/v1/model/list")
 async def api_v1_model_list(user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         return {"models": model_pipelines.get_model_lists()}
     except Exception as e:
         traceback.print_exc()
@@ -296,10 +293,6 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
 @app.get("/api/v1/task/query")
 async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
-        
         # 检查是否有task_ids参数（批量查询）
         if "task_ids" in request.query_params:
             task_ids = request.query_params["task_ids"].split(',')
@@ -331,10 +324,6 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
 async def api_v1_task_list(request: Request, user=Depends(verify_user_access)):
     try:
         user_id = user["user_id"]
-        msg = await server_monitor.check_user_busy(user_id)
-        if msg is not True:
-            return error_response(msg, 400)
-
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         assert page > 0 and page_size > 0, "page and page_size must be greater than 0"
@@ -363,19 +352,57 @@ async def api_v1_task_list(request: Request, user=Depends(verify_user_access)):
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request, user=Depends(verify_user_access_from_query)):
+@app.get("/api/v1/task/result_url")
+async def api_v1_task_result_url(request: Request, user=Depends(verify_user_access)):
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
-        if task is None:
-            return error_response(f"Task {task_id} not found", 404)
-        if task["status"] != TaskStatus.SUCCEED:
-            return error_response(f"Task {task_id} not succeed", 400)
+        assert task is not None, f"Task {task_id} not found"
+        assert task["status"] == TaskStatus.SUCCEED, f"Task {task_id} not succeed"
         assert name in task["outputs"], f"Output {name} not found in task {task_id}"
-        if name in task["params"]:
-            return error_response(f"Output {name} is a stream", 400)
+        assert name not in task["params"], f"Output {name} is a stream"
+
+        url = await data_manager.presign_url(task["outputs"][name])
+        if url is None:
+            url = f"./assets/task/result?task_id={task_id}&name={name}"
+        return {"url": url}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/input_url")
+async def api_v1_task_input_url(request: Request, user=Depends(verify_user_access)):
+    try:
+        name = request.query_params["name"]
+        task_id = request.query_params["task_id"]
+        task = await task_manager.query_task(task_id, user_id=user["user_id"])
+        assert task is not None, f"Task {task_id} not found"
+        assert name in task["inputs"], f"Input {name} not found in task {task_id}"
+        assert name not in task["params"], f"Input {name} is a stream"
+
+        url = await data_manager.presign_url(task["inputs"][name])
+        if url is None:
+            url = f"./assets/task/input?task_id={task_id}&name={name}"
+        return {"url": url}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/assets/task/result")
+async def assets_task_result(request: Request, user=Depends(verify_user_access_from_query)):
+    try:
+        name = request.query_params["name"]
+        task_id = request.query_params["task_id"]
+        task = await task_manager.query_task(task_id, user_id=user["user_id"])
+        assert task is not None, f"Task {task_id} not found"
+        assert task["status"] == TaskStatus.SUCCEED, f"Task {task_id} not succeed"
+        assert name in task["outputs"], f"Output {name} not found in task {task_id}"
+        assert name not in task["params"], f"Output {name} is a stream"
         data = await data_manager.load_bytes(task["outputs"][name])
 
         #  set correct Content-Type
@@ -389,18 +416,15 @@ async def api_v1_task_result(request: Request, user=Depends(verify_user_access_f
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/task/input")
-async def api_v1_task_input(request: Request, user=Depends(verify_user_access_from_query)):
+@app.get("/assets/task/input")
+async def assets_task_input(request: Request, user=Depends(verify_user_access_from_query)):
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
-        if task is None:
-            return error_response(f"Task {task_id} not found", 404)
-        if name not in task["inputs"]:
-            return error_response(f"Input {name} not found in task {task_id}", 404)
-        if name in task["params"]:
-            return error_response(f"Input {name} is a stream", 400)
+        assert task is not None, f"Task {task_id} not found"
+        assert name in task["inputs"], f"Input {name} not found in task {task_id}"
+        assert name not in task["params"], f"Input {name} is a stream"
         data = await data_manager.load_bytes(task["inputs"][name])
 
         #  set correct Content-Type
@@ -417,9 +441,6 @@ async def api_v1_task_input(request: Request, user=Depends(verify_user_access_fr
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         task_id = request.query_params["task_id"]
         ret = await task_manager.cancel_task(task_id, user_id=user["user_id"])
         logger.warning(f"Task {task_id} cancelled: {ret}")
@@ -435,9 +456,6 @@ async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access))
 @app.get("/api/v1/task/resume")
 async def api_v1_task_resume(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"], active_new_task=True)
-        if msg is not True:
-            return error_response(msg, 400)
         task_id = request.query_params["task_id"]
         ret = await task_manager.resume_task(task_id, user_id=user["user_id"], all_subtask=True)
         if ret:
@@ -453,9 +471,6 @@ async def api_v1_task_resume(request: Request, user=Depends(verify_user_access))
 @app.delete("/api/v1/task/delete")
 async def api_v1_task_delete(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         task_id = request.query_params["task_id"]
 
         task = await task_manager.query_task(task_id, user["user_id"], only_task=True)

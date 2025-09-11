@@ -4145,6 +4145,30 @@
                     }, 100);
                 };
 
+                const getTaskFileUrlFromApi = async (taskId, fileKey) => {
+                    let apiUrl = `./api/v1/task/input_url?task_id=${taskId}&name=${fileKey}`;
+                    if (fileKey.includes('output')) {
+                        apiUrl = `./api/v1/task/result_url?task_id=${taskId}&name=${fileKey}`;
+                    }
+                    const response = await apiRequest(apiUrl);
+                    if (response && response.ok) {
+                        const data = await response.json();
+                        let assertUrl = data.url;
+                        if (assertUrl.startsWith('./assets/')) {
+                            const token = localStorage.getItem('accessToken');
+                            if (token) {
+                                assertUrl = `${assertUrl}&token=${encodeURIComponent(token)}`;
+                            }
+                        }
+                        setTaskFileToCache(taskId, fileKey, {
+                            url: assertUrl,
+                            timestamp: Date.now()
+                        });
+                        return assertUrl;
+                    }
+                    return null;
+                };
+
                 // 获取任务文件URL（优先从缓存，缓存没有则调用后端）
                 const getTaskFileUrl = async (taskId, fileKey) => {
                     // 先从缓存获取
@@ -4152,27 +4176,7 @@
                     if (cachedFile) {
                         return cachedFile.url;
                     }
-
-                    // 缓存中没有，生成API URL并缓存
-                    const token = localStorage.getItem('accessToken');
-                    let apiUrl;
-                    if (fileKey.includes('output')) {
-                        apiUrl = token 
-                            ? `./api/v1/task/result?task_id=${taskId}&name=${fileKey}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/result?task_id=${taskId}&name=${fileKey}`;
-                    } else {
-                        apiUrl = token 
-                            ? `./api/v1/task/input?task_id=${taskId}&name=${fileKey}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/input?task_id=${taskId}&name=${fileKey}`;
-                    }
-                    
-                    // 缓存API URL
-                    setTaskFileToCache(taskId, fileKey, {
-                        url: apiUrl,
-                        timestamp: Date.now()
-                    });
-                    
-                    return apiUrl;
+                    return await getTaskFileUrlFromApi(taskId, fileKey);
                 };
 
                 // 获取任务的第一个图片键
@@ -4406,20 +4410,26 @@
                 const downloadSingleResult = async (taskId, key, outputPath) => {
                     try {
                         downloadLoading.value = true;
-                        const response = await apiCall(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            // 使用原始文件名，如果没有则使用outputPath
-                            const filename = key || outputPath || `result_${taskId}`;
-                            a.download = filename;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            window.URL.revokeObjectURL(url);
-                            showAlert('文件下载成功', 'success');
+
+                        const url = await getTaskFileUrl(taskId, key);
+                        if (url) {
+                            const response = await fetch(url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                // 使用原始文件名，如果没有则使用outputPath
+                                const filename = key || outputPath || `result_${taskId}`;
+                                a.download = filename;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                window.URL.revokeObjectURL(url);
+                                showAlert('文件下载成功', 'success');
+                            } else {
+                                showAlert('获取结果失败', 'danger');
+                            }
                         } else {
                             showAlert('获取结果失败', 'danger');
                         }
@@ -4433,12 +4443,17 @@
                 const viewSingleResult = async (taskId, key) => {
                     try {
                         downloadLoading.value = true;
-                        const response = await apiCall(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const videoBlob = new Blob([blob], { type: 'video/mp4' });
-                            const url = window.URL.createObjectURL(videoBlob);
-                            window.open(url, '_blank');
+                        const url = await getTaskFileUrl(taskId, key);
+                        if (url) {
+                            const response = await fetch(url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const videoBlob = new Blob([blob], { type: 'video/mp4' });
+                                const url = window.URL.createObjectURL(videoBlob);
+                                window.open(url, '_blank');
+                            } else {
+                                showAlert('获取结果失败', 'danger');
+                            }
                         } else {
                             showAlert('获取结果失败', 'danger');
                         }
@@ -4459,8 +4474,8 @@
                     // 缓存没有则生成URL并缓存
                     const token = localStorage.getItem('accessToken');
                     const url = token 
-                        ? `./api/v1/task/result?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
-                        : `./api/v1/task/result?task_id=${taskId}&name=${key}`;
+                        ? `./assets/task/result?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
+                        : `./assets/task/result?task_id=${taskId}&name=${key}`;
                     
                     // 缓存API URL
                     setTaskFileToCache(taskId, key, {
@@ -4629,15 +4644,18 @@
                         if (task.inputs) {
                             for (const [key, inputPath] of Object.entries(task.inputs)) {
                                 try {
-                                    const response = await apiRequest(`./api/v1/task/input?task_id=${taskId}&name=${key}`);
-                                    if (response && response.ok) {
-                                        const blob = await response.blob();
-                                        files.inputs[key] = {
-                                            name: inputPath, // 使用原始文件名而不是key
-                                            path: inputPath,
-                                            blob: blob,
-                                            url: URL.createObjectURL(blob)
-                                        };
+                                    const url = await getTaskFileUrl(taskId, key);
+                                    if (url) {
+                                        const response = await fetch(url);
+                                        if (response && response.ok) {
+                                            const blob = await response.blob()
+                                            files.inputs[key] = {
+                                                name: inputPath, // 使用原始文件名而不是key
+                                                path: inputPath,
+                                                blob: blob,
+                                                url: URL.createObjectURL(blob)
+                                            }
+                                        }
                                     }
                                 } catch (error) {
                                     console.error(`Failed to load input ${key}:`, error);
@@ -4654,14 +4672,17 @@
                         if (task.status === 'SUCCEED' && task.outputs) {
                             for (const [key, outputPath] of Object.entries(task.outputs)) {
                                 try {
-                                    const response = await apiRequest(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                                    if (response && response.ok) {
-                                        const blob = await response.blob();
-                                        files.outputs[key] = {
-                                            name: outputPath, // 使用原始文件名而不是key
-                                            path: outputPath,
-                                            blob: blob,
-                                            url: URL.createObjectURL(blob)
+                                    const url = await getTaskFileUrl(taskId, key);
+                                    if (url) {
+                                        const response = await fetch(url);
+                                        if (response && response.ok) {
+                                            const blob = await response.blob()
+                                            files.outputs[key] = {
+                                                name: outputPath, // 使用原始文件名而不是key
+                                                path: outputPath,
+                                                blob: blob,
+                                                url: URL.createObjectURL(blob)
+                                            }
                                         };
                                     }
                                 } catch (error) {
@@ -4786,7 +4807,7 @@
                                 // 加载图片文件
                                 if (imageUrl) {
                                     try {
-                                        const imageResponse = await apiRequest(imageUrl);
+                                        const imageResponse = await fetch(imageUrl);
                                         if (imageResponse && imageResponse.ok) {
                                             const blob = await imageResponse.blob();
                                             const filename = task.inputs[Object.keys(task.inputs).find(key => 
@@ -4805,7 +4826,7 @@
                                 // 加载音频文件
                                 if (audioUrl) {
                                     try {
-                                        const audioResponse = await apiRequest(audioUrl);
+                                        const audioResponse = await fetch(audioUrl);
                                         if (audioResponse && audioResponse.ok) {
                                             const blob = await audioResponse.blob();
                                             const filename = task.inputs[Object.keys(task.inputs).find(key => 
@@ -5037,11 +5058,12 @@
                         console.log('getTaskInputUrl: 从缓存获取', { taskId, key, url: cachedUrl });
                         return cachedUrl;
                     }
+                    
                     // 缓存没有则生成URL并缓存
                     const token = localStorage.getItem('accessToken');
                     const url = token 
-                        ? `./api/v1/task/input?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
-                        : `./api/v1/task/input?task_id=${taskId}&name=${key}`;
+                        ? `./assets/task/input?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
+                        : `./assets/task/input?task_id=${taskId}&name=${key}`;
                     
                     // 缓存API URL
                     setTaskFileToCache(taskId, key, {
@@ -5162,7 +5184,7 @@
                 const downloadTaskInput = async (taskId, inputName, fileName) => {
                     try {
                         const url = getTaskInputUrl(taskId, inputName);
-                        const response = await apiRequest(url);
+                        const response = await fetch(url);
 
                         if (!response || !response.ok) {
                             throw new Error(`下载失败: ${response ? response.status : '认证失败'}`);
@@ -5333,6 +5355,19 @@
                     }
                 };
 
+                const refreshTaskFiles = (task) => {
+                    for (const [key, inputPath] of Object.entries(task.inputs)) {
+                        getTaskFileUrlFromApi(task.task_id, key).then(url => {
+                            console.log('refreshTaskFiles: input', task.task_id, key, url);
+                        });
+                    }
+                    for (const [key, outputPath] of Object.entries(task.outputs)) {
+                        getTaskFileUrlFromApi(task.task_id, key).then(url => {
+                            console.log('refreshTaskFiles: output', task.task_id, key, url);
+                        });
+                    }
+                };
+
                 // 轮询任务状态
                 const pollTaskStatuses = async () => {
                     if (pollingTasks.value.size === 0) return;
@@ -5372,6 +5407,7 @@
                                         // 如果任务完成或失败，停止轮询并显示提示
                                         if (['SUCCEED', 'FAILED', 'CANCEL'].includes(updatedTask.status)) {
                                             stopPollingTask(updatedTask.task_id);
+                                            refreshTaskFiles(updatedTask);
                                             if (currentView.value === 'projects') {
                                                 refreshTasks(true);
                                             }
@@ -6711,6 +6747,7 @@
                     saveTaskFilesToCache,
                     getTaskFileFromCache,
                     setTaskFileToCache,
+                    getTaskFileUrlFromApi,
                     getTaskFileUrl,
                     getTaskFileUrlSync,
                     getFirstImageKey,
