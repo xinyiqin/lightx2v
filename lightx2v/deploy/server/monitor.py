@@ -348,7 +348,7 @@ class ServerMonitor:
         max_count = self.pending_subtasks[queue]["max_count"]
         self.pending_subtasks[queue]["subtasks"][task_id] = max_count
         self.pending_subtasks[queue]["max_count"] = max_count + 1
-        logger.warning(f"Pending subtasks {queue} add {task_id}: {self.pending_subtasks[queue]}")
+        # logger.warning(f"Pending subtasks {queue} add {task_id}: {self.pending_subtasks[queue]}")
 
     def pending_subtasks_sub(self, queue, task_id):
         if queue not in self.pending_subtasks:
@@ -357,7 +357,7 @@ class ServerMonitor:
         self.pending_subtasks[queue]["consume_count"] += 1
         if task_id in self.pending_subtasks[queue]["subtasks"]:
             self.pending_subtasks[queue]["subtasks"].pop(task_id)
-        logger.warning(f"Pending subtasks {queue} sub {task_id}: {self.pending_subtasks[queue]}")
+        # logger.warning(f"Pending subtasks {queue} sub {task_id}: {self.pending_subtasks[queue]}")
 
     def pending_subtasks_get_order(self, queue, task_id):
         if queue not in self.pending_subtasks:
@@ -369,7 +369,7 @@ class ServerMonitor:
         order = self.pending_subtasks[queue]["subtasks"][task_id]
         consume = self.pending_subtasks[queue]["consume_count"]
         real_order = max(order - consume, 0)
-        logger.warning(f"Pending subtasks {queue} get order {task_id}: real={real_order} order={order} consume={consume}")
+        # logger.warning(f"Pending subtasks {queue} get order {task_id}: real={real_order} order={order} consume={consume}")
         return real_order + 1
 
     def get_ready_worker_count(self, queue):

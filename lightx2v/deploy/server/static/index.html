@@ -4502,8 +4502,8 @@
                         // 缓存没有则生成URL
                         const token = localStorage.getItem('accessToken');
                         const url = token
-                            ? `./api/v1/task/input?task_id=${task.task_id}&name=${firstImageKey}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/input?task_id=${task.task_id}&name=${firstImageKey}`;
+                            ? `./assets/task/input?task_id=${task.task_id}&name=${firstImageKey}&token=${encodeURIComponent(token)}`
+                            : `./assets/task/input?task_id=${task.task_id}&name=${firstImageKey}`;
 
                         taskImageUrlCache.value.set(cacheKey, url);
                         return url;
@@ -4529,8 +4529,8 @@
                         // 缓存没有则生成URL
                         const token = localStorage.getItem('accessToken');
                         const url = token
-                            ? `./api/v1/task/result?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/result?task_id=${taskId}&name=${key}`;
+                            ? `./assets/task/result?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
+                            : `./assets/task/result?task_id=${taskId}&name=${key}`;
 
                         // 缓存API URL
                         setTaskFileToCache(taskId, key, {
