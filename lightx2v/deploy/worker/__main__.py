@@ -207,9 +207,9 @@ async def main(args):
 
     data_manager = None
     if args.data_url.startswith("/"):
-        data_manager = LocalDataManager(args.data_url)
+        data_manager = LocalDataManager(args.data_url, None)
     elif args.data_url.startswith("{"):
-        data_manager = S3DataManager(args.data_url)
+        data_manager = S3DataManager(args.data_url, None)
     else:
         raise NotImplementedError
     await data_manager.init()
