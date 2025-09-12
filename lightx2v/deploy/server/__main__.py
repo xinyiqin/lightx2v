@@ -658,7 +658,7 @@ async def api_v1_monitor_metrics():
 
 
 @app.get("/api/v1/template/asset_url/{template_type}/{filename}")
-async def api_v1_template_asset_url(template_type: str, filename: str):
+async def api_v1_template_asset_url(template_type: str, filename: str, valid=Depends(verify_user_access)):
     try:
         url = await data_manager.presign_template_url(template_type, filename)
         if url is None:
@@ -672,7 +672,7 @@ async def api_v1_template_asset_url(template_type: str, filename: str):
 
 # Template API endpoints
 @app.get("/assets/template/{template_type}/{filename}")
-async def assets_template(template_type: str, filename: str):
+async def assets_template(template_type: str, filename: str, valid=Depends(verify_user_access_from_query)):
     """get template file"""
     try:
         if not await data_manager.template_file_exists(template_type, filename):
@@ -714,7 +714,7 @@ async def assets_template(template_type: str, filename: str):
 
 
 @app.get("/api/v1/template/list")
-async def api_v1_template_list(request: Request):
+async def api_v1_template_list(request: Request, valid=Depends(verify_user_access)):
     """get template file list (support pagination)"""
     try:
         # check page params
@@ -786,7 +786,7 @@ async def api_v1_template_list(request: Request):
 
 
 @app.get("/api/v1/template/tasks")
-async def api_v1_template_tasks(request: Request):
+async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_access)):
     """get template task list (support pagination)"""
     try:
         # check page params
