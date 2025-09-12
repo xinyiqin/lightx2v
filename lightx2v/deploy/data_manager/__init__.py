@@ -36,6 +36,9 @@ class BaseDataManager:
     async def delete_bytes(self, filename):
         raise NotImplementedError
 
+    async def presign_url(self, filename):
+        return None
+
     async def recurrent_save(self, data, prefix):
         if isinstance(data, dict):
             return {k: await self.recurrent_save(v, f"{prefix}-{k}") for k, v in data.items()}

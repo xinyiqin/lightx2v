@@ -4,6 +4,7 @@ import json
 import os
 
 import aioboto3
+import tos
 from botocore.client import Config
 from loguru import logger
 
@@ -24,14 +25,29 @@ class S3DataManager(BaseDataManager):
         self.connect_timeout = self.config.get("connect_timeout", 60)
         self.read_timeout = self.config.get("read_timeout", 10)
         self.write_timeout = self.config.get("write_timeout", 10)
+        self.addressing_style = self.config.get("addressing_style", None)
+        self.region = self.config.get("region", None)
         self.session = None
         self.s3_client = None
+        self.presign_client = None
+
+    async def init_presign_client(self):
+        # init tos client for volces.com
+        if "volces.com" in self.endpoint_url:
+            self.presign_client = tos.TosClientV2(
+                self.aws_access_key_id,
+                self.aws_secret_access_key,
+                self.endpoint_url.replace("tos-s3-", "tos-"),
+                self.region,
+            )
 
     async def init(self):
         for i in range(self.max_retries):
             try:
                 logger.info(f"S3DataManager init with config: {self.config} (attempt {i + 1}/{self.max_retries}) ...")
-
+                s3_config = {"payload_signing_enabled": True}
+                if self.addressing_style:
+                    s3_config["addressing_style"] = self.addressing_style
                 self.session = aioboto3.Session()
                 self.s3_client = await self.session.client(
                     "s3",
@@ -40,7 +56,7 @@ class S3DataManager(BaseDataManager):
                     endpoint_url=self.endpoint_url,
                     config=Config(
                         signature_version="s3v4",
-                        s3={"payload_signing_enabled": True},
+                        s3=s3_config,
                         connect_timeout=self.connect_timeout,
                         read_timeout=self.read_timeout,
                         parameter_validation=False,
@@ -55,6 +71,7 @@ class S3DataManager(BaseDataManager):
                     logger.info(f"check bucket {self.bucket_name} error: {e}, try to create it...")
                     await self.s3_client.create_bucket(Bucket=self.bucket_name)
 
+                await self.init_presign_client()
                 logger.info(f"Successfully init S3 bucket: {self.bucket_name} with timeouts - connect: {self.connect_timeout}s, read: {self.read_timeout}s, write: {self.write_timeout}s")
                 return
             except Exception as e:
@@ -109,6 +126,16 @@ class S3DataManager(BaseDataManager):
             for obj in response["Contents"]:
                 files.append(obj["Key"])
         return files
+
+    @class_try_catch_async
+    async def presign_url(self, filename):
+        filename = os.path.join(self.base_path, filename)
+        if self.presign_client:
+            expires = self.config.get("presign_expires", 24 * 60 * 60)
+            out = await asyncio.to_thread(self.presign_client.pre_signed_url, tos.HttpMethodType.Http_Method_Get, self.bucket_name, filename, expires)
+            return out.signed_url
+        else:
+            return None
 
 
 async def test():

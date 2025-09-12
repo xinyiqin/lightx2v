@@ -280,20 +280,15 @@ class LocalTaskManager(BaseTaskManager):
 
     @class_try_catch_async
     async def delete_task(self, task_id, user_id=None):
-        task, subtasks = self.load(task_id, user_id)
-        if not task:
-            return False
-        
-        # 只允许删除已完成的任务（SUCCEED, FAILED, CANCEL）
+        task = self.load(task_id, user_id, only_task=True)
+        # only allow to delete finished tasks
         if task["status"] not in FinishedStatus:
             return False
-        
-        # 删除任务文件
+        # delete task file
         task_file = self.get_task_filename(task_id)
         if os.path.exists(task_file):
             os.remove(task_file)
         return True
-
 
     @class_try_catch_async
     async def insert_user_if_not_exists(self, user_info):

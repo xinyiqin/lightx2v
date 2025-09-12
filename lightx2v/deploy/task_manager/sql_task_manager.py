@@ -639,26 +639,19 @@ class PostgresSQLTaskManager(BaseTaskManager):
         try:
             await ASYNC_LOCK.acquire()
             async with conn.transaction(isolation="read_uncommitted"):
-                # 首先检查任务是否存在且属于该用户
-                task, subtasks = await self.load(conn, task_id, user_id)
-                if not task:
-                    logger.warning(f"Task {task_id} not found or not accessible by user {user_id}")
-                    return False
-                
-                # 只允许删除已完成的任务（SUCCEED, FAILED, CANCEL）
-                print(task["status"])
+                task = await self.load(conn, task_id, user_id, only_task=True)
+
+                # only allow to delete finished tasks
                 if task["status"] not in FinishedStatus:
                     logger.warning(f"Cannot delete task {task_id} with status {task['status']}, only finished tasks can be deleted")
                     return False
-                
-                # 删除子任务
+
+                # delete subtasks & task record
                 await conn.execute(f"DELETE FROM {self.table_subtasks} WHERE task_id = $1", task_id)
-                
-                # 删除主任务
                 await conn.execute(f"DELETE FROM {self.table_tasks} WHERE task_id = $1", task_id)
-                
                 logger.info(f"Task {task_id} and its subtasks deleted successfully")
                 return True
+
         except:  # noqa
             logger.error(f"delete_task error: {traceback.format_exc()}")
             return False

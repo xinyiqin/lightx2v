@@ -5,11 +5,12 @@
     "audio_sr": 16000,
     "target_video_length": 17,
     "prev_frame_length": 1,
-    "resize_mode": "fixed_shape",
-    "fixed_shape": [
-        480,
-        480
-    ],
+    "resize_mode": "adaptive",
+    "bucket_shape": {
+        "0.667": [[480, 832], [544, 960]],
+        "1.500": [[832, 480], [960, 544]],
+        "1.000": [[480, 480], [576, 576], [704, 704]]
+    },
     "self_attn_1_type": "flash_attn3",
     "cross_attn_1_type": "flash_attn3",
     "cross_attn_2_type": "flash_attn3",

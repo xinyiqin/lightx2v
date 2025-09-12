@@ -25,7 +25,7 @@ from lightx2v.models.runners.wan.wan_runner import WanRunner
 from lightx2v.models.schedulers.wan.audio.scheduler import EulerScheduler
 from lightx2v.models.video_encoders.hf.wan.vae_2_2 import Wan2_2_VAE
 from lightx2v.utils.envs import *
-from lightx2v.utils.profiler import ProfilingContext, ProfilingContext4Debug
+from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import find_torch_model_path, load_weights, save_to_video, vae_to_comfyui_image
 
@@ -71,14 +71,25 @@ def get_crop_bbox(ori_h, ori_w, tgt_h, tgt_w):
 
 def isotropic_crop_resize(frames: torch.Tensor, size: tuple):
     """
-    frames: (T, C, H, W)
+    frames: (C, H, W) or (T, C, H, W) or (N, C, H, W)
     size: (H, W)
     """
+    original_shape = frames.shape
+
+    if len(frames.shape) == 3:
+        frames = frames.unsqueeze(0)
+    elif len(frames.shape) == 4 and frames.shape[0] > 1:
+        pass
+
     ori_h, ori_w = frames.shape[2:]
     h, w = size
     y0, y1, x0, x1 = get_crop_bbox(ori_h, ori_w, h, w)
     cropped_frames = frames[:, :, y0:y1, x0:x1]
     resized_frames = resize(cropped_frames, [h, w], InterpolationMode.BICUBIC, antialias=True)
+
+    if len(original_shape) == 3:
+        resized_frames = resized_frames.squeeze(0)
+
     return resized_frames
 
 
@@ -103,19 +114,34 @@ def fixed_shape_resize(img, target_height, target_width):
     return resized_img, h, w
 
 
-def resize_image(img, resize_mode="adaptive", fixed_area=None, fixed_shape=None):
-    assert resize_mode in ["adaptive", "keep_ratio_fixed_area", "fixed_min_area", "fixed_max_area", "fixed_shape"]
+def resize_image(img, resize_mode="adaptive", bucket_shape=None, fixed_area=None, fixed_shape=None):
+    assert resize_mode in ["adaptive", "keep_ratio_fixed_area", "fixed_min_area", "fixed_max_area", "fixed_shape", "fixed_min_side"]
 
     if resize_mode == "fixed_shape":
         assert fixed_shape is not None
         logger.info(f"[wan_audio] fixed_shape_resize fixed_height: {fixed_shape[0]}, fixed_width: {fixed_shape[1]}")
         return fixed_shape_resize(img, fixed_shape[0], fixed_shape[1])
 
-    bucket_config = {
-        0.667: (np.array([[480, 832], [544, 960], [720, 1280]], dtype=np.int64), np.array([0.2, 0.5, 0.3])),
-        1.0: (np.array([[480, 480], [576, 576], [704, 704], [960, 960]], dtype=np.int64), np.array([0.1, 0.1, 0.5, 0.3])),
-        1.5: (np.array([[480, 832], [544, 960], [720, 1280]], dtype=np.int64)[:, ::-1], np.array([0.2, 0.5, 0.3])),
-    }
+    if bucket_shape is not None:
+        """
+        "adaptive_shape": {
+            "0.667": [[480, 832], [544, 960], [720, 1280]],
+            "1.500": [[832, 480], [960, 544], [1280, 720]],
+            "1.000": [[480, 480], [576, 576], [704, 704], [960, 960]]
+        }
+        """
+        bucket_config = {}
+        for ratio, resolutions in bucket_shape.items():
+            bucket_config[float(ratio)] = np.array(resolutions, dtype=np.int64)
+        # logger.info(f"[wan_audio] use custom bucket_shape: {bucket_config}")
+    else:
+        bucket_config = {
+            0.667: np.array([[480, 832], [544, 960], [720, 1280]], dtype=np.int64),
+            1.500: np.array([[832, 480], [960, 544], [1280, 720]], dtype=np.int64),
+            1.000: np.array([[480, 480], [576, 576], [704, 704], [960, 960]], dtype=np.int64),
+        }
+        # logger.info(f"[wan_audio] use default bucket_shape: {bucket_config}")
+
     ori_height = img.shape[-2]
     ori_weight = img.shape[-1]
     ori_ratio = ori_height / ori_weight
@@ -130,7 +156,7 @@ def resize_image(img, resize_mode="adaptive", fixed_area=None, fixed_shape=None)
             target_h, target_w = 480, 480
         else:
             target_h, target_w = 832, 480
-        for resolution in bucket_config[closet_ratio][0]:
+        for resolution in bucket_config[closet_ratio]:
             if ori_height * ori_weight >= resolution[0] * resolution[1]:
                 target_h, target_w = resolution
     elif resize_mode == "keep_ratio_fixed_area":
@@ -142,12 +168,22 @@ def resize_image(img, resize_mode="adaptive", fixed_area=None, fixed_shape=None)
         aspect_ratios = np.array(np.array(list(bucket_config.keys())))
         closet_aspect_idx = np.argmin(np.abs(aspect_ratios - ori_ratio))
         closet_ratio = aspect_ratios[closet_aspect_idx]
-        target_h, target_w = bucket_config[closet_ratio][0][0]
+        target_h, target_w = bucket_config[closet_ratio][0]
+    elif resize_mode == "fixed_min_side":
+        assert fixed_area in ["480p", "720p"], f"fixed_min_side mode requires fixed_area to be '480p' or '720p', got {fixed_area}"
+
+        min_side = 720 if fixed_area == "720p" else 480
+        if ori_ratio < 1.0:
+            target_h = min_side
+            target_w = round(target_h / ori_ratio)
+        else:
+            target_w = min_side
+            target_h = round(target_w * ori_ratio)
     elif resize_mode == "fixed_max_area":
         aspect_ratios = np.array(np.array(list(bucket_config.keys())))
         closet_aspect_idx = np.argmin(np.abs(aspect_ratios - ori_ratio))
         closet_ratio = aspect_ratios[closet_aspect_idx]
-        target_h, target_w = bucket_config[closet_ratio][0][-1]
+        target_h, target_w = bucket_config[closet_ratio][-1]
 
     cropped_img = isotropic_crop_resize(img, (target_h, target_w))
     return cropped_img, target_h, target_w
@@ -160,8 +196,6 @@ class AudioSegment:
     audio_array: np.ndarray
     start_frame: int
     end_frame: int
-    is_last: bool = False
-    useful_length: Optional[int] = None
 
 
 class FramePreprocessorTorchVersion:
@@ -213,6 +247,7 @@ class AudioProcessor:
     def __init__(self, audio_sr: int = 16000, target_fps: int = 16):
         self.audio_sr = audio_sr
         self.target_fps = target_fps
+        self.audio_frame_rate = audio_sr // target_fps
 
     def load_audio(self, audio_path: str) -> np.ndarray:
         """Load and resample audio"""
@@ -222,62 +257,47 @@ class AudioProcessor:
 
     def get_audio_range(self, start_frame: int, end_frame: int) -> Tuple[int, int]:
         """Calculate audio range for given frame range"""
-        audio_frame_rate = self.audio_sr / self.target_fps
-        return round(start_frame * audio_frame_rate), round(end_frame * audio_frame_rate)
+        return round(start_frame * self.audio_frame_rate), round(end_frame * self.audio_frame_rate)
 
     def segment_audio(self, audio_array: np.ndarray, expected_frames: int, max_num_frames: int, prev_frame_length: int = 5) -> List[AudioSegment]:
         """Segment audio based on frame requirements"""
         segments = []
+        segments_idx = self.init_segments_idx(expected_frames, max_num_frames, prev_frame_length)
 
-        # Calculate intervals
-        interval_num = 1
-        res_frame_num = 0
+        audio_start, audio_end = self.get_audio_range(0, expected_frames)
+        audio_array_ori = audio_array[audio_start:audio_end]
 
-        if expected_frames <= max_num_frames:
-            interval_num = 1
-        else:
-            interval_num = max(int((expected_frames - max_num_frames) / (max_num_frames - prev_frame_length)) + 1, 1)
-            res_frame_num = expected_frames - interval_num * (max_num_frames - prev_frame_length)
-            if res_frame_num > prev_frame_length:
-                interval_num += 1
+        for idx, (start_idx, end_idx) in enumerate(segments_idx):
+            audio_start, audio_end = self.get_audio_range(start_idx, end_idx)
+            audio_array = audio_array_ori[audio_start:audio_end]
 
-        # Create segments
-        for idx in range(interval_num):
-            if idx == 0:
-                # First segment
-                audio_start, audio_end = self.get_audio_range(0, max_num_frames)
-                segment_audio = audio_array[audio_start:audio_end]
-                useful_length = None
-
-                if expected_frames < max_num_frames:
-                    useful_length = segment_audio.shape[0]
-                    max_num_audio_length = int((max_num_frames + 1) / self.target_fps * self.audio_sr)
-                    segment_audio = np.concatenate((segment_audio, np.zeros(max_num_audio_length - useful_length)), axis=0)
-
-                segments.append(AudioSegment(segment_audio, 0, max_num_frames, False, useful_length))
-
-            elif res_frame_num > prev_frame_length and idx == interval_num - 1:
-                # Last segment (might be shorter)
-                start_frame = idx * max_num_frames - idx * prev_frame_length
-                audio_start, audio_end = self.get_audio_range(start_frame, expected_frames)
-                segment_audio = audio_array[audio_start:audio_end]
-                useful_length = segment_audio.shape[0]
-
-                max_num_audio_length = int((max_num_frames + 1) / self.target_fps * self.audio_sr)
-                segment_audio = np.concatenate((segment_audio, np.zeros(max_num_audio_length - useful_length)), axis=0)
-
-                segments.append(AudioSegment(segment_audio, start_frame, expected_frames, True, useful_length))
-
+            if idx < len(segments_idx) - 1:
+                end_idx = segments_idx[idx + 1][0]
             else:
-                # Middle segments
-                start_frame = idx * max_num_frames - idx * prev_frame_length
-                end_frame = (idx + 1) * max_num_frames - idx * prev_frame_length
-                audio_start, audio_end = self.get_audio_range(start_frame, end_frame)
-                segment_audio = audio_array[audio_start:audio_end]
+                if audio_array.shape[0] < audio_end - audio_start:
+                    padding_len = audio_end - audio_start - audio_array.shape[0]
+                    audio_array = np.concatenate((audio_array, np.zeros(padding_len)), axis=0)
+                    end_idx = end_idx - padding_len // self.audio_frame_rate
 
-                segments.append(AudioSegment(segment_audio, start_frame, end_frame, False))
-
+            segments.append(AudioSegment(audio_array, start_idx, end_idx))
+        del audio_array, audio_array_ori
         return segments
+
+    def init_segments_idx(self, total_frame: int, clip_frame: int = 81, overlap_frame: int = 5) -> list[tuple[int, int, int]]:
+        """Initialize segment indices with overlap"""
+        start_end_list = []
+        min_frame = clip_frame
+        for start in range(0, total_frame, clip_frame - overlap_frame):
+            is_last = start + clip_frame >= total_frame
+            end = min(start + clip_frame, total_frame)
+            if end - start < min_frame:
+                end = start + min_frame
+            if ((end - start) - 1) % 4 != 0:
+                end = start + (((end - start) - 1) // 4) * 4 + 1
+            start_end_list.append((start, end))
+            if is_last:
+                break
+        return start_end_list
 
 
 @RUNNER_REGISTER("seko_talk")
@@ -322,7 +342,13 @@ class WanAudioRunner(WanRunner):  # type:ignore
             ref_img = Image.open(img_path).convert("RGB")
         ref_img = TF.to_tensor(ref_img).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
 
-        ref_img, h, w = resize_image(ref_img, resize_mode=self.config.get("resize_mode", "adaptive"), fixed_area=self.config.get("fixed_area", None), fixed_shape=self.config.get("fixed_shape", None))
+        ref_img, h, w = resize_image(
+            ref_img,
+            resize_mode=self.config.get("resize_mode", "adaptive"),
+            bucket_shape=self.config.get("bucket_shape", None),
+            fixed_area=self.config.get("fixed_area", None),
+            fixed_shape=self.config.get("fixed_shape", None),
+        )
         logger.info(f"[wan_audio] resize_image target_h: {h}, target_w: {w}")
         patched_h = h // self.config.vae_stride[1] // self.config.patch_size[1]
         patched_w = w // self.config.vae_stride[2] // self.config.patch_size[2]
@@ -363,7 +389,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             gc.collect()
         return vae_encoder_out
 
-    @ProfilingContext("Run Encoders")
+    @ProfilingContext4DebugL2("Run Encoders")
     def _run_input_encoder_local_r2v_audio(self):
         prompt = self.config["prompt_enhanced"] if self.config["use_prompt_enhancer"] else self.config["prompt"]
         img = self.read_image_input(self.config["image_path"])
@@ -405,7 +431,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             self.vae_encoder = self.load_vae_encoder()
 
         _, nframe, height, width = self.model.scheduler.latents.shape
-        with ProfilingContext4Debug("vae_encoder in init run segment"):
+        with ProfilingContext4DebugL1("vae_encoder in init run segment"):
             if self.config.model_cls == "wan2.2_audio":
                 if prev_video is not None:
                     prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
@@ -455,11 +481,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
         self.cut_audio_list = []
         self.prev_video = None
 
-    @ProfilingContext4Debug("Init run segment")
+    @ProfilingContext4DebugL1("Init run segment")
     def init_run_segment(self, segment_idx, audio_array=None):
         self.segment_idx = segment_idx
         if audio_array is not None:
-            self.segment = AudioSegment(audio_array, 0, audio_array.shape[0], False)
+            end_idx = audio_array.shape[0] // self._audio_processor.audio_frame_rate - self.prev_frame_length
+            self.segment = AudioSegment(audio_array, 0, end_idx)
         else:
             self.segment = self.inputs["audio_segments"][segment_idx]
 
@@ -480,24 +507,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
         if segment_idx > 0:
             self.model.scheduler.reset(self.inputs["previmg_encoder_output"])
 
-    @ProfilingContext4Debug("End run segment")
+    @ProfilingContext4DebugL1("End run segment")
     def end_run_segment(self):
         self.gen_video = torch.clamp(self.gen_video, -1, 1).to(torch.float)
-
-        # Extract relevant frames
-        start_frame = 0 if self.segment_idx == 0 else self.prev_frame_length
-        start_audio_frame = 0 if self.segment_idx == 0 else int(self.prev_frame_length * self._audio_processor.audio_sr / self.config.get("target_fps", 16))
-
-        if self.segment.is_last and self.segment.useful_length:
-            end_frame = self.segment.end_frame - self.segment.start_frame
-            self.gen_video_list.append(self.gen_video[:, :, start_frame:end_frame].cpu())
-            self.cut_audio_list.append(self.segment.audio_array[start_audio_frame : self.segment.useful_length])
-        elif self.segment.useful_length and self.inputs["expected_frames"] < self.config.get("target_video_length", 81):
-            self.gen_video_list.append(self.gen_video[:, :, start_frame : self.inputs["expected_frames"]].cpu())
-            self.cut_audio_list.append(self.segment.audio_array[start_audio_frame : self.segment.useful_length])
-        else:
-            self.gen_video_list.append(self.gen_video[:, :, start_frame:].cpu())
-            self.cut_audio_list.append(self.segment.audio_array[start_audio_frame:])
+        useful_length = self.segment.end_frame - self.segment.start_frame
+        self.gen_video_list.append(self.gen_video[:, :, :useful_length].cpu())
+        self.cut_audio_list.append(self.segment.audio_array[: useful_length * self._audio_processor.audio_frame_rate])
 
         if self.va_recorder:
             cur_video = vae_to_comfyui_image(self.gen_video_list[-1])
@@ -582,7 +597,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
             max_fail_count = 10
 
             while True:
-                with ProfilingContext4Debug(f"stream segment get audio segment {segment_idx}"):
+                with ProfilingContext4DebugL1(f"stream segment get audio segment {segment_idx}"):
                     self.check_stop()
                     audio_array = self.va_reader.get_audio_segment(timeout=fetch_timeout)
                     if audio_array is None:
@@ -592,7 +607,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                             raise Exception(f"Failed to get audio chunk {fail_count} times, stop reader")
                         continue
 
-                with ProfilingContext4Debug(f"stream segment end2end {segment_idx}"):
+                with ProfilingContext4DebugL1(f"stream segment end2end {segment_idx}"):
                     fail_count = 0
                     self.init_run_segment(segment_idx, audio_array)
                     latents = self.run_segment(total_steps=None)
@@ -610,7 +625,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 self.va_recorder.stop(wait=False)
                 self.va_recorder = None
 
-    @ProfilingContext4Debug("Process after vae decoder")
+    @ProfilingContext4DebugL1("Process after vae decoder")
     def process_images_after_vae_decoder(self, save_video=True):
         # Merge results
         gen_lvideo = torch.cat(self.gen_video_list, dim=2).float()
@@ -735,12 +750,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
         audio_adapter.load_state_dict(weights_dict, strict=False)
         return audio_adapter.to(dtype=GET_DTYPE())
 
-    @ProfilingContext("Load models")
     def load_model(self):
         super().load_model()
-        self.audio_encoder = self.load_audio_encoder()
-        self.audio_adapter = self.load_audio_adapter()
-        self.model.set_audio_adapter(self.audio_adapter)
+        with ProfilingContext4DebugL2("Load audio encoder and adapter"):
+            self.audio_encoder = self.load_audio_encoder()
+            self.audio_adapter = self.load_audio_adapter()
+            self.model.set_audio_adapter(self.audio_adapter)
 
     def set_target_shape(self):
         """Set target shape for generation"""

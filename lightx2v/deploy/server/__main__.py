@@ -22,7 +22,7 @@ from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManage
 from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
-from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus
+from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus, FinishedStatus
 from lightx2v.utils.service_utils import ProcessManager
 
 # =========================
@@ -163,6 +163,69 @@ async def github_callback(request: Request):
         return error_response(str(e), 500)
 
 
+@app.get("/auth/login/google")
+async def google_auth(request: Request):
+    client_id = auth_manager.google_client_id
+    redirect_uri = auth_manager.google_redirect_uri
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid%20email%20profile&access_type=offline"
+    logger.info(f"Google auth: auth_url: {auth_url}")
+    return {"auth_url": auth_url}
+
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    try:
+        code = request.query_params.get("code")
+        if not code:
+            return error_response("Missing authorization code", 400)
+        user_info = await auth_manager.auth_google(code)
+        user_id = await task_manager.create_user(user_info)
+        user_info["user_id"] = user_id
+        access_token = auth_manager.create_jwt_token(user_info)
+        logger.info(f"Google callback: user_info: {user_info}, access_token: {access_token}")
+        return {"access_token": access_token, "user_info": user_info}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/auth/login/sms")
+async def sms_auth(request: Request):
+    try:
+        phone_number = request.query_params.get("phone_number")
+        if not phone_number:
+            return error_response("Missing phone number", 400)
+        ok = await auth_manager.send_sms(phone_number)
+        if not ok:
+            return error_response("SMS send failed", 400)
+        return {"msg": "SMS send successfully"}
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/auth/callback/sms")
+async def sms_callback(request: Request):
+    try:
+        phone_number = request.query_params.get("phone_number")
+        verify_code = request.query_params.get("verify_code")
+        if not phone_number or not verify_code:
+            return error_response("Missing phone number or verify code", 400)
+        user_info = await auth_manager.check_sms(phone_number, verify_code)
+        if not user_info:
+            return error_response("SMS verify failed", 400)
+
+        user_id = await task_manager.create_user(user_info)
+        user_info["user_id"] = user_id
+        access_token = auth_manager.create_jwt_token(user_info)
+        logger.info(f"SMS callback: user_info: {user_info}, access_token: {access_token}")
+        return {"access_token": access_token, "user_info": user_info}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
 async def prepare_subtasks(task_id):
     # schedule next subtasks and pend, put to message queue
     subtasks = await task_manager.next_subtasks(task_id)
@@ -176,9 +239,6 @@ async def prepare_subtasks(task_id):
 @app.get("/api/v1/model/list")
 async def api_v1_model_list(user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         return {"models": model_pipelines.get_model_lists()}
     except Exception as e:
         traceback.print_exc()
@@ -233,10 +293,6 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
 @app.get("/api/v1/task/query")
 async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
-        
         # 检查是否有task_ids参数（批量查询）
         if "task_ids" in request.query_params:
             task_ids = request.query_params["task_ids"].split(',')
@@ -268,10 +324,6 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
 async def api_v1_task_list(request: Request, user=Depends(verify_user_access)):
     try:
         user_id = user["user_id"]
-        msg = await server_monitor.check_user_busy(user_id)
-        if msg is not True:
-            return error_response(msg, 400)
-
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         assert page > 0 and page_size > 0, "page and page_size must be greater than 0"
@@ -300,24 +352,63 @@ async def api_v1_task_list(request: Request, user=Depends(verify_user_access)):
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/task/result")
-async def api_v1_task_result(request: Request, user=Depends(verify_user_access_from_query)):
+@app.get("/api/v1/task/result_url")
+async def api_v1_task_result_url(request: Request, user=Depends(verify_user_access)):
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
-        if task is None:
-            return error_response(f"Task {task_id} not found", 404)
-        if task["status"] != TaskStatus.SUCCEED:
-            return error_response(f"Task {task_id} not succeed", 400)
+        assert task is not None, f"Task {task_id} not found"
+        assert task["status"] == TaskStatus.SUCCEED, f"Task {task_id} not succeed"
         assert name in task["outputs"], f"Output {name} not found in task {task_id}"
-        if name in task["params"]:
-            return error_response(f"Output {name} is a stream", 400)
+        assert name not in task["params"], f"Output {name} is a stream"
+
+        url = await data_manager.presign_url(task["outputs"][name])
+        if url is None:
+            url = f"./assets/task/result?task_id={task_id}&name={name}"
+        return {"url": url}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/api/v1/task/input_url")
+async def api_v1_task_input_url(request: Request, user=Depends(verify_user_access)):
+    try:
+        name = request.query_params["name"]
+        task_id = request.query_params["task_id"]
+        task = await task_manager.query_task(task_id, user_id=user["user_id"])
+        assert task is not None, f"Task {task_id} not found"
+        assert name in task["inputs"], f"Input {name} not found in task {task_id}"
+        assert name not in task["params"], f"Input {name} is a stream"
+
+        url = await data_manager.presign_url(task["inputs"][name])
+        if url is None:
+            url = f"./assets/task/input?task_id={task_id}&name={name}"
+        return {"url": url}
+
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
+
+
+@app.get("/assets/task/result")
+async def assets_task_result(request: Request, user=Depends(verify_user_access_from_query)):
+    try:
+        name = request.query_params["name"]
+        task_id = request.query_params["task_id"]
+        task = await task_manager.query_task(task_id, user_id=user["user_id"])
+        assert task is not None, f"Task {task_id} not found"
+        assert task["status"] == TaskStatus.SUCCEED, f"Task {task_id} not succeed"
+        assert name in task["outputs"], f"Output {name} not found in task {task_id}"
+        assert name not in task["params"], f"Output {name} is a stream"
         data = await data_manager.load_bytes(task["outputs"][name])
 
         #  set correct Content-Type
         content_type = guess_file_type(name, "application/octet-stream")
         headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+        headers["Cache-Control"] = "public, max-age=3600"
         return Response(content=data, media_type=content_type, headers=headers)
 
     except Exception as e:
@@ -325,18 +416,15 @@ async def api_v1_task_result(request: Request, user=Depends(verify_user_access_f
         return error_response(str(e), 500)
 
 
-@app.get("/api/v1/task/input")
-async def api_v1_task_input(request: Request, user=Depends(verify_user_access_from_query)):
+@app.get("/assets/task/input")
+async def assets_task_input(request: Request, user=Depends(verify_user_access_from_query)):
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
-        if task is None:
-            return error_response(f"Task {task_id} not found", 404)
-        if name not in task["inputs"]:
-            return error_response(f"Input {name} not found in task {task_id}", 404)
-        if name in task["params"]:
-            return error_response(f"Input {name} is a stream", 400)
+        assert task is not None, f"Task {task_id} not found"
+        assert name in task["inputs"], f"Input {name} not found in task {task_id}"
+        assert name not in task["params"], f"Input {name} is a stream"
         data = await data_manager.load_bytes(task["inputs"][name])
 
         #  set correct Content-Type
@@ -353,9 +441,6 @@ async def api_v1_task_input(request: Request, user=Depends(verify_user_access_fr
 @app.get("/api/v1/task/cancel")
 async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
         task_id = request.query_params["task_id"]
         ret = await task_manager.cancel_task(task_id, user_id=user["user_id"])
         logger.warning(f"Task {task_id} cancelled: {ret}")
@@ -371,9 +456,6 @@ async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access))
 @app.get("/api/v1/task/resume")
 async def api_v1_task_resume(request: Request, user=Depends(verify_user_access)):
     try:
-        msg = await server_monitor.check_user_busy(user["user_id"], active_new_task=True)
-        if msg is not True:
-            return error_response(msg, 400)
         task_id = request.query_params["task_id"]
         ret = await task_manager.resume_task(task_id, user_id=user["user_id"], all_subtask=True)
         if ret:
@@ -389,49 +471,26 @@ async def api_v1_task_resume(request: Request, user=Depends(verify_user_access))
 @app.delete("/api/v1/task/delete")
 async def api_v1_task_delete(request: Request, user=Depends(verify_user_access)):
     try:
-        task_id = request.query_params.get("task_id")
-        if not task_id:
-            return error_response("task_id is required", 400)
-        
-        msg = await server_monitor.check_user_busy(user["user_id"])
-        if msg is not True:
-            return error_response(msg, 400)
-        
-        # 先获取任务信息，用于删除相关数据文件
-        try:
-            task = await task_manager.query_task(task_id, user["user_id"], only_task=True)
-            if not task:
-                return error_response("Task not found", 404)
-            
-            # 只允许删除已完成的任务
-            from lightx2v.deploy.task_manager import FinishedStatus
-            if task["status"] not in FinishedStatus:
-                return error_response("Only finished tasks can be deleted", 400)
-            
-            # 删除相关的数据文件
-            try:
-                # 删除输入文件
-                for input_name, input_filename in task.get("inputs", {}).items():
-                    try:
-                        await data_manager.delete_bytes(input_filename)
-                        logger.info(f"Deleted input file: {input_filename}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete input file {input_filename}: {e}")
-                
-                # 删除输出文件
-                for output_name, output_filename in task.get("outputs", {}).items():
-                    try:
-                        await data_manager.delete_bytes(output_filename)
-                        logger.info(f"Deleted output file: {output_filename}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete output file {output_filename}: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to delete some data files for task {task_id}: {e}")
-            
-        except Exception as e:
-            logger.warning(f"Failed to get task info for data cleanup: {e}")
-        
-        # 调用任务管理器删除任务记录
+        task_id = request.query_params["task_id"]
+
+        task = await task_manager.query_task(task_id, user["user_id"], only_task=True)
+        if not task:
+            return error_response("Task not found", 404)
+
+        if task["status"] not in FinishedStatus:
+            return error_response("Only finished tasks can be deleted", 400)
+
+        # delete input files
+        for _, input_filename in task["inputs"].items():
+            await data_manager.delete_bytes(input_filename)
+            logger.info(f"Deleted input file: {input_filename}")
+
+        # delete output files
+        for _, output_filename in task["outputs"].items():
+            await data_manager.delete_bytes(output_filename)
+            logger.info(f"Deleted output file: {output_filename}")
+
+        # delete task record
         success = await task_manager.delete_task(task_id, user["user_id"])
         if success:
             logger.info(f"Task {task_id} deleted by user {user['user_id']}")
@@ -643,7 +702,8 @@ async def api_v1_template(template_type: str, filename: str):
         else:
             media_type = "application/octet-stream"
 
-        return Response(content=data, media_type=media_type)
+        headers = {"Cache-Control": "public, max-age=3600"}
+        return Response(content=data, media_type=media_type, headers=headers)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)

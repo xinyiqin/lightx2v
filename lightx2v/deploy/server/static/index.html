@@ -1232,6 +1232,17 @@
                 animation: slideDown 0.2s ease-out;
             }
 
+            /* 短信登录样式 */
+            .sms-login-form {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                padding: 20px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(10px);
+                margin-top: 10px;
+                animation: slideDown 0.3s ease-out;
+            }
+
             @keyframes slideDown {
                 from {
                     opacity: 0;
@@ -1259,6 +1270,43 @@
             .language-switcher .absolute > div[class*="bg-laser-purple"] {
                 background: bg-laser-purple/20;
                 border-left: 3px solid #9a72ff;
+            }
+
+            .sms-login-form .form-control {
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: white;
+                border-radius: 8px;
+                transition: all 0.3s ease;
+                height: 50px;
+                padding: 12px 16px;
+                font-size: 16px;
+                margin-right: 20px;
+            }
+
+            .sms-login-form .form-control:focus {
+                background: rgba(255, 255, 255, 0.15);
+                border-color: #007bff;
+                box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+                color: white;
+            }
+
+            .sms-login-form .form-control::placeholder {
+                color: rgba(255, 255, 255, 1.0);
+            }
+
+            .sms-login-form .btn-primary:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+
+            .sms-login-form .btn-primary {
+                color: white;
+                transition: all 0.3s ease;
+                height: 50px;
+                padding: 12px 20px;
+                font-size: 16px;
+                font-weight: 500;
             }
     </style>
 </head>
@@ -1312,10 +1360,78 @@
                                 </div>
 
                                 <!-- 登录按钮 -->
+                                <div class="mb-4">
                                 <button @click="loginWithGitHub" class="btn btn-github btn-lg w-100 mb-4" :disabled="loginLoading">
                                     <i class="fab fa-github me-2"></i>
                         {{ loginLoading ? t('loggingIn') : t('loginWithGitHub') }}
                                 </button>
+                                </div>
+
+                                <!-- 登录按钮 -->
+                                <div class="mb-4">
+                                <button @click="loginWithGoogle" class="btn btn-github btn-lg w-100 mb-4" :disabled="loginLoading">
+                                    <i class="fab fa-google me-2"></i>
+                                    {{ loginLoading ? t('loggingIn') : t('loginWithGoogle') }}
+                                </button>
+                                </div>
+
+                                <!-- 短信验证码登录 -->
+                                <div class="mb-4">
+                                    <button @click="toggleSmsLogin" class="btn btn-github btn-lg w-100 mb-4" :disabled="loginLoading">
+                                        <i class="fas fa-mobile-alt me-2"></i>
+                                        {{ loginLoading ? t('loggingIn') : t('loginWithSMS') }}
+                                    </button>
+
+                                    <!-- 短信登录表单 -->
+                                    <div v-if="showSmsForm" class="sms-login-form">
+                                        <div class="mb-3 d-flex gap-3">
+                                            <input v-model="phoneNumber"
+                                                type="tel"
+                                                class="form-control form-control-lg flex-1"
+                                                placeholder="请输入手机号"
+                                                :disabled="loginLoading"
+                                                maxlength="11"
+                                            >
+                                            <button
+                                                @click="sendSmsCode"
+                                                class="btn btn-primary btn-lg"
+                                                :disabled="!phoneNumber || smsCountdown > 0 || loginLoading"
+                                                style="min-width: 120px;"
+                                            >
+                                                {{ smsCountdown > 0 ? `${smsCountdown}s` : '发送验证码' }}
+                                            </button>
+                                        </div>
+                                        <div class="mb-3 d-flex gap-3">
+                                            <input
+                                                v-model="verifyCode"
+                                                type="text"
+                                                class="form-control form-control-lg flex-1"
+                                                placeholder="请输入验证码"
+                                                :disabled="loginLoading"
+                                                maxlength="6"
+                                            >
+                                            <button
+                                                @click="loginWithSms"
+                                                class="btn btn-primary btn-lg"
+                                                :disabled="!phoneNumber || !verifyCode || loginLoading"
+                                                style="min-width: 120px;"
+                                            >
+                                                {{ loginLoading ? '登录中...' : '确认登录' }}
+                                            </button>
+                                        </div>
+                                        <div class="d-flex justify-content-end">
+                                            <button
+                                                @click="toggleSmsLogin"
+                                                class="btn btn-primary btn-lg"
+                                                :disabled="loginLoading"
+                                                style="min-width: 120px; margin-top: 20px;"
+                                            >
+                                                <i class="fas fa-times me-2"></i>
+                                                取消
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <!-- 功能特性 -->
                                 <div class="login-features">
@@ -3321,6 +3437,12 @@
                 const initLoading = ref(false);
                 const downloadLoading = ref(false);
                 const alert = ref({ show: false, message: '', type: 'info' });
+
+                // 短信登录相关数据
+                const phoneNumber = ref('');
+                const verifyCode = ref('');
+                const smsCountdown = ref(0);
+                const showSmsForm = ref(false);
                 const showErrorDetails = ref(false);
                 const showFailureDetails = ref(false);
 
@@ -3376,6 +3498,8 @@
 
                         // 登录相关
                         loginWithGitHub: '使用GitHub登录',
+                        loginWithGoogle: '使用Google登录',
+                        loginWithSMS: '使用短信登录',
                         loggingIn: '登录中...',
                         logout: '退出登录',
                         loggedOut: '已退出登录',
@@ -3652,6 +3776,8 @@
 
                         // 登录相关
                         loginWithGitHub: 'Login with GitHub',
+                        loginWithGoogle: 'Login with Google',
+                        loginWithSMS: 'Login with SMS',
                         loggingIn: 'Logging in...',
                         logout: 'Logout',
                         loggedOut: 'Logged out',
@@ -4524,15 +4650,114 @@
                         loginLoading.value = true;
                         const response = await fetch('./auth/login/github');
                         const data = await response.json();
+                        localStorage.setItem('loginSource', 'github');
                         window.location.href = data.auth_url;
                     } catch (error) {
                         showAlert('获取GitHub认证URL失败', 'danger');
                     }
                 };
 
-                const handleGitHubCallback = async (code) => {
+                const loginWithGoogle = async () => {
                     try {
-                        const response = await fetch(`./auth/callback/github?code=${code}`);
+                        const response = await fetch('./auth/login/google');
+                        const data = await response.json();
+                        localStorage.setItem('loginSource', 'google');
+                        window.location.href = data.auth_url;
+                    } catch (error) {
+                        showAlert('获取Google认证URL失败', 'danger');
+                    }
+                };
+
+                // 发送短信验证码
+                const sendSmsCode = async () => {
+                    if (!phoneNumber.value) {
+                        showAlert('请输入手机号', 'warning');
+                        return;
+                    }
+
+                    // 简单的手机号格式验证
+                    const phoneRegex = /^1[3-9]\d{9}$/;
+                    if (!phoneRegex.test(phoneNumber.value)) {
+                        showAlert('请输入正确的手机号格式', 'warning');
+                        return;
+                    }
+
+                    try {
+                        loginLoading.value = true;
+                        const response = await fetch(`./auth/login/sms?phone_number=${phoneNumber.value}`);
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            showAlert('验证码已发送，请查收短信', 'success');
+                            // 开始倒计时
+                            startSmsCountdown();
+                        } else {
+                            showAlert(data.message || '发送验证码失败', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('发送验证码失败，请重试', 'danger');
+                    } finally {
+                        loginLoading.value = false;
+                    }
+                };
+
+                // 短信验证码登录
+                const loginWithSms = async () => {
+                    if (!phoneNumber.value || !verifyCode.value) {
+                        showAlert('请输入手机号和验证码', 'warning');
+                        return;
+                    }
+
+                    try {
+                        loginLoading.value = true;
+                        const response = await fetch(`./auth/callback/sms?phone_number=${phoneNumber.value}&verify_code=${verifyCode.value}`);
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            localStorage.setItem('accessToken', data.access_token);
+                            localStorage.setItem('currentUser', JSON.stringify(data.user_info));
+                            currentUser.value = data.user_info;
+                            isLoggedIn.value = true;
+
+                            // 登录成功后初始化数据
+                            await init();
+
+                            showAlert('登录成功', 'success');
+                        } else {
+                            showAlert(data.message || '验证码错误或已过期', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('登录失败，请重试', 'danger');
+                    } finally {
+                        loginLoading.value = false;
+                    }
+                };
+
+                // 短信验证码倒计时
+                const startSmsCountdown = () => {
+                    smsCountdown.value = 60;
+                    const timer = setInterval(() => {
+                        smsCountdown.value--;
+                        if (smsCountdown.value <= 0) {
+                            clearInterval(timer);
+                        }
+                    }, 1000);
+                };
+
+                // 切换短信登录表单显示
+                const toggleSmsLogin = () => {
+                    showSmsForm.value = !showSmsForm.value;
+                    if (!showSmsForm.value) {
+                        // 重置表单数据
+                        phoneNumber.value = '';
+                        verifyCode.value = '';
+                        smsCountdown.value = 0;
+                    }
+                };
+
+                const handleLoginCallback = async (code, source) => {
+                    try {
+                        const response = await fetch(`./auth/callback/${source}?code=${code}`);
                         if (response.ok) {
                             const data = await response.json();
                             console.log(data);
@@ -4555,8 +4780,6 @@
                         console.error(error);
                     }
                 };
-
-
 
                 const logout = () => {
                     localStorage.removeItem('accessToken');
@@ -5233,6 +5456,30 @@
                     }, 100);
                 };
 
+                const getTaskFileUrlFromApi = async (taskId, fileKey) => {
+                    let apiUrl = `./api/v1/task/input_url?task_id=${taskId}&name=${fileKey}`;
+                    if (fileKey.includes('output')) {
+                        apiUrl = `./api/v1/task/result_url?task_id=${taskId}&name=${fileKey}`;
+                    }
+                    const response = await apiRequest(apiUrl);
+                    if (response && response.ok) {
+                        const data = await response.json();
+                        let assertUrl = data.url;
+                        if (assertUrl.startsWith('./assets/')) {
+                            const token = localStorage.getItem('accessToken');
+                            if (token) {
+                                assertUrl = `${assertUrl}&token=${encodeURIComponent(token)}`;
+                            }
+                        }
+                        setTaskFileToCache(taskId, fileKey, {
+                            url: assertUrl,
+                            timestamp: Date.now()
+                        });
+                        return assertUrl;
+                    }
+                    return null;
+                };
+
                 // 获取任务文件URL（优先从缓存，缓存没有则调用后端）
                 const getTaskFileUrl = async (taskId, fileKey) => {
                     // 先从缓存获取
@@ -5240,27 +5487,7 @@
                     if (cachedFile) {
                         return cachedFile.url;
                     }
-
-                    // 缓存中没有，生成API URL并缓存
-                    const token = localStorage.getItem('accessToken');
-                    let apiUrl;
-                    if (fileKey.includes('output')) {
-                        apiUrl = token 
-                            ? `./api/v1/task/result?task_id=${taskId}&name=${fileKey}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/result?task_id=${taskId}&name=${fileKey}`;
-                    } else {
-                        apiUrl = token 
-                            ? `./api/v1/task/input?task_id=${taskId}&name=${fileKey}&token=${encodeURIComponent(token)}`
-                            : `./api/v1/task/input?task_id=${taskId}&name=${fileKey}`;
-                    }
-                    
-                    // 缓存API URL
-                    setTaskFileToCache(taskId, fileKey, {
-                        url: apiUrl,
-                        timestamp: Date.now()
-                    });
-                    
-                    return apiUrl;
+                    return await getTaskFileUrlFromApi(taskId, fileKey);
                 };
 
                 // 获取任务的第一个图片键
@@ -5660,20 +5887,25 @@
                 const downloadSingleResult = async (taskId, key, outputPath) => {
                     try {
                         downloadLoading.value = true;
-                        const response = await apiCall(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            // 使用原始文件名，如果没有则使用outputPath
-                            const filename = key || outputPath || `result_${taskId}`;
-                            a.download = filename;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            window.URL.revokeObjectURL(url);
-                            showAlert(t('fileDownloadSuccessAlert'), 'success');
+                        const url = await getTaskFileUrl(taskId, key);
+                        if (url) {
+                            const response = await fetch(url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                // 使用原始文件名，如果没有则使用outputPath
+                                const filename = key || outputPath || `result_${taskId}`;
+                                a.download = filename;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                window.URL.revokeObjectURL(url);
+                                showAlert('文件下载成功', 'success');
+                            } else {
+                                showAlert('获取结果失败', 'danger');
+                            }
                         } else {
                             showAlert(t('getTaskResultFailedAlert'), 'danger');
                         }
@@ -5687,12 +5919,17 @@
                 const viewSingleResult = async (taskId, key) => {
                     try {
                         downloadLoading.value = true;
-                        const response = await apiCall(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const videoBlob = new Blob([blob], { type: 'video/mp4' });
-                            const url = window.URL.createObjectURL(videoBlob);
-                            window.open(url, '_blank');
+                        const url = await getTaskFileUrl(taskId, key);
+                        if (url) {
+                            const response = await fetch(url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const videoBlob = new Blob([blob], { type: 'video/mp4' });
+                                const url = window.URL.createObjectURL(videoBlob);
+                                window.open(url, '_blank');
+                            } else {
+                                showAlert('获取结果失败', 'danger');
+                            }
                         } else {
                             showAlert(t('getTaskResultFailedAlert'), 'danger');
                         }
@@ -5869,15 +6106,18 @@
                         if (task.inputs) {
                             for (const [key, inputPath] of Object.entries(task.inputs)) {
                                 try {
-                                    const response = await apiRequest(`./api/v1/task/input?task_id=${taskId}&name=${key}`);
-                                    if (response && response.ok) {
-                                        const blob = await response.blob();
-                                        files.inputs[key] = {
-                                            name: inputPath, // 使用原始文件名而不是key
-                                            path: inputPath,
-                                            blob: blob,
-                                            url: URL.createObjectURL(blob)
-                                        };
+                                    const url = await getTaskFileUrl(taskId, key);
+                                    if (url) {
+                                        const response = await fetch(url);
+                                        if (response && response.ok) {
+                                            const blob = await response.blob()
+                                            files.inputs[key] = {
+                                                name: inputPath, // 使用原始文件名而不是key
+                                                path: inputPath,
+                                                blob: blob,
+                                                url: URL.createObjectURL(blob)
+                                            }
+                                        }
                                     }
                                 } catch (error) {
                                     console.error(`Failed to load input ${key}:`, error);
@@ -5894,14 +6134,17 @@
                         if (task.status === 'SUCCEED' && task.outputs) {
                             for (const [key, outputPath] of Object.entries(task.outputs)) {
                                 try {
-                                    const response = await apiRequest(`./api/v1/task/result?task_id=${taskId}&name=${key}`);
-                                    if (response && response.ok) {
-                                        const blob = await response.blob();
-                                        files.outputs[key] = {
-                                            name: outputPath, // 使用原始文件名而不是key
-                                            path: outputPath,
-                                            blob: blob,
-                                            url: URL.createObjectURL(blob)
+                                    const url = await getTaskFileUrl(taskId, key);
+                                    if (url) {
+                                        const response = await fetch(url);
+                                        if (response && response.ok) {
+                                            const blob = await response.blob()
+                                            files.outputs[key] = {
+                                                name: outputPath, // 使用原始文件名而不是key
+                                                path: outputPath,
+                                                blob: blob,
+                                                url: URL.createObjectURL(blob)
+                                            }
                                         };
                                     }
                                 } catch (error) {
@@ -6027,7 +6270,7 @@
                                 // 加载图片文件
                                 if (imageUrl) {
                                     try {
-                                        const imageResponse = await apiRequest(imageUrl);
+                                        const imageResponse = await fetch(imageUrl);
                                         if (imageResponse && imageResponse.ok) {
                                             const blob = await imageResponse.blob();
                                             const filename = task.inputs[Object.keys(task.inputs).find(key => 
@@ -6046,7 +6289,7 @@
                                 // 加载音频文件
                                 if (audioUrl) {
                                     try {
-                                        const audioResponse = await apiRequest(audioUrl);
+                                        const audioResponse = await fetch(audioUrl);
                                         if (audioResponse && audioResponse.ok) {
                                             const blob = await audioResponse.blob();
                                             const filename = task.inputs[Object.keys(task.inputs).find(key => 
@@ -6280,20 +6523,7 @@
                         console.log('getTaskInputUrl: 从缓存获取', { taskId, key, url: cachedUrl });
                         return cachedUrl;
                     }
-                    // 缓存没有则生成URL并缓存
-                    const token = localStorage.getItem('accessToken');
-                    const url = token 
-                        ? `./api/v1/task/input?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
-                        : `./api/v1/task/input?task_id=${taskId}&name=${key}`;
-                    
-                    // 缓存API URL
-                    setTaskFileToCache(taskId, key, {
-                        url: url,
-                        timestamp: Date.now()
-                    });
-                    
-                    console.log('getTaskInputUrl: 生成并缓存输入URL', { taskId, key, url });
-                    return url;
+                    return await getTaskFileUrlFromApi(taskId, key);
                 };
 
                 const getTaskInputImage = async (task) => {
@@ -6405,7 +6635,7 @@
                 const downloadTaskInput = async (taskId, inputName, fileName) => {
                     try {
                         const url = await getTaskInputUrl(taskId, inputName);
-                        const response = await apiRequest(url);
+                        const response = await fetch(url);
 
                         if (!response || !response.ok) {
                             throw new Error(`下载失败: ${response ? response.status : '认证失败'}`);
@@ -6612,6 +6842,19 @@
                     }
                 };
 
+                const refreshTaskFiles = (task) => {
+                    for (const [key, inputPath] of Object.entries(task.inputs)) {
+                        getTaskFileUrlFromApi(task.task_id, key).then(url => {
+                            console.log('refreshTaskFiles: input', task.task_id, key, url);
+                        });
+                    }
+                    for (const [key, outputPath] of Object.entries(task.outputs)) {
+                        getTaskFileUrlFromApi(task.task_id, key).then(url => {
+                            console.log('refreshTaskFiles: output', task.task_id, key, url);
+                        });
+                    }
+                };
+
                 // 轮询任务状态
                 const pollTaskStatuses = async () => {
                     if (pollingTasks.value.size === 0) return;
@@ -6651,6 +6894,7 @@
                                         // 如果任务完成或失败，停止轮询并显示提示
                                         if (['SUCCEED', 'FAILED', 'CANCEL'].includes(updatedTask.status)) {
                                             stopPollingTask(updatedTask.task_id);
+                                            refreshTaskFiles(updatedTask);
                                             refreshTasks(true);
                                             
                                             // 显示任务完成提示
@@ -7076,7 +7320,8 @@
                             const urlParams = new URLSearchParams(window.location.search);
                             const code = urlParams.get('code');
                             if (code) {
-                                await handleGitHubCallback(code);
+                                source = localStorage.getItem('loginSource');
+                                await handleLoginCallback(code, source);
                                 // handleGitHubCallback内部会设置isLoggedIn.value = true
                             } else {
                                 // 没有token且不是回调，显示登录页面
@@ -8003,6 +8248,15 @@
                     initLoading,
                     downloadLoading,
                     loginWithGitHub,
+                    loginWithGoogle,
+                    // 短信登录相关
+                    phoneNumber,
+                    verifyCode,
+                    smsCountdown,
+                    showSmsForm,
+                    sendSmsCode,
+                    loginWithSms,
+                    toggleSmsLogin,
                     submitting,
                     taskSearchQuery,
                     currentUser,
@@ -8126,6 +8380,7 @@
                     saveTaskFilesToCache,
                     getTaskFileFromCache,
                     setTaskFileToCache,
+                    getTaskFileUrlFromApi,
                     getTaskFileUrl,
                     getTaskFileUrlSync,
                     getTemplateFileUrl,
