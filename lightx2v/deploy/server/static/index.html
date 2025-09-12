@@ -4827,6 +4827,21 @@
                     }
                 };
 
+                const refreshTemplateFileUrl = (templatesData) => {
+                    for (const img of templatesData.images) {
+                        console.log('刷新图片素材文件URL:', img.filename, img.url);
+                        setTemplateFileToCache(img.filename, {url: img.url, timestamp: Date.now()});
+                    }
+                    for (const audio of templatesData.audios) {
+                        console.log('刷新音频素材文件URL:', audio.filename, audio.url);
+                        setTemplateFileToCache(audio.filename, {url: audio.url, timestamp: Date.now()});
+                    }
+                    for (const video of templatesData.videos) {
+                        console.log('刷新视频素材文件URL:', video.filename, video.url);
+                        setTemplateFileToCache(video.filename, {url: video.url, timestamp: Date.now()});
+                    }
+                }
+
                 // 加载模板文件
                 const loadImageAudioTemplates = async (forceRefresh = false) => {
                     try {
@@ -4849,6 +4864,8 @@
                         if (response.ok) {
                             const data = await response.json();
                             console.log('图片音乐素材库数据:', data);
+
+                            refreshTemplateFileUrl(data.templates);
                             const templatesData = {
                                 images: data.templates.images || [],
                                 audios: data.templates.audios || []
@@ -5349,6 +5366,27 @@
                     }, 100);
                 };
 
+                const getTemplateFileUrlFromApi = async (fileKey, fileType) => {
+                    const apiUrl = `./api/v1/template/asset_url/${fileType}/${fileKey}`;
+                    const response = await apiRequest(apiUrl);
+                    if (response && response.ok) {
+                        const data = await response.json();
+                        let assertUrl = data.url;
+                        if (assertUrl.startsWith('./assets/')) {
+                            const token = localStorage.getItem('accessToken');
+                            if (token) {
+                                assertUrl = `${assertUrl}&token=${encodeURIComponent(token)}`;
+                            }
+                        }
+                        setTemplateFileToCache(fileKey, {
+                            url: assertUrl,
+                            timestamp: Date.now()
+                        });
+                        return assertUrl;
+                    }
+                    return null;
+                };
+
                 // 获取模板文件URL（优先从缓存，缓存没有则生成URL）- 同步版本
                 const getTemplateFileUrl = (fileKey, fileType) => {
                     // 先从缓存获取
@@ -5357,21 +5395,7 @@
                         console.log('从缓存获取模板文件url', { fileKey});
                         return cachedFile.url;
                     }
-
-                    // 缓存中没有，生成API URL并缓存
-                    const token = localStorage.getItem('accessToken');
-                    const url = token
-                        ? `./api/v1/template/${fileType}/${fileKey}?token=${encodeURIComponent(token)}`
-                        : `./api/v1/template/${fileType}/${fileKey}`;
-                    const cachedUrl = getCachedUrl(`template_${fileType}_${fileKey}`, () => url);
-                    // // 缓存API URL
-                    setTemplateFileToCache(fileKey, {
-                        url: url,
-                        timestamp: Date.now()
-                    });
-                    
-                    console.log('getTemplateFileUrl: 生成并缓存模板URL', { fileKey, fileType, cachedUrl });
-                    return cachedUrl;
+                    getTemplateFileUrlFromApi(fileKey, fileType);
                 };
 
                 // 获取模板文件URL（异步版本，用于预加载等场景）
@@ -5382,16 +5406,7 @@
                         console.log('getTemplateFileUrlAsync: 从缓存获取', { fileKey, url: cachedFile.url });
                         return cachedFile.url;
                     }
-
-                    // 缓存中没有，生成API URL并缓存
-                    const token = localStorage.getItem('accessToken');
-                    const url = token
-                        ? `./api/v1/template/${fileType}/${fileKey}?token=${encodeURIComponent(token)}`
-                        : `./api/v1/template/${fileType}/${fileKey}`;
-                    const cachedUrl = getCachedUrl(`template_${fileType}_${fileKey}`, () => url);
-                    
-                    console.log('getTemplateFileUrlAsync: 生成并缓存模板URL', { fileKey, fileType, cachedUrl });
-                    return cachedUrl;
+                    return await getTemplateFileUrlFromApi(fileKey, fileType);
                 };
 
                 // 任务文件缓存管理函数
@@ -8383,6 +8398,7 @@
                     getTaskFileUrlFromApi,
                     getTaskFileUrl,
                     getTaskFileUrlSync,
+                    getTemplateFileUrlFromApi,
                     getTemplateFileUrl,
                     getTemplateFileUrlAsync,
                     loadTemplateFilesFromCache,

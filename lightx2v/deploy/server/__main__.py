@@ -657,24 +657,29 @@ async def api_v1_monitor_metrics():
         return error_response(str(e), 500)
 
 
-# Template API endpoints
-@app.get("/api/v1/template/{template_type}/{filename}")
-async def api_v1_template(template_type: str, filename: str):
-    """获取模板文件"""
+@app.get("/api/v1/template/asset_url/{template_type}/{filename}")
+async def api_v1_template_asset_url(template_type: str, filename: str):
     try:
-        import os
+        url = await data_manager.presign_template_url(template_type, filename)
+        if url is None:
+            url = f"./assets/template/{template_type}/{filename}"
+        headers = {"Cache-Control": "public, max-age=3600"}
+        return Response(content=json.dumps({"url": url}), media_type="application/json", headers=headers)
+    except Exception as e:
+        traceback.print_exc()
+        return error_response(str(e), 500)
 
-        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
-        file_path = os.path.join(template_dir, template_type, filename)
 
-        # 安全检查：确保文件在template目录内
-        if not os.path.exists(file_path) or not file_path.startswith(template_dir):
-            return error_response(f"Template file not found", 404)
+# Template API endpoints
+@app.get("/assets/template/{template_type}/{filename}")
+async def assets_template(template_type: str, filename: str):
+    """get template file"""
+    try:
+        if not await data_manager.template_file_exists(template_type, filename):
+            return error_response(f"template file {template_type} {filename} not found", 404)
+        data = await data_manager.load_template_file(template_type, filename)
 
-        with open(file_path, "rb") as f:
-            data = f.read()
-
-        # 根据文件类型设置媒体类型
+        # set media type according to file type
         if template_type == "images":
             if filename.lower().endswith(".png"):
                 media_type = "image/png"
@@ -690,7 +695,6 @@ async def api_v1_template(template_type: str, filename: str):
             else:
                 media_type = "application/octet-stream"
         elif template_type == "videos":
-            # 根据文件扩展名设置媒体类型
             if filename.lower().endswith(".mp4"):
                 media_type = "video/mp4"
             elif filename.lower().endswith(".webm"):
@@ -698,7 +702,7 @@ async def api_v1_template(template_type: str, filename: str):
             elif filename.lower().endswith(".avi"):
                 media_type = "video/x-msvideo"
             else:
-                media_type = "video/mp4"  # 默认为mp4
+                media_type = "video/mp4"  # default to mp4
         else:
             media_type = "application/octet-stream"
 
@@ -711,74 +715,64 @@ async def api_v1_template(template_type: str, filename: str):
 
 @app.get("/api/v1/template/list")
 async def api_v1_template_list(request: Request):
-    """获取模板文件列表（支持分页）"""
+    """get template file list (support pagination)"""
     try:
-        import glob
-        import os
-
-        # 获取分页参数
+        # check page params
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 12))
-        
-        # 验证分页参数
         if page < 1 or page_size < 1:
             return error_response("page and page_size must be greater than 0", 400)
-        
-        # 限制每页最大数量
-        if page_size > 100:
-            page_size = 100
+        # limit page size
+        page_size = min(page_size, 100)
 
-        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
+        all_images = await data_manager.list_template_files("images")
+        all_audios = await data_manager.list_template_files("audios")
+        all_videos = await data_manager.list_template_files("videos")
+        all_images = [] if all_images is None else all_images
+        all_audios = [] if all_audios is None else all_audios
+        all_videos = [] if all_videos is None else all_videos
 
-        # 获取所有图片模板
-        all_images = []
-        image_dir = os.path.join(template_dir, "images")
-        if os.path.exists(image_dir):
-            for file_path in glob.glob(os.path.join(image_dir, "*")):
-                if os.path.isfile(file_path):
-                    filename = os.path.basename(file_path)
-                    all_images.append({"filename": filename, "url": f"/api/v1/template/images/{filename}"})
-
-        # 获取所有音频模板
-        all_audios = []
-        audio_dir = os.path.join(template_dir, "audios")
-        if os.path.exists(audio_dir):
-            for file_path in glob.glob(os.path.join(audio_dir, "*")):
-                if os.path.isfile(file_path):
-                    filename = os.path.basename(file_path)
-                    all_audios.append({"filename": filename, "url": f"/api/v1/template/audios/{filename}"})
-
-        # 计算分页信息
+        # page info
         total_images = len(all_images)
         total_audios = len(all_audios)
-        
-        # 计算总页数（基于所有模板的总数）
-        total_pages = (max(total_images, total_audios) + page_size - 1) // page_size
-        
-        # 如果请求的页码超过总页数，返回空结果
-        if page > total_pages:
-            return {
-                "templates": {"images": [], "audios": []},
-                "pagination": {
-                    "page": page,
-                    "page_size": page_size,
-                    "total": max(total_images, total_audios),
-                    "total_pages": total_pages
-                }
-            }
+        total_videos = len(all_videos)
+        total_pages = (max(total_images, total_audios, total_videos) + page_size - 1) // page_size
 
-        # 计算分页范围
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
+        paginated_image_templates = []
+        paginated_audio_templates = []
+        paginated_video_templates = []
 
-        # 合并所有模板并按文件名排序
-        all_images.sort(key=lambda x: x["filename"])
-        all_audios.sort(key=lambda x: x["filename"])
-        paginated_image_templates = all_images[start_idx:end_idx]
-        paginated_audio_templates = all_audios[start_idx:end_idx]
+        if page <= total_pages:
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            all_images.sort(key=lambda x: x)
+            all_audios.sort(key=lambda x: x)
+            all_videos.sort(key=lambda x: x)
+
+            for image in all_images[start_idx:end_idx]:
+                url = await data_manager.presign_template_url("images", image)
+                if url is None:
+                    url = f"./assets/template/images/{image}"
+                paginated_image_templates.append({"filename": image, "url": url})
+
+            for audio in all_audios[start_idx:end_idx]:
+                url = await data_manager.presign_template_url("audios", audio)
+                if url is None:
+                    url = f"./assets/template/audios/{audio}"
+                paginated_audio_templates.append({"filename": audio, "url": url})
+
+            for video in all_videos[start_idx:end_idx]:
+                url = await data_manager.presign_template_url("videos", video)
+                if url is None:
+                    url = f"./assets/template/videos/{video}"
+                paginated_video_templates.append({"filename": video, "url": url})
 
         return {
-            "templates": {"images": paginated_image_templates, "audios": paginated_audio_templates},
+            "templates": {
+                "images": paginated_image_templates,
+                "audios": paginated_audio_templates,
+                "videos": paginated_video_templates
+            },
             "pagination": {
                 "page": page,
                 "page_size": page_size,
@@ -790,71 +784,46 @@ async def api_v1_template_list(request: Request):
         traceback.print_exc()
         return error_response(str(e), 500)
 
+
 @app.get("/api/v1/template/tasks")
 async def api_v1_template_tasks(request: Request):
-    """获取模板任务列表（支持分页）"""
+    """get template task list (support pagination)"""
     try:
-        import glob
-        import os
-        import json
-
-        # 获取分页参数
+        # check page params
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 12))
         category = request.query_params.get("category", None)
         search = request.query_params.get("search", None)
-        
-        # 验证分页参数
         if page < 1 or page_size < 1:
             return error_response("page and page_size must be greater than 0", 400)
-        
-        # 限制每页最大数量
-        if page_size > 100:
-            page_size = 100
-
-        template_dir = os.path.join(os.path.dirname(__file__), "..", "template")
-        tasks_dir = os.path.join(template_dir, "tasks")
+        # limit page size
+        page_size = min(page_size, 100)
 
         all_templates = []
+        template_files = await data_manager.list_template_files("tasks")
+        template_files = [] if template_files is None else template_files
 
-        if os.path.exists(tasks_dir):
-            # 获取所有模板任务JSON文件
-            for file_path in glob.glob(os.path.join(tasks_dir, "*.json")):
-                if os.path.isfile(file_path):
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            template_data = json.load(f)
-                            if category is not None and category != 'all' and category not in template_data['task']['tags']:
-                                continue
-                            if search is not None and search not in template_data['task']['params']['prompt']+template_data['task']['params']['negative_prompt']+template_data['task']['model_cls']+template_data['task']['stage']+template_data['task']['task_type']+','.join(template_data['task']['tags']):
-                                continue
-                            all_templates.append(template_data['task'])
-                    except Exception as e:
-                        logger.warning(f"Failed to load template file {file_path}: {e}")
-                        continue
+        for template_file in template_files:
+            try:
+                bytes_data = await data_manager.load_template_file("tasks", template_file)
+                template_data = json.loads(bytes_data)
+                if category is not None and category != 'all' and category not in template_data['task']['tags']:
+                    continue
+                if search is not None and search not in template_data['task']['params']['prompt']+template_data['task']['params']['negative_prompt']+template_data['task']['model_cls']+template_data['task']['stage']+template_data['task']['task_type']+','.join(template_data['task']['tags']):
+                    continue
+                all_templates.append(template_data['task'])
+            except Exception as e:
+                logger.warning(f"Failed to load template file {template_file}: {e}")
 
-        # 计算分页信息
+        # page info
         total_templates = len(all_templates)
         total_pages = (total_templates + page_size - 1) // page_size
-        
-        # 如果请求的页码超过总页数，返回空结果
-        if page > total_pages:
-            return {
-                "templates": [],
-                "pagination": {
-                    "page": page,
-                    "page_size": page_size,
-                    "total": total_templates,
-                    "total_pages": total_pages
-                }
-            }
+        paginated_templates = []
 
-        # 计算分页范围
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-
-        # 分页处理
-        paginated_templates = all_templates[start_idx:end_idx]
+        if page <= total_pages:
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_templates = all_templates[start_idx:end_idx]
 
         return {
             "templates": paginated_templates,
@@ -865,6 +834,7 @@ async def api_v1_template_tasks(request: Request):
                 "total_pages": total_pages
             }
         }
+
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -889,6 +859,7 @@ if __name__ == "__main__":
     parser.add_argument("--task_url", type=str, default=dft_task_url)
     parser.add_argument("--data_url", type=str, default=dft_data_url)
     parser.add_argument("--queue_url", type=str, default=dft_queue_url)
+    parser.add_argument("--template_dir", type=str, default="")
     parser.add_argument("--ip", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
@@ -903,9 +874,9 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
     if args.data_url.startswith("/"):
-        data_manager = LocalDataManager(args.data_url)
+        data_manager = LocalDataManager(args.data_url, args.template_dir)
     elif args.data_url.startswith("{"):
-        data_manager = S3DataManager(args.data_url)
+        data_manager = S3DataManager(args.data_url, args.template_dir)
     else:
         raise NotImplementedError
     if args.queue_url.startswith("/"):
