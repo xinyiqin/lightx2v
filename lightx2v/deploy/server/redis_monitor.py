@@ -73,7 +73,6 @@ class RedisServerMonitor(ServerMonitor):
         for queue in self.all_queues:
             key = f"workers:{queue}:workers"
             workers = await self.redis_client.hgetall(key)
-            infer_avg = await self.redis_client.list_avg(f"workers:{queue}:infer_cost", self.worker_avg_window)
 
             for identity, worker in workers.items():
                 worker = json.loads(worker)
