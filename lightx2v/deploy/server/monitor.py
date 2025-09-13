@@ -96,19 +96,18 @@ class WorkerClient:
 
 
 class ServerMonitor:
-    def __init__(self, model_pipelines, task_manager, queue_manager, interval=1):
+    def __init__(self, model_pipelines, task_manager, queue_manager):
         self.model_pipelines = model_pipelines
         self.task_manager = task_manager
         self.queue_manager = queue_manager
-        self.interval = interval
         self.stop = False
         self.worker_clients = {}
-        self.identity_to_queue = {}
         self.subtask_run_timeouts = {}
         self.pending_subtasks = {}
 
         self.all_queues = self.model_pipelines.get_queues()
         self.config = self.model_pipelines.get_monitor_config()
+        self.interval = self.config.get("monitor_interval", 30)
 
         for queue in self.all_queues:
             self.subtask_run_timeouts[queue] = self.config["subtask_running_timeouts"].get(queue, 60)
@@ -117,11 +116,7 @@ class ServerMonitor:
         self.worker_avg_window = self.config["worker_avg_window"]
         self.worker_offline_timeout = self.config["worker_offline_timeout"]
         self.worker_min_capacity = self.config["worker_min_capacity"]
-        self.worker_min_cnt = self.config["worker_min_cnt"]
-        self.worker_max_cnt = self.config["worker_max_cnt"]
         self.task_timeout = self.config["task_timeout"]
-        self.schedule_ratio_high = self.config["schedule_ratio_high"]
-        self.schedule_ratio_low = self.config["schedule_ratio_low"]
         self.ping_timeout = self.config["ping_timeout"]
 
         self.user_visits = {}  # user_id -> last_visit_t
@@ -132,19 +127,16 @@ class ServerMonitor:
         assert self.worker_avg_window > 0
         assert self.worker_offline_timeout > 0
         assert self.worker_min_capacity > 0
-        assert self.worker_min_cnt > 0
-        assert self.worker_max_cnt > 0
-        assert self.worker_min_cnt <= self.worker_max_cnt
         assert self.task_timeout > 0
-        assert self.schedule_ratio_high > 0 and self.schedule_ratio_high < 1
-        assert self.schedule_ratio_low > 0 and self.schedule_ratio_low < 1
-        assert self.schedule_ratio_high >= self.schedule_ratio_low
         assert self.ping_timeout > 0
         assert self.user_max_active_tasks > 0
         assert self.user_max_daily_tasks > 0
         assert self.user_visit_frequency > 0
 
     async def init(self):
+        await self.init_pending_subtasks()
+
+    async def loop(self):
         while True:
             if self.stop:
                 break
@@ -166,17 +158,15 @@ class ServerMonitor:
         if identity not in self.worker_clients[queue]:
             infer_timeout = self.subtask_run_timeouts[queue]
             self.worker_clients[queue][identity] = WorkerClient(queue, identity, infer_timeout, self.worker_offline_timeout, self.worker_avg_window, self.ping_timeout)
-            self.identity_to_queue[identity] = queue
         return self.worker_clients[queue][identity]
 
     @class_try_catch_async
     async def worker_update(self, queue, identity, status):
-        if queue is None:
-            queue = self.identity_to_queue[identity]
         worker = self.init_worker(queue, identity)
         worker.update(status)
         logger.info(f"Worker {identity} {queue} update [{status}]")
 
+    @class_try_catch_async
     async def clean_workers(self):
         qs = list(self.worker_clients.keys())
         for queue in qs:
@@ -184,9 +174,9 @@ class ServerMonitor:
             for identity in idens:
                 if not self.worker_clients[queue][identity].check():
                     self.worker_clients[queue].pop(identity)
-                    self.identity_to_queue.pop(identity)
                     logger.warning(f"Worker {queue} {identity} out of contact removed, remain {self.worker_clients[queue]}")
 
+    @class_try_catch_async
     async def clean_subtasks(self):
         created_end_t = time.time() - self.subtask_created_timeout
         pending_end_t = time.time() - self.subtask_pending_timeout
@@ -225,7 +215,8 @@ class ServerMonitor:
                 await self.task_manager.finish_subtasks(t["task_id"], TaskStatus.FAILED, worker_name=t["worker_name"], fail_msg=f"RUNNING timeout: {elapse:.2f} s")
                 fails.add(t["task_id"])
 
-    def get_avg_worker_infer_cost(self, queue):
+    @class_try_catch_async
+    async def get_avg_worker_infer_cost(self, queue):
         if queue not in self.worker_clients:
             self.worker_clients[queue] = {}
         infer_costs = []
@@ -267,8 +258,8 @@ class ServerMonitor:
         wait_time = 0
 
         for queue in queues:
-            avg_cost = self.get_avg_worker_infer_cost(queue)
-            worker_cnt = len(self.worker_clients[queue])
+            avg_cost = await self.get_avg_worker_infer_cost(queue)
+            worker_cnt = await self.get_ready_worker_count(queue)
             subtask_pending = await self.queue_manager.pending_num(queue)
             capacity = self.task_timeout * max(worker_cnt, 1) // avg_cost
             capacity = max(self.worker_min_capacity, capacity)
@@ -281,46 +272,6 @@ class ServerMonitor:
         return wait_time
 
     @class_try_catch_async
-    async def cal_metrics(self):
-        data = {}
-        target_high = self.task_timeout * self.schedule_ratio_high
-        target_low = self.task_timeout * self.schedule_ratio_low
-
-        for queue in self.all_queues:
-            avg_cost = self.get_avg_worker_infer_cost(queue)
-            worker_cnt = len(self.worker_clients[queue])
-            subtask_pending = await self.queue_manager.pending_num(queue)
-
-            data[queue] = {
-                "avg_cost": avg_cost,
-                "worker_cnt": worker_cnt,
-                "subtask_pending": subtask_pending,
-                "max_worker": 0,
-                "min_worker": 0,
-                "need_add_worker": 0,
-                "need_del_worker": 0,
-                "del_worker_identities": [],
-            }
-
-            fix_cnt = subtask_pending // max(self.worker_min_capacity, 1)
-            min_cnt = min(fix_cnt, subtask_pending * avg_cost // target_high)
-            max_cnt = min(fix_cnt, subtask_pending * avg_cost // target_low)
-            data[queue]["min_worker"] = max(self.worker_min_cnt, min_cnt)
-            data[queue]["max_worker"] = max(self.worker_max_cnt, max_cnt)
-
-            if worker_cnt < data[queue]["min_worker"]:
-                data[queue]["need_add_worker"] = data[queue]["min_worker"] - worker_cnt
-
-            if subtask_pending == 0 and worker_cnt > data[queue]["max_worker"]:
-                data[queue]["need_del_worker"] = worker_cnt - data[queue]["max_worker"]
-                if data[queue]["need_del_worker"] > 0:
-                    for identity, client in self.worker_clients[queue].items():
-                        if client.status in [WorkerStatus.FETCHING, WorkerStatus.DISCONNECT]:
-                            data[queue]["del_worker_identities"].append(identity)
-                            if len(data[queue]["del_worker_identities"]) >= data[queue]["need_del_worker"]:
-                                break
-        return data
-
     async def init_pending_subtasks(self):
         # query all pending subtasks in task_manager
         subtasks = {}
@@ -338,19 +289,21 @@ class ServerMonitor:
             pending_num = await self.queue_manager.pending_num(queue)
             self.pending_subtasks[queue] = {"consume_count": 0, "max_count": pending_num, "subtasks": {}}
             for i, task_id in enumerate(task_ids):
-                self.pending_subtasks[queue]["subtasks"][task_id] = max(pending_num - i - 1, 0)
+                self.pending_subtasks[queue]["subtasks"][task_id] = max(pending_num - i, 1)
         logger.info(f"Init pending subtasks: {self.pending_subtasks}")
 
-    def pending_subtasks_add(self, queue, task_id):
+    @class_try_catch_async
+    async def pending_subtasks_add(self, queue, task_id):
         if queue not in self.pending_subtasks:
             logger.warning(f"Queue {queue} not found in self.pending_subtasks")
             return
         max_count = self.pending_subtasks[queue]["max_count"]
-        self.pending_subtasks[queue]["subtasks"][task_id] = max_count
+        self.pending_subtasks[queue]["subtasks"][task_id] = max_count + 1
         self.pending_subtasks[queue]["max_count"] = max_count + 1
         # logger.warning(f"Pending subtasks {queue} add {task_id}: {self.pending_subtasks[queue]}")
 
-    def pending_subtasks_sub(self, queue, task_id):
+    @class_try_catch_async
+    async def pending_subtasks_sub(self, queue, task_id):
         if queue not in self.pending_subtasks:
             logger.warning(f"Queue {queue} not found in self.pending_subtasks")
             return
@@ -359,7 +312,8 @@ class ServerMonitor:
             self.pending_subtasks[queue]["subtasks"].pop(task_id)
         # logger.warning(f"Pending subtasks {queue} sub {task_id}: {self.pending_subtasks[queue]}")
 
-    def pending_subtasks_get_order(self, queue, task_id):
+    @class_try_catch_async
+    async def pending_subtasks_get_order(self, queue, task_id):
         if queue not in self.pending_subtasks:
             logger.warning(f"Queue {queue} not found in self.pending_subtasks")
             return None
@@ -368,17 +322,18 @@ class ServerMonitor:
             return None
         order = self.pending_subtasks[queue]["subtasks"][task_id]
         consume = self.pending_subtasks[queue]["consume_count"]
-        real_order = max(order - consume, 0)
+        real_order = max(order - consume, 1)
         # logger.warning(f"Pending subtasks {queue} get order {task_id}: real={real_order} order={order} consume={consume}")
-        return real_order + 1
+        return real_order
 
-    def get_ready_worker_count(self, queue):
+    @class_try_catch_async
+    async def get_ready_worker_count(self, queue):
         if queue not in self.worker_clients:
             self.worker_clients[queue] = {}
         return len(self.worker_clients[queue])
 
-    @class_try_catch
-    def format_subtask(self, subtasks):
+    @class_try_catch_async
+    async def format_subtask(self, subtasks):
         ret = []
         for sub in subtasks:
             cur = {
@@ -392,14 +347,15 @@ class ServerMonitor:
                 "ready_worker_count": None,
             }
             if sub["status"] in [TaskStatus.PENDING, TaskStatus.RUNNING]:
-                cur["estimated_running_secs"] = self.get_avg_worker_infer_cost(sub["queue"])
-                cur["ready_worker_count"] = self.get_ready_worker_count(sub["queue"])
+                cur["estimated_running_secs"] = await self.get_avg_worker_infer_cost(sub["queue"])
+                cur["ready_worker_count"] = await self.get_ready_worker_count(sub["queue"])
                 if sub["status"] == TaskStatus.PENDING:
-                    order = self.pending_subtasks_get_order(sub["queue"], sub["task_id"])
+                    order = await self.pending_subtasks_get_order(sub["queue"], sub["task_id"])
                     worker_count = max(cur["ready_worker_count"], 1e-7)
                     if order is not None:
                         cur["estimated_pending_order"] = order
-                        cur["estimated_pending_secs"] = order * cur["estimated_running_secs"] / worker_count
+                        wait_cycle = (order - 1) // worker_count + 1
+                        cur["estimated_pending_secs"] = cur["estimated_running_secs"] * wait_cycle
 
             if isinstance(sub["extra_info"], dict):
                 if "elapses" in sub["extra_info"]:

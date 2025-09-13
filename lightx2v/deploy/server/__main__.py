@@ -22,6 +22,7 @@ from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManage
 from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
+from lightx2v.deploy.server.redis_monitor import RedisServerMonitor
 from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus, FinishedStatus
 from lightx2v.utils.service_utils import ProcessManager
 
@@ -44,8 +45,8 @@ async def lifespan(app: FastAPI):
     await task_manager.mark_server_restart()
     await data_manager.init()
     await queue_manager.init()
-    await server_monitor.init_pending_subtasks()
-    asyncio.create_task(server_monitor.init())
+    await server_monitor.init()
+    asyncio.create_task(server_monitor.loop())
     yield
     await server_monitor.close()
     await queue_manager.close()
@@ -233,7 +234,7 @@ async def prepare_subtasks(task_id):
         logger.info(f"Prepare ready subtask: ({task_id}, {sub['worker_name']})")
         r = await queue_manager.put_subtask(sub)
         assert r, "put subtask to queue error"
-        server_monitor.pending_subtasks_add(sub["queue"], sub["task_id"])
+        await server_monitor.pending_subtasks_add(sub["queue"], sub["task_id"])
 
 
 @app.get("/api/v1/model/list")
@@ -302,7 +303,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
                 if task_id:
                     task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
                     if task is not None:
-                        task["subtasks"] = server_monitor.format_subtask(subtasks)
+                        task["subtasks"] = await server_monitor.format_subtask(subtasks)
                         task["status"] = task["status"].name
                         tasks.append(task)
             return {"tasks": tasks}
@@ -312,7 +313,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
         task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
         if task is None:
             return error_response(f"Task {task_id} not found", 404)
-        task["subtasks"] = server_monitor.format_subtask(subtasks)
+        task["subtasks"] = await server_monitor.format_subtask(subtasks)
         task["status"] = task["status"].name
         return task
     except Exception as e:
@@ -538,7 +539,7 @@ async def api_v1_worker_fetch(request: Request, valid=Depends(verify_worker_acce
 
         subtasks = [] if subtasks is None else subtasks
         for sub in subtasks:
-            server_monitor.pending_subtasks_sub(sub["queue"], sub["task_id"])
+            await server_monitor.pending_subtasks_sub(sub["queue"], sub["task_id"])
         valid_subtasks = await task_manager.run_subtasks(subtasks, identity)
         valids = [sub["task_id"] for sub in valid_subtasks]
 
@@ -611,37 +612,6 @@ async def api_v1_worker_ping_subtask(request: Request, valid=Depends(verify_work
         assert await task_manager.ping_subtask(task_id, worker_name, identity)
         await server_monitor.worker_update(queue, identity, WorkerStatus.PING)
         return {"msg": "ok"}
-
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-
-@app.post("/api/v1/worker/ping/life")
-async def api_v1_worker_ping_life(request: Request, valid=Depends(verify_worker_access)):
-    try:
-        params = await request.json()
-        logger.info(f"{params}")
-        identity = params.pop("worker_identity")
-        keys = params.pop("worker_keys")
-        worker = model_pipelines.get_worker(keys)
-
-        # worker lost, init it again
-        queue = server_monitor.identity_to_queue.get(identity, None)
-        if queue is None:
-            queue = worker["queue"]
-            logger.warning(f"worker {identity} lost, refetching it")
-            await server_monitor.worker_update(queue, identity, WorkerStatus.FETCHING)
-        else:
-            assert queue == worker["queue"], f"worker {identity} queue not matched: {queue} vs {worker['queue']}"
-
-        metrics = await server_monitor.cal_metrics()
-        ret = {"queue": queue, "metrics": metrics[queue]}
-        if identity in metrics[queue]["del_worker_identities"]:
-            ret["msg"] = "delete"
-        else:
-            ret["msg"] = "ok"
-        return ret
 
     except Exception as e:
         traceback.print_exc()
@@ -859,6 +829,7 @@ if __name__ == "__main__":
     parser.add_argument("--task_url", type=str, default=dft_task_url)
     parser.add_argument("--data_url", type=str, default=dft_data_url)
     parser.add_argument("--queue_url", type=str, default=dft_queue_url)
+    parser.add_argument("--redis_url", type=str, default="")
     parser.add_argument("--template_dir", type=str, default="")
     parser.add_argument("--ip", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
@@ -885,6 +856,9 @@ if __name__ == "__main__":
         queue_manager = RabbitMQQueueManager(args.queue_url)
     else:
         raise NotImplementedError
-    server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
+    if args.redis_url:
+        server_monitor = RedisServerMonitor(model_pipelines, task_manager, queue_manager, args.redis_url)
+    else:
+        server_monitor = ServerMonitor(model_pipelines, task_manager, queue_manager)
 
     uvicorn.run(app, host=args.ip, port=args.port, reload=False, workers=1)
