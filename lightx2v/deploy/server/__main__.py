@@ -458,7 +458,7 @@ async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access))
 async def api_v1_task_resume(request: Request, user=Depends(verify_user_access)):
     try:
         task_id = request.query_params["task_id"]
-        ret = await task_manager.resume_task(task_id, user_id=user["user_id"], all_subtask=True)
+        ret = await task_manager.resume_task(task_id, user_id=user["user_id"], all_subtask=False)
         if ret:
             await prepare_subtasks(task_id)
             return {"msg": "ok"}
