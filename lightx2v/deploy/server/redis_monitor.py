@@ -104,6 +104,13 @@ class RedisServerMonitor(ServerMonitor):
                         await self.redis_client.hdel(key, identity)
                         continue
 
+                # fetching too long
+                elif status == WorkerStatus.FETCHING.name:
+                    if elapse > self.fetching_timeout:
+                        logger.warning(f"Worker {identity} {queue} fetching timeout: {elapse:.2f} s")
+                        await self.redis_client.hdel(key, identity)
+                        continue
+
     async def get_ready_worker_count(self, queue):
         key = f"workers:{queue}:workers"
         worker_count = await self.redis_client.hlen(key)

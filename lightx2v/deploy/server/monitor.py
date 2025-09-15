@@ -108,6 +108,7 @@ class ServerMonitor:
         self.all_queues = self.model_pipelines.get_queues()
         self.config = self.model_pipelines.get_monitor_config()
         self.interval = self.config.get("monitor_interval", 30)
+        self.fetching_timeout = self.config.get("fetching_timeout", 1000)
 
         for queue in self.all_queues:
             self.subtask_run_timeouts[queue] = self.config["subtask_running_timeouts"].get(queue, 60)
