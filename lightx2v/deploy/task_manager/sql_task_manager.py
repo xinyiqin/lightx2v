@@ -425,20 +425,26 @@ class PostgresSQLTaskManager(BaseTaskManager):
             rows = await conn.fetch(query, *params)
             if count:
                 return rows[0]["count"]
+
+            # query subtasks with task
+            subtasks = {}
+            if not kwargs.get("subtasks", False):
+                subtask_query = f"SELECT {self.table_subtasks}.* FROM ({query}) AS t \
+                                JOIN {self.table_subtasks} ON t.task_id = {self.table_subtasks}.task_id"
+                subtask_rows = await conn.fetch(subtask_query, *params)
+                for row in subtask_rows:
+                    sub = dict(row)
+                    self.parse_dict(sub)
+                    if sub["task_id"] not in subtasks:
+                        subtasks[sub["task_id"]] = []
+                    subtasks[sub["task_id"]].append(sub)
+
             tasks = []
             for row in rows:
                 task = dict(row)
                 self.parse_dict(task)
-                
-                # 如果不是查询子任务，则添加子任务信息到任务中
                 if not kwargs.get("subtasks", False):
-                    try:
-                        _, subtasks = await self.load(conn, task["task_id"], only_task=False)
-                        task["subtasks"] = subtasks
-                    except Exception as e:
-                        logger.warning(f"Failed to load subtasks for task {task['task_id']}: {e}")
-                        task["subtasks"] = []
-                
+                    task["subtasks"] = subtasks.get(task["task_id"], [])
                 tasks.append(task)
             return tasks
         except:  # noqa
