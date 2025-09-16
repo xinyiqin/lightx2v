@@ -2,15 +2,12 @@ try:
     import flash_attn
 except ModuleNotFoundError:
     flash_attn = None
-import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from einops import rearrange
-
-from lightx2v.models.input_encoders.hf.q_linear import SglQuantLinearFp8
 
 
 def linear_interpolation(features, output_len: int):
@@ -19,32 +16,82 @@ def linear_interpolation(features, output_len: int):
     return output_features.transpose(1, 2)
 
 
-def get_q_lens_audio_range(
-    batchsize: int,
-    n_tokens_per_rank: int,
-    n_query_tokens: int,
-    n_tokens_per_frame: int,
-    sp_rank: int,
+@torch.compiler.disable
+def get_max_int(q_lens, k_lens):
+    max_seqlen_q = int(q_lens.max().item())
+    max_seqlen_k = int(k_lens.max().item())
+    return max_seqlen_q, max_seqlen_k
+
+
+def get_qk_lens_audio_range(
+    n_tokens_per_rank: torch.Tensor,
+    n_query_tokens: torch.Tensor,
+    n_tokens_per_frame: torch.Tensor,
+    sp_rank: torch.Tensor,
+    num_tokens_x4,
 ):
+    device = n_tokens_per_rank.device
+    dtype = torch.int32
+
     if n_query_tokens == 0:
-        q_lens = [1] * batchsize
-        return q_lens, 0, 1
+        q_lens = torch.ones(1, dtype=dtype, device=device)
+        t0 = torch.tensor(0, device=device)
+        t1 = torch.tensor(1, device=device)
+        k_lens = torch.full((t1 - t0,), num_tokens_x4, dtype=dtype, device=device)
+        max_seqlen_q, max_seqlen_k = get_max_int(q_lens, k_lens)
+        return q_lens, k_lens, max_seqlen_q, max_seqlen_k, t0, t1
+
     idx0 = n_tokens_per_rank * sp_rank
+
     first_length = n_tokens_per_frame - idx0 % n_tokens_per_frame
-    first_length = min(first_length, n_query_tokens)
-    n_frames = (n_query_tokens - first_length) // n_tokens_per_frame
+    first_length = torch.minimum(first_length, n_query_tokens)
+
+    n_frames = torch.div(n_query_tokens - first_length, n_tokens_per_frame, rounding_mode="floor")
+
     last_length = n_query_tokens - n_frames * n_tokens_per_frame - first_length
-    q_lens = []
-    if first_length > 0:
-        q_lens.append(first_length)
-    q_lens += [n_tokens_per_frame] * n_frames
-    if last_length > 0:
-        q_lens.append(last_length)
+
+    first_tensor = first_length.unsqueeze(0)  # [1]
+    frame_tensor = n_tokens_per_frame.repeat(n_frames)  # [n_frames]
+    last_tensor = last_length.unsqueeze(0)  # [1]
+
+    q_lens_all = torch.cat([first_tensor, frame_tensor, last_tensor])
+    q_lens = q_lens_all[q_lens_all > 0].to(dtype)
+
     t0 = idx0 // n_tokens_per_frame
-    t1 = t0 + len(q_lens)
-    return q_lens * batchsize, t0, t1
+    t1 = t0 + q_lens.numel()
+
+    k_lens = torch.full((t1 - t0,), num_tokens_x4, dtype=dtype, device=device)
+
+    assert q_lens.shape == k_lens.shape
+    max_seqlen_q, max_seqlen_k = get_max_int(q_lens, k_lens)
+
+    return q_lens, k_lens, max_seqlen_q, max_seqlen_k, t0, t1
 
 
+def calculate_n_query_tokens(hidden_states, sp_rank, sp_size, n_tokens_per_rank, n_tokens):
+    tail_length = n_tokens_per_rank * sp_size - n_tokens
+    n_unused_ranks = tail_length // n_tokens_per_rank
+
+    if sp_rank > sp_size - n_unused_ranks - 1:
+        n_query_tokens = 0
+    elif sp_rank == sp_size - n_unused_ranks - 1:
+        val = n_tokens_per_rank - (tail_length % n_tokens_per_rank)
+        n_query_tokens = val
+    else:
+        n_query_tokens = n_tokens_per_rank
+
+    if n_query_tokens > 0:
+        hidden_states_aligned = hidden_states[:n_query_tokens]
+        hidden_states_tail = hidden_states[n_query_tokens:]
+    else:
+        # for ranks that should be excluded from cross-attn, fake cross-attn will be applied so that FSDP works.
+        hidden_states_aligned = hidden_states[:1]
+        hidden_states_tail = hidden_states[1:]
+
+    return n_query_tokens, hidden_states_aligned, hidden_states_tail
+
+
+'''
 class PerceiverAttentionCA(nn.Module):
     def __init__(self, dim_head=128, heads=16, kv_dim=2048, adaLN: bool = False, quantized=False, quant_scheme=None):
         super().__init__()
@@ -73,7 +120,7 @@ class PerceiverAttentionCA(nn.Module):
             shift_scale_gate[:, 2] = 1
             self.register_buffer("shift_scale_gate", shift_scale_gate, persistent=False)
 
-    def forward(self, x, latents, t_emb, q_lens, k_lens):
+    def forward(self, x, latents, t_emb, q_lens, k_lens, max_seqlen_q, max_seqlen_k):
         """x shape (batchsize, latent_frame, audio_tokens_per_latent,
         model_dim) latents (batchsize, length, model_dim)"""
         batchsize = len(x)
@@ -90,14 +137,15 @@ class PerceiverAttentionCA(nn.Module):
         q = rearrange(q, "B L (H C) -> (B L) H C", H=self.heads)
         k = rearrange(k, "B T L (H C) -> (B T L) H C", H=self.heads)
         v = rearrange(v, "B T L (H C) -> (B T L) H C", H=self.heads)
+
         out = flash_attn.flash_attn_varlen_func(
             q=q,
             k=k,
             v=v,
             cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True),
             cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True),
-            max_seqlen_q=q_lens.max().item(),
-            max_seqlen_k=k_lens.max().item(),
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
             dropout_p=0.0,
             softmax_scale=None,
             causal=False,
@@ -106,6 +154,7 @@ class PerceiverAttentionCA(nn.Module):
         )
         out = rearrange(out, "(B L) H C -> B L (H C)", B=batchsize)
         return self.to_out(out) * gate
+'''
 
 
 class AudioProjection(nn.Module):
@@ -208,9 +257,10 @@ class AudioAdapter(nn.Module):
         # self.num_tokens = num_tokens * 4
         self.num_tokens_x4 = num_tokens * 4
         self.audio_pe = nn.Parameter(torch.randn(self.num_tokens_x4, mlp_dims[-1] // num_tokens) * 0.02)
-        ca_num = math.ceil(base_num_layers / interval)
+        # ca_num = math.ceil(base_num_layers / interval)
         self.base_num_layers = base_num_layers
         self.interval = interval
+        """
         self.ca = nn.ModuleList(
             [
                 PerceiverAttentionCA(
@@ -224,6 +274,7 @@ class AudioAdapter(nn.Module):
                 for _ in range(ca_num)
             ]
         )
+        """
         self.dim = attention_head_dim * num_attention_heads
         if time_freq_dim > 0:
             self.time_embedding = TimeEmbedding(self.dim, time_freq_dim, self.dim * 3)
