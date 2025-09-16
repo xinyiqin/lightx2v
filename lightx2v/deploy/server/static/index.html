@@ -8159,6 +8159,10 @@
                                         // 如果当前在查看这个任务的详情，更新selectedTask
                                         if (modalTask.value && modalTask.value.task_id === updatedTask.task_id) {
                                             modalTask.value = updatedTask;
+                                            if (updatedTask.status === 'SUCCEED') {
+                                                console.log('refresh viewing task: output files');
+                                                loadTaskFiles(updatedTask.task_id);
+                                            }
                                         }
 
                                         // 如果当前在projects页面且变化的是状态，更新tasks
