@@ -4,8 +4,9 @@ import time
 import aiohttp
 import jwt
 from fastapi import HTTPException
-from lightx2v.deploy.common.aliyun import AlibabaCloudClient
 from loguru import logger
+
+from lightx2v.deploy.common.aliyun import AlibabaCloudClient
 
 
 class AuthManager:

@@ -4,7 +4,7 @@ from enum import Enum
 
 from loguru import logger
 
-from lightx2v.deploy.common.utils import class_try_catch_async, class_try_catch
+from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.deploy.task_manager import TaskStatus
 
 
@@ -280,7 +280,7 @@ class ServerMonitor:
         for row in rows:
             if row["queue"] not in subtasks:
                 subtasks[row["queue"]] = []
-            subtasks[row["queue"]].append(row['task_id'])
+            subtasks[row["queue"]].append(row["task_id"])
         for queue in self.all_queues:
             if queue not in subtasks:
                 subtasks[queue] = []

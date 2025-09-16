@@ -1,9 +1,8 @@
 import argparse
 import asyncio
+import json
 import mimetypes
 import os
-import base64
-import json
 import traceback
 from contextlib import asynccontextmanager
 
@@ -23,7 +22,7 @@ from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
 from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.server.redis_monitor import RedisServerMonitor
-from lightx2v.deploy.task_manager import LocalTaskManager, PostgresSQLTaskManager, TaskStatus, FinishedStatus
+from lightx2v.deploy.task_manager import FinishedStatus, LocalTaskManager, PostgresSQLTaskManager, TaskStatus
 from lightx2v.utils.service_utils import ProcessManager
 
 # =========================
@@ -296,7 +295,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
     try:
         # 检查是否有task_ids参数（批量查询）
         if "task_ids" in request.query_params:
-            task_ids = request.query_params["task_ids"].split(',')
+            task_ids = request.query_params["task_ids"].split(",")
             tasks = []
             for task_id in task_ids:
                 task_id = task_id.strip()
@@ -307,7 +306,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
                         task["status"] = task["status"].name
                         tasks.append(task)
             return {"tasks": tasks}
-        
+
         # 单个任务查询
         task_id = request.query_params["task_id"]
         task, subtasks = await task_manager.query_task(task_id, user["user_id"], only_task=False)
@@ -738,17 +737,8 @@ async def api_v1_template_list(request: Request, valid=Depends(verify_user_acces
                 paginated_video_templates.append({"filename": video, "url": url})
 
         return {
-            "templates": {
-                "images": paginated_image_templates,
-                "audios": paginated_audio_templates,
-                "videos": paginated_video_templates
-            },
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": max(total_images, total_audios),
-                "total_pages": total_pages
-            }
+            "templates": {"images": paginated_image_templates, "audios": paginated_audio_templates, "videos": paginated_video_templates},
+            "pagination": {"page": page, "page_size": page_size, "total": max(total_images, total_audios), "total_pages": total_pages},
         }
     except Exception as e:
         traceback.print_exc()
@@ -777,11 +767,13 @@ async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_acce
             try:
                 bytes_data = await data_manager.load_template_file("tasks", template_file)
                 template_data = json.loads(bytes_data)
-                if category is not None and category != 'all' and category not in template_data['task']['tags']:
+                if category is not None and category != "all" and category not in template_data["task"]["tags"]:
                     continue
-                if search is not None and search not in template_data['task']['params']['prompt']+template_data['task']['params']['negative_prompt']+template_data['task']['model_cls']+template_data['task']['stage']+template_data['task']['task_type']+','.join(template_data['task']['tags']):
+                if search is not None and search not in template_data["task"]["params"]["prompt"] + template_data["task"]["params"]["negative_prompt"] + template_data["task"][
+                    "model_cls"
+                ] + template_data["task"]["stage"] + template_data["task"]["task_type"] + ",".join(template_data["task"]["tags"]):
                     continue
-                all_templates.append(template_data['task'])
+                all_templates.append(template_data["task"])
             except Exception as e:
                 logger.warning(f"Failed to load template file {template_file}: {e}")
 
@@ -795,15 +787,7 @@ async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_acce
             end_idx = start_idx + page_size
             paginated_templates = all_templates[start_idx:end_idx]
 
-        return {
-            "templates": paginated_templates,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": total_templates,
-                "total_pages": total_pages
-            }
-        }
+        return {"templates": paginated_templates, "pagination": {"page": page, "page_size": page_size, "total": total_templates, "total_pages": total_pages}}
 
     except Exception as e:
         traceback.print_exc()

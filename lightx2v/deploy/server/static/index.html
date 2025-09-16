@@ -2618,8 +2618,8 @@
                             <!-- 语言切换按钮 -->
                             <div class="language-switcher mr-6">
                                 <button @click="toggleLanguage"
-                                    class="w-10 h-10 bg-laser-purple/10 text-gradient-icon items-center px-1 py-1 
-                                           rounded-lg bg-dark-light border border-laser-purple/50 hover:border-laser-purple 
+                                    class="w-10 h-10 bg-laser-purple/10 text-gradient-icon items-center px-1 py-1
+                                           rounded-lg bg-dark-light border border-laser-purple/50 hover:border-laser-purple
                                            transition-all duration-200 text-sm hover:scale-105"
                                     :title="t('switchLanguage')">
                                     <span class="text-lg">{{ languageOptions.find(lang => lang.code ===
@@ -2656,8 +2656,8 @@
                                 <!-- 生成视频功能 -->
                                 <div class="relative group">
                                     <button @click="switchToCreateView"
-                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300 
-                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg 
+                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300
+                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                                                hover:shadow-laser-purple/40 mobile-nav-btn"
                                         :class="currentView === 'create'
                                             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
@@ -2670,8 +2670,8 @@
                                 <!-- 我的项目功能 -->
                                 <div class="relative group">
                                     <button @click="switchToProjectsView"
-                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300 
-                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg 
+                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300
+                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                                                hover:shadow-laser-purple/20 mobile-nav-btn"
                                         :class="currentView === 'projects'
                                             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/40'
@@ -2684,8 +2684,8 @@
                                 <!-- 灵感广场功能 -->
                                 <div class="relative group">
                                     <button @click="switchToInspirationView"
-                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300 
-                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg 
+                                        class="w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-300
+                                               font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                                                hover:shadow-laser-purple/40 mobile-nav-btn"
                                         :class="currentView === 'inspiration'
                                             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
@@ -3618,7 +3618,7 @@
                                             <div v-for="item in filteredInspirationItems" :key="item.task_id"
                                                     class="break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
                                                 <!-- 视频缩略图区域 -->
-                                                <div class="cursor-pointer bg-gray-800 relative flex flex-col" 
+                                                <div class="cursor-pointer bg-gray-800 relative flex flex-col"
                                                 @click="previewTemplateDetail(item)"
                                                 :title="t('viewTemplateDetail')">
                                                         <!-- 视频预览 -->

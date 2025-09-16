@@ -489,8 +489,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
                             sub["params"] = task["params"]
                             self.mark_subtask_change(records, sub, sub["status"], TaskStatus.PENDING)
                             await self.update_subtask(
-                                conn, task_id, sub["worker_name"], status=TaskStatus.PENDING,
-                                extra_info=sub["extra_info"], src_status=sub["status"],
+                                conn,
+                                task_id,
+                                sub["worker_name"],
+                                status=TaskStatus.PENDING,
+                                extra_info=sub["extra_info"],
+                                src_status=sub["status"],
                             )
                             nexts.append(sub)
                 if len(nexts) > 0:
@@ -520,8 +524,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
 
                     self.mark_subtask_change(records, subs[0], subs[0]["status"], TaskStatus.RUNNING)
                     await self.update_subtask(
-                        conn, task_id, worker_name, status=TaskStatus.RUNNING, worker_identity=worker_identity,
-                        ping_t=True, extra_info=subs[0]["extra_info"], src_status=subs[0]["status"],
+                        conn,
+                        task_id,
+                        worker_name,
+                        status=TaskStatus.RUNNING,
+                        worker_identity=worker_identity,
+                        ping_t=True,
+                        extra_info=subs[0]["extra_info"],
+                        src_status=subs[0]["status"],
                     )
                     await self.update_task(conn, task_id, status=TaskStatus.RUNNING)
                     valids.append(cand)
@@ -577,8 +587,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
                             continue
                         self.mark_subtask_change(records, sub, sub["status"], status, fail_msg=fail_msg)
                         await self.update_subtask(
-                            conn, task_id, sub["worker_name"], status=status,
-                            extra_info=sub["extra_info"], src_status=sub["status"],
+                            conn,
+                            task_id,
+                            sub["worker_name"],
+                            status=status,
+                            extra_info=sub["extra_info"],
+                            src_status=sub["status"],
                         )
                         sub["status"] = status
 
@@ -599,14 +613,21 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     if task["status"] != TaskStatus.FAILED:
                         self.mark_task_end(records, task, TaskStatus.FAILED)
                         await self.update_task(
-                            conn, task_id, status=TaskStatus.FAILED,
-                            extra_info=task["extra_info"], src_status=task["status"],
+                            conn,
+                            task_id,
+                            status=TaskStatus.FAILED,
+                            extra_info=task["extra_info"],
+                            src_status=task["status"],
                         )
                     for sub in running_subs:
                         self.mark_subtask_change(records, sub, sub["status"], TaskStatus.FAILED, fail_msg="other subtask failed")
                         await self.update_subtask(
-                            conn, task_id, sub["worker_name"], status=TaskStatus.FAILED,
-                            extra_info=sub["extra_info"], src_status=sub["status"],
+                            conn,
+                            task_id,
+                            sub["worker_name"],
+                            status=TaskStatus.FAILED,
+                            extra_info=sub["extra_info"],
+                            src_status=sub["status"],
                         )
                     self.metrics_commit(records)
                     return TaskStatus.FAILED
@@ -616,8 +637,11 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     if task["status"] != TaskStatus.SUCCEED:
                         self.mark_task_end(records, task, TaskStatus.SUCCEED)
                         await self.update_task(
-                            conn, task_id, status=TaskStatus.SUCCEED,
-                            extra_info=task["extra_info"], src_status=task["status"],
+                            conn,
+                            task_id,
+                            status=TaskStatus.SUCCEED,
+                            extra_info=task["extra_info"],
+                            src_status=task["status"],
                         )
                     self.metrics_commit(records)
                     return TaskStatus.SUCCEED
@@ -645,14 +669,21 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     if sub["status"] not in FinishedStatus:
                         self.mark_subtask_change(records, sub, sub["status"], TaskStatus.CANCEL)
                         await self.update_subtask(
-                            conn, task_id, sub["worker_name"], status=TaskStatus.CANCEL,
-                            extra_info=sub["extra_info"], src_status=sub["status"],
+                            conn,
+                            task_id,
+                            sub["worker_name"],
+                            status=TaskStatus.CANCEL,
+                            extra_info=sub["extra_info"],
+                            src_status=sub["status"],
                         )
 
                 self.mark_task_end(records, task, TaskStatus.CANCEL)
                 await self.update_task(
-                    conn, task_id, status=TaskStatus.CANCEL,
-                    extra_info=task["extra_info"], src_status=task["status"],
+                    conn,
+                    task_id,
+                    status=TaskStatus.CANCEL,
+                    extra_info=task["extra_info"],
+                    src_status=task["status"],
                 )
                 self.metrics_commit(records)
                 return True
@@ -680,14 +711,22 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     if all_subtask or sub["status"] != TaskStatus.SUCCEED:
                         self.mark_subtask_change(records, sub, None, TaskStatus.CREATED)
                         await self.update_subtask(
-                            conn, task_id, sub["worker_name"], status=TaskStatus.CREATED,
-                            reset_ping_t=True, extra_info=sub["extra_info"], src_status=sub["status"],
+                            conn,
+                            task_id,
+                            sub["worker_name"],
+                            status=TaskStatus.CREATED,
+                            reset_ping_t=True,
+                            extra_info=sub["extra_info"],
+                            src_status=sub["status"],
                         )
 
                 self.mark_task_start(records, task)
                 await self.update_task(
-                    conn, task_id, status=TaskStatus.CREATED,
-                    extra_info=task["extra_info"], src_status=task["status"],
+                    conn,
+                    task_id,
+                    status=TaskStatus.CREATED,
+                    extra_info=task["extra_info"],
+                    src_status=task["status"],
                 )
                 self.metrics_commit(records)
                 return True

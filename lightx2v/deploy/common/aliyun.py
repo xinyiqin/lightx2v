@@ -1,22 +1,21 @@
+import asyncio
+import json
 import os
 import sys
-import json
-import traceback
-import asyncio
-from loguru import logger
 
+from alibabacloud_dypnsapi20170525 import models as dypnsapi_models
 from alibabacloud_dypnsapi20170525.client import Client
 from alibabacloud_tea_openapi import models as openapi_models
-from alibabacloud_dypnsapi20170525 import models as dypnsapi_models
 from alibabacloud_tea_util import models as util_models
+from loguru import logger
 
 
 class AlibabaCloudClient:
     def __init__(self):
         config = openapi_models.Config(
-            access_key_id = os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID"),
-            access_key_secret = os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
-            https_proxy = os.getenv("auth_https_proxy", None),
+            access_key_id=os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID"),
+            access_key_secret=os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
+            https_proxy=os.getenv("auth_https_proxy", None),
         )
         self.client = Client(config)
         self.runtime = util_models.RuntimeOptions()
@@ -29,7 +28,7 @@ class AlibabaCloudClient:
         if "body" not in res or "Code" not in res["body"] or "Success" not in res["body"]:
             logger.warning(f"{prefix}: error body: {res}")
             return False
-        if res["body"]["Code"] != "OK" or res["body"]["Success"] != True:
+        if res["body"]["Code"] != "OK" or res["body"]["Success"] is not True:
             logger.warning(f"{prefix}: sms error: {res}")
             return False
         return True
@@ -40,7 +39,7 @@ class AlibabaCloudClient:
                 phone_number=phone_number,
                 sign_name="速通互联验证服务",
                 template_code="100001",
-                template_param=json.dumps({"code":"##code##", "min": "5"}),
+                template_param=json.dumps({"code": "##code##", "min": "5"}),
                 valid_time=300,
             )
             res = await self.client.send_sms_verify_code_with_options_async(req, self.runtime)
@@ -78,5 +77,5 @@ async def test(args):
         await client.check_sms(phone_number, args[1])
 
 
-if __name__ == '__main__':    
+if __name__ == "__main__":
     asyncio.run(test(sys.argv[1:]))

@@ -4,7 +4,7 @@ from re import T
 
 from loguru import logger
 
-from lightx2v.deploy.common.utils import current_time, data_name, class_try_catch
+from lightx2v.deploy.common.utils import class_try_catch, current_time, data_name
 
 
 class TaskStatus(Enum):
@@ -163,10 +163,12 @@ class BaseTaskManager:
         task["extra_info"]["start_t"] = t
         logger.info(f"Task {task['task_id']} active start")
         if self.metrics_monitor:
-            records.append([
-                self.metrics_monitor.record_task_start,
-                [task],
-            ])
+            records.append(
+                [
+                    self.metrics_monitor.record_task_start,
+                    [task],
+                ]
+            )
 
     def mark_task_end(self, records, task, end_status):
         if "start_t" not in task["extra_info"]:
@@ -178,10 +180,12 @@ class BaseTaskManager:
 
             logger.info(f"Task {task['task_id']} active end with [{end_status}], elapse: {elapse}")
             if self.metrics_monitor:
-                records.append([
-                    self.metrics_monitor.record_task_end,
-                    [task, end_status, elapse],
-                ])
+                records.append(
+                    [
+                        self.metrics_monitor.record_task_end,
+                        [task, end_status, elapse],
+                    ]
+                )
 
     def mark_subtask_change(self, records, subtask, old_status, new_status, fail_msg=None):
         t = current_time()
@@ -219,10 +223,12 @@ class BaseTaskManager:
         )
 
         if self.metrics_monitor:
-            records.append([
-                self.metrics_monitor.record_subtask_change,
-                [subtask, old_status, new_status, elapse_key, elapse],
-            ])
+            records.append(
+                [
+                    self.metrics_monitor.record_subtask_change,
+                    [subtask, old_status, new_status, elapse_key, elapse],
+                ]
+            )
 
     @class_try_catch
     def metrics_commit(self, records):
