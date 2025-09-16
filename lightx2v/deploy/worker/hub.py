@@ -201,9 +201,9 @@ class PipelineWorker(BaseWorker):
         base_dir = os.path.abspath(os.path.join(cur_dir, "../../.."))
         self.runner.config["prompt"] = "The video features a old lady is saying something and knitting a sweater."
         if self.runner.config.task == "i2v":
-            self.runner.config["image_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "15.png")
+            self.runner.config["image_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "seko_input.png")
         if self.is_audio_model():
-            self.runner.config["audio_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "15.wav")
+            self.runner.config["audio_path"] = os.path.join(base_dir, "assets", "inputs", "audio", "seko_input.wav")
 
     @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
