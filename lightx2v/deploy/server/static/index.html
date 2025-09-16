@@ -2806,7 +2806,7 @@
                                             <div v-for="task in filteredTasks" :key="task.task_id"
                                                     class="cursor-pointer break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20"
                                                 @click="openTaskDetailModal(task)"
-                                                :title="viewTaskDetails">
+                                                :title="t('viewTaskDetails')">
                                                     <!-- 缩略图区域 -->
                                                     <div class="relative mb-3">
                                                         <div class="w-full h-auto bg-dark-light rounded-lg overflow-hidden">
@@ -2838,41 +2838,41 @@
 
                                                         <!-- 悬停时显示的操作按钮 -->
                                                     <div
-                                                        class="absolute bottom-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                                                            <div class="flex space-x-3 pointer-events-auto">
+                                                        class="absolute bottom-2 left-1/2 transform -translate-x-1/2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                                                            <div class="flex space-x-2 sm:space-x-3 pointer-events-auto">
                                                 <button
                                                                     v-if="['CREATED', 'PENDING', 'RUNNING','SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                     @click.stop="reuseTask(task)"
-                                                                    class="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                                                                    class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
                                                                 :title="t('reuseTask')">
-                                                            <i class="fas fa-copy text-lg"></i>
+                                                            <i class="fas fa-copy text-sm sm:text-lg"></i>
                                                 </button>
                                                         <button
                                                                 v-if="['CREATED', 'PENDING', 'RUNNING'].includes(task.status)"
                                                                 @click.stop="cancelTask(task.task_id)"
                                                                 class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('cancelTask')">
-                                                            <i class="fas fa-times text-lg"></i>
+                                                            <i class="fas fa-times text-sm sm:text-lg"></i>
                                                         </button>
                                                         <button
                                                                     v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                     @click.stop="resumeTask(task.task_id)"
-                                                                    class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                                    class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('retryTask')">
-                                                                    <i class="fas fa-redo text-lg"></i>
+                                                                    <i class="fas fa-redo text-sm sm:text-lg"></i>
                                                         </button>
                                                             <button v-if="task.status === 'SUCCEED'"
                                                                     @click.stop="downloadTaskOutput(task)"
-                                                                    class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                                    class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('downloadTask')">
-                                                                    <i class="fas fa-download text-lg"></i>
+                                                                    <i class="fas fa-download text-sm sm:text-lg"></i>
                                                         </button>
                                                         <button
                                                                     v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                     @click.stop="deleteTask(task.task_id)"
-                                                                    class="w-10 h-10 rounded-full bg-red-400/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-red-500 transition-colors"
+                                                                    class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-red-400/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-red-500 transition-colors"
                                                                 :title="t('deleteTask')">
-                                                                    <i class="fas fa-trash text-lg"></i>
+                                                                    <i class="fas fa-trash text-sm sm:text-lg"></i>
                                                         </button>
                                                 </div>
                                             </div>
@@ -3037,7 +3037,7 @@
                                                 </div>
                                             </div>
                                          <div class="overflow-y-auto flex-1 max-h-[60vh] main-scrollbar">
-                                         <div v-if="imageTemplates.length > 0" class="columns-4 gap-4">
+                                         <div v-if="imageTemplates.length > 0" class="columns-2 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4">
                                             <div v-for="template in imageTemplates" :key="template.filename"
                                                 @click="selectImageTemplate(template)"
                                                 class="break-inside-avoid mb-4 relative group cursor-pointer rounded-lg border border-gray-700 hover:border-laser-purple/50 transition-all">
@@ -3392,7 +3392,7 @@
 
                                                 <!-- 悬停时显示的操作按钮，位置在中下方 -->
                                                     <div
-                                                        class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                                        class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300">
                                                     <div class="flex space-x-3">
                                                             <button @click.stop="triggerImageUpload"
                                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
@@ -3473,7 +3473,7 @@
 
                                             <!-- 悬停时显示的操作按钮，位置在中下方 -->
                                                 <div
-                                                    class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                                    class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300">
                                                 <div class="flex space-x-3">
                                                         <button @click.stop="triggerAudioUpload"
                                                         class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
@@ -3512,7 +3512,7 @@
                                                 </button>
                                             </label>
                                             <div class="text-xs text-gray-400">
-                                                {{ getCurrentForm().prompt?.length || 0 }} / 500
+                                                {{ getCurrentForm().prompt?.length || 0 }} / 1000
                                             </div>
                                         </div>
                                         <div class="relative group cursor-pointer">
@@ -3539,7 +3539,9 @@
                                 <div class="flex justify-center mt-2">
                                     <button @click="submitTask" :disabled="submitting"
                                         class="btn-primary flex items-center justify-center px-8 py-3 rounded-lg text-lg transition-all shadow-lg">
-                                        <i class="fas fa-play text-xl mr-2"></i>
+            
+                                        <i class="fas fa-spinner fa-spin text-xl mr-2" :class="{ 'hidden': !submitting }"></i>
+                                        <i class="fas fa-play text-xl mr-2" :class="{ 'hidden': submitting }"></i>
                                         {{ submitting ? t('submitting') : t('generateVideo') }}
                                     </button>
                                 </div>
@@ -3646,7 +3648,7 @@
                                                 </div>
                                         </div>
                                         <!-- 灵感内容网格 -->
-                                        <div class="flex-1 overflow-y-auto history-tasks-scroll min-h-0 p-4"
+                                        <div class="flex-1 overflow-y-auto main-scrollbar min-h-0 p-4"
                                         style="overflow-x: visible;">
                                         <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-6">
                                             <!-- 灵感卡片 -->
@@ -3675,34 +3677,24 @@
                                                     <div
                                                         class="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 w-full">
                                                         <div class="flex space-x-3 pointer-events-auto">
-                                                            <button @click="applyTemplateImage(item)"
-                                                                class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                            <button @click.stop="applyTemplateImage(item)"
+                                                                class="w-10 h-10 rounded-full bg-laser-purple backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('applyImage')">
                                                                 <i class="fas fa-image text-sm"></i>
                                                             </button>
-                                                            <button @click="applyTemplateAudio(item)"
-                                                                class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                            <button @click.stop="applyTemplateAudio(item)"
+                                                                class="w-10 h-10 rounded-full bg-laser-purple backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('applyAudio')">
                                                                 <i class="fas fa-music text-sm"></i>
                                                             </button>
-                                                            <button @click="useTemplate(item)"
-                                                                class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                            <button @click.stop="useTemplate(item)"
+                                                                class="w-10 h-10 rounded-full bg-laser-purple backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('useTemplate')">
                                                                 <i class="fas fa-clone text-sm"></i>
                                                             </button>
                                                         </div>
                                                     </div>
 
-                                            </div>                                                <!-- 固定高度内容信息和标签，合并为一个组件，最多两行文字 -->
-                                                <div class="p-4 flex flex-col justify-between h-20">
-                                                        <div class="flex flex-wrap gap-1">
-                                                            <span v-for="tag in item.tags" :key="tag"
-                                                                class="px-2 py-1 bg-gray-700/50 text-gray-300 text-xs rounded-full">
-                                                            {{ tag }}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                        </div>
                                     </div>
 
                                     </div>
@@ -3919,7 +3911,7 @@
                 <div v-if="showTemplateDetailModal"
                     class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
                     @click="closeTemplateDetailModal">
-                    <div class="bg-secondary rounded-xl w-[80%] h-[100vh]" @click.stop>
+                    <div class="bg-secondary rounded-xl w-[95%] sm:w-[90%] md:w-[80%] h-[95vh] sm:h-[100vh]" @click.stop>
                         <!-- 弹窗头部 -->
                         <div class="flex items-center justify-between p-6 border-b border-gray-700">
                             <h3 class="text-xl font-medium text-white flex items-center">
@@ -3942,10 +3934,23 @@
                         </div>
 
                         <!-- 弹窗内容 -->
-                        <div class="flex h-[calc(100vh-120px)] overflow-y-auto main-scrollbar">
-                            <!-- 左侧输入素材区域 -->
-                            <div class="w-2/5 border-r border-gray-700">
-                                <div class="p-6 space-y-6">
+                        <div class="flex flex-col lg:flex-row h-[calc(100vh-120px)] overflow-y-auto main-scrollbar">
+                            <!-- 左侧视频播放区域 -->
+                            <div class="flex-1 lg:flex-1">
+                                <div class="p-4 lg:p-6 flex items-center justify-between">
+                                    <label class="text-sm font-medium text-white">{{ t('outputVideo') }}</label>
+                                </div>
+                                <div class="w-full h-[50vh] sm:h-[60vh] lg:h-[calc(70vh)] bg-gray-900 rounded-lg overflow-hidden mx-4 lg:mx-6">
+                                    <video
+                                    :src="getTemplateFileUrl(selectedTemplate.outputs.output_video,'videos')"
+                                    :poster="getTemplateFileUrl(selectedTemplate.inputs.input_image,'images')"
+                                        class="w-full h-full object-contain" controls
+                                        @loadeddata="onVideoLoaded($event)"></video>
+                                </div>
+                            </div>
+                            <!-- 右侧输入素材区域 -->
+                            <div class="w-full lg:w-2/5 lg:border-l border-gray-700 mt-4 lg:mt-0">
+                                <div class="p-4 lg:p-6 space-y-4 lg:space-y-6">
                                     <!-- 输入图片 -->
                                     <div v-if="selectedTemplate?.inputs?.input_image" class="space-y-3">
                                         <div class="flex items-center justify-between">
@@ -3955,7 +3960,7 @@
                                                 {{ t('applyImage') }}
                                             </button>
                                         </div>
-                                        <div class="relative w-[50%] bg-gray-800 rounded-lg overflow-hidden cursor-pointer group"
+                                        <div class="relative w-full sm:w-3/4 lg:w-[50%] bg-gray-800 rounded-lg overflow-hidden cursor-pointer group"
                                             @click="showImageZoom(getTemplateFileUrl(selectedTemplate.inputs.input_image,'images'))">
                                             <img :src="getTemplateFileUrl(selectedTemplate.inputs.input_image,'images')" :alt="'输入图片'"
                                                 class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
@@ -4000,20 +4005,6 @@
                                         </div>
                                     </div>
 
-                                </div>
-                            </div>
-
-                            <!-- 右侧视频播放区域 -->
-                            <div class="flex-1">
-                                <div class="p-6 flex items-center justify-between">
-                                    <label class="text-sm font-medium text-white">{{ t('outputVideo') }}</label>
-                                </div>
-                                <div class="w-full h-[calc(70vh)] bg-gray-900 rounded-lg overflow-hidden">
-                                    <video
-                                    :src="getTemplateFileUrl(selectedTemplate.outputs.output_video,'videos')"
-                                    :poster="getTemplateFileUrl(selectedTemplate.inputs.input_image,'images')"
-                                        class="w-full h-full object-contain" controls
-                                        @loadeddata="onVideoLoaded($event)"></video>
                                 </div>
                             </div>
                         </div>
@@ -4062,10 +4053,10 @@
                         </div>
 
                         <!-- 左右布局内容 -->
-                        <div class="flex h-[calc(100vh-120px)]">
+                        <div class="flex flex-col lg:flex-row h-[calc(100vh-120px)] main-scrollbar overflow-y-auto">
                             <!-- 左侧视频播放器 -->
-                            <div class="flex-1 p-6">
-                                <div class="h-full bg-black rounded-xl border border-laser-purple/50 overflow-hidden">
+                            <div class="flex-1 p-6 order-1 lg:order-1">
+                                <div class="h-64 lg:h-full bg-black rounded-xl border border-laser-purple/50 overflow-hidden">
                         <video
                             v-if="selectedTaskFiles.outputs.output_video && selectedTaskFiles.outputs.output_video.url"
                                         class="w-full h-full object-contain" controls preload="metadata"
@@ -4089,7 +4080,7 @@
                 </div>
 
                             <!-- 右侧任务详情 -->
-                            <div class="w-[28rem] overflow-y-auto border-l border-gray-700">
+                            <div class="w-full lg:w-[28rem] border-t lg:border-t-0 lg:border-l border-gray-700 order-2 lg:order-2">
                                 <!-- 任务操作按钮 -->
                                 <div class="flex flex-col space-y-3 items-center">
                                     <button v-if="['CREATED', 'PENDING', 'RUNNING'].includes(modalTask?.status)"
@@ -4277,7 +4268,7 @@
 
                         <!-- 弹窗内容 -->
 
-                        <div class="overflow-y-auto max-h-[calc(90vh-120px)] p-6">
+                        <div class="overflow-y-auto max-h-[calc(90vh-120px)] p-6 main-scrollbar">
                                 <!-- 任务进行中信息 -->
                             <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(modalTask?.status)"
                                 class="max-w-4xl mx-auto task-running-panel">
@@ -4672,6 +4663,7 @@
                         promptCopied: '提示词已复制到剪贴板',
                         outputVideo: '输出视频',
                         audio: '音频',
+                        optional: '（选填）',
 
                         // 页面标题
                         pageTitle: 'LightX2V服务',
@@ -4994,6 +4986,7 @@
                         inputMaterials: 'Input Materials',
                         inputImage: 'Input Image',
                         inputAudio: 'Input Audio',
+                        optional: '(Optional)',
 
                         // 页面标题
                         pageTitle: 'LightX2V Service',
@@ -6554,12 +6547,16 @@
                         }
 
                         if (!currentForm.prompt || currentForm.prompt.trim().length === 0) {
-                            showAlert('请输入提示词', 'warning');
-                            return;
+                            if (selectedTaskId.value === 's2v') {
+                                currentForm.prompt = 'Make the character speak in a natural way according to the audio.';
+                            } else {
+                                showAlert('请输入提示词', 'warning');
+                                return;
+                            }
                         }
 
-                        if (currentForm.prompt.length > 500) {
-                            showAlert('提示词长度不能超过500个字符', 'warning');
+                        if (currentForm.prompt.length > 1000) {
+                            showAlert('提示词长度不能超过1000个字符', 'warning');
                             return;
                         }
 
@@ -7690,7 +7687,8 @@
                                         'mp4': 'audio/mp4',
                                         'aac': 'audio/aac',
                                         'ogg': 'audio/ogg',
-                                        'm4a': 'audio/mp4'
+                                        'm4a': 'audio/mp4',
+                                        'webm': 'audio/webm'
                                     };
                                     mimeType = mimeTypes[ext] || 'audio/mpeg';
                                 }
@@ -7945,7 +7943,7 @@
                     } else if (selectedTaskId.value === 'i2v') {
                         return t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheContentActionRequirementsBasedOnTheImage');
                     } else if (selectedTaskId.value === 's2v') {
-                        return t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheDigitalHumanImageBackgroundStyleActionRequirements');
+                        return t('optional') + ' '+ t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheDigitalHumanImageBackgroundStyleActionRequirements');
                     }
                     return t('pleaseEnterThePromptForVideoGeneration') + '...';
                 };
@@ -8248,7 +8246,7 @@
                                 stage: currentStage || 'single_stage',
                                 imageFile: null,
                                 audioFile: null,
-                                prompt: '',
+                                prompt: 'Make the character speak in a natural way according to the audio.',
                                 seed: Math.floor(Math.random() * 1000000)
                             };
                             break;
@@ -8805,13 +8803,28 @@
                     's2v': [
                         {
                             id: 's2v_1',
-                            title: '商务演讲',
-                            prompt: '数字人进行商务演讲，表情自然，手势得体，背景为现代化的会议室，整体风格专业商务。'
+                            title: '情绪表达',
+                            prompt: '根据音频，人物进行情绪化表达，表情丰富，能体现音频中的情绪，手势根据情绪适当调整。'
                         },
                         {
                             id: 's2v_2',
+                            title: '故事讲述',
+                            prompt: '根据音频，人物进行故事讲述，表情丰富，能体现音频中的情绪，手势根据故事情节适当调整。'
+                        },
+                        {
+                            id: 's2v_3',
+                            title: '知识讲解',
+                            prompt: '根据音频，人物进行知识讲解，表情严肃，整体风格专业得体，手势根据知识内容适当调整。'
+                        },
+                        {
+                            id: 's2v_4',
+                            title: '商务演讲',
+                            prompt: '根据音频，人物进行商务演讲，表情严肃，手势得体，整体风格专业商务。'
+                        },
+                        {
+                            id: 's2v_5',
                             title: '产品介绍',
-                            prompt: '数字人介绍产品特点，语气亲切，动作自然，背景为产品展示区，突出产品的科技感和实用性。'
+                            prompt: '数字人介绍产品特点，语气亲切热情，表情丰富，动作自然，能体现产品特点。'
                         }
                     ],
                     't2v': [
