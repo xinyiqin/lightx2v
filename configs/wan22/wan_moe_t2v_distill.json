@@ -1,5 +1,5 @@
 {
-    "infer_steps": 6,
+    "infer_steps": 4,
     "target_video_length": 81,
     "text_len": 512,
     "target_height": 480,
@@ -13,8 +13,8 @@
     "enable_cfg": false,
     "cpu_offload": true,
     "offload_granularity": "model",
-    "boundary_step_index": 4,
-    "denoising_step_list": [1000, 875, 750, 625, 500, 250],
+    "boundary_step_index": 2,
+    "denoising_step_list": [1000, 750, 500, 250],
     "lora_configs": [
         {
             "name": "low_noise_model",
