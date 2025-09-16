@@ -59,6 +59,12 @@ class WanRunner(DefaultRunner):
     def load_image_encoder(self):
         image_encoder = None
         if self.config.task in ["i2v", "flf2v"] and self.config.get("use_image_encoder", True):
+            # offload config
+            clip_offload = self.config.get("clip_cpu_offload", self.config.get("cpu_offload", False))
+            if clip_offload:
+                clip_device = torch.device("cpu")
+            else:
+                clip_device = torch.device("cuda")
             # quant_config
             clip_quantized = self.config.get("clip_quantized", False)
             if clip_quantized:
@@ -76,12 +82,12 @@ class WanRunner(DefaultRunner):
 
             image_encoder = CLIPModel(
                 dtype=torch.float16,
-                device=self.init_device,
+                device=clip_device,
                 checkpoint_path=clip_original_ckpt,
                 clip_quantized=clip_quantized,
                 clip_quantized_ckpt=clip_quantized_ckpt,
                 quant_scheme=clip_quant_scheme,
-                cpu_offload=self.config.get("clip_cpu_offload", self.config.get("cpu_offload", False)),
+                cpu_offload=clip_offload,
                 use_31_block=self.config.get("use_31_block", True),
             )
 
@@ -191,10 +197,9 @@ class WanRunner(DefaultRunner):
             raise NotImplementedError(f"Unsupported feature_caching type: {self.config.feature_caching}")
 
         if self.config.get("changing_resolution", False):
-            scheduler = WanScheduler4ChangingResolutionInterface(scheduler_class, self.config)
+            self.scheduler = WanScheduler4ChangingResolutionInterface(scheduler_class, self.config)
         else:
-            scheduler = scheduler_class(self.config)
-        self.model.set_scheduler(scheduler)
+            self.scheduler = scheduler_class(self.config)
 
     def run_text_encoder(self, text, img=None):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
@@ -206,13 +211,17 @@ class WanRunner(DefaultRunner):
             cfg_p_rank = dist.get_rank(cfg_p_group)
             if cfg_p_rank == 0:
                 context = self.text_encoders[0].infer([text])
+                context = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context])
                 text_encoder_output = {"context": context}
             else:
                 context_null = self.text_encoders[0].infer([n_prompt])
+                context_null = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context_null])
                 text_encoder_output = {"context_null": context_null}
         else:
             context = self.text_encoders[0].infer([text])
+            context = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context])
             context_null = self.text_encoders[0].infer([n_prompt])
+            context_null = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context_null])
             text_encoder_output = {
                 "context": context,
                 "context_null": context_null,

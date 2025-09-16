@@ -1,10 +1,10 @@
-from redis import asyncio as aioredis
 import asyncio
-import time
-import uuid
 import json
 import traceback
+
 from loguru import logger
+from redis import asyncio as aioredis
+
 from lightx2v.deploy.common.utils import class_try_catch_async
 
 
@@ -90,7 +90,7 @@ class RedisClient:
                 assert ret, "Redis connection failed"
                 break
             except Exception:
-                logger.warning(f"Redis connection failed, retry {i+1}/{self.retry_times}: {traceback.format_exc()}")
+                logger.warning(f"Redis connection failed, retry {i + 1}/{self.retry_times}: {traceback.format_exc()}")
                 await asyncio.sleep(1)
 
     def fmt_key(self, key):
@@ -241,6 +241,7 @@ async def main():
     logger.info(f"hlen test: {await r.hlen('test')}")
 
     await r.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

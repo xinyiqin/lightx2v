@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 
-from loguru import logger
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time, str2time, time2str
 from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
@@ -94,11 +93,11 @@ class LocalTaskManager(BaseTaskManager):
                     continue
                 if "end_ping_t" in kwargs and kwargs["end_ping_t"] < task["ping_t"]:
                     continue
-                
+
                 # 如果不是查询子任务，则添加子任务信息到任务中
                 if not kwargs.get("subtasks", False):
                     task["subtasks"] = info.get("subtasks", [])
-                
+
                 tasks.append(task)
         if "count" in kwargs:
             return len(tasks)

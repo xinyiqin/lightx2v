@@ -26,6 +26,11 @@ def get_default_config():
         "cfg_parallel": False,
         "enable_cfg": False,
         "use_image_encoder": True,
+        "lat_h": None,
+        "lat_w": None,
+        "tgt_h": None,
+        "tgt_w": None,
+        "target_shape": None,
     }
     return default_config
 
@@ -45,6 +50,10 @@ def set_config(args):
         config.update(model_config)
     elif os.path.exists(os.path.join(config.model_path, "low_noise_model", "config.json")):  # 需要一个更优雅的update方法
         with open(os.path.join(config.model_path, "low_noise_model", "config.json"), "r") as f:
+            model_config = json.load(f)
+        config.update(model_config)
+    elif os.path.exists(os.path.join(config.model_path, "distill_models", "low_noise_model", "config.json")):  # 需要一个更优雅的update方法
+        with open(os.path.join(config.model_path, "distill_models", "low_noise_model", "config.json"), "r") as f:
             model_config = json.load(f)
         config.update(model_config)
     elif os.path.exists(os.path.join(config.model_path, "original", "config.json")):

@@ -1,11 +1,12 @@
 import asyncio
-import time
 import json
+import time
+
 from loguru import logger
 
 from lightx2v.deploy.common.utils import class_try_catch_async
+from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.server.redis_client import RedisClient
-from lightx2v.deploy.server.monitor import WorkerStatus, ServerMonitor
 
 
 class RedisServerMonitor(ServerMonitor):
@@ -142,15 +143,13 @@ class RedisServerMonitor(ServerMonitor):
 
     @class_try_catch_async
     async def pending_subtasks_add(self, queue, task_id):
-        max_count = await self.redis_client.increment_and_get(
-            f"pendings:{queue}:info", "max_count", 1)
+        max_count = await self.redis_client.increment_and_get(f"pendings:{queue}:info", "max_count", 1)
         await self.redis_client.set(f"pendings:{queue}:subtasks:{task_id}", max_count)
         # logger.warning(f"Redis pending subtasks {queue} add {task_id}: {max_count}")
 
     @class_try_catch_async
     async def pending_subtasks_sub(self, queue, task_id):
-        consume_count = await self.redis_client.increment_and_get(
-            f"pendings:{queue}:info", "consume_count", 1)
+        consume_count = await self.redis_client.increment_and_get(f"pendings:{queue}:info", "consume_count", 1)
         await self.redis_client.delete_key(f"pendings:{queue}:subtasks:{task_id}")
         # logger.warning(f"Redis pending subtasks {queue} sub {task_id}: {consume_count}")
 

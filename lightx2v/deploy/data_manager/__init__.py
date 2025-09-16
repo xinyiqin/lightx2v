@@ -1,6 +1,6 @@
 import io
-import os
 import json
+import os
 
 import torch
 from PIL import Image

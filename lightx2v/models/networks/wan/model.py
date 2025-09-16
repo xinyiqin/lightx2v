@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from loguru import logger
 from safetensors import safe_open
 
-from lightx2v.common.ops.attn import MaskMap
 from lightx2v.models.networks.wan.infer.feature_caching.transformer_infer import (
     WanTransformerInferAdaCaching,
     WanTransformerInferCustomCaching,
@@ -30,6 +29,7 @@ from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
 from lightx2v.models.networks.wan.weights.transformer_weights import (
     WanTransformerWeights,
 )
+from lightx2v.utils.custom_compiler import CompiledMethodsMixin, compiled_method
 from lightx2v.utils.envs import *
 from lightx2v.utils.utils import *
 
@@ -39,11 +39,12 @@ except ImportError:
     gguf = None
 
 
-class WanModel:
+class WanModel(CompiledMethodsMixin):
     pre_weight_class = WanPreWeights
     transformer_weight_class = WanTransformerWeights
 
     def __init__(self, model_path, config, device):
+        super().__init__()
         self.model_path = model_path
         self.config = config
         self.cpu_offload = self.config.get("cpu_offload", False)
@@ -127,11 +128,8 @@ class WanModel:
         return False
 
     def _load_safetensor_to_dict(self, file_path, unified_dtype, sensitive_layer):
-        with safe_open(file_path, framework="pt") as f:
-            return {
-                key: (f.get_tensor(key).to(GET_DTYPE()) if unified_dtype or all(s not in key for s in sensitive_layer) else f.get_tensor(key).to(GET_SENSITIVE_DTYPE())).pin_memory().to(self.device)
-                for key in f.keys()
-            }
+        with safe_open(file_path, framework="pt", device=str(self.device)) as f:
+            return {key: (f.get_tensor(key).to(GET_DTYPE()) if unified_dtype or all(s not in key for s in sensitive_layer) else f.get_tensor(key).to(GET_SENSITIVE_DTYPE())) for key in f.keys()}
 
     def _load_ckpt(self, unified_dtype, sensitive_layer):
         safetensors_path = find_hf_model_path(self.config, self.model_path, "dit_original_ckpt", subdir="original")
@@ -172,11 +170,11 @@ class WanModel:
                         torch.float,
                     ]:
                         if unified_dtype or all(s not in k for s in sensitive_layer):
-                            weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_DTYPE()).to(self.device)
+                            weight_dict[k] = f.get_tensor(k).to(GET_DTYPE()).to(self.device)
                         else:
-                            weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_SENSITIVE_DTYPE()).to(self.device)
+                            weight_dict[k] = f.get_tensor(k).to(GET_SENSITIVE_DTYPE()).to(self.device)
                     else:
-                        weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
+                        weight_dict[k] = f.get_tensor(k).to(self.device)
 
         return weight_dict
 
@@ -194,11 +192,11 @@ class WanModel:
                     torch.float,
                 ]:
                     if unified_dtype or all(s not in k for s in sensitive_layer):
-                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_DTYPE()).to(self.device)
+                        pre_post_weight_dict[k] = f.get_tensor(k).to(GET_DTYPE()).to(self.device)
                     else:
-                        pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(GET_SENSITIVE_DTYPE()).to(self.device)
+                        pre_post_weight_dict[k] = f.get_tensor(k).to(GET_SENSITIVE_DTYPE()).to(self.device)
                 else:
-                    pre_post_weight_dict[k] = f.get_tensor(k).pin_memory().to(self.device)
+                    pre_post_weight_dict[k] = f.get_tensor(k).to(self.device)
 
         return pre_post_weight_dict
 
@@ -340,11 +338,6 @@ class WanModel:
                 self.pre_weight.to_cuda()
                 self.transformer_weights.non_block_weights_to_cuda()
 
-        if self.transformer_infer.mask_map is None:
-            _, c, h, w = self.scheduler.latents.shape
-            video_token_num = c * (h // 2) * (w // 2)
-            self.transformer_infer.mask_map = MaskMap(video_token_num, c)
-
         if self.config["enable_cfg"]:
             if self.config["cfg_parallel"]:
                 # ==================== CFG Parallel Processing ====================
@@ -378,7 +371,7 @@ class WanModel:
                 self.pre_weight.to_cpu()
                 self.transformer_weights.non_block_weights_to_cpu()
 
-    @torch.compile(disable=not CHECK_ENABLE_GRAPH_MODE())
+    @compiled_method()
     @torch.no_grad()
     def _infer_cond_uncond(self, inputs, infer_condition=True):
         self.scheduler.infer_condition = infer_condition
