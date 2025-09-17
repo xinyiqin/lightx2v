@@ -2443,7 +2443,7 @@
         </div>
 
         <!-- 登录页面 -->
-        <div v-if="isLoggedIn === false" class="login-container w-full">
+        <div v-if="isLoggedIn === false || currentView === 'login'" class="login-container w-full">
             <!-- 浮动粒子背景 -->
             <div class="floating-particles">
                 <div class="particle"></div>
@@ -2572,7 +2572,7 @@
         </div>
 
         <!-- 主应用页面 -->
-        <div v-if="isLoggedIn === true" class="main-container">
+        <div v-if="isLoggedIn === true && currentView !== 'login'" class="main-container">
         <!-- 浮动粒子背景 -->
         <div class="floating-particles">
             <div class="particle"></div>
@@ -2815,20 +2815,21 @@
                                                                 @mouseenter="playVideo($event)"
                                                                 @mouseleave="pauseVideo($event)"
                                                                 @loadeddata="onVideoLoaded($event)"
+                                                                @ended="onVideoEnded($event)"
                                                             @error="onVideoError($event)"></video>
                                                             
-                                                            <!-- 移动端播放按钮 -->
-                                                            <button v-if="task.status === 'SUCCEED'" 
-                                                                @click.stop="toggleVideoPlay($event)"
-                                                                class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
-                                                                <i class="fas fa-play text-sm"></i>
-                                                            </button>
                                                     <!-- 其他状态：显示输入图片或占位符 -->
                                                     <img v-else="task.inputs?.input_image"
                                                     :src="getTaskFileUrlSync(task.task_id, 'input_image')"
                                                     class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
                                                     @error="handleThumbnailError" />
-                                                        
+                                                    
+                                                    <!-- 移动端播放按钮 -->
+                                                    <button v-if="task.status === 'SUCCEED'" 
+                                                    @click.stop="toggleVideoPlay($event)"
+                                                    class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
+                                                    <i class="fas fa-play text-sm"></i>
+                                                </button>
 
                                                         <!-- 状态指示器 -->
                                                         <div class="absolute top-2 right-2">
@@ -3588,13 +3589,13 @@
 
                                             <!-- 分类筛选 -->
                                                 <div class="flex gap-2 flex-wrap">
-                                                    <button v-for="category in dynamicInspirationCategories" :key="category.id"
-                                                    @click="selectInspirationCategory(category.id)"
-                                                    :class="selectedInspirationCategory === category.id
+                                                    <button v-for="category in InspirationCategories" :key="category"
+                                                    @click="selectInspirationCategory(category)"
+                                                    :class="selectedInspirationCategory === category
                                                         ? 'bg-laser-purple/20 text-white border-laser-purple/40'
                                                         : 'bg-dark-light text-gray-400 hover:text-white hover:bg-dark-light/80'"
                                                         class="px-4 py-2 rounded-lg border border-transparent transition-all duration-200 text-sm font-medium">
-                                                    {{ category.name }}
+                                                    {{ category }}
                                                 </button>
                                             </div>
                                         </div>
@@ -3654,7 +3655,7 @@
                                         style="overflow-x: visible;">
                                         <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-6">
                                             <!-- 灵感卡片 -->
-                                            <div v-for="item in filteredInspirationItems" :key="item.task_id"
+                                            <div v-for="item in inspirationItems" :key="item.task_id"
                                                     class="break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
                                                 <!-- 视频缩略图区域 -->
                                                 <div class="cursor-pointer bg-gray-800 relative flex flex-col"
@@ -3668,20 +3669,20 @@
                                                             preload="auto" playsinline webkit-playsinline
                                                             @mouseenter="playVideo($event)" @mouseleave="pauseVideo($event)"
                                                             @loadeddata="onVideoLoaded($event)"
+                                                            @ended="onVideoEnded($event)"
                                                             @error="onVideoError($event)"></video>
-                                                        
+                                                    <!-- 图片缩略图 -->
+                                                        <img v-else
+                                                        :src="getTemplateFileUrl(item.inputs.input_image,'images')"
+                                                        :alt="item.params?.prompt || '模板图片'"
+                                                        class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
+                                                        @error="handleThumbnailError" />
                                                         <!-- 移动端播放按钮 -->
                                                         <button v-if="item?.outputs?.output_video" 
                                                             @click.stop="toggleVideoPlay($event)"
                                                             class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
                                                             <i class="fas fa-play text-sm"></i>
                                                         </button>
-                                                    <!-- 图片缩略图 -->
-                                                        <img v-else="item?.inputs?.input_image"
-                                                        :src="getTemplateFileUrl(item.inputs.input_image,'images')"
-                                                        :alt="item.params?.prompt || '模板图片'"
-                                                        class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
-                                                        @error="handleThumbnailError" />
                                                     <!-- 悬浮操作按钮（下方居中，仅桌面端） -->
                                                     <div
                                                         class="hidden md:flex absolute bottom-3 left-1/2 transform -translate-x-1/2 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 w-full">
@@ -3715,35 +3716,7 @@
         </div>
 
         </div>
-        <!-- 增强的提示消息系统 -->
-        <div v-cloak>
-            <div v-if="alert.show"
-                class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] max-w-xs w-full px-4"
-                :class="getAlertClass(alert.type)">
-                    <div
-                        class="bg-gray-800/95 backdrop-blur-sm border border-gray-700/50 rounded-lg shadow-lg transition-all duration-300 ease-out">
-                    <div class="flex items-center p-3">
-                        <div class="flex-shrink-0 mr-3">
-                            <div class="w-6 h-6 rounded-full flex items-center justify-center"
-                                :class="getAlertIconBgClass(alert.type)">
-                                <i :class="getAlertIcon(alert.type)" class="text-xs"></i>
-                            </div>
-                        </div>
-                        <div class="flex-1">
-                            <p class="text-xs font-medium text-gray-200">
-                                {{ alert.message }}
-                            </p>
-                        </div>
-                        <div class="flex-shrink-0 ml-2">
-                            <button @click="alert.show = false"
-                                    class="w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-all duration-200">
-                                <i class="fas fa-times text-xs"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+
 
         <!-- 自定义确认对话框 -->
          <div v-cloak>
@@ -4048,7 +4021,7 @@
                     @click="closeTaskDetailModal">
                     <!-- 任务完成时的大弹窗 -->
                     <div v-if="modalTask?.status === 'SUCCEED'"
-                        class="bg-secondary rounded-xl max-w-7xl w-full max-h-[95vh] overflow-hidden" @click.stop>
+                        class="bg-secondary rounded-xl w-[95%] sm:w-[90%] md:w-[80%] h-[95vh] sm:h-[100vh]" @click.stop>
                         <!-- 弹窗头部 -->
                         <div class="flex items-center justify-between p-6 border-b border-gray-700">
                             <h3 class="text-xl font-medium text-white flex items-center">
@@ -4261,7 +4234,7 @@
                     </div>
 
                     <!-- 其他状态的小弹窗 -->
-                    <div v-else class="bg-secondary rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden"
+                    <div v-else class="bg-secondary rounded-xl w-[95%] sm:w-[90%] md:w-[80%] h-[95vh] sm:h-[100vh]"
                         @click.stop>
                         <!-- 弹窗头部 -->
                         <div class="flex items-center justify-between p-6 border-b border-gray-700">
@@ -4586,6 +4559,36 @@
 
         </div>
     </div>
+
+            <!-- 增强的提示消息系统 -->
+            <div v-cloak>
+                <div v-if="alert.show"
+                    class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] max-w-xs w-full px-4"
+                    :class="getAlertClass(alert.type)">
+                        <div
+                            class="bg-gray-800/95 backdrop-blur-sm border border-gray-700/50 rounded-lg shadow-lg transition-all duration-300 ease-out">
+                        <div class="flex items-center p-3">
+                            <div class="flex-shrink-0 mr-3">
+                                <div class="w-6 h-6 rounded-full flex items-center justify-center"
+                                    :class="getAlertIconBgClass(alert.type)">
+                                    <i :class="getAlertIcon(alert.type)" class="text-xs"></i>
+                                </div>
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-xs font-medium text-gray-200">
+                                    {{ alert.message }}
+                                </p>
+                            </div>
+                            <div class="flex-shrink-0 ml-2">
+                                <button @click="alert.show = false"
+                                        class="w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-all duration-200">
+                                    <i class="fas fa-times text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 </div>
 </div>
 
@@ -5323,10 +5326,24 @@
                 const showTaskDetailModal = ref(false);
                 const modalTask = ref(null);
 
+                // 视频加载状态跟踪
+                const videoLoadedStates = ref(new Map()); // 跟踪每个视频的加载状态
+
+                // 检查视频是否已加载完成
+                const isVideoLoaded = (videoSrc) => {
+                    return videoLoadedStates.value.get(videoSrc) || false;
+                };
+
+                // 设置视频加载状态
+                const setVideoLoaded = (videoSrc, loaded) => {
+                    videoLoadedStates.value.set(videoSrc, loaded);
+                };
+
                 // 灵感广场相关数据
                 const inspirationSearchQuery = ref('');
                 const selectedInspirationCategory = ref('all');
                 const inspirationItems = ref([]);
+                const InspirationCategories = ref([]);
 
                 // 灵感广场分页相关变量
                 const inspirationPagination = ref(null);
@@ -5728,28 +5745,6 @@
                     };
                 });
 
-                // 动态生成灵感广场类别
-                const dynamicInspirationCategories = computed(() => {
-                    const categories = [{ id: 'all', name: '全部' }];
-
-                    // 从所有灵感项目中提取唯一的category
-                    const uniqueCategories = new Set();
-                    inspirationItems.value.forEach(item => {
-                        if (item.tags && item.tags.length > 0) {
-                            uniqueCategories.add(item.tags[0]);
-                        }
-                    });
-
-                    // 将唯一的category转换为类别对象
-                    Array.from(uniqueCategories).sort().forEach(category => {
-                        categories.push({
-                            id: category,
-                            name: category
-                        });
-                    });
-                    console.log(categories)
-                    return categories;
-                });
 
                 // 通用URL缓存
                 const urlCache = ref(new Map());
@@ -5932,6 +5927,14 @@
 
                             // 登录成功后初始化数据
                             await init();
+                            
+                            // 登录成功后跳转到用户原本想访问的页面，如果没有则跳转到创建页面
+                            if (currentView.value === 'login') {
+                                currentView.value = 'create';
+                                updateURL('create');
+                            } else {
+                                updateURL(currentView.value);
+                            }
 
                             showAlert('登录成功', 'success');
                         } else {
@@ -6033,6 +6036,14 @@
 
                             // 登录成功后初始化数据
                             await init();
+                            
+                            // 登录成功后跳转到用户原本想访问的页面，如果没有则跳转到创建页面
+                            if (currentView.value === 'login') {
+                                currentView.value = 'create';
+                                updateURL('create');
+                            } else {
+                                updateURL(currentView.value);
+                            }
 
                             // 清除URL中的code参数
                             window.history.replaceState({}, document.title, window.location.pathname);
@@ -6050,7 +6061,7 @@
                     localStorage.removeItem('accessToken');
                     localStorage.removeItem('currentUser');
                     clearAllCache();
-
+                    switchToLoginView();
                     currentUser.value = {};
                     isLoggedIn.value = false;
                     models.value = [];
@@ -8052,6 +8063,9 @@
                         loadTemplateFilesFromCache();
                         loadImageAudioTemplates(true);
 
+                        // 4. 初始化路由（在数据加载完成后）
+                        initRoute();
+
                         console.log('初始化完成:', {
                             currentUser: currentUser.value,
                             availableModels: models.value,
@@ -8633,8 +8647,17 @@
                                 await handleLoginCallback(code, source);
                                 // handleGitHubCallback内部会设置isLoggedIn.value = true
                             } else {
-                                // 没有token且不是回调，显示登录页面
+                                // 没有token且不是回调，默认显示登录界面
                                 isLoggedIn.value = false;
+                                const urlParams = new URLSearchParams(window.location.search);
+                                const view = urlParams.get('view');
+                                if (view && ['create', 'projects', 'inspiration'].includes(view)) {
+                                    // 如果URL中指定了其他页面，仍然显示登录界面，但设置currentView用于登录后跳转
+                                    currentView.value = view;
+                                } else {
+                                    // 默认显示登录界面
+                                    currentView.value = 'login';
+                                }
                             }
                         }
                     } catch (error) {
@@ -8647,8 +8670,6 @@
                         initLoading.value = false;
                     }
 
-                    // 初始化路由
-                    initRoute();
                     // 监听浏览器前进后退
                     window.addEventListener('popstate', handlePopState);
                 });
@@ -9219,6 +9240,11 @@
                     loadInspirationData();
                 };
 
+                const switchToLoginView = () => {
+                    currentView.value = 'login';
+                    updateURL('login');
+                };
+
                 // URL路由管理
                 const updateURL = (view) => {
                     const url = new URL(window.location);
@@ -9230,18 +9256,14 @@
                     const urlParams = new URLSearchParams(window.location.search);
                     const view = urlParams.get('view');
                     
-                    if (view && ['create', 'projects', 'inspiration'].includes(view)) {
+                    if (view && ['create', 'projects', 'inspiration', 'login'].includes(view)) {
                         currentView.value = view;
-                        // 根据页面加载相应的数据
-                        if (view === 'projects') {
-                            refreshTasks();
-                        } else if (view === 'inspiration') {
-                            loadInspirationData();
-                        }
+                        // 注意：数据已经在init()中加载过了，这里不需要重复加载
+                        // 只需要设置当前视图即可
                     } else {
-                        // 默认页面
-                        currentView.value = 'create';
-                        updateURL('create');
+                        // 默认显示登录界面
+                        currentView.value = 'login';
+                        updateURL('login');
                     }
                 };
 
@@ -9255,6 +9277,7 @@
                         } else if (event.state.view === 'inspiration') {
                             loadInspirationData();
                         }
+                        // login页面不需要额外数据加载
                     } else {
                         // 处理直接访问URL的情况
                         initRoute();
@@ -9284,6 +9307,7 @@
                         if (cachedData && cachedData.templates) {
                             console.log(`成功从缓存加载灵感模板数据${cacheKey}:`, cachedData.templates);
                             inspirationItems.value = cachedData.templates;
+                            InspirationCategories.value = cachedData.categories;
                                 // 如果有分页信息也加载
                                 if (cachedData.pagination) {
                                     inspirationPagination.value = cachedData.pagination;
@@ -9300,6 +9324,7 @@
                             const templates = data.templates || [];
 
                             inspirationItems.value = data.templates || [];
+                            InspirationCategories.value = data.categories || [];
                             inspirationPagination.value = data.pagination || null;
 
                             // 缓存模板数据
@@ -9325,21 +9350,17 @@
                         console.warn('加载模板数据失败:', error);
                     }
                 };
-                // 筛选灵感内容 - 现在数据直接从后端获取，不需要前端筛选
-                const filteredInspirationItems = computed(() => {
-                    // 直接返回从后端获取的数据，后端已经根据分类和搜索条件进行了筛选
-                    return inspirationItems.value || [];
-                });
+
 
                 // 选择分类
-                const selectInspirationCategory = async (categoryId) => {
+                const selectInspirationCategory = async (category) => {
                     // 如果点击的是当前分类，不重复请求
-                    if (selectedInspirationCategory.value === categoryId) {
+                    if (selectedInspirationCategory.value === category) {
                         return;
                     }
 
                     // 更新分类
-                    selectedInspirationCategory.value = categoryId;
+                    selectedInspirationCategory.value = category;
 
                     // 重置页码为1
                     inspirationCurrentPage.value = 1;
@@ -9378,28 +9399,97 @@
                     }, 500); // 500ms 防抖延迟
                 };
 
+                // 全局视频播放管理
+                let currentPlayingVideo = null;
+                let currentLoadingVideo = null; // 跟踪正在等待加载的视频
+
+                // 更新视频播放按钮图标
+                const updateVideoIcon = (video, isPlaying) => {
+                    // 查找视频容器中的播放按钮
+                    const container = video.closest('.relative');
+                    if (!container) return;
+                    
+                    // 查找移动端播放按钮
+                    const playButton = container.querySelector('button[class*="absolute"][class*="bottom-3"]');
+                    if (playButton) {
+                        const icon = playButton.querySelector('i');
+                        if (icon) {
+                            icon.className = isPlaying ? 'fas fa-pause text-sm' : 'fas fa-play text-sm';
+                        }
+                    }
+                };
+
+                // 处理视频播放结束
+                const onVideoEnded = (event) => {
+                    const video = event.target;
+                    console.log('视频播放完毕:', video.src);
+                    
+                    // 重置视频到开始位置
+                    video.currentTime = 0;
+                    
+                    // 更新播放按钮图标为播放状态
+                    updateVideoIcon(video, false);
+                    
+                    // 如果播放完毕的是当前播放的视频，清除引用
+                    if (currentPlayingVideo === video) {
+                        currentPlayingVideo = null;
+                        console.log('当前播放视频播放完毕');
+                    }
+                };
+
                 // 视频播放控制
                 const playVideo = (event) => {
                     const video = event.target;
-                    if (video.readyState >= 2) { // HAVE_CURRENT_DATA
-                        video.currentTime = 0; // 从头开始播放
-                        video.play().catch(e => {
-                            console.log('视频播放失败:', e);
-                            // 如果自动播放失败，可以尝试用户交互后播放
-                        });
-                    } else {
-                        // 如果视频还没加载完成，等待加载完成后不自动播放
-                        video.addEventListener('loadeddata', () => {
-                            // 重置到开始位置，但不自动播放
-                            video.currentTime = 0;
-                        }, { once: true });
+                    
+                    // 检查视频是否已加载完成
+                    if (video.readyState < 2) { // HAVE_CURRENT_DATA
+                        console.log('视频还没加载完成，忽略鼠标悬停播放');
+                        return;
                     }
+                    
+                    // 如果当前有视频在播放，先暂停它
+                    if (currentPlayingVideo && currentPlayingVideo !== video) {
+                        currentPlayingVideo.pause();
+                        currentPlayingVideo.currentTime = 0;
+                        // 更新上一个视频的图标
+                        updateVideoIcon(currentPlayingVideo, false);
+                        console.log('暂停上一个视频');
+                    }
+                    
+                    // 视频已加载完成，可以播放
+                    video.currentTime = 0; // 从头开始播放
+                    video.play().then(() => {
+                        // 播放成功，更新当前播放视频
+                        currentPlayingVideo = video;
+                        console.log('开始播放新视频');
+                    }).catch(e => {
+                        console.log('视频播放失败:', e);
+                        currentPlayingVideo = null;
+                        video.pause();
+                        video.currentTime = 0;
+                    });
                 };
 
                 const pauseVideo = (event) => {
                     const video = event.target;
+                    
+                    // 检查视频是否已加载完成
+                    if (video.readyState < 2) { // HAVE_CURRENT_DATA
+                        console.log('视频还没加载完成，忽略鼠标离开暂停');
+                        return;
+                    }
+                    
                     video.pause();
                     video.currentTime = 0;
+                    
+                    // 更新视频图标
+                    updateVideoIcon(video, false);
+                    
+                    // 如果暂停的是当前播放的视频，清除引用
+                    if (currentPlayingVideo === video) {
+                        currentPlayingVideo = null;
+                        console.log('暂停当前播放视频');
+                    }
                 };
 
                 // 移动端视频播放切换
@@ -9409,35 +9499,107 @@
                     const icon = button.querySelector('i');
                     
                     if (video.paused) {
+                        // 如果当前有视频在播放，先暂停它
+                        if (currentPlayingVideo && currentPlayingVideo !== video) {
+                            currentPlayingVideo.pause();
+                            currentPlayingVideo.currentTime = 0;
+                            // 更新上一个视频的图标
+                            updateVideoIcon(currentPlayingVideo, false);
+                            console.log('暂停上一个视频（移动端）');
+                        }
+                        
+                        // 如果当前有视频在等待加载，取消它的等待状态
+                        if (currentLoadingVideo && currentLoadingVideo !== video) {
+                            currentLoadingVideo = null;
+                            console.log('取消上一个视频的加载等待（移动端）');
+                        }
+                        
                         // 检查视频是否已加载完成
                         if (video.readyState >= 2) { // HAVE_CURRENT_DATA
                             // 视频已加载完成，直接播放
                             video.currentTime = 0;
                             video.play().then(() => {
                                 icon.className = 'fas fa-pause text-sm';
+                                currentPlayingVideo = video;
+                                console.log('开始播放新视频（移动端）');
                             }).catch(e => {
                                 console.log('视频播放失败:', e);
                                 icon.className = 'fas fa-play text-sm';
+                                currentPlayingVideo = null;
                             });
                         } else {
-                            // 视频未加载完成，显示loading
+                            // 视频未加载完成，显示loading并等待
+                            console.log('视频还没加载完成，等待加载（移动端）');
                             icon.className = 'fas fa-spinner fa-spin text-sm';
+                            currentLoadingVideo = video;
                             
                             // 等待视频加载完成
                             video.addEventListener('loadeddata', () => {
-                                video.currentTime = 0;
-                                video.play().then(() => {
-                                    icon.className = 'fas fa-pause text-sm';
-                                }).catch(e => {
-                                    console.log('视频播放失败:', e);
+                                // 检查这个视频是否仍然是当前等待加载的视频
+                                if (currentLoadingVideo === video) {
+                                    currentLoadingVideo = null;
+                                    video.currentTime = 0;
+                                    video.play().then(() => {
+                                        icon.className = 'fas fa-pause text-sm';
+                                        currentPlayingVideo = video;
+                                        console.log('开始播放新视频（移动端-延迟加载）');
+                                    }).catch(e => {
+                                        console.log('视频播放失败:', e);
+                                        icon.className = 'fas fa-play text-sm';
+                                        currentPlayingVideo = null;
+                                    });
+                                } else {
+                                    // 这个视频的加载等待已被取消，重置图标
                                     icon.className = 'fas fa-play text-sm';
-                                });
+                                    console.log('视频加载完成但等待已被取消（移动端）');
+                                }
                             }, { once: true });
-                        }
-                    } else {
+                    };
+                 } else {
                         video.pause();
                         video.currentTime = 0;
                         icon.className = 'fas fa-play text-sm';
+                        
+                        // 如果暂停的是当前播放的视频，清除引用
+                        if (currentPlayingVideo === video) {
+                            currentPlayingVideo = null;
+                            console.log('暂停当前播放视频（移动端）');
+                        }
+                        
+                        // 如果暂停的是当前等待加载的视频，清除引用
+                        if (currentLoadingVideo === video) {
+                            currentLoadingVideo = null;
+                            console.log('取消当前等待加载的视频（移动端）');
+                        }
+                    }
+                };
+
+                // 暂停所有视频
+                const pauseAllVideos = () => {
+                    if (currentPlayingVideo) {
+                        currentPlayingVideo.pause();
+                        currentPlayingVideo.currentTime = 0;
+                        // 更新视频图标
+                        updateVideoIcon(currentPlayingVideo, false);
+                        currentPlayingVideo = null;
+                        console.log('暂停所有视频');
+                    }
+                    
+                    // 清理等待加载的视频状态
+                    if (currentLoadingVideo) {
+                        // 重置等待加载的视频图标
+                        const loadingContainer = currentLoadingVideo.closest('.relative');
+                        if (loadingContainer) {
+                            const loadingButton = loadingContainer.querySelector('button[class*="absolute"][class*="bottom-3"]');
+                            if (loadingButton) {
+                                const loadingIcon = loadingButton.querySelector('i');
+                                if (loadingIcon) {
+                                    loadingIcon.className = 'fas fa-play text-sm';
+                                }
+                            }
+                        }
+                        currentLoadingVideo = null;
+                        console.log('取消所有等待加载的视频');
                     }
                 };
 
@@ -9445,6 +9607,12 @@
                     const video = event.target;
                     // 视频加载完成，准备播放
                     console.log('视频加载完成:', video.src);
+                    
+                    // 更新视频加载状态（使用视频的实际src）
+                    setVideoLoaded(video.src, true);
+                    
+                    // 触发Vue的响应式更新
+                    videoLoadedStates.value = new Map(videoLoadedStates.value);
                 };
 
                 const onVideoError = (event) => {
@@ -9996,6 +10164,7 @@
                     switchToCreateView,
                     switchToProjectsView,
                     switchToInspirationView,
+                    switchToLoginView,
                     updateURL,
                     initRoute,
                     handlePopState,
@@ -10005,8 +10174,7 @@
                     inspirationSearchQuery,
                     selectedInspirationCategory,
                     inspirationItems,
-                    dynamicInspirationCategories,
-                    filteredInspirationItems,
+                    InspirationCategories,
                     loadInspirationData,
                     selectInspirationCategory,
                     handleInspirationSearch,
@@ -10039,8 +10207,11 @@
                     playVideo,
                     pauseVideo,
                     toggleVideoPlay,
+                    pauseAllVideos,
+                    updateVideoIcon,
                     onVideoLoaded,
-                    onVideoError
+                    onVideoError,
+                    onVideoEnded
                 };
             }
         }).mount('#app');
