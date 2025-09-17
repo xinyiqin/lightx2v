@@ -2862,7 +2862,7 @@
                                                                     <i class="fas fa-redo text-sm sm:text-lg"></i>
                                                         </button>
                                                             <button v-if="task.status === 'SUCCEED'"
-                                                                    @click.stop="downloadTaskOutput(task)"
+                                                                    @click.stop="downloadFile(task.outputs?.output_video)"
                                                                     class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                 :title="t('downloadTask')">
                                                                     <i class="fas fa-download text-sm sm:text-lg"></i>
@@ -4669,7 +4669,7 @@
                         pageTitle: 'LightX2V服务',
                         pleaseEnterThePromptForVideoGeneration: '请输入视频生成提示词',
                         describeTheContentStyleSceneOfTheVideo: '描述视频内容、风格、场景等...',
-                        describeTheDigitalHumanImageBackgroundStyleActionRequirements: '描述数字人形象、背景风格、动作要求等...',
+                        describeTheDigitalHumanImageBackgroundStyleActionRequirements: '描述数字人表情、语气、动作等...',
                         describeTheContentActionRequirementsBasedOnTheImage: '描述基于图片的视频内容、动作要求等...',
                         loginSubtitle: '一个强大的视频生成平台',
 
@@ -4992,7 +4992,7 @@
                         pageTitle: 'LightX2V Service',
                         pleaseEnterThePromptForVideoGeneration: 'Please enter the prompt for video generation',
                         describeTheContentStyleSceneOfTheVideo: 'Describe the content, style, and scene of the video...',
-                        describeTheDigitalHumanImageBackgroundStyleActionRequirements: 'Describe the digital human image, background style, and action requirements...',
+                        describeTheDigitalHumanImageBackgroundStyleActionRequirements: 'Describe the digital human expression, tone, and action...',
                         describeTheContentActionRequirementsBasedOnTheImage: 'Describe the content and action requirements based on the image...',
                         loginSubtitle: 'A powerful video generation platform',
                         whatDoYouWantToDo: 'What do you want to do today?',
@@ -7332,38 +7332,6 @@
                     return statusMap[status] || 'bg-secondary';
                 };
 
-                const downloadSingleResult = async (taskId, key, outputPath) => {
-                    try {
-                        downloadLoading.value = true;
-                        const url = await getTaskFileUrl(taskId, key);
-                        if (url) {
-                            const response = await fetch(url);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                // 使用原始文件名，如果没有则使用outputPath
-                                const filename = key || outputPath || `result_${taskId}`;
-                                a.download = filename;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                window.URL.revokeObjectURL(url);
-                                showAlert('文件下载成功', 'success');
-                            } else {
-                                showAlert('获取结果失败', 'danger');
-                            }
-                        } else {
-                            showAlert(t('getTaskResultFailedAlert'), 'danger');
-                        }
-                    } catch (error) {
-                        showAlert(`${t('downloadTaskResultFailedAlert')}: ${error.message}`, 'danger');
-                    } finally {
-                        downloadLoading.value = false;
-                    }
-                };
-
                 const viewSingleResult = async (taskId, key) => {
                     try {
                         downloadLoading.value = true;
@@ -8073,38 +8041,6 @@
                     const span = audio.parentElement.parentElement.querySelector('span');
                     if (span) {
                         span.style.display = 'none';
-                    }
-                };
-
-                const downloadTaskInput = async (taskId, inputName, fileName) => {
-                    try {
-                        const url = await getTaskInputUrl(taskId, inputName);
-                        const response = await fetch(url);
-
-                        if (!response || !response.ok) {
-                            throw new Error(`下载失败: ${response ? response.status : '认证失败'}`);
-                        }
-
-                        const blob = await response.blob();
-                        const downloadUrl = window.URL.createObjectURL(blob);
-
-                        // 创建下载链接
-                        const link = document.createElement('a');
-                        link.href = downloadUrl;
-                        // 使用原始文件名，如果没有则使用inputName
-                        const filename = inputName || fileName || `input_${taskId}`;
-                        link.download = filename;
-                        document.body.appendChild(link);
-                        link.click();
-
-                        // 清理
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(downloadUrl);
-
-                        showAlert(t('fileDownloadSuccessAlert'), 'success');
-                    } catch (error) {
-                        console.error(t('downloadFailedAlert'), error);
-                        showAlert(`${t('downloadFailedAlert')}: ${error.message}`, 'danger');
                     }
                 };
 
@@ -8818,11 +8754,16 @@
                         },
                         {
                             id: 's2v_4',
+                            title: '浮夸表演',
+                            prompt: '根据音频，人物进行浮夸表演，表情夸张，动作浮夸，整体风格夸张搞笑。'
+                        },
+                        {
+                            id: 's2v_5',
                             title: '商务演讲',
                             prompt: '根据音频，人物进行商务演讲，表情严肃，手势得体，整体风格专业商务。'
                         },
                         {
-                            id: 's2v_5',
+                            id: 's2v_6',
                             title: '产品介绍',
                             prompt: '数字人介绍产品特点，语气亲切热情，表情丰富，动作自然，能体现产品特点。'
                         }
@@ -9960,7 +9901,7 @@
                     saveToCache,
                     clearAllCache,
                     getStatusBadgeClass,
-                    downloadSingleResult,
+                    ,
                     viewSingleResult,
                     cancelTask,
                     resumeTask,
@@ -9995,7 +9936,6 @@
                     handleImageLoad,
                     handleAudioError,
                     handleAudioLoad,
-                    downloadTaskInput,
                     getTaskStatusDisplay,
                     getTaskStatusColor,
                     getTaskStatusIcon,
