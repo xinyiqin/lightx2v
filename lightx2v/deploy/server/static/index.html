@@ -2788,28 +2788,28 @@
                         </div>
 
                         <!-- 可滚动的任务列表区域 -->
-                                <div class="flex-1 overflow-y-auto history-tasks-scroll min-h-0 p-4"
+                                <div class="flex-1 overflow-y-auto main-scrollbar min-h-0 p-4"
                                     style="overflow-x: visible;">
                             <div v-cloak>
                                         <div v-if="filteredTasks.length === 0"
                                             class="flex-col items-center justify-center py-12 text-center">
                                             <p class="text-gray-400 text-sm">{{ t('noHistoryTasks') }}</p>
                                             <p class="text-gray-500 text-xs mt-1">{{ t('startToCreateYourFirstAIVideo') }}</p>
-                                </div>
+                                        </div>
                                         <div v-else
-                                            class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-6">
+                                            class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3">
                                                 <!-- 任务卡片 -->
                                             <div v-for="task in filteredTasks" :key="task.task_id"
-                                                    class="cursor-pointer break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20"
+                                                    class="break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
+                                                <!-- 缩略图区域 -->
+                                                <div class="cursor-pointer bg-gray-800 relative flex flex-col"
                                                 @click="openTaskDetailModal(task)"
                                                 :title="t('viewTaskDetails')">
-                                                    <!-- 缩略图区域 -->
-                                                    <div class="relative mb-3">
-                                                        <div class="w-full h-auto bg-dark-light rounded-lg overflow-hidden relative">
-                                                            <!-- 成功任务：显示视频动图 -->
-                                                        <video v-if="task.status === 'SUCCEED'"
-                                                            :src="getTaskVideoUrl(task.task_id, 'output_video')"
-                                                            :poster="getTaskImageUrl(task)"
+                                                    <!-- 视频预览 -->
+                                                        <!-- 成功任务：显示视频动图 -->
+                                                        <video v-if="task.status === 'SUCCEED' && task.outputs?.output_video"
+                                                            :src="getTaskFileUrlSync(task.task_id, 'output_video')"
+                                                            :poster="getTaskFileUrlSync(task.task_id, 'input_image')"
                                                                 class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
                                                             preload="auto" playsinline webkit-playsinline
                                                                 @mouseenter="playVideo($event)"
@@ -2823,13 +2823,12 @@
                                                                 class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
                                                                 <i class="fas fa-play text-sm"></i>
                                                             </button>
-
-                                                            <!-- 其他状态：显示输入图片或占位符 -->
-                                                        <img v-else
-                                                            :src="getTaskImageUrl(task)" :alt="t('taskPreview')"
-                                                                class="w-full h-auto object-cover bg-dark-light transition-transform duration-300 group-hover:scale-105"
-                                                            @error="handleThumbnailError" />
-                                    </div>
+                                                    <!-- 其他状态：显示输入图片或占位符 -->
+                                                    <img v-else="task.inputs?.input_image"
+                                                    :src="getTaskFileUrlSync(task.task_id, 'input_image')"
+                                                    class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
+                                                    @error="handleThumbnailError" />
+                                                        
 
                                                         <!-- 状态指示器 -->
                                                         <div class="absolute top-2 right-2">
@@ -2894,7 +2893,7 @@
 
                                 </div>
                             </div>
-                            </div>
+                                        </div>
                                 </div>
                             </div>
                         </div>
@@ -5752,79 +5751,8 @@
                     return categories;
                 });
 
-                // 任务图片URL缓存
-                const taskImageUrlCache = ref(new Map());
-
-                // 任务视频URL缓存
-                const taskVideoUrlCache = ref(new Map());
-
                 // 通用URL缓存
                 const urlCache = ref(new Map());
-
-                // 获取任务图片URL（带缓存）
-                const getTaskImageUrl = (task) => {
-                    if (!task || !task.inputs) return null;
-
-                    const cacheKey = task.task_id;
-                    if (taskImageUrlCache.value.has(cacheKey)) {
-                        return taskImageUrlCache.value.get(cacheKey);
-                    }
-
-                    const imageInputs = Object.keys(task.inputs).filter(key =>
-                        key.includes('image') ||
-                        task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
-                    );
-
-                    if (imageInputs.length > 0) {
-                        const firstImageKey = imageInputs[0];
-                        // 优先从缓存获取
-                        const cachedUrl = getTaskFileUrlSync(task.task_id, firstImageKey);
-                        if (cachedUrl) {
-                            taskImageUrlCache.value.set(cacheKey, cachedUrl);
-                            return cachedUrl;
-                        }
-                        // 缓存没有则生成URL
-                        const token = localStorage.getItem('accessToken');
-                        const url = token
-                            ? `./assets/task/input?task_id=${task.task_id}&name=${firstImageKey}&token=${encodeURIComponent(token)}`
-                            : `./assets/task/input?task_id=${task.task_id}&name=${firstImageKey}`;
-
-                        taskImageUrlCache.value.set(cacheKey, url);
-                        return url;
-                    }
-
-                    return null;
-                };
-
-                // 获取任务视频URL（带缓存，同步版本）
-                const getTaskVideoUrl = (taskId, key) => {
-                    const cacheKey = `${taskId}_${key}`;
-                    if (taskVideoUrlCache.value.has(cacheKey)) {
-                        return taskVideoUrlCache.value.get(cacheKey);
-                    }
-
-                    // 优先从缓存获取
-                    const cachedUrl = getTaskFileUrlSync(taskId, key);
-                        if (cachedUrl) {
-                            taskVideoUrlCache.value.set(cacheKey, cachedUrl);
-                            return cachedUrl;
-                        }
-
-                        // 缓存没有则生成URL
-                        const token = localStorage.getItem('accessToken');
-                        const url = token
-                            ? `./assets/task/result?task_id=${taskId}&name=${key}&token=${encodeURIComponent(token)}`
-                            : `./assets/task/result?task_id=${taskId}&name=${key}`;
-
-                        // 缓存API URL
-                        setTaskFileToCache(taskId, key, {
-                            url: url,
-                            timestamp: Date.now()
-                        });
-
-                        taskVideoUrlCache.value.set(cacheKey, url);
-                        return url;
-                    };
 
                 // 通用URL缓存函数
                 const getCachedUrl = (key, urlGenerator) => {
@@ -6947,18 +6875,6 @@
                         return cachedFile.url;
                     }
                     return await getTaskFileUrlFromApi(taskId, fileKey);
-                };
-
-                // 获取任务的第一个图片键
-                const getFirstImageKey = (task) => {
-                    if (!task || !task.inputs) return null;
-
-                    const imageInputs = Object.keys(task.inputs).filter(key =>
-                        key.includes('image') ||
-                        task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
-                    );
-
-                    return imageInputs.length > 0 ? imageInputs[0] : null;
                 };
 
                 // 同步获取任务文件URL（仅从缓存获取，用于模板显示）
@@ -9998,7 +9914,6 @@
                     getTemplateFileUrlAsync,
                     loadTemplateFilesFromCache,
                     saveTemplateFilesToCache,
-                    getFirstImageKey,
                     loadFromCache,
                     saveToCache,
                     clearAllCache,
@@ -10026,8 +9941,7 @@
                     getTaskInputUrl,
                     getTaskInputImage,
                     getTaskInputAudio,
-                    getTaskImageUrl,
-                    getTaskVideoUrl,
+                    getTaskFileUrl,
                     getHistoryImageUrl,
                     getUserAvatarUrl,
                     getCurrentImagePreviewUrl,
