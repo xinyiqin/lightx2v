@@ -2602,10 +2602,6 @@
             <!-- 顶部栏 -->
             <div class="top-bar">
                 <div class="top-bar-content">
-                    <!-- 左侧图标 -->
-                    <!-- <div class="top-bar-left">
-                        <img src="/icon/seko_logo_white.svg" alt="SekoTalk Logo" class="top-bar-logo">
-                    </div> -->
                     <div class="top-bar-left">
                         <i class="fas fa-video text-gradient-icon mr-2 text-xl"></i>
                         <span class="text-lg">LightX2V</span>
@@ -8734,6 +8730,11 @@
                         loginLoading.value = false;
                         initLoading.value = false;
                     }
+
+                    // 初始化路由
+                    initRoute();
+                    // 监听浏览器前进后退
+                    window.addEventListener('popstate', handlePopState);
                 });
 
                 // 页面卸载时清理轮询
@@ -8746,6 +8747,9 @@
 
                     // 清理提示滚动
                     stopHintRotation();
+                    
+                    // 清理路由事件监听器
+                    window.removeEventListener('popstate', handlePopState);
                 });
 
                 // 提示词模板管理
@@ -9272,6 +9276,7 @@
                 // 新增：视图切换方法
                 const switchToCreateView = () => {
                     currentView.value = 'create';
+                    updateURL('create');
                     // 如果之前有展开过创作区域，保持展开状态
                     if (isCreationAreaExpanded.value) {
                         // 延迟一点时间确保DOM更新完成
@@ -9286,14 +9291,58 @@
 
                 const switchToProjectsView = () => {
                     currentView.value = 'projects';
+                    updateURL('projects');
                     // 刷新任务列表
                     refreshTasks();
                 };
 
                 const switchToInspirationView = () => {
                     currentView.value = 'inspiration';
+                    updateURL('inspiration');
                     // 加载灵感数据
                     loadInspirationData();
+                };
+
+                // URL路由管理
+                const updateURL = (view) => {
+                    const url = new URL(window.location);
+                    url.searchParams.set('view', view);
+                    window.history.pushState({ view }, '', url);
+                };
+
+                const initRoute = () => {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const view = urlParams.get('view');
+                    
+                    if (view && ['create', 'projects', 'inspiration'].includes(view)) {
+                        currentView.value = view;
+                        // 根据页面加载相应的数据
+                        if (view === 'projects') {
+                            refreshTasks();
+                        } else if (view === 'inspiration') {
+                            loadInspirationData();
+                        }
+                    } else {
+                        // 默认页面
+                        currentView.value = 'create';
+                        updateURL('create');
+                    }
+                };
+
+                // 监听浏览器前进后退
+                const handlePopState = (event) => {
+                    if (event.state && event.state.view) {
+                        currentView.value = event.state.view;
+                        // 根据页面加载相应的数据
+                        if (event.state.view === 'projects') {
+                            refreshTasks();
+                        } else if (event.state.view === 'inspiration') {
+                            loadInspirationData();
+                        }
+                    } else {
+                        // 处理直接访问URL的情况
+                        initRoute();
+                    }
                 };
 
                 // 日期格式化函数
@@ -10033,6 +10082,9 @@
                     switchToCreateView,
                     switchToProjectsView,
                     switchToInspirationView,
+                    updateURL,
+                    initRoute,
+                    handlePopState,
                     openTaskDetailModal,
                     closeTaskDetailModal,
                     // 灵感广场相关
