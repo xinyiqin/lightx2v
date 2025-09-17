@@ -801,8 +801,6 @@
             @media (max-width: 640px) {
                 /* 通用移动端样式 */
                 .mobile-bottom-nav {
-
-
                     width: 100% !important;
                     height: auto !important;
                     padding: 0 !important;
@@ -972,11 +970,6 @@
                 .grid.grid-cols-1.gap-6 {
                     grid-template-columns: 1fr !important;
                     gap: 1rem !important;
-                }
-
-                /* 模板卡片在移动端调整 */
-                .bg-dark-light.rounded-xl.overflow-hidden {
-                    margin: 0 !important;
                 }
 
                 /* 模态框在移动端调整 */
@@ -2824,7 +2817,7 @@
                                             class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3">
                                                 <!-- 任务卡片 -->
                                             <div v-for="task in filteredTasks" :key="task.task_id"
-                                                    class="break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
+                                                    class="break-inside-avoid mb-3 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
                                                 <!-- 缩略图区域 -->
                                                 <div class="cursor-pointer bg-gray-800 relative flex flex-col"
                                                 @click="openTaskDetailModal(task)"
@@ -3677,10 +3670,10 @@
                                         <!-- 灵感内容网格 -->
                                         <div class="flex-1 overflow-y-auto main-scrollbar min-h-0 p-4"
                                         style="overflow-x: visible;">
-                                        <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-6">
+                                        <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3">
                                             <!-- 灵感卡片 -->
                                             <div v-for="item in inspirationItems" :key="item.task_id"
-                                                    class="break-inside-avoid mb-6 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
+                                                    class="break-inside-avoid mb-3 group relative bg-dark-light rounded-xl overflow-hidden border border-gray-700/50 hover:border-laser-purple/40 transition-all duration-300 hover:shadow-laser/20">
                                                 <!-- 视频缩略图区域 -->
                                                 <div class="cursor-pointer bg-gray-800 relative flex flex-col"
                                                 @click="previewTemplateDetail(item)"
