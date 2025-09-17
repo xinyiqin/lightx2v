@@ -576,6 +576,53 @@
                 padding: 0 1rem;
             }
 
+            /* 移动端全屏显示 */
+            @media (max-width: 768px) {
+                #task-creator {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                #inspiration-gallery {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                /* 任务详情面板移动端全屏 */
+                .task-detail-panel {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                /* 任务运行面板移动端全屏 */
+                .task-running-panel {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                /* 任务失败面板移动端全屏 */
+                .task-failed-panel {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                /* 任务取消面板移动端全屏 */
+                .task-cancelled-panel {
+                    width: 100%;
+                    padding: 0 0.5rem;
+                }
+
+                /* 移动端内容区域调整 */
+                .content-area {
+                    padding: 0.5rem !important;
+                }
+
+                /* 移动端创作区域调整 */
+                .creation-area-container {
+                    padding: 0.5rem;
+                }
+            }
+
             /* 任务详情面板全屏 */
             .task-detail-panel {
                 max-width: none;
@@ -754,14 +801,11 @@
             @media (max-width: 640px) {
                 /* 通用移动端样式 */
                 .mobile-bottom-nav {
-                    position: fixed !important;
-                    bottom: 0 !important;
-                    left: 0 !important;
-                    right: 0 !important;
+
+
                     width: 100% !important;
                     height: auto !important;
                     padding: 0 !important;
-                    background: rgba(11, 10, 32, 0.95) !important;
                     backdrop-filter: blur(20px) !important;
                     border-top: 1px solid rgba(154, 114, 255, 0.2) !important;
                     z-index: 50 !important;
@@ -781,10 +825,6 @@
                     width: 3rem !important;
                     height: 3rem !important;
                     flex-shrink: 0 !important;
-                }
-
-                .mobile-content {
-                    margin-bottom: 5rem !important;
                 }
 
                 .sms-login-form .input-group {
@@ -819,19 +859,7 @@
                 }
 
                 /* 左侧功能区在移动端移动到下方 */
-                .relative.w-20.pl-5.flex.flex-col.z-10 {
-                    position: fixed !important;
-                    bottom: 0 !important;
-                    left: 0 !important;
-                    right: 0 !important;
-                    width: 100% !important;
-                    height: auto !important;
-                    padding: 0 !important;
-                    background: rgba(11, 10, 32, 0.95) !important;
-                    backdrop-filter: blur(20px) !important;
-                    border-top: 1px solid rgba(154, 114, 255, 0.2) !important;
-                    z-index: 50 !important;
-                }
+
 
                 /* 功能导航在移动端水平排列 */
                 .p-2.flex.flex-col.justify-center.h-full {
@@ -878,10 +906,6 @@
                     flex-shrink: 0 !important;
                 }
 
-                /* 主内容区域在移动端占满全屏 */
-                .flex-1.flex.flex-col.min-h-0 {
-                    margin-bottom: 5rem !important; /* 为底部导航留出空间 */
-                }
 
                 /* 历史任务区域调整 */
                 .flex-1.overflow-y-auto.p-10.content-area.main-scrollbar {
