@@ -760,6 +760,7 @@ async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_acce
         page_size = min(page_size, 100)
 
         all_templates = []
+        all_categories = set()
         template_files = await data_manager.list_template_files("tasks")
         template_files = [] if template_files is None else template_files
 
@@ -767,6 +768,7 @@ async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_acce
             try:
                 bytes_data = await data_manager.load_template_file("tasks", template_file)
                 template_data = json.loads(bytes_data)
+                all_categories.update(template_data["task"]["tags"])
                 if category is not None and category != "all" and category not in template_data["task"]["tags"]:
                     continue
                 if search is not None and search not in template_data["task"]["params"]["prompt"] + template_data["task"]["params"]["negative_prompt"] + template_data["task"][
@@ -787,7 +789,7 @@ async def api_v1_template_tasks(request: Request, valid=Depends(verify_user_acce
             end_idx = start_idx + page_size
             paginated_templates = all_templates[start_idx:end_idx]
 
-        return {"templates": paginated_templates, "pagination": {"page": page, "page_size": page_size, "total": total_templates, "total_pages": total_pages}}
+        return {"templates": paginated_templates, "pagination": {"page": page, "page_size": page_size, "total": total_templates, "total_pages": total_pages}, "categories": list(all_categories)}
 
     except Exception as e:
         traceback.print_exc()
