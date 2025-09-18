@@ -463,12 +463,18 @@ async def api_v1_task_cancel(request: Request, user=Depends(verify_user_access))
 async def api_v1_task_resume(request: Request, user=Depends(verify_user_access)):
     try:
         task_id = request.query_params["task_id"]
+
+        task = await task_manager.query_task(task_id, user_id=user["user_id"])
+        keys = [task["task_type"], task["model_cls"], task["stage"]]
+        if not model_pipelines.check_item_by_keys(keys):
+            return error_response(f"Model {keys} is not supported now, please submit a new task", 400)
+
         ret = await task_manager.resume_task(task_id, user_id=user["user_id"], all_subtask=False)
-        if ret:
+        if ret is True:
             await prepare_subtasks(task_id)
             return {"msg": "ok"}
         else:
-            return error_response(f"Task {task_id} resume failed", 400)
+            return error_response(f"Task {task_id} resume failed: {ret}", 400)
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)

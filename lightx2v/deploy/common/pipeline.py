@@ -134,6 +134,14 @@ class Pipeline:
             item = item[k]
         return item
 
+    def check_item_by_keys(self, keys):
+        item = self.data
+        for k in keys:
+            if k not in item:
+                return False
+            item = item[k]
+        return True
+
     def get_model_lists(self):
         return self.model_lists
 
