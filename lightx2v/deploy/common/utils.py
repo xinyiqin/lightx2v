@@ -90,7 +90,7 @@ async def fetch_resource(url, timeout):
 
 # check, resize, read rotate meta info
 def format_image_data(data, max_size=1280):
-    image = Image.open(io.BytesIO(data))
+    image = Image.open(io.BytesIO(data)).convert("RGB")
     exif = image.getexif()
     changed = False
     w, h = image.size
