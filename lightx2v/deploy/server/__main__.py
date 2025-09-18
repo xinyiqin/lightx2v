@@ -605,7 +605,7 @@ async def api_v1_worker_ping_subtask(request: Request, valid=Depends(verify_work
         queue = params.pop("queue")
 
         task = await task_manager.query_task(task_id)
-        if task["status"] != TaskStatus.RUNNING:
+        if task is None or task["status"] != TaskStatus.RUNNING:
             return {"msg": "delete"}
 
         assert await task_manager.ping_subtask(task_id, worker_name, identity)
