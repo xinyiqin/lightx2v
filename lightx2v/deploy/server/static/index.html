@@ -5868,8 +5868,21 @@
                     return response;
                 };
 
+                const beforeLogin = () => {
+                    localStorage.removeItem('loginSource');
+                    localStorage.removeItem('accessToken');
+                    localStorage.removeItem('currentUser');
+                    clearAllCache();
+                    switchToLoginView();
+                    currentUser.value = {};
+                    isLoggedIn.value = false;
+                    models.value = [];
+                    tasks.value = [];
+                };
+
                 const loginWithGitHub = async () => {
                     try {
+                        beforeLogin();
                         console.log('starting login')
                         loginLoading.value = true;
                         const response = await fetch('./auth/login/github');
@@ -5883,6 +5896,9 @@
 
                 const loginWithGoogle = async () => {
                     try {
+                        beforeLogin();
+                        console.log('starting login')
+                        loginLoading.value = true;
                         const response = await fetch('./auth/login/google');
                         const data = await response.json();
                         localStorage.setItem('loginSource', 'google');
@@ -5907,6 +5923,7 @@
                     }
 
                     try {
+                        beforeLogin();
                         const response = await fetch(`./auth/login/sms?phone_number=${phoneNumber.value}`);
                         const data = await response.json();
 
