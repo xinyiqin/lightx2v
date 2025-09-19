@@ -27,7 +27,7 @@ from lightx2v.models.video_encoders.hf.wan.vae_2_2 import Wan2_2_VAE
 from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
-from lightx2v.utils.utils import find_torch_model_path, load_weights, save_to_video, vae_to_comfyui_image
+from lightx2v.utils.utils import find_torch_model_path, load_weights, vae_to_comfyui_image_inplace
 
 
 def get_optimal_patched_size_with_sp(patched_h, patched_w, sp_size):
@@ -473,6 +473,11 @@ class WanAudioRunner(WanRunner):  # type:ignore
         super().init_run()
         self.scheduler.set_audio_adapter(self.audio_adapter)
         self.prev_video = None
+        if self.config.get("return_video", False):
+            self.gen_video_final = torch.zeros((self.inputs["expected_frames"], self.config.tgt_h, self.config.tgt_w, 3), dtype=torch.float32, device='cpu')
+        else:
+            self.gen_video_final = None
+        self.cut_audio_final = None
 
     @ProfilingContext4DebugL1("Init run segment")
     def init_run_segment(self, segment_idx, audio_array=None):
@@ -507,24 +512,27 @@ class WanAudioRunner(WanRunner):  # type:ignore
         video_seg = self.gen_video[:, :, :useful_length].cpu()
         audio_seg = self.segment.audio_array[: useful_length * self._audio_processor.audio_frame_rate]
 
+        video_seg = vae_to_comfyui_image_inplace(video_seg)
+
+        # [Warning] Need check whether video segment interpolation works...
+        if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+            target_fps = self.config["video_frame_interpolation"]["target_fps"]
+            logger.info(f"Interpolating frames from {self.config.get('fps', 16)} to {target_fps}")
+            video_seg = self.vfi_model.interpolate_frames(
+                video_seg,
+                source_fps=self.config.get("fps", 16),
+                target_fps=target_fps,
+            )
+
         if self.va_recorder:
-            video_seg = vae_to_comfyui_image(video_seg)
-            # Apply frame interpolation if configured
-            if "video_frame_interpolation" in self.config and self.vfi_model is not None:
-                target_fps = self.config["video_frame_interpolation"]["target_fps"]
-                logger.info(f"Interpolating frames from {self.config.get('fps', 16)} to {target_fps}")
-                video_seg = self.vfi_model.interpolate_frames(
-                    video_seg,
-                    source_fps=self.config.get("fps", 16),
-                    target_fps=target_fps,
-                )
             self.va_recorder.pub_livestream(video_seg, audio_seg)
+        elif self.config.get("return_video", False):
+            self.gen_video_final[self.segment.start_frame:self.segment.end_frame].copy_(video_seg)
+            self.cut_audio_final = np.concatenate([self.cut_audio_final, audio_seg], axis=0).astype(np.float32) if self.cut_audio_final is not None else audio_seg
 
         # Update prev_video for next iteration
         self.prev_video = self.gen_video
 
-        # Clean up GPU memory after each segment
-        del self.gen_video
         del video_seg, audio_seg
         torch.cuda.empty_cache()
 
@@ -628,8 +636,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 self.va_recorder = None
 
     @ProfilingContext4DebugL1("Process after vae decoder")
-    def process_images_after_vae_decoder(self, save_video=True):
-        pass
+    def process_images_after_vae_decoder(self, save_video=False):
+        if self.config.get("return_video", False):
+            audio_waveform = torch.from_numpy(self.cut_audio_final).unsqueeze(0).unsqueeze(0)
+            comfyui_audio = {"waveform": audio_waveform, "sample_rate": self._audio_processor.audio_sr}
+            return {"video": self.gen_video_final, "audio": comfyui_audio}
+        return {"video": None, "audio": None}
 
     def init_modules(self):
         super().init_modules()
