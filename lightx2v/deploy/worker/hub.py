@@ -23,8 +23,8 @@ from lightx2v.utils.utils import seed_all
 class BaseWorker:
     @ProfilingContext4DebugL1("Init Worker Worker Cost:")
     def __init__(self, args):
+        args.save_video_path = ""
         config = set_config(args)
-        config["mode"] = ""
         logger.info(f"config:\n{json.dumps(config, ensure_ascii=False, indent=4)}")
         seed_all(config.seed)
         self.rank = 0
