@@ -1,6 +1,5 @@
 import gc
 import os
-import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -12,7 +11,6 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from einops import rearrange
 from loguru import logger
-from torchvision.io import write_video
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms.functional import resize
 
@@ -475,7 +473,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         self.scheduler.set_audio_adapter(self.audio_adapter)
         self.prev_video = None
         if self.config.get("return_video", False):
-            self.gen_video_final = torch.zeros((self.inputs["expected_frames"], self.config.tgt_h, self.config.tgt_w, 3), dtype=torch.float32, device='cpu')
+            self.gen_video_final = torch.zeros((self.inputs["expected_frames"], self.config.tgt_h, self.config.tgt_w, 3), dtype=torch.float32, device="cpu")
         else:
             self.gen_video_final = None
         self.cut_audio_final = None
@@ -528,7 +526,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         if self.va_recorder:
             self.va_recorder.pub_livestream(video_seg, audio_seg)
         elif self.config.get("return_video", False):
-            self.gen_video_final[self.segment.start_frame:self.segment.end_frame].copy_(video_seg)
+            self.gen_video_final[self.segment.start_frame : self.segment.end_frame].copy_(video_seg)
             self.cut_audio_final = np.concatenate([self.cut_audio_final, audio_seg], axis=0).astype(np.float32) if self.cut_audio_final is not None else audio_seg
 
         # Update prev_video for next iteration

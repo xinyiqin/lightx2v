@@ -2834,15 +2834,15 @@
                                                                 @loadeddata="onVideoLoaded($event)"
                                                                 @ended="onVideoEnded($event)"
                                                             @error="onVideoError($event)"></video>
-                                                            
+
                                                     <!-- 其他状态：显示输入图片或占位符 -->
                                                     <img v-else="task.inputs?.input_image"
                                                     :src="getTaskFileUrlSync(task.task_id, 'input_image')"
                                                     class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
                                                     @error="handleThumbnailError" />
-                                                    
+
                                                     <!-- 移动端播放按钮 -->
-                                                    <button v-if="task.status === 'SUCCEED'" 
+                                                    <button v-if="task.status === 'SUCCEED'"
                                                     @click.stop="toggleVideoPlay($event)"
                                                     class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
                                                     <i class="fas fa-play text-sm"></i>
@@ -3387,7 +3387,7 @@
                                                         <div class="flex flex-col items-center space-y-2">
                                                             <button
                                                                 class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
-                                                                @click="triggerImageUpload" 
+                                                                @click="triggerImageUpload"
                                                                 :title="t('uploadImage')">
                                                                 <i class="fas fa-upload text-lg"></i>
                                                             </button>
@@ -3460,7 +3460,7 @@
                                                     <div class="flex flex-col items-center space-y-2">
                                                         <button
                                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
-                                                            @click="triggerAudioUpload" 
+                                                            @click="triggerAudioUpload"
                                                             :title="t('uploadAudio')">
                                                             <i class="fas fa-upload text-lg"></i>
                                                         </button>
@@ -3559,7 +3559,7 @@
                                 <div class="flex justify-center mt-2">
                                     <button @click="submitTask" :disabled="submitting"
                                         class="btn-primary flex items-center justify-center px-8 py-3 rounded-lg text-lg transition-all shadow-lg">
-            
+
                                         <i class="fas fa-spinner fa-spin text-xl mr-2" :class="{ 'hidden': !submitting }"></i>
                                         <i class="fas fa-play text-xl mr-2" :class="{ 'hidden': submitting }"></i>
                                         {{ submitting ? t('submitting') : t('generateVideo') }}
@@ -3695,7 +3695,7 @@
                                                         class="w-full h-auto object-contain group-hover:scale-105 transition-transform duration-300"
                                                         @error="handleThumbnailError" />
                                                         <!-- 移动端播放按钮 -->
-                                                        <button v-if="item?.outputs?.output_video" 
+                                                        <button v-if="item?.outputs?.output_video"
                                                             @click.stop="toggleVideoPlay($event)"
                                                             class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors z-20">
                                                             <i class="fas fa-play text-sm"></i>
@@ -4622,7 +4622,7 @@
                 const loginLoading = ref(false);
                 const initLoading = ref(false);
                 const downloadLoading = ref(false);
-                
+
                 // 录音相关状态
                 const isRecording = ref(false);
                 const mediaRecorder = ref(null);
@@ -5961,7 +5961,7 @@
 
                             // 登录成功后初始化数据
                             await init();
-                            
+
                             // 登录成功后跳转到用户原本想访问的页面，如果没有则跳转到创建页面
                             if (currentView.value === 'login') {
                                 currentView.value = 'create';
@@ -6070,7 +6070,7 @@
 
                             // 登录成功后初始化数据
                             await init();
-                            
+
                             // 登录成功后跳转到用户原本想访问的页面，如果没有则跳转到创建页面
                             if (currentView.value === 'login') {
                                 currentView.value = 'create';
@@ -6218,11 +6218,11 @@
 
                     if (response.ok) {
                         const blob = await response.blob();
-                        
+
                         // 根据文件扩展名确定正确的MIME类型
                         let mimeType = blob.type;
                         const extension = template.filename.toLowerCase().split('.').pop();
-                        
+
                         if (extension === 'wav') {
                             mimeType = 'audio/wav';
                         } else if (extension === 'mp3') {
@@ -6234,9 +6234,9 @@
                         } else if (extension === 'webm') {
                             mimeType = 'audio/webm';
                         }
-                        
+
                         console.log('文件扩展名:', extension, 'MIME类型:', mimeType);
-                        
+
                         const file = new File([blob], template.filename, { type: mimeType });
 
                         // 缓存文件对象
@@ -6433,80 +6433,80 @@
                 const startRecording = async () => {
                     try {
                         // 请求麦克风权限
-                        const stream = await navigator.mediaDevices.getUserMedia({ 
+                        const stream = await navigator.mediaDevices.getUserMedia({
                             audio: {
                                 echoCancellation: true,
                                 noiseSuppression: true,
                                 sampleRate: 44100
-                            } 
+                            }
                         });
-                        
+
                         // 创建MediaRecorder
                         mediaRecorder.value = new MediaRecorder(stream, {
                             mimeType: 'audio/webm;codecs=opus'
                         });
-                        
+
                         audioChunks.value = [];
-                        
+
                         // 监听数据可用事件
                         mediaRecorder.value.ondataavailable = (event) => {
                             if (event.data.size > 0) {
                                 audioChunks.value.push(event.data);
                             }
                         };
-                        
+
                         // 监听录音停止事件
                         mediaRecorder.value.onstop = () => {
                             const audioBlob = new Blob(audioChunks.value, { type: 'audio/webm' });
                             const audioFile = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
-                            
+
                             // 设置到表单
                             s2vForm.value.audioFile = audioFile;
-                            
+
                             // 创建预览URL
                             const audioUrl = URL.createObjectURL(audioBlob);
                             setCurrentAudioPreview(audioUrl);
                             updateUploadedContentStatus();
-                            
+
                             // 停止所有音频轨道
                             stream.getTracks().forEach(track => track.stop());
-                            
+
                             showAlert(t('recordingCompleted'), 'success');
                         };
-                        
+
                         // 开始录音
                         mediaRecorder.value.start(1000); // 每秒收集一次数据
                         isRecording.value = true;
                         recordingDuration.value = 0;
-                        
+
                         // 开始计时
                         recordingTimer.value = setInterval(() => {
                             recordingDuration.value++;
                         }, 1000);
-                        
+
                         showAlert(t('recordingStarted'), 'info');
-                        
+
                     } catch (error) {
                         console.error('录音失败:', error);
                         showAlert(t('recordingFailed'), 'danger');
                     }
                 };
-                
+
                 // 停止录音
                 const stopRecording = () => {
                     if (mediaRecorder.value && isRecording.value) {
                         mediaRecorder.value.stop();
                         isRecording.value = false;
-                        
+
                         if (recordingTimer.value) {
                             clearInterval(recordingTimer.value);
                             recordingTimer.value = null;
                         }
-                        
+
                         showAlert(t('recordingStopped'), 'info');
                     }
                 };
-                
+
                 // 格式化录音时长
                 const formatRecordingDuration = (seconds) => {
                     const mins = Math.floor(seconds / 60);
@@ -8718,7 +8718,7 @@
 
                     // 清理提示滚动
                     stopHintRotation();
-                    
+
                     // 清理路由事件监听器
                     window.removeEventListener('popstate', handlePopState);
                 });
@@ -9289,7 +9289,7 @@
                 const initRoute = () => {
                     const urlParams = new URLSearchParams(window.location.search);
                     const view = urlParams.get('view');
-                    
+
                     if (view && ['create', 'projects', 'inspiration', 'login'].includes(view)) {
                         currentView.value = view;
                         // 注意：数据已经在init()中加载过了，这里不需要重复加载
@@ -9442,7 +9442,7 @@
                     // 查找视频容器中的播放按钮
                     const container = video.closest('.relative');
                     if (!container) return;
-                    
+
                     // 查找移动端播放按钮
                     const playButton = container.querySelector('button[class*="absolute"][class*="bottom-3"]');
                     if (playButton) {
@@ -9457,13 +9457,13 @@
                 const onVideoEnded = (event) => {
                     const video = event.target;
                     console.log('视频播放完毕:', video.src);
-                    
+
                     // 重置视频到开始位置
                     video.currentTime = 0;
-                    
+
                     // 更新播放按钮图标为播放状态
                     updateVideoIcon(video, false);
-                    
+
                     // 如果播放完毕的是当前播放的视频，清除引用
                     if (currentPlayingVideo === video) {
                         currentPlayingVideo = null;
@@ -9474,13 +9474,13 @@
                 // 视频播放控制
                 const playVideo = (event) => {
                     const video = event.target;
-                    
+
                     // 检查视频是否已加载完成
                     if (video.readyState < 2) { // HAVE_CURRENT_DATA
                         console.log('视频还没加载完成，忽略鼠标悬停播放');
                         return;
                     }
-                    
+
                     // 如果当前有视频在播放，先暂停它
                     if (currentPlayingVideo && currentPlayingVideo !== video) {
                         currentPlayingVideo.pause();
@@ -9489,7 +9489,7 @@
                         updateVideoIcon(currentPlayingVideo, false);
                         console.log('暂停上一个视频');
                     }
-                    
+
                     // 视频已加载完成，可以播放
                     video.currentTime = 0; // 从头开始播放
                     video.play().then(() => {
@@ -9506,19 +9506,19 @@
 
                 const pauseVideo = (event) => {
                     const video = event.target;
-                    
+
                     // 检查视频是否已加载完成
                     if (video.readyState < 2) { // HAVE_CURRENT_DATA
                         console.log('视频还没加载完成，忽略鼠标离开暂停');
                         return;
                     }
-                    
+
                     video.pause();
                     video.currentTime = 0;
-                    
+
                     // 更新视频图标
                     updateVideoIcon(video, false);
-                    
+
                     // 如果暂停的是当前播放的视频，清除引用
                     if (currentPlayingVideo === video) {
                         currentPlayingVideo = null;
@@ -9531,7 +9531,7 @@
                     const button = event.target.closest('button');
                     const video = button.parentElement.querySelector('video');
                     const icon = button.querySelector('i');
-                    
+
                     if (video.paused) {
                         // 如果当前有视频在播放，先暂停它
                         if (currentPlayingVideo && currentPlayingVideo !== video) {
@@ -9541,13 +9541,13 @@
                             updateVideoIcon(currentPlayingVideo, false);
                             console.log('暂停上一个视频（移动端）');
                         }
-                        
+
                         // 如果当前有视频在等待加载，取消它的等待状态
                         if (currentLoadingVideo && currentLoadingVideo !== video) {
                             currentLoadingVideo = null;
                             console.log('取消上一个视频的加载等待（移动端）');
                         }
-                        
+
                         // 检查视频是否已加载完成
                         if (video.readyState >= 2) { // HAVE_CURRENT_DATA
                             // 视频已加载完成，直接播放
@@ -9566,7 +9566,7 @@
                             console.log('视频还没加载完成，等待加载（移动端）');
                             icon.className = 'fas fa-spinner fa-spin text-sm';
                             currentLoadingVideo = video;
-                            
+
                             // 等待视频加载完成
                             video.addEventListener('loadeddata', () => {
                                 // 检查这个视频是否仍然是当前等待加载的视频
@@ -9593,13 +9593,13 @@
                         video.pause();
                         video.currentTime = 0;
                         icon.className = 'fas fa-play text-sm';
-                        
+
                         // 如果暂停的是当前播放的视频，清除引用
                         if (currentPlayingVideo === video) {
                             currentPlayingVideo = null;
                             console.log('暂停当前播放视频（移动端）');
                         }
-                        
+
                         // 如果暂停的是当前等待加载的视频，清除引用
                         if (currentLoadingVideo === video) {
                             currentLoadingVideo = null;
@@ -9618,7 +9618,7 @@
                         currentPlayingVideo = null;
                         console.log('暂停所有视频');
                     }
-                    
+
                     // 清理等待加载的视频状态
                     if (currentLoadingVideo) {
                         // 重置等待加载的视频图标
@@ -9641,10 +9641,10 @@
                     const video = event.target;
                     // 视频加载完成，准备播放
                     console.log('视频加载完成:', video.src);
-                    
+
                     // 更新视频加载状态（使用视频的实际src）
                     setVideoLoaded(video.src, true);
-                    
+
                     // 触发Vue的响应式更新
                     videoLoadedStates.value = new Map(videoLoadedStates.value);
                 };
@@ -9965,7 +9965,7 @@
                     loginLoading,
                     initLoading,
                     downloadLoading,
-                    
+
                     // 录音相关
                     isRecording,
                     recordingDuration,
