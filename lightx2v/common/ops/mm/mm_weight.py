@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 import torch
+import torch.distributed as dist
 from loguru import logger
 
 from lightx2v.utils.envs import *
@@ -84,19 +85,26 @@ class MMWeight(MMWeightTemplate):
 
     def load(self, weight_dict):
         device = weight_dict[self.weight_name].device
+        if device.type == "cuda":
+            self.weight = weight_dict[self.weight_name].t()
+            if self.bias_name is not None:
+                self.bias = weight_dict[self.bias_name]
+        elif device.type == "cpu":
+            weight_shape = weight_dict[self.weight_name].t().shape
+            weight_dtype = weight_dict[self.weight_name].dtype
+            self.weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype)
+            self.weight.copy_(weight_dict[self.weight_name].t())
 
-        weight_shape = weight_dict[self.weight_name].t().shape
-        weight_dtype = weight_dict[self.weight_name].dtype
-        self.weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype).to(device)
-        self.weight = self.weight.copy_(weight_dict[self.weight_name].t())
-
-        if self.bias_name is not None:
-            bias_shape = weight_dict[self.bias_name].shape
-            bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            if self.bias_name is not None:
+                bias_shape = weight_dict[self.bias_name].shape
+                bias_dtype = weight_dict[self.bias_name].dtype
+                self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype)
+                self.bias.copy_(weight_dict[self.bias_name])
+            else:
+                self.bias = None
+            del weight_dict[self.weight_name]
         else:
-            self.bias = None
+            raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
 
     def _calculate_size(self):
         if self.bias is not None:
@@ -149,7 +157,7 @@ class MMWeightQuantTemplate(MMWeightTemplate):
     # weight load functions
     # =========================
 
-    def load_from_disk(self):
+    def load_from_disk(self):  # Need Rewrite
         if not torch._dynamo.is_compiling():
             self.weight = self.lazy_load_file.get_tensor(self.weight_name).pin_memory()
             self.weight_scale = self.lazy_load_file.get_tensor(self.weight_scale_name).float().pin_memory()
@@ -180,28 +188,27 @@ class MMWeightQuantTemplate(MMWeightTemplate):
     def _calculate_size(self):
         if self.bias is not None:
             return self.weight.numel() * self.weight.element_size() + self.weight_scale.numel() * self.weight_scale.element_size() + self.bias.numel() * self.bias.element_size()
-
         return self.weight.numel() * self.weight.element_size() + self.weight_scale.numel() * self.weight_scale.element_size()
 
     def load_quantized(self, weight_dict):
         device = weight_dict[self.weight_name].device
-        weight_shape = weight_dict[self.weight_name].shape
-        weight_dtype = weight_dict[self.weight_name].dtype
-        self.weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype).to(device)
-        self.weight = self.weight.copy_(weight_dict[self.weight_name])
+        if device.type == "cuda":
+            self.weight = weight_dict[self.weight_name]
+            self.weight_scale = weight_dict[self.weight_scale_name].float()
+        elif device.type == "cpu":
+            weight_shape = weight_dict[self.weight_name].shape
+            weight_dtype = weight_dict[self.weight_name].dtype
+            self.weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype)
+            self.weight.copy_(weight_dict[self.weight_name])
 
-        weight_scale_shape = weight_dict[self.weight_scale_name].shape
-        weight_scale_dtype = torch.float
-        self.weight_scale = torch.empty(weight_scale_shape, pin_memory=True, dtype=weight_scale_dtype).to(device)
-        self.weight_scale = self.weight_scale.copy_(weight_dict[self.weight_scale_name])
-
-        if self.bias_name is not None:
-            bias_shape = weight_dict[self.bias_name].shape
-            bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            weight_scale_shape = weight_dict[self.weight_scale_name].shape
+            weight_scale_dtype = torch.float
+            self.weight_scale = torch.empty(weight_scale_shape, pin_memory=True, dtype=weight_scale_dtype)
+            self.weight_scale.copy_(weight_dict[self.weight_scale_name])
+            if dist.is_initialized():
+                del weight_dict[self.weight_name]
         else:
-            self.bias = None
+            raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
 
     def load_fp8_perchannel_sym(self, weight_dict):
         if self.config.get("weight_auto_quant", False):
@@ -215,10 +222,15 @@ class MMWeightQuantTemplate(MMWeightTemplate):
 
         if self.bias_name is not None:
             device = weight_dict[self.bias_name].device
-            bias_shape = weight_dict[self.bias_name].shape
-            bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            if device.type == "cuda":
+                self.bias = weight_dict[self.bias_name]
+            elif device.type == "cpu":
+                bias_shape = weight_dict[self.bias_name].shape
+                bias_dtype = weight_dict[self.bias_name].dtype
+                self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype)
+                self.bias.copy_(weight_dict[self.bias_name])
+            else:
+                raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
         else:
             self.bias = None
 
@@ -234,10 +246,15 @@ class MMWeightQuantTemplate(MMWeightTemplate):
 
         if self.bias_name is not None:
             device = weight_dict[self.bias_name].device
-            bias_shape = weight_dict[self.bias_name].shape
-            bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            if device.type == "cuda":
+                self.bias = weight_dict[self.bias_name]
+            elif device.type == "cpu":
+                bias_shape = weight_dict[self.bias_name].shape
+                bias_dtype = weight_dict[self.bias_name].dtype
+                self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype)
+                self.bias.copy_(weight_dict[self.bias_name])
+            else:
+                raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
         else:
             self.bias = None
 
@@ -250,10 +267,15 @@ class MMWeightQuantTemplate(MMWeightTemplate):
 
         if self.bias_name is not None:
             device = weight_dict[self.bias_name].device
-            bias_shape = weight_dict[self.bias_name].shape
-            bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            if device.type == "cuda":
+                self.bias = weight_dict[self.bias_name]
+            elif device.type == "cpu":
+                bias_shape = weight_dict[self.bias_name].shape
+                bias_dtype = weight_dict[self.bias_name].dtype
+                self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype)
+                self.bias.copy_(weight_dict[self.bias_name])
+            else:
+                raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
         else:
             self.bias = None
 
@@ -735,8 +757,8 @@ class MMWeightWint4group128Marlin(MMWeightQuantTemplate):
         if self.bias_name is not None:
             bias_shape = weight_dict[self.bias_name].shape
             bias_dtype = weight_dict[self.bias_name].dtype
-            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype).to(device)
-            self.bias = self.bias.copy_(weight_dict[self.bias_name])
+            self.bias = torch.empty(bias_shape, pin_memory=True, dtype=bias_dtype)
+            self.bias.copy_(weight_dict[self.bias_name])
         else:
             self.bias = None
 
