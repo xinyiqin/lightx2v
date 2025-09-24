@@ -120,7 +120,6 @@ class VARecorder:
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
             "/opt/conda/bin/ffmpeg",
-            "-re",
             "-f",
             "s16le",
             "-ar",
@@ -131,7 +130,6 @@ class VARecorder:
             f"tcp://127.0.0.1:{self.audio_port}",
             "-f",
             "rawvideo",
-            "-re",
             "-pix_fmt",
             "rgb24",
             "-r",
