@@ -73,8 +73,8 @@ class VARecorder:
                         logger.info("Audio thread received stop signal")
                         break
                     # Convert audio data to 16-bit integer format
-                    audios = np.clip(np.round(data * 32767), -32768, 32767).astype(np.int16)
-                    self.audio_conn.send(audios.tobytes())
+                    audios = torch.clamp(torch.round(data * 32767), -32768, 32767).to(torch.int16)
+                    self.audio_conn.send(audios[None].cpu().numpy().tobytes())
                     fail_time = 0
                 except:  # noqa
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
@@ -119,8 +119,7 @@ class VARecorder:
     def start_ffmpeg_process_local(self):
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
-            "/opt/conda/bin/ffmpeg",
-            "-re",
+            "ffmpeg",
             "-f",
             "s16le",
             "-ar",
@@ -131,7 +130,6 @@ class VARecorder:
             f"tcp://127.0.0.1:{self.audio_port}",
             "-f",
             "rawvideo",
-            "-re",
             "-pix_fmt",
             "rgb24",
             "-r",
@@ -171,7 +169,7 @@ class VARecorder:
     def start_ffmpeg_process_rtmp(self):
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
-            "/opt/conda/bin/ffmpeg",
+            "ffmpeg",
             "-re",
             "-f",
             "s16le",
@@ -223,7 +221,7 @@ class VARecorder:
     def start_ffmpeg_process_whip(self):
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
-            "/opt/conda/bin/ffmpeg",
+            "ffmpeg",
             "-re",
             "-f",
             "s16le",
@@ -299,7 +297,7 @@ class VARecorder:
         self.video_thread.start()
 
     # Publish ComfyUI Image tensor and audio tensor to livestream
-    def pub_livestream(self, images: torch.Tensor, audios: np.ndarray):
+    def pub_livestream(self, images: torch.Tensor, audios: torch.Tensor):
         N, height, width, C = images.shape
         M = audios.reshape(-1).shape[0]
         assert C == 3, "Input must be [N, H, W, C] with C=3"
@@ -414,7 +412,7 @@ if __name__ == "__main__":
     audio_path = "/path/to/test_b_2min.wav"
     audio_array, ori_sr = ta.load(audio_path)
     audio_array = ta.functional.resample(audio_array.mean(0), orig_freq=ori_sr, new_freq=16000)
-    audio_array = audio_array.numpy().reshape(-1)
+    audio_array = audio_array.reshape(-1)
     secs = audio_array.shape[0] // sample_rate
     interval = 1
 
