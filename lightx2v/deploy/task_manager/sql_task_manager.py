@@ -17,6 +17,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.table_subtasks = "subtasks"
         self.table_users = "users"
         self.table_versions = "versions"
+        self.table_shares = "shares"
         self.pool = None
         self.metrics_monitor = metrics_monitor
 
@@ -152,6 +153,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         create_t TIMESTAMPTZ NOT NULL
                     )
                 """)
+                # create shares table
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.table_shares} (
+                        share_id VARCHAR(32) PRIMARY KEY,
+                        task_id VARCHAR(128),
+                        user_id VARCHAR(256),
+                        share_type VARCHAR(32) DEFAULT 'task',
+                        create_t TIMESTAMPTZ,
+                        FOREIGN KEY (task_id) REFERENCES {self.table_tasks}(task_id) ON DELETE CASCADE,
+                        FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
+                    )
+                """)
                 # create indexes
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_users}_source ON {self.table_users}(source)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_users}_id ON {self.table_users}(id)")
@@ -161,6 +174,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_subtasks}_task_id ON {self.table_subtasks}(task_id)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_subtasks}_worker_name ON {self.table_subtasks}(worker_name)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_subtasks}_status ON {self.table_subtasks}(status)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_shares}_task_id ON {self.table_shares}(task_id)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_shares}_user_id ON {self.table_shares}(user_id)")
 
                 # update version
                 await conn.execute(f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)", version, description, datetime.now())
@@ -757,6 +772,44 @@ class PostgresSQLTaskManager(BaseTaskManager):
         except:  # noqa
             logger.error(f"delete_task error: {traceback.format_exc()}")
             return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def create_share_link(self, share_id, task_id, user_id, share_type="task"):
+        """创建分享链接"""
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                await conn.execute(
+                    f"INSERT INTO {self.table_shares} (share_id, task_id, user_id, share_type, create_t) VALUES ($1, $2, $3, $4, $5)",
+                    share_id, task_id, user_id, share_type, datetime.now()
+                )
+                return True
+        except:  # noqa
+            logger.error(f"create_share_link error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def get_share_data(self, share_id):
+        """获取分享数据"""
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                row = await conn.fetchrow(
+                    f"SELECT * FROM {self.table_shares} WHERE share_id = $1",
+                    share_id
+                )
+                if not row:
+                    return None
+                share_data = dict(row)
+                self.parse_dict(share_data)
+                return share_data
+        except:  # noqa
+            logger.error(f"get_share_data error: {traceback.format_exc()}")
+            return None
         finally:
             await self.release_conn(conn)
 

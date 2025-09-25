@@ -66,6 +66,14 @@ class BaseTaskManager:
     async def delete_task(self, task_id, user_id=None):
         raise NotImplementedError
 
+    async def create_share_link(self, share_id, task_id, user_id, share_type="task"):
+        """创建分享链接"""
+        raise NotImplementedError
+
+    async def get_share_data(self, share_id):
+        """获取分享数据"""
+        raise NotImplementedError
+
     def fmt_dict(self, data):
         for k in ["status"]:
             if k in data:

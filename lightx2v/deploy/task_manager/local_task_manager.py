@@ -302,6 +302,35 @@ class LocalTaskManager(BaseTaskManager):
             os.remove(task_file)
         return True
 
+    def get_share_filename(self, share_id):
+        return os.path.join(self.local_dir, f"share_{share_id}.json")
+
+    @class_try_catch_async
+    async def create_share_link(self, share_id, task_id, user_id, share_type="task"):
+        """创建分享链接"""
+        share_data = {
+            "share_id": share_id,
+            "task_id": task_id,
+            "user_id": user_id,
+            "share_type": share_type,
+            "create_t": current_time()
+        }
+        share_file = self.get_share_filename(share_id)
+        self.fmt_dict(share_data)
+        with open(share_file, "w") as fout:
+            fout.write(json.dumps(share_data, indent=4, ensure_ascii=False))
+        return True
+
+    @class_try_catch_async
+    async def get_share_data(self, share_id):
+        """获取分享数据"""
+        share_file = self.get_share_filename(share_id)
+        if not os.path.exists(share_file):
+            return None
+        share_data = json.load(open(share_file))
+        self.parse_dict(share_data)
+        return share_data
+
     @class_try_catch_async
     async def insert_user_if_not_exists(self, user_info):
         fpath = self.get_user_filename(user_info["user_id"])
