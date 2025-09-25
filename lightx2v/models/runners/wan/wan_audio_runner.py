@@ -590,10 +590,13 @@ class WanAudioRunner(WanRunner):  # type:ignore
             if self.va_reader is None:
                 return super().run_main(total_steps)
 
+            self.va_reader.start()
             rank, world_size = self.get_rank_and_world_size()
             if rank == world_size - 1:
                 assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 2"
-            self.va_reader.start()
+                self.va_recorder.start(self.config.tgt_w, self.config.tgt_h)
+            if world_size > 1:
+                dist.barrier()
 
             self.init_run()
             if self.config.get("compile", False):
