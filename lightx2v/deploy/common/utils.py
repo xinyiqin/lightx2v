@@ -139,18 +139,10 @@ def format_image_data(data, max_size=1280):
 def format_audio_data(data):
     if len(data) < 4:
         raise ValueError("Audio file too short")
-    try:
-        waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
-        logger.info(f"load audio: {waveform.size()}, {sample_rate}")
-        assert waveform.size(0) > 0, "audio is empty"
-        assert sample_rate > 0, "audio sample rate is not valid"
-    except Exception as e:
-        logger.warning(f"torchaudio failed to load audio, trying alternative method: {e}")
-        # check audio headers
-        audio_headers = [b"RIFF", b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"OggS"]
-        if not any(data.startswith(header) for header in audio_headers):
-            logger.warning("Audio file doesn't have recognized header, but continuing...")
-        logger.info(f"Audio validation passed (alternative method), size: {len(data)} bytes")
+    waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
+    logger.info(f"load audio: {waveform.size()}, {sample_rate}")
+    assert waveform.size(0) > 0, "audio is empty"
+    assert sample_rate > 0, "audio sample rate is not valid"
     return data
 
 
