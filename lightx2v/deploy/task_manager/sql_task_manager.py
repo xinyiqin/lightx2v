@@ -187,7 +187,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     async def load(self, conn, task_id, user_id=None, only_task=False, worker_name=None):
-        query = f"SELECT * FROM {self.table_tasks} WHERE task_id = $1"
+        query = f"SELECT * FROM {self.table_tasks} WHERE task_id = $1 AND tag != 'delete'"
         params = [task_id]
         if user_id is not None:
             query += " AND user_id = $2"
@@ -372,6 +372,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 assert "user_id" not in kwargs, "user_id is not allowed when subtasks is True"
             else:
                 query += self.table_tasks
+                if not kwargs.get("include_delete", False):
+                    param_idx += 1
+                    conds.append(f"tag != ${param_idx}")
+                    params.append("delete")
 
             if "status" in kwargs:
                 param_idx += 1
@@ -717,10 +721,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 task, subtasks = await self.load(conn, task_id, user_id)
                 # the task is not finished
                 if task["status"] not in FinishedStatus:
-                    return False
+                    return "Active task cannot be resumed"
                 # the task is no need to resume
                 if not all_subtask and task["status"] == TaskStatus.SUCCEED:
-                    return False
+                    return "Succeed task cannot be resumed"
 
                 for sub in subtasks:
                     if all_subtask or sub["status"] != TaskStatus.SUCCEED:
@@ -763,10 +767,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     logger.warning(f"Cannot delete task {task_id} with status {task['status']}, only finished tasks can be deleted")
                     return False
 
-                # delete subtasks & task record
-                await conn.execute(f"DELETE FROM {self.table_subtasks} WHERE task_id = $1", task_id)
-                await conn.execute(f"DELETE FROM {self.table_tasks} WHERE task_id = $1", task_id)
-                logger.info(f"Task {task_id} and its subtasks deleted successfully")
+                # delete task record
+                await conn.execute(f"UPDATE {self.table_tasks} SET tag = 'delete', update_t = $1 WHERE task_id = $2", datetime.now(), task_id)
+                logger.info(f"Task {task_id} deleted successfully")
                 return True
 
         except:  # noqa

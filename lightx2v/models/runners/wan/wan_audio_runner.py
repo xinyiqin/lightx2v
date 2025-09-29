@@ -1,6 +1,5 @@
 import gc
 import os
-import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -17,6 +16,7 @@ from torchvision.transforms.functional import resize
 
 from lightx2v.deploy.common.va_reader import VAReader
 from lightx2v.deploy.common.va_recorder import VARecorder
+from lightx2v.deploy.common.va_x64_recorder import VAX64Recorder
 from lightx2v.models.input_encoders.hf.seko_audio.audio_adapter import AudioAdapter
 from lightx2v.models.input_encoders.hf.seko_audio.audio_encoder import SekoAudioEncoderModel
 from lightx2v.models.networks.wan.audio_model import WanAudioModel
@@ -27,7 +27,7 @@ from lightx2v.models.video_encoders.hf.wan.vae_2_2 import Wan2_2_VAE
 from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
-from lightx2v.utils.utils import find_torch_model_path, load_weights, save_to_video, vae_to_comfyui_image
+from lightx2v.utils.utils import find_torch_model_path, load_weights, vae_to_comfyui_image_inplace
 
 
 def get_optimal_patched_size_with_sp(patched_h, patched_w, sp_size):
@@ -472,10 +472,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
     def init_run(self):
         super().init_run()
         self.scheduler.set_audio_adapter(self.audio_adapter)
-
-        self.gen_video_list = []
-        self.cut_audio_list = []
         self.prev_video = None
+        if self.config.get("return_video", False):
+            self.gen_video_final = torch.zeros((self.inputs["expected_frames"], self.config.tgt_h, self.config.tgt_w, 3), dtype=torch.float32, device="cpu")
+        else:
+            self.gen_video_final = None
+        self.cut_audio_final = None
 
     @ProfilingContext4DebugL1("Init run segment")
     def init_run_segment(self, segment_idx, audio_array=None):
@@ -507,22 +509,31 @@ class WanAudioRunner(WanRunner):  # type:ignore
     def end_run_segment(self):
         self.gen_video = torch.clamp(self.gen_video, -1, 1).to(torch.float)
         useful_length = self.segment.end_frame - self.segment.start_frame
-        self.gen_video_list.append(self.gen_video[:, :, :useful_length].cpu())
-        self.cut_audio_list.append(self.segment.audio_array[: useful_length * self._audio_processor.audio_frame_rate])
+        video_seg = self.gen_video[:, :, :useful_length].cpu()
+        audio_seg = self.segment.audio_array[: useful_length * self._audio_processor.audio_frame_rate]
+
+        video_seg = vae_to_comfyui_image_inplace(video_seg)
+
+        # [Warning] Need check whether video segment interpolation works...
+        if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+            target_fps = self.config["video_frame_interpolation"]["target_fps"]
+            logger.info(f"Interpolating frames from {self.config.get('fps', 16)} to {target_fps}")
+            video_seg = self.vfi_model.interpolate_frames(
+                video_seg,
+                source_fps=self.config.get("fps", 16),
+                target_fps=target_fps,
+            )
 
         if self.va_recorder:
-            cur_video = vae_to_comfyui_image(self.gen_video_list[-1])
-            self.va_recorder.pub_livestream(cur_video, self.cut_audio_list[-1])
-
-        if self.va_reader:
-            self.gen_video_list.pop()
-            self.cut_audio_list.pop()
+            self.va_recorder.pub_livestream(video_seg, audio_seg)
+        elif self.config.get("return_video", False):
+            self.gen_video_final[self.segment.start_frame : self.segment.end_frame].copy_(video_seg)
+            self.cut_audio_final = np.concatenate([self.cut_audio_final, audio_seg], axis=0).astype(np.float32) if self.cut_audio_final is not None else audio_seg
 
         # Update prev_video for next iteration
         self.prev_video = self.gen_video
 
-        # Clean up GPU memory after each segment
-        del self.gen_video
+        del video_seg, audio_seg
         torch.cuda.empty_cache()
 
     def get_rank_and_world_size(self):
@@ -537,15 +548,26 @@ class WanAudioRunner(WanRunner):  # type:ignore
         output_video_path = self.config.get("save_video_path", None)
         self.va_recorder = None
         if isinstance(output_video_path, dict):
-            assert output_video_path["type"] == "stream", f"unexcept save_video_path: {output_video_path}"
-            rank, world_size = self.get_rank_and_world_size()
-            if rank == 2 % world_size:
-                record_fps = self.config.get("target_fps", 16)
-                audio_sr = self.config.get("audio_sr", 16000)
-                if "video_frame_interpolation" in self.config and self.vfi_model is not None:
-                    record_fps = self.config["video_frame_interpolation"]["target_fps"]
+            output_video_path = output_video_path["data"]
+        logger.info(f"init va_recorder with output_video_path: {output_video_path}")
+        rank, world_size = self.get_rank_and_world_size()
+        if output_video_path and rank == world_size - 1:
+            record_fps = self.config.get("target_fps", 16)
+            audio_sr = self.config.get("audio_sr", 16000)
+            if "video_frame_interpolation" in self.config and self.vfi_model is not None:
+                record_fps = self.config["video_frame_interpolation"]["target_fps"]
+
+            whip_shared_path = os.getenv("WHIP_SHARED_LIB", None)
+            if whip_shared_path and output_video_path.startswith("http"):
+                self.va_recorder = VAX64Recorder(
+                    whip_shared_path=whip_shared_path,
+                    livestream_url=output_video_path,
+                    fps=record_fps,
+                    sample_rate=audio_sr,
+                )
+            else:
                 self.va_recorder = VARecorder(
-                    livestream_url=output_video_path["data"],
+                    livestream_url=output_video_path,
                     fps=record_fps,
                     sample_rate=audio_sr,
                 )
@@ -579,10 +601,13 @@ class WanAudioRunner(WanRunner):  # type:ignore
             if self.va_reader is None:
                 return super().run_main(total_steps)
 
-            rank, world_size = self.get_rank_and_world_size()
-            if rank == 2 % world_size:
-                assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 0"
             self.va_reader.start()
+            rank, world_size = self.get_rank_and_world_size()
+            if rank == world_size - 1:
+                assert self.va_recorder is not None, "va_recorder is required for stream audio input for rank 2"
+                self.va_recorder.start(self.config.tgt_w, self.config.tgt_h)
+            if world_size > 1:
+                dist.barrier()
 
             self.init_run()
             if self.config.get("compile", False):
@@ -620,78 +645,20 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 self.va_reader.stop()
                 self.va_reader = None
             if self.va_recorder:
-                self.va_recorder.stop(wait=False)
+                self.va_recorder.stop()
                 self.va_recorder = None
 
     @ProfilingContext4DebugL1("Process after vae decoder")
-    def process_images_after_vae_decoder(self, save_video=True):
-        # Merge results
-        gen_lvideo = torch.cat(self.gen_video_list, dim=2).float()
-        merge_audio = np.concatenate(self.cut_audio_list, axis=0).astype(np.float32)
-
-        comfyui_images = vae_to_comfyui_image(gen_lvideo)
-
-        # Apply frame interpolation if configured
-        if "video_frame_interpolation" in self.config and self.vfi_model is not None:
-            target_fps = self.config["video_frame_interpolation"]["target_fps"]
-            logger.info(f"Interpolating frames from {self.config.get('fps', 16)} to {target_fps}")
-            comfyui_images = self.vfi_model.interpolate_frames(
-                comfyui_images,
-                source_fps=self.config.get("fps", 16),
-                target_fps=target_fps,
-            )
-
-        if save_video and isinstance(self.config["save_video_path"], str):
-            if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
-                fps = self.config["video_frame_interpolation"]["target_fps"]
-            else:
-                fps = self.config.get("fps", 16)
-
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                logger.info(f"🎬 Start to save video 🎬")
-
-                self._save_video_with_audio(comfyui_images, merge_audio, fps)
-                logger.info(f"✅ Video saved successfully to: {self.config.save_video_path} ✅")
-
-        # Convert audio to ComfyUI format
-        audio_waveform = torch.from_numpy(merge_audio).unsqueeze(0).unsqueeze(0)
-        comfyui_audio = {"waveform": audio_waveform, "sample_rate": self._audio_processor.audio_sr}
-
-        return {"video": comfyui_images, "audio": comfyui_audio}
+    def process_images_after_vae_decoder(self, save_video=False):
+        if self.config.get("return_video", False):
+            audio_waveform = torch.from_numpy(self.cut_audio_final).unsqueeze(0).unsqueeze(0)
+            comfyui_audio = {"waveform": audio_waveform, "sample_rate": self._audio_processor.audio_sr}
+            return {"video": self.gen_video_final, "audio": comfyui_audio}
+        return {"video": None, "audio": None}
 
     def init_modules(self):
         super().init_modules()
         self.run_input_encoder = self._run_input_encoder_local_r2v_audio
-
-    def _save_video_with_audio(self, images, audio_array, fps):
-        """Save video with audio"""
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_tmp:
-            video_path = video_tmp.name
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as audio_tmp:
-            audio_path = audio_tmp.name
-
-        try:
-            save_to_video(images, video_path, fps)
-            ta.save(audio_path, torch.tensor(audio_array[None]), sample_rate=self._audio_processor.audio_sr)  # type: ignore
-
-            output_path = self.config.get("save_video_path")
-            parent_dir = os.path.dirname(output_path)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-
-            subprocess.call(["/usr/bin/ffmpeg", "-y", "-i", video_path, "-i", audio_path, output_path])
-
-            logger.info(f"Saved video with audio to: {output_path}")
-
-        finally:
-            # Clean up temp files
-            if os.path.exists(video_path):
-                os.remove(video_path)
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
 
     def load_transformer(self):
         """Load transformer with LoRA support"""
@@ -735,7 +702,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
         )
 
         audio_adapter.to(device)
-        weights_dict = load_weights(self.config.adapter_model_path, cpu_offload=audio_adapter_offload, remove_key="ca")
+        load_from_rank0 = self.config.get("load_from_rank0", False)
+        weights_dict = load_weights(self.config.adapter_model_path, cpu_offload=audio_adapter_offload, remove_key="ca", load_from_rank0=load_from_rank0)
         audio_adapter.load_state_dict(weights_dict, strict=False)
         return audio_adapter.to(dtype=GET_DTYPE())
 
