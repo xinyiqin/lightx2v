@@ -95,7 +95,7 @@ class LocalTaskManager(BaseTaskManager):
                     continue
                 if "end_ping_t" in kwargs and kwargs["end_ping_t"] < task["ping_t"]:
                     continue
-                if not kwargs.get("include_delete", False) and task["tag"] == "delete":
+                if not kwargs.get("include_delete", False) and task.get("tag", "") == "delete":
                     continue
 
                 # 如果不是查询子任务，则添加子任务信息到任务中

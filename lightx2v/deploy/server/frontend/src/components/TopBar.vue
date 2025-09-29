@@ -7,10 +7,15 @@ import { initLanguage,loadLanguageAsync, switchLang, languageOptions } from '../
 import {
             currentUser,
             logout,
+            showTemplateDetailModal,
+            showTaskDetailModal,
+            login,
 } from '../utils/other'
 
 // 导航到主页面
 const goToHome = () => {
+    showTemplateDetailModal.value = false
+    showTaskDetailModal.value = false
     router.push({ name: 'Generate' })
 }
 
@@ -51,12 +56,21 @@ const goToHome = () => {
                                     
                             </div>
                             <div class="user-details">
-                                <span class="username">{{ currentUser.username }}</span>
-                                <span class="user-email">{{ currentUser.email }}</span>
+                                <span v-if="currentUser">
+                                    {{ currentUser.username || currentUser.email || '用户' }}
+                                </span>
+                                <span v-else>未登录</span>
                             </div>
+                            <div v-if="currentUser.username">
                                 <button @click="logout" class="text-gradient-primary" :title="t('logout')">
-                                <i class="fas fa-sign-out-alt"></i>
-                            </button>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                </button>
+                            </div>
+                            <div v-else>
+                                <button @click="login" class="text-gradient-primary" :title="t('login')">
+                                    <i class="fas fa-sign-in-alt"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
         </div>

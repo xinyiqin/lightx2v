@@ -10,7 +10,7 @@ import Share from '../views/Share.vue'
 const routes = [
   { path: '/', redirect: '/login' },
   {
-    path: '/login', name: 'Login', component: Login
+    path: '/login', name: 'Login', component: Login, meta: { requiresAuth: false }
   },
   {
     path: '/share/:shareId', name: 'Share', component: Share, meta: { requiresAuth: false }
@@ -74,28 +74,34 @@ const router = createRouter({
 // 路由守卫
 // router/index.js
 router.beforeEach((to, from, next) => {
-  // localStorage.setItem('accessToken', '1234567890')
   const token = localStorage.getItem('accessToken')
-  console.log(token)
-  console.log('to.path:', to.path)
-  if (to.meta.requiresAuth) { // 需要登录的页面
-    if (!token) { // 未登录
-      next('/login');
-    } else {
-      console.log('已登录')
-      if (to.path === '/' || to.path === '/login') { // 已登录且在首页
-        console.log('已登录且在首页')
-        next('/generate');
-      } else { // 已登录且不在首页
-        console.log('已登录')
-        next();
-      }
-    }
-  } else { // 不需要登录的页面
-    console.log('不需要登录的页面')
+  console.log('路由守卫 - token:', token)
+  console.log('路由守卫 - to.path:', to.path)
+  
+  // 如果是不需要登录的页面，直接放行
+  if (to.meta.requiresAuth === false) {
+    console.log('不需要登录的页面，直接放行')
+    // 如果已登录用户访问登录页面，重定向到生成页面
     if (token && to.path === '/login') {
+      console.log('已登录用户访问登录页，重定向到生成页')
       next('/generate');
     } else {
+      next();
+    }
+    return;
+  }
+  
+  // 需要登录的页面
+  if (!token) { // 未登录
+    console.log('需要登录但未登录，跳转到登录页')
+    next('/login');
+  } else {
+    console.log('已登录')
+    if (to.path === '/') { // 已登录且在首页
+      console.log('已登录且在首页，跳转到生成页')
+      next('/generate');
+    } else { // 已登录且不在首页
+      console.log('已登录，放行')
       next();
     }
   }

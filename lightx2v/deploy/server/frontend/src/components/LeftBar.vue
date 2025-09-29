@@ -13,33 +13,33 @@ const { t, locale } = useI18n()
         <!-- 生成视频功能 -->
         <div
           @click="switchToCreateView"
-          class="w-16 h-16 flex items-center justify-center rounded-lg transition-all duration-300
+          class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                  hover:shadow-laser-purple/20 mobile-nav-btn"
           :class="$route.path === '/generate'
             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
             : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
           :title="t('generateVideo')">
-          <i class="fi fi-sr-add text-2xl transition-transform duration-300 group-hover:animate-pulse"></i>
+          <i class="fi fi-sr-add text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
         </div>
 
         <!-- 我的项目功能 -->
         <div
           @click="switchToProjectsView"
-          class="w-16 h-16 flex items-center justify-center rounded-lg transition-all duration-300
+          class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                  hover:shadow-laser-purple/20 mobile-nav-btn"
           :class="$route.path === '/projects'
             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
             : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
           :title="t('myProjects')">
-          <i class="fi fi-br-house-chimney-heart text-2xl transition-transform duration-300 group-hover:animate-pulse"></i>
+          <i class="fi fi-br-house-chimney-heart text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
         </div>
 
         <!-- 灵感广场功能 -->
         <div
           @click="switchToInspirationView"
-          class="w-16 h-16 flex items-center justify-center rounded-lg transition-all duration-300
+          class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
                  hover:shadow-laser-purple/40 mobile-nav-btn"
           :class="$route.path === '/inspirations'
@@ -47,7 +47,7 @@ const { t, locale } = useI18n()
             : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
           :title="t('inspiration')">
           
-          <i class="fi fi-sr-sparkles text-2xl transition-transform duration-300 group-hover:animate-pulse"></i>
+          <i class="fi fi-sr-sparkles text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
         </div>
       </nav>
     </div>

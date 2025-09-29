@@ -39,7 +39,6 @@ import {
             startRecording,
             stopRecording,
             formatRecordingDuration,
-
             taskSearchQuery,
             currentUser,
             models,
@@ -72,7 +71,6 @@ import {
             filteredTasks,
             selectedTaskId,
             selectedTask,
-            selectedTaskFiles,
             loadingTaskFiles,
             statusFilter,
             pagination,
@@ -177,7 +175,6 @@ import {
             deleteTask,
             startPollingTask,
             stopPollingTask,
-            viewTaskDetail,
             reuseTask,
             showTaskCreator,
             toggleSidebar,
@@ -217,7 +214,6 @@ import {
             getSubtaskStatusText,
             formatEstimatedTime,
             formatDuration,
-            getTaskFailureInfo,
             searchTasks,
             filterTasksByStatus,
             filterTasksByType,
@@ -302,6 +298,100 @@ import {
 // 路由监听
 const route = useRoute()
 const router = useRouter()
+
+// 处理任务下载
+const handleDownloadTask = async (task) => {
+    try {
+        console.log('开始下载任务文件:', { taskId: task.task_id, outputs: task.outputs })
+        
+        // 处理文件名，确保有正确的后缀名
+        let fileName = task.outputs?.output_video || 'video.mp4'
+        if (fileName && typeof fileName === 'string') {
+            // 检查是否已有后缀名
+            const hasExtension = /\.[a-zA-Z0-9]+$/.test(fileName)
+            if (!hasExtension) {
+                // 没有后缀名，添加mp4后缀
+                fileName = `${fileName}.mp4`
+                console.log('添加后缀名:', fileName)
+            }
+        }
+        
+        // 先尝试从缓存获取
+        let fileData = getTaskFileFromCache(task.task_id, 'output_video')
+        console.log('缓存中的文件数据:', fileData)
+        
+        if (fileData && fileData.blob) {
+            // 缓存中有blob数据，直接使用
+            console.log('使用缓存中的文件数据')
+            downloadFile({ ...fileData, name: fileName })
+            return
+        }
+        
+        if (fileData && fileData.url) {
+            // 缓存中有URL，使用URL下载
+            console.log('使用缓存中的URL下载:', fileData.url)
+            try {
+                const response = await fetch(fileData.url)
+                console.log('文件响应状态:', response.status, response.ok)
+                
+                if (response.ok) {
+                    const blob = await response.blob()
+                    console.log('文件blob大小:', blob.size)
+                    
+                    const downloadData = {
+                        blob: blob,
+                        name: fileName
+                    }
+                    console.log('构造的文件数据:', downloadData)
+                    downloadFile(downloadData)
+                    return
+                } else {
+                    console.error('文件响应失败:', response.status, response.statusText)
+                }
+            } catch (error) {
+                console.error('使用缓存URL下载失败:', error)
+            }
+        }
+        
+        if (!fileData) {
+            console.log('缓存中没有文件，尝试异步获取...')
+            // 缓存中没有，尝试异步获取
+            const url = await getTaskFileUrl(task.task_id, 'output_video')
+            console.log('获取到的文件URL:', url)
+            
+            if (url) {
+                const response = await fetch(url)
+                console.log('文件响应状态:', response.status, response.ok)
+                
+                if (response.ok) {
+                    const blob = await response.blob()
+                    console.log('文件blob大小:', blob.size)
+                    
+                    fileData = {
+                        blob: blob,
+                        name: fileName
+                    }
+                    console.log('构造的文件数据:', fileData)
+                } else {
+                    console.error('文件响应失败:', response.status, response.statusText)
+                }
+            } else {
+                console.error('无法获取文件URL')
+            }
+        }
+        
+        if (fileData && fileData.blob) {
+            console.log('开始下载文件:', fileData.name)
+            downloadFile(fileData)
+        } else {
+            console.error('文件数据无效:', fileData)
+            showAlert(t('fileUnavailableAlert'), 'danger')
+        }
+    } catch (error) {
+        console.error('下载失败:', error)
+        showAlert(t('downloadFailedAlert'), 'danger')
+    }
+}
 
 // 监听路由变化，处理任务详情路由
 watch(() => route.params.taskId, (newTaskId) => {
@@ -528,7 +618,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                                         <i class="fas fa-redo text-sm sm:text-lg"></i>
                                                             </button>
                                                                 <button v-if="task.status === 'SUCCEED'"
-                                                                        @click.stop="downloadFile(task.outputs?.output_video)"
+                                                                        @click.stop="handleDownloadTask(task)"
                                                                         class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                     :title="t('downloadTask')">
                                                                         <i class="fas fa-download text-sm sm:text-lg"></i>

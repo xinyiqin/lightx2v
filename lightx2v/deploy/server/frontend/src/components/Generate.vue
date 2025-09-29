@@ -113,6 +113,7 @@ let resizeHandler = null
 
 import {
             submitting,
+            templateLoading,
             showTaskTypeMenu,
             showModelMenu,
             isRecording,
@@ -296,32 +297,11 @@ onUnmounted(() => {
                                     <!-- 两个并列的下拉菜单 -->
                                     <div class="flex justify-center gap-10 mb-6">
                                         <!-- 任务类型下拉菜单 -->
-                                        <div class="task-type-dropdown">
-                                            <div class="relative">
-                                                <button @click="showTaskTypeMenu = !showTaskTypeMenu"
-                                                    class="flex items-center gap-3 px-4 py-3 text-white hover:text-gradient-icon transition-all duration-200 text-sm min-w-[120px]"
-                                                    :title="t('selectTaskType')">
-                                                    <span class="text-sm">{{ getTaskTypeName(selectedTaskId) }}</span>
-                                                    <i class="fas fa-chevron-down text-xs transition-transform duration-200 ml-auto"
-                                                        :class="{ 'rotate-180': showTaskTypeMenu }"></i>
-                                                </button>
-
-                                                <!-- 任务类型选择下拉菜单 -->
-                                                <div v-if="showTaskTypeMenu"
-                                                    class="absolute top-full left-0 mt-2 bg-dark-light border border-laser-purple/30 rounded-lg shadow-lg z-50 min-w-[150px]"
-                                                    @click.stop>
-                                                    <div v-for="taskType in availableTaskTypes" :key="taskType"
-                                                        @click="selectTask(taskType); showTaskTypeMenu = false"
-                                                        class="flex items-center gap-3 px-4 py-3 hover:bg-laser-purple/20 cursor-pointer transition-colors duration-200 first:rounded-t-lg last:rounded-b-lg"
-                                                        :class="{ 'bg-laser-purple/20': selectedTaskId === taskType }">
-                                                        <i :class="getTaskTypeIcon(taskType)" class="text-sm"></i>
-                                                        <span class="text-white text-sm">{{ getTaskTypeName(taskType) }}</span>
-                                                        <i v-if="selectedTaskId === taskType"
-                                                            class="fas fa-check text-laser-purple ml-auto"></i>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <ModelDropdown
+                                            :available-models="availableTaskTypes.map(taskType => getTaskTypeName(taskType))"
+                                            :selected-model="getTaskTypeName(selectedTaskId)"
+                                            @select-model="selectTask"
+                                        />
 
                                         <!-- 模型选择下拉菜单 -->
                                         <ModelDropdown 
@@ -509,7 +489,7 @@ onUnmounted(() => {
                                                         class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
                                                             :title="isRecording ? t('stopRecording') : t('recordAudio')"
                                                             :class="{ 'bg-red-500/80': isRecording }">
-                                                        <i class="fas fa-microphone text-lg" :class="{ 'animate-pulse': isRecording }"></i>
+                                                        <i class="fas fa-microphone text-lg" :class="{ 'animate-pulse': isRecording, 'text-red-500': isRecording }"></i>
                                                     </button>
                                                         <span class="text-xs text-gray-300">{{ isRecording ? formatRecordingDuration(recordingDuration) : t('recordAudio') }}</span>
                                                     </div>
@@ -577,13 +557,14 @@ onUnmounted(() => {
 
                                         </div>
                                 <!-- 提交按钮 -->
-                                <div class="flex justify-center mt-2">
-                                    <button @click="submitTask" :disabled="submitting"
-                                        class="btn-primary flex items-center justify-center px-8 py-3 rounded-lg text-lg transition-all shadow-lg">
-            
-                                        <i v-if="submitting" class="fas fa-spinner fa-spin text-xl mr-2"></i>
-                                        <i v-else class="fas fa-play text-xl mr-2"></i>
-                                        {{ submitting ? t('submitting') : t('generateVideo') }}
+                                <div class="flex justify-center mt-6">
+                                    <button @click="submitTask" :disabled="submitting || templateLoading"
+                                        class="generate-button"
+                                        :class="{ 'disabled': submitting || templateLoading }">
+                                        <i v-if="submitting" class="fas fa-spinner fa-spin text-xl mr-3"></i>
+                                        <i v-else-if="templateLoading" class="fas fa-spinner fa-spin text-xl mr-3"></i>
+                                        <i v-else class="fas fa-play text-xl mr-3"></i>
+                                        {{ submitting ? t('submitting') : templateLoading ? '模板加载中...' : t('generateVideo') }}
                                     </button>
                                 </div>
 
@@ -696,3 +677,59 @@ onUnmounted(() => {
 
                 <MediaTemplate />
 </template>
+
+<style scoped>
+/* 生成按钮样式 - 简约大气 */
+.generate-button {
+    padding: 1rem 3rem;
+    background: #8b5cf6;
+    border: none;
+    border-radius: 0.5rem;
+    color: white;
+    font-size: 1.125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 200px;
+    letter-spacing: 0.025em;
+    
+    /* 简约阴影 */
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.generate-button:hover:not(.disabled) {
+    background: #7c3aed;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+.generate-button:active:not(.disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.generate-button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    background: #6b7280;
+    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.2);
+}
+
+.generate-button.disabled:hover {
+    transform: none;
+    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.2);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .generate-button {
+        padding: 0.875rem 2.5rem;
+        font-size: 1rem;
+        min-width: 180px;
+    }
+}
+</style>

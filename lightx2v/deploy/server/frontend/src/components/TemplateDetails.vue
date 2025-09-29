@@ -101,7 +101,6 @@ onUnmounted(() => {
                                             class="video-player"
                                             controls
                                             autoplay
-                                            muted
                                             loop
                                             preload="metadata"
                                             @loadstart="onVideoLoadStart"

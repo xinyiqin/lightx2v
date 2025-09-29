@@ -13,7 +13,8 @@ import {
     getTemplateFileUrl,
     isCreationAreaExpanded,
     switchToCreateView,
-    showAlert
+    showAlert,
+    login
 } from '../utils/other'
 
 const { t } = useI18n()
@@ -59,22 +60,17 @@ const fetchShareData = async () => {
 
 // 获取分享标题
 const getShareTitle = () => {
-    if (shareData.value?.share_type === 'template') {
+    if (shareData.value?.share_type === 'task') {
         // 获取用户名，如果没有则显示默认文本
         const username = shareData.value?.username || '用户'
         return `${username}${t('userGeneratedVideo')}`
     }
-    return t('aiGeneratedVideo')
+    return t('templateVideo')
 }
 
 // 获取分享描述
 const getShareDescription = () => {
-    switch (shareData.value?.share_type) {
-        case 'template':
-            return t('templateDescription')
-        default:
-            return t('createdWithAI')
-    }
+    return t('description')
 }
 
 // 获取分享按钮文本
@@ -144,7 +140,7 @@ const createSimilar = async () => {
     if (!token) {
         // 未登录，跳转到登录页面，并保存分享ID
         localStorage.setItem('shareData', JSON.stringify({ shareId: shareId.value }))
-        router.push('/login')
+        login()
         return
     }
 
@@ -319,7 +315,6 @@ onMounted(async () => {
                             class="video-player"
                             controls
                             autoplay
-                            muted
                             loop
                             preload="metadata"
                             @loadstart="onVideoLoadStart"
@@ -381,7 +376,11 @@ onMounted(async () => {
                         
                         <!-- 技术信息 -->
                         <div class="tech-info">
-                            <p class="tech-text">{{ t('poweredByLightX2V') }}</p>
+                            <p class="tech-text">
+                                <a href="https://github.com/ModelTC/LightX2V" target="_blank" rel="noopener noreferrer" class="tech-link">
+                                    {{ t('poweredByLightX2V') }}
+                                </a>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -744,6 +743,16 @@ onMounted(async () => {
     color: #9ca3af;
     font-size: 0.875rem;
     font-weight: 500;
+}
+
+.tech-link {
+    color: #9ca3af;
+    text-decoration: underline;
+    transition: color 0.3s ease;
+}
+
+.tech-link:hover {
+    color: #8b5cf6;
 }
 
 /* 详细信息面板 */

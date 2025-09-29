@@ -43,11 +43,20 @@ onMounted(async () => {
   // 3. 添加全局点击事件监听器
   document.addEventListener('click', handleClickOutside)
 
-  if (router.currentRoute.value.path === '/share') {
-    return
-  }
   try {
-    // 4. 检查登录状态
+    // 检查是否有登录回调参数
+    const urlParams = new URLSearchParams(window.location.search)
+    const code = urlParams.get('code')
+    
+    if (code) {
+      // 处理登录回调
+      isLoading.value = true
+      source = localStorage.getItem('loginSource')
+      await handleLoginCallback(code, source)
+      return
+    }
+
+    // 检查本地存储的登录状态
     const savedToken = localStorage.getItem('accessToken')
     const savedUser = localStorage.getItem('currentUser')
 
@@ -57,44 +66,24 @@ onMounted(async () => {
       if (isValidToken) {
         currentUser.value = JSON.parse(savedUser)
         isLoggedIn.value = true
-
-        console.log(isLoggedIn)   // true / false
-        console.log(currentUser)  // 当前用户对象
         await init();
-        // 只有访问 '/' 或空路径时才跳到 /generate
-        if (router.currentRoute.value.path === '/' || router.currentRoute.value.path === '') {
-            router.replace('/generate');
-        }
+        console.log('用户已登录，初始化完成')
       } else {
         // Token已过期，清除本地存储
         localStorage.removeItem('accessToken')
         localStorage.removeItem('currentUser')
         isLoggedIn.value = false
-        router.push('/login')
-        console.log('登陆过期')
+        console.log('Token已过期')
         showAlert('请重新登录', 'warning')
-        isLoading.value = false
       }
     } else {
-      const urlParams = new URLSearchParams(window.location.search)
-      const code = urlParams.get('code')
-      if (code) {
-        isLoading.value = true
-        source = localStorage.getItem('loginSource')
-        await handleLoginCallback(code, source)
-        // 登录回调处理完成后，不需要在这里隐藏loading，让路由守卫处理
-        return
-      } else {
-        isLoggedIn.value = false
-        isLoading.value = false
-        router.push('/login')
-      }
+      isLoggedIn.value = false
+      console.log('用户未登录')
     }
   } catch (error) {
     console.error('初始化失败', error)
     showAlert('初始化失败，请刷新页面重试', 'danger')
     isLoggedIn.value = false
-    isLoading.value = false
   } finally {
     loginLoading.value = false
     initLoading.value = false

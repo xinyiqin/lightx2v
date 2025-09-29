@@ -300,7 +300,7 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
 @app.get("/api/v1/task/query")
 async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
     try:
-        # 检查是否有task_ids参数（批量查询）
+        logger.info(f"Query task: {request.query_params}")
         if "task_ids" in request.query_params:
             task_ids = request.query_params["task_ids"].split(",")
             tasks = []
@@ -321,6 +321,7 @@ async def api_v1_task_query(request: Request, user=Depends(verify_user_access)):
             return error_response(f"Task {task_id} not found", 404)
         task["subtasks"] = await server_monitor.format_subtask(subtasks)
         format_task(task)
+        logger.info(f"Query task: {task_id} {task}")
         return task
     except Exception as e:
         traceback.print_exc()
