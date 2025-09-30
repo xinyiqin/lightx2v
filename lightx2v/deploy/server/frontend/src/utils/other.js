@@ -358,6 +358,8 @@
                         s2vAudioPreview.value = value;
                         break;
                 }
+                // 清除音频预览缓存，确保新音频能正确显示
+                urlCache.value.delete('current_audio_preview');
             };
 
             // 提示词模板相关
@@ -3799,6 +3801,10 @@
 
             // 保存完整的任务历史（包括提示词、图片、音频）
             const addTaskToHistory = (taskType, formData) => {
+                console.log('开始保存任务历史:', { taskType, formData });
+                console.log('formData.imageFile:', formData.imageFile);
+                console.log('formData.audioFile:', formData.audioFile);
+                
                 const historyItem = {
                     id: Date.now(),
                     timestamp: new Date().toISOString(),
@@ -3806,6 +3812,31 @@
                     prompt: formData.prompt || '',
                     imageFile: null,
                     audioFile: null
+                };
+
+                let filesToProcess = 0;
+                let filesProcessed = 0;
+
+                // 检查需要处理的文件数量
+                if (formData.imageFile) {
+                    filesToProcess++;
+                    console.log('需要处理图片文件:', formData.imageFile.name, formData.imageFile.type, formData.imageFile.size);
+                }
+                if (formData.audioFile) {
+                    filesToProcess++;
+                    console.log('需要处理音频文件:', formData.audioFile.name, formData.audioFile.type, formData.audioFile.size);
+                }
+
+                console.log('总共需要处理文件数量:', filesToProcess);
+
+                const processFile = () => {
+                    filesProcessed++;
+                    console.log(`文件处理进度: ${filesProcessed}/${filesToProcess}`);
+                    if (filesProcessed === filesToProcess) {
+                        // 所有文件都处理完成，保存历史记录
+                        console.log('所有文件处理完成，开始保存历史记录:', historyItem);
+                        saveTaskHistoryItem(historyItem);
+                    }
                 };
 
                 // 保存图片文件
@@ -3818,12 +3849,10 @@
                             size: formData.imageFile.size,
                             data: e.target.result
                         };
-                        saveTaskHistoryItem(historyItem);
+                        console.log('图片文件处理完成:', formData.imageFile.name);
+                        processFile();
                     };
                     reader.readAsDataURL(formData.imageFile);
-                } else {
-                    // 没有图片文件，直接保存
-                    saveTaskHistoryItem(historyItem);
                 }
 
                 // 保存音频文件
@@ -3836,9 +3865,16 @@
                             size: formData.audioFile.size,
                             data: e.target.result
                         };
-                        saveTaskHistoryItem(historyItem);
+                        console.log('音频文件处理完成:', formData.audioFile.name);
+                        processFile();
                     };
                     reader.readAsDataURL(formData.audioFile);
+                }
+
+                // 如果没有文件需要处理，直接保存
+                if (filesToProcess === 0) {
+                    console.log('没有文件需要处理，直接保存历史记录');
+                    saveTaskHistoryItem(historyItem);
                 }
             };
 
@@ -3847,11 +3883,15 @@
                 try {
                     const existingHistory = JSON.parse(localStorage.getItem('taskHistory') || '[]');
 
-                    // 避免重复添加（基于提示词和任务类型）
-                    const isDuplicate = existingHistory.some(item =>
-                        item.prompt === historyItem.prompt &&
-                        item.taskType === historyItem.taskType
-                    );
+                    // 避免重复添加（基于提示词、任务类型、图片和音频）
+                    const isDuplicate = existingHistory.some(item => {
+                        const samePrompt = item.prompt === historyItem.prompt;
+                        const sameTaskType = item.taskType === historyItem.taskType;
+                        const sameImage = (item.imageFile?.name || '') === (historyItem.imageFile?.name || '');
+                        const sameAudio = (item.audioFile?.name || '') === (historyItem.audioFile?.name || '');
+                        
+                        return samePrompt && sameTaskType && sameImage && sameAudio;
+                    });
 
                     if (!isDuplicate) {
                         // 按时间戳排序，确保最新的记录在最后
@@ -3864,11 +3904,36 @@
                             existingHistory.splice(0, existingHistory.length - 20);
                         }
 
-                        localStorage.setItem('taskHistory', JSON.stringify(existingHistory));
-                        console.log(t('taskHistorySaved'), historyItem);
+                        // 尝试保存到localStorage，如果失败则清理空间
+                        try {
+                            localStorage.setItem('taskHistory', JSON.stringify(existingHistory));
+                            console.log('任务历史已保存:', historyItem);
+                        } catch (storageError) {
+                            if (storageError.name === 'QuotaExceededError') {
+                                console.warn('localStorage空间不足，尝试清理旧数据...');
+                                
+                                // 清理策略：保留最新的10条记录
+                                const cleanedHistory = existingHistory.slice(-10);
+                                
+                                try {
+                                    localStorage.setItem('taskHistory', JSON.stringify(cleanedHistory));
+                                    console.log('任务历史已保存（清理后）:', historyItem);
+                                } catch (secondError) {
+                                    console.error('即使清理后仍无法保存，localStorage空间严重不足:', secondError);
+                                    showAlert('历史记录保存失败：存储空间不足', 'warning');
+                                }
+                            } else {
+                                throw storageError;
+                            }
+                        }
+                    } else {
+                        console.log('任务历史重复，跳过保存:', historyItem);
                     }
                 } catch (error) {
-                    console.error(t('saveTaskHistoryFailed'), error);
+                    console.error('保存任务历史失败:', error);
+                    if (error.name === 'QuotaExceededError') {
+                        showAlert('历史记录保存失败：存储空间不足', 'warning');
+                    }
                 }
             };
 
@@ -3907,57 +3972,85 @@
                 showAlert(t('promptHistoryCleared'), 'info');
             };
 
-            // 图片历史记录管理
+            // 图片历史记录管理 - 从任务列表获取
             const getImageHistory = async () => {
                 try {
-                    const taskHistory = await getLocalTaskHistory();
+                    // 确保任务列表已加载
+                    if (tasks.value.length === 0) {
+                        await refreshTasks();
+                    }
+                    
                     const uniqueImages = [];
                     const seenImages = new Set();
 
-                    // 遍历taskHistory，提取唯一的图片
-                    for (const task of taskHistory) {
-                        if (task.imageFile && task.imageFile.name && !seenImages.has(task.imageFile.name)) {
-                            uniqueImages.push({
-                                filename: task.imageFile.name,
-                                thumbnail: task.imageFile.data,
-                                data: task.imageFile.data,
-                                timestamp: task.timestamp
-                            });
-                            seenImages.add(task.imageFile.name);
+                    // 遍历任务列表，提取唯一的图片
+                    for (const task of tasks.value) {
+                        if (task.inputs && task.inputs.input_image && !seenImages.has(task.inputs.input_image)) {
+                            // 获取图片URL
+                            const imageUrl = await getTaskFileUrl(task.task_id, 'input_image');
+                            if (imageUrl) {
+                                uniqueImages.push({
+                                    filename: task.inputs.input_image,
+                                    url: imageUrl,
+                                    thumbnail: imageUrl, // 使用URL作为缩略图
+                                    taskId: task.task_id,
+                                    timestamp: task.create_t,
+                                    taskType: task.task_type
+                                });
+                                seenImages.add(task.inputs.input_image);
+                            }
                         }
                     }
 
+                    // 按时间戳排序，最新的在前
+                    uniqueImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    
                     const result = uniqueImages.slice(0, 20); // 只显示最近20条
                     imageHistory.value = result;
+                    console.log('从任务列表获取图片历史:', result.length, '条');
                     return result;
                 } catch (error) {
-                    console.error(t('getImageHistoryFailed'), error);
+                    console.error('获取图片历史失败:', error);
                     imageHistory.value = [];
                     return [];
                 }
             };
 
-            // 音频历史记录管理
+            // 音频历史记录管理 - 从任务列表获取
             const getAudioHistory = async () => {
                 try {
-                    const taskHistory = await getLocalTaskHistory();
+                    // 确保任务列表已加载
+                    if (tasks.value.length === 0) {
+                        await refreshTasks();
+                    }
+                    
                     const uniqueAudios = [];
                     const seenAudios = new Set();
 
-                    // 遍历taskHistory，提取唯一的音频
-                    for (const task of taskHistory) {
-                        if (task.audioFile && task.audioFile.name && !seenAudios.has(task.audioFile.name)) {
-                            uniqueAudios.push({
-                                filename: task.audioFile.name,
-                                data: task.audioFile.data,
-                                timestamp: task.timestamp
-                            });
-                            seenAudios.add(task.audioFile.name);
+                    // 遍历任务列表，提取唯一的音频
+                    for (const task of tasks.value) {
+                        if (task.inputs && task.inputs.input_audio && !seenAudios.has(task.inputs.input_audio)) {
+                            // 获取音频URL
+                            const audioUrl = await getTaskFileUrl(task.task_id, 'input_audio');
+                            if (audioUrl) {
+                                uniqueAudios.push({
+                                    filename: task.inputs.input_audio,
+                                    url: audioUrl,
+                                    taskId: task.task_id,
+                                    timestamp: task.create_t,
+                                    taskType: task.task_type
+                                });
+                                seenAudios.add(task.inputs.input_audio);
+                            }
                         }
                     }
 
+                    // 按时间戳排序，最新的在前
+                    uniqueAudios.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    
                     const result = uniqueAudios.slice(0, 20); // 只显示最近20条
                     audioHistory.value = result;
+                    console.log('从任务列表获取音频历史:', result.length, '条');
                     return result;
                 } catch (error) {
                     console.error('获取音频历史失败:', error);
@@ -3966,55 +4059,66 @@
                 }
             };
 
-            // 选择图片历史记录
-            const selectImageHistory = (history) => {
-                // 创建File对象
-                const byteCharacters = atob(history.data.split(',')[1]);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+            // 选择图片历史记录 - 从URL获取
+            const selectImageHistory = async (history) => {
+                try {
+                    // 从URL获取图片文件
+                    const response = await fetch(history.url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const blob = await response.blob();
+                    const file = new File([blob], history.filename, { type: blob.type });
+
+                    // 设置图片预览
+                    setCurrentImagePreview(history.url);
+                    updateUploadedContentStatus();
+
+                    // 更新表单
+                    const currentForm = getCurrentForm();
+                    currentForm.imageFile = file;
+
+                    showImageTemplates.value = false;
+                    showAlert('已应用历史图片', 'success');
+                } catch (error) {
+                    console.error('应用历史图片失败:', error);
+                    showAlert('应用历史图片失败', 'danger');
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                const file = new File([byteArray], history.filename, { type: 'image/jpeg' });
-
-                // 设置图片预览
-                setCurrentImagePreview(history.data);
-
-                // 更新表单
-                const currentForm = getCurrentForm();
-                currentForm.imageFile = file;
-
-                showImageTemplates.value = false;
-                showAlert('已应用历史图片', 'success');
             };
 
-            // 选择音频历史记录
-            const selectAudioHistory = (history) => {
-                // 创建File对象
-                const byteCharacters = atob(history.data.split(',')[1]);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+            // 选择音频历史记录 - 从URL获取
+            const selectAudioHistory = async (history) => {
+                try {
+                    // 从URL获取音频文件
+                    const response = await fetch(history.url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const blob = await response.blob();
+                    const file = new File([blob], history.filename, { type: blob.type });
+
+                    // 设置音频预览
+                    setCurrentAudioPreview(history.url);
+                    updateUploadedContentStatus();
+
+                    // 更新表单
+                    const currentForm = getCurrentForm();
+                    currentForm.audioFile = file;
+
+                    showAudioTemplates.value = false;
+                    showAlert('已应用历史音频', 'success');
+                } catch (error) {
+                    console.error('应用历史音频失败:', error);
+                    showAlert('应用历史音频失败', 'danger');
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                const file = new File([byteArray], history.filename, { type: 'audio/mpeg' });
-
-                // 设置音频预览
-                setCurrentAudioPreview(history.data);
-                updateUploadedContentStatus();
-
-                // 更新表单
-                const currentForm = getCurrentForm();
-                currentForm.audioFile = file;
-
-                showAudioTemplates.value = false;
-                showAlert('已应用历史音频', 'success');
             };
 
-            // 预览音频历史记录
+            // 预览音频历史记录 - 使用URL
             const previewAudioHistory = (history) => {
                 console.log('预览音频历史:', history);
-                const audioUrl = history.data;
+                const audioUrl = history.url;
                 console.log('音频历史URL:', audioUrl);
                 if (!audioUrl) {
                     showAlert('音频历史URL获取失败', 'danger');
@@ -4037,6 +4141,38 @@
             const clearAudioHistory = () => {
                 audioHistory.value = [];
                 showAlert('音频历史已清空', 'info');
+            };
+
+            // 清理localStorage存储空间
+            const clearLocalStorage = () => {
+                try {
+                    // 清理任务历史
+                    localStorage.removeItem('taskHistory');
+                    
+                    // 清理其他可能的缓存数据
+                    const keysToRemove = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && (key.includes('template') || key.includes('task') || key.includes('history'))) {
+                            keysToRemove.push(key);
+                        }
+                    }
+                    
+                    keysToRemove.forEach(key => {
+                        localStorage.removeItem(key);
+                    });
+                    
+                    // 重置相关状态
+                    imageHistory.value = [];
+                    audioHistory.value = [];
+                    promptHistory.value = [];
+                    
+                    showAlert('存储空间已清理', 'success');
+                    console.log('localStorage已清理，释放了存储空间');
+                } catch (error) {
+                    console.error('清理localStorage失败:', error);
+                    showAlert('清理存储空间失败', 'danger');
+                }
             };
 
             const getAuthHeaders = () => {
@@ -5478,6 +5614,7 @@
                 previewAudioHistory,
                 clearImageHistory,
                 clearAudioHistory,
+                clearLocalStorage,
                 getAudioMimeType,
                 getAuthHeaders,
                 startResize,

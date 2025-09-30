@@ -599,14 +599,14 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                     <button
                                                                         v-if="['CREATED', 'PENDING', 'RUNNING','SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                         @click.stop="reuseTask(task)"
-                                                                        class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                                                                        class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/30 transition-colors"
                                                                     :title="t('reuseTask')">
                                                                 <i class="fas fa-copy text-sm sm:text-lg"></i>
                                                     </button>
                                                             <button
                                                                     v-if="['CREATED', 'PENDING', 'RUNNING'].includes(task.status)"
                                                                     @click.stop="cancelTask(task.task_id)"
-                                                                    class="w-10 h-10 rounded-full bg-laser-purple/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
+                                                                    class="w-10 h-10 rounded-full bg-red-400/80 backdrop-blur-sm flex items-center justify-center text-white hover:bg-laser-purple transition-colors"
                                                                     :title="t('cancelTask')">
                                                                 <i class="fas fa-times text-sm sm:text-lg"></i>
                                                             </button>

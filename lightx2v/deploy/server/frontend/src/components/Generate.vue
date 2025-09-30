@@ -23,6 +23,9 @@ const currentFeaturedTemplates = ref([])
 // 屏幕尺寸响应式状态
 const screenSize = ref('large') // 'small' 或 'large'
 
+// 拖拽状态
+const isDragOver = ref(false)
+
 // 获取随机精选模版
 const refreshRandomTemplates = async () => {
     const randomTemplates = await getRandomFeaturedTemplates(10) // 获取10个模版
@@ -36,11 +39,11 @@ const generateRandomColumnLayout = (templates) => {
     // 响应式列数控制
     const getColumnCount = () => {
         if (screenSize.value === 'large') {
-            // 大屏幕：2-4列
-            return Math.floor(Math.random() * 3) + 2 // 2, 3, 4列
+            // 大屏幕：4-6列
+            return Math.floor(Math.random() * 2) + 4 // 4, 5, 6列
         } else {
-            // 小屏幕：1-2列
-            return Math.floor(Math.random() * 2) + 1 // 1, 2列
+            // 小屏幕：2-3列
+            return Math.floor(Math.random() * 2) + 2 // 2, 3列
         }
     }
     
@@ -271,6 +274,83 @@ onMounted(async () => {
     currentFeaturedTemplates.value = randomTemplates
 })
 
+// 拖拽处理函数
+const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+}
+
+const handleDragEnter = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isDragOver.value = true
+}
+
+const handleDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // 只有当离开整个拖拽区域时才设置为false
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+        isDragOver.value = false
+    }
+}
+
+const handleImageDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isDragOver.value = false
+    
+    const files = Array.from(e.dataTransfer.files)
+    const imageFile = files.find(file => file.type.startsWith('image/'))
+    
+    if (imageFile) {
+        // 创建FileList对象来模拟input[type="file"]的change事件
+        const dataTransfer = new DataTransfer()
+        dataTransfer.items.add(imageFile)
+        const fileList = dataTransfer.files
+        
+        // 创建模拟的change事件
+        const event = {
+            target: {
+                files: fileList
+            }
+        }
+        
+        handleImageUpload(event)
+        showAlert('图片拖拽上传成功', 'success')
+    } else {
+        showAlert('请拖拽图片文件', 'warning')
+    }
+}
+
+const handleAudioDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isDragOver.value = false
+    
+    const files = Array.from(e.dataTransfer.files)
+    const audioFile = files.find(file => file.type.startsWith('audio/'))
+    
+    if (audioFile) {
+        // 创建FileList对象来模拟input[type="file"]的change事件
+        const dataTransfer = new DataTransfer()
+        dataTransfer.items.add(audioFile)
+        const fileList = dataTransfer.files
+        
+        // 创建模拟的change事件
+        const event = {
+            target: {
+                files: fileList
+            }
+        }
+        
+        handleAudioUpload(event)
+        showAlert('音频拖拽上传成功', 'success')
+    } else {
+        showAlert('请拖拽音频文件', 'warning')
+    }
+}
+
 // 组件卸载时清理
 onUnmounted(() => {
     if (resizeHandler) {
@@ -281,9 +361,9 @@ onUnmounted(() => {
 </script>
 <template>
                 <!-- 主内容区域 - 响应式布局 -->
-                <div class="flex-1 flex flex-col lg:flex-row min-h-0 mobile-content main-scrollbar content-area">
+                <div class="flex-1 flex flex-col min-h-0 mobile-content main-scrollbar content-area">
                     <!-- 生成视频区域 -->
-                    <div class="flex-1 lg:w-1/2 flex flex-col">
+                    <div class="flex-1 flex flex-col">
                         <!-- 内容区域 -->
                         <div class="flex-1 p-6">
 
@@ -401,6 +481,11 @@ onUnmounted(() => {
                                         </div>
                                         <!-- 上传图片 -->
                                         <div class="upload-area"
+                                            @drop="handleImageDrop"
+                                            @dragover="handleDragOver"
+                                            @dragenter="handleDragEnter"
+                                            @dragleave="handleDragLeave"
+                                            :class="{ 'drag-over': isDragOver }"
                                             >
                                             <!-- 默认上传界面 -->
                                             <div v-if="!getCurrentImagePreview()" class="upload-content">
@@ -459,7 +544,13 @@ onUnmounted(() => {
                                                         </label>
                                         </div>
                                         <!-- 上传音频 -->
-                                        <div class="upload-area">
+                                        <div class="upload-area"
+                                            @drop="handleAudioDrop"
+                                            @dragover="handleDragOver"
+                                            @dragenter="handleDragEnter"
+                                            @dragleave="handleDragLeave"
+                                            :class="{ 'drag-over': isDragOver }"
+                                            >
                                         <!-- 默认上传界面 -->
                                             <div v-if="!getCurrentAudioPreview()" class="upload-content"
                                                 >
@@ -559,7 +650,7 @@ onUnmounted(() => {
                                 <!-- 提交按钮 -->
                                 <div class="flex justify-center mt-6">
                                     <button @click="submitTask" :disabled="submitting || templateLoading"
-                                        class="generate-button"
+                                        class="generate-button btn-primary"
                                         :class="{ 'disabled': submitting || templateLoading }">
                                         <i v-if="submitting" class="fas fa-spinner fa-spin text-xl mr-3"></i>
                                         <i v-else-if="templateLoading" class="fas fa-spinner fa-spin text-xl mr-3"></i>
@@ -581,10 +672,10 @@ onUnmounted(() => {
                     
 
                     <!-- 精选模版区域 -->
-                    <div v-if="currentFeaturedTemplates.length > 0" class="flex-1 lg:w-1/2 flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-gray-700/30">
+                    <div v-if="currentFeaturedTemplates.length > 0" class="flex-1 flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-gray-700/30">
                         <div class="flex-1 p-4 lg:p-6">
                             <!-- 控制区域 -->
-                            <div class="flex items-center justify-between mb-6 lg:mb-8">
+                            <div class="flex-col flex items-center justify-center mb-4 lg:mb-6 gap-3 lg:gap-4">
                                 <!-- 左侧：发现文字和随机按钮 -->
                                 <div class="flex items-center gap-3 lg:gap-4">
                                     <h2 class="text-2xl lg:text-3xl font-bold text-white">{{ t('discover') }}</h2>
@@ -731,5 +822,30 @@ onUnmounted(() => {
         font-size: 1rem;
         min-width: 180px;
     }
+}
+
+/* 拖拽样式 */
+.upload-area.drag-over {
+    border-color: #8b5cf6 !important;
+    background: rgba(139, 92, 246, 0.1) !important;
+    transform: scale(1.02);
+    transition: all 0.3s ease;
+}
+
+.upload-area.drag-over .upload-content {
+    opacity: 0.7;
+}
+
+.upload-area.drag-over::before {
+    content: '拖拽文件到这里';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #8b5cf6;
+    font-size: 1.125rem;
+    font-weight: 600;
+    z-index: 10;
+    pointer-events: none;
 }
 </style>
