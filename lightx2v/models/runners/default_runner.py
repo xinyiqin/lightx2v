@@ -277,7 +277,8 @@ class DefaultRunner(BaseRunner):
         "Run VAE Decoder",
         recorder_mode=GET_RECORDER_MODE(),
         metrics_func=monitor_cli.lightx2v_run_vae_decode_duration,
-        metrics_labels=labels=["DefaultRunner"]
+        metrics_labels=["DefaultRunner"],
+        labels=["DefaultRunner"]
     )
     def run_vae_decoder(self, latents):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):

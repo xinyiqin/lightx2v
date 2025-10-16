@@ -1,4 +1,4 @@
-0<script setup>
+<script setup>
 import { showTemplateDetailModal,
         closeTemplateDetailModal,
         useTemplate,
@@ -87,7 +87,7 @@ onUnmounted(() => {
                         </div>
 
                         <!-- 主要内容区域 -->
-                        <div class="main-content main-scrollbar overflow-y-auto">
+                        <div class="main-content">
                             <!-- 分享内容 -->
                             <div class="content-grid">
                                 <!-- 左侧视频区域 -->
@@ -279,7 +279,7 @@ onUnmounted(() => {
 <style scoped>
 /* Landing Page 样式 */
 .landing-page {
-    min-height: calc(100vh - 60px);
+    height: calc(100vh - 60px);
     width: 100%;
     background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
     color: white;
@@ -287,8 +287,9 @@ onUnmounted(() => {
     top: 60px;
     left: 0;
     right: 0;
-    bottom: 0;
     z-index: 50;
+    display: flex;
+    flex-direction: column;
 }
 
 .modal-header {
@@ -346,8 +347,11 @@ onUnmounted(() => {
 .main-content {
     width: 100%;
     padding: 2rem 0;
-    min-height: calc(100vh - 80px);
+    flex: 1;
     background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
 }
 
 /* 内容网格布局 */

@@ -15,10 +15,10 @@ const { t, locale } = useI18n()
           @click="switchToCreateView"
           class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
-                 hover:shadow-laser-purple/20 mobile-nav-btn"
+                 active:scale-105 active:shadow-lg active:shadow-laser-purple/20 mobile-nav-btn"
           :class="$route.path === '/generate'
             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
-            : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
+            : 'text-gray-400 hover:text-laser-purple active:text-white active:bg-laser-purple active:border-laser-purple/30'"
           :title="t('generateVideo')">
           <i class="fi fi-sr-add text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
         </div>
@@ -28,10 +28,10 @@ const { t, locale } = useI18n()
           @click="switchToProjectsView"
           class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
-                 hover:shadow-laser-purple/20 mobile-nav-btn"
+                 mobile-nav-btn"
           :class="$route.path === '/projects'
             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
-            : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
+            : 'text-gray-400 hover:text-laser-purple active:text-white active:bg-laser-purple active:border-laser-purple/30'"
           :title="t('myProjects')">
           <i class="fi fi-br-house-chimney-heart text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
         </div>
@@ -41,10 +41,10 @@ const { t, locale } = useI18n()
           @click="switchToInspirationView"
           class="w-18 h-18 flex items-center justify-center rounded-lg transition-all duration-300
                  font-medium text-sm border border-transparent hover:scale-105 hover:shadow-lg
-                 hover:shadow-laser-purple/40 mobile-nav-btn"
+                 active:scale-105 active:shadow-lg active:shadow-laser-purple/20 mobile-nav-btn"
           :class="$route.path === '/inspirations'
             ? 'bg-laser-purple/40 text-white border-laser-purple/40 shadow-lg shadow-laser-purple/20'
-            : 'text-gray-400 hover:text-white hover:bg-dark-light hover:border-laser-purple/30'"
+            : 'text-gray-400 hover:text-laser-purple active:text-white active:bg-laser-purple active:border-laser-purple/30'"
           :title="t('inspiration')">
 
           <i class="fi fi-sr-sparkles text-3xl transition-transform duration-300 group-hover:animate-pulse"></i>
