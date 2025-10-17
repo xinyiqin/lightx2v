@@ -4,9 +4,9 @@
     "text_len": 512,
     "target_height": 720,
     "target_width": 1280,
-    "self_attn_1_type": "flash_attn3",
-    "cross_attn_1_type": "flash_attn3",
-    "cross_attn_2_type": "flash_attn3",
+    "self_attn_1_type": "sage_attn2",
+    "cross_attn_1_type": "sage_attn2",
+    "cross_attn_2_type": "sage_attn2",
     "sample_guide_scale": [
         3.5,
         3.5
@@ -25,6 +25,9 @@
         500,
         250
     ],
-    "dit_distill_ckpt_high": "Wan2.2-I2V-A14B/distill_models/high_noise_model/distill_model.safetensors",
-    "dit_distill_ckpt_low": "Wan2.2-I2V-A14B/distill_models/low_noise_model/distill_model.safetensors"
+    "mm_config": {
+        "mm_type": "W-fp8-channel-sym-A-fp8-channel-sym-dynamic-Q8F"
+    },
+    "t5_quantized": true,
+    "t5_quant_scheme": "fp8-q8f"
 }
