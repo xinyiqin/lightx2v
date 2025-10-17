@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { watch, onMounted, computed, ref, nextTick, onUnmounted } from 'vue'
 import ModelDropdown from './ModelDropdown.vue'
 import MediaTemplate from './MediaTemplate.vue'
+import Voice_tts from './Voice_tts.vue'
 
 // Props
 const props = defineProps({
@@ -25,6 +26,35 @@ const screenSize = ref('large') // 'small' 或 'large'
 
 // 拖拽状态
 const isDragOver = ref(false)
+
+// 语音合成模态框状态
+const showVoiceTTSModal = ref(false)
+
+// 处理语音合成完成后的回调
+const handleTTSComplete = (audioBlob) => {
+    // 创建File对象
+    const audioFile = new File([audioBlob], 'tts_audio.mp3', { type: 'audio/mpeg' })
+
+    // 模拟文件上传事件
+    const dataTransfer = new DataTransfer()
+    dataTransfer.items.add(audioFile)
+    const fileList = dataTransfer.files
+
+    const event = {
+        target: {
+            files: fileList
+        }
+    }
+
+    // 处理音频上传
+    handleAudioUpload(event)
+
+    // 关闭模态框
+    showVoiceTTSModal.value = false
+
+    // 显示成功提示
+    showAlert('语音合成完成，已自动添加到音频素材', 'success')
+}
 
 // 获取随机精选模版
 const refreshRandomTemplates = async () => {
@@ -420,7 +450,7 @@ onUnmounted(() => {
                                     <!-- 展开开关 -->
                                     <div class="relative group cursor-pointer max-w-3/5" @click="expandCreationArea">
                                         <button
-                                            class="relative w-full bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base hover:border-laser-purple transition-all duration-300 resize-none hover:shadow-2xl"
+                                            class="cursor-pointer relative bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base text-white hover:border-laser-purple hover:bg-laser-purple hover:text-gray-900 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 resize-none min-w-[250px] max-w-[400px] group"
                                         >
                                         <i class="fi fi-sr-cursor-finger-click text-lg text-gradient-icon transition-all duration-300 pointer-events-none group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.6)] group-hover:animate-pulse"></i>
                                         <span class="pl-2 text-base font-bold text-gradient-icon transition-all duration-300 pointer-events-none group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.6)] group-hover:animate-pulse">{{ t('startCreatingVideo') }}</span>
@@ -436,7 +466,7 @@ onUnmounted(() => {
                                     <!-- 中心文字 -->
                                     <div class="text-center">
 
-                                        <h2 class="text-4xl font-bold text-laser-purple mb-6 animate-fade-in">{{ t('whatMaterialsDoYouNeed') }}</h2>
+                                        <h2 class="text-3xl sm:text-3xl md:text-3xl lg:text-4xl font-bold text-laser-purple mb-6 animate-fade-in">{{ t('whatMaterialsDoYouNeed') }}</h2>
 
                                         <p class="text-gray-400 text-lg mb-8 transition-all duration-300">
                                             <span v-if="selectedTaskId === 't2v'"
@@ -584,6 +614,14 @@ onUnmounted(() => {
                                                     </button>
                                                         <span class="text-xs text-gray-300">{{ isRecording ? formatRecordingDuration(recordingDuration) : t('recordAudio') }}</span>
                                                     </div>
+                                                    <div class="flex flex-col items-center space-y-2">
+                                                        <button @click.stop="showVoiceTTSModal = true"
+                                                            class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
+                                                            title="语音合成">
+                                                            <i class="fas fa-volume-up text-lg"></i>
+                                                        </button>
+                                                        <span class="text-xs text-gray-300">语音合成</span>
+                                                    </div>
 
                                         </div>
                                             </div>
@@ -650,13 +688,14 @@ onUnmounted(() => {
                                 <!-- 提交按钮 -->
                                 <div class="flex justify-center mt-6">
                                     <button @click="submitTask" :disabled="submitting || templateLoading"
-                                        class="generate-button btn-primary"
-                                        :class="{ 'disabled': submitting || templateLoading }">
+                                            class="cursor-pointer relative bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base text-white hover:border-laser-purple hover:bg-laser-purple hover:text-gray-900 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 resize-none min-w-[250px] max-w-[400px] group"
+                                            :class="{ 'disabled': submitting || templateLoading }">
+
                                         <i v-if="submitting" class="fas fa-spinner fa-spin text-xl mr-3"></i>
                                         <i v-else-if="templateLoading" class="fas fa-spinner fa-spin text-xl mr-3"></i>
-                                        <i v-else class="fas fa-play text-xl mr-3"></i>
-                                        {{ submitting ? t('submitting') : templateLoading ? '模板加载中...' : t('generateVideo') }}
-                                    </button>
+                                        <i v-else class="fi fi-sr-cursor-finger-click text-lg text-gradient-icon transition-all duration-300 pointer-events-none group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.6)] group-hover:animate-pulse"></i>
+                                        <span class="pl-2 text-base font-bold text-gradient-icon transition-all duration-300 pointer-events-none group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.6)] group-hover:animate-pulse">{{ submitting ? t('submitting') : templateLoading ? '模板加载中...' : t('generateVideo') }}</span>
+                                        </button>
                                 </div>
 
                                 </div>
@@ -767,61 +806,44 @@ onUnmounted(() => {
             </div>
 
                 <MediaTemplate />
+
+                <!-- 语音合成模态框 -->
+                <div v-if="showVoiceTTSModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+                    <div class="relative w-full h-full max-w-8xl max-h-[100vh] mx-4 my-8 bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
+                        <Voice_tts @tts-complete="handleTTSComplete" @close-modal="showVoiceTTSModal = false" />
+                    </div>
+                </div>
 </template>
 
 <style scoped>
-/* 生成按钮样式 - 简约大气 */
-.generate-button {
-    padding: 1rem 3rem;
-    background: #8b5cf6;
-    border: none;
-    border-radius: 0.5rem;
-    color: white;
-    font-size: 1.125rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 200px;
-    letter-spacing: 0.025em;
 
-    /* 简约阴影 */
-    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
-}
-
-.generate-button:hover:not(.disabled) {
-    background: #7c3aed;
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
-}
-
-.generate-button:active:not(.disabled) {
-    transform: translateY(0);
-    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
-}
-
-.generate-button.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    background: #6b7280;
-    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.2);
-}
-
-.generate-button.disabled:hover {
-    transform: none;
-    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.2);
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-    .generate-button {
-        padding: 0.875rem 2.5rem;
-        font-size: 1rem;
-        min-width: 180px;
+/* 脉冲动画 */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
     }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* 按钮禁用状态样式 */
+button.disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    background: rgba(31, 41, 55, 0.8) !important;
+    border-color: #6b7280 !important;
+    box-shadow: none !important;
+    color: #ffffff !important;
+}
+
+button.disabled:hover {
+    transform: none !important;
+    background: rgba(31, 41, 55, 0.8) !important;
+    border-color: #6b7280 !important;
+    box-shadow: none !important;
+    color: #ffffff !important;
 }
 
 /* 拖拽样式 */

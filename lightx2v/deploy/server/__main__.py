@@ -3,7 +3,9 @@ import asyncio
 import json
 import mimetypes
 import os
+import tempfile
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -13,9 +15,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from pydantic import BaseModel
 
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.utils import check_params, data_name, load_inputs
+from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.server.auth import AuthManager
@@ -24,6 +28,22 @@ from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.server.redis_monitor import RedisServerMonitor
 from lightx2v.deploy.task_manager import FinishedStatus, LocalTaskManager, PostgresSQLTaskManager, TaskStatus
 from lightx2v.utils.service_utils import ProcessManager
+
+# =========================
+# Pydantic Models
+# =========================
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice_type: str
+    context_texts: str = ""
+    emotion: str = ""
+    emotion_scale: int = 3
+    speed_rate: int = 0
+    loudness_rate: int = 0
+    resource_id: str = "seed-tts-1.0"
+
 
 # =========================
 # FastAPI Related Code
@@ -36,6 +56,7 @@ queue_manager = None
 server_monitor = None
 auth_manager = None
 metrics_monitor = MetricMonitor()
+volcengine_tts_client = None
 
 
 @asynccontextmanager
@@ -906,6 +927,59 @@ async def api_v1_share_get(share_id: str):
         return error_response(str(e), 500)
 
 
+@app.get("/api/v1/voices/list")
+async def api_v1_voices_list():
+    try:
+        if volcengine_tts_client is None:
+            return error_response("Volcengine TTS client not loaded", 500)
+        voices = volcengine_tts_client.get_voice_list()
+        if voices is None:
+            return error_response("No voice list found", 404)
+        return voices
+    except Exception as e:
+        traceback.print_exc()
+        return error_response("Failed to get voice list", 500)
+
+
+@app.post("/api/v1/tts/generate")
+async def api_v1_tts_generate(request: TTSRequest):
+    """Generate TTS audio from text"""
+    try:
+        # Validate parameters
+        if not request.text.strip():
+            return JSONResponse({"error": "Text cannot be empty"}, status_code=400)
+
+        if not request.voice_type:
+            return JSONResponse({"error": "Voice type is required"}, status_code=400)
+
+        # Generate unique output filename
+        output_filename = f"tts_output_{uuid.uuid4().hex}.mp3"
+        output_path = os.path.join(tempfile.gettempdir(), output_filename)
+
+        # Generate TTS
+        success = await volcengine_tts_client.tts_request(
+            text=request.text,
+            voice_type=request.voice_type,
+            context_texts=request.context_texts,
+            emotion=request.emotion,
+            emotion_scale=request.emotion_scale,
+            speed_rate=request.speed_rate,
+            loudness_rate=request.loudness_rate,
+            output=output_path,
+            resource_id=request.resource_id,
+        )
+
+        if success and os.path.exists(output_path):
+            # Return the audio file
+            return FileResponse(output_path, media_type="audio/mpeg", filename=output_filename)
+        else:
+            return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+
+    except Exception as e:
+        logger.error(f"TTS generation error: {e}")
+        return JSONResponse({"error": f"TTS generation failed: {str(e)}"}, status_code=500)
+
+
 # 所有未知路由 fallback 到 index.html (必须在所有API路由之后)
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def vue_fallback(full_path: str):
@@ -929,6 +1003,7 @@ if __name__ == "__main__":
     dft_task_url = os.path.join(base_dir, "local_task")
     dft_data_url = os.path.join(base_dir, "local_data")
     dft_queue_url = os.path.join(base_dir, "local_queue")
+    dft_volcengine_tts_list_json = os.path.join(base_dir, "configs/volcengine_voices_list.json")
 
     parser.add_argument("--pipeline_json", type=str, default=dft_pipeline_json)
     parser.add_argument("--task_url", type=str, default=dft_task_url)
@@ -936,12 +1011,14 @@ if __name__ == "__main__":
     parser.add_argument("--queue_url", type=str, default=dft_queue_url)
     parser.add_argument("--redis_url", type=str, default="")
     parser.add_argument("--template_dir", type=str, default="")
+    parser.add_argument("--volcengine_tts_list_json", type=str, default=dft_volcengine_tts_list_json)
     parser.add_argument("--ip", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
     model_pipelines = Pipeline(args.pipeline_json)
+    volcengine_tts_client = VolcEngineTTSClient(args.volcengine_tts_list_json)
     auth_manager = AuthManager()
     if args.task_url.startswith("/"):
         task_manager = LocalTaskManager(args.task_url, metrics_monitor)
