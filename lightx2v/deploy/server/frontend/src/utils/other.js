@@ -57,6 +57,9 @@
 
             const showTaskDetailModal = ref(false);
             const modalTask = ref(null);
+            
+            // TaskCarousel当前任务状态
+            const currentTask = ref(null);
 
             // 视频加载状态跟踪
             const videoLoadedStates = ref(new Map()); // 跟踪每个视频的加载状态
@@ -3372,6 +3375,12 @@
                                         }
                                     }
 
+                                    // 如果当前TaskCarousel显示的是这个任务，更新currentTask
+                                    if (currentTask.value && currentTask.value.task_id === updatedTask.task_id) {
+                                        currentTask.value = updatedTask;
+                                        console.log('TaskCarousel: 更新currentTask', updatedTask);
+                                    }
+
                                     // 如果当前在projects页面且变化的是状态，更新tasks
                                     if (router.path === '/projects' && oldTask.status !== updatedTask.status) {
                                         refreshTasks(true);
@@ -5559,6 +5568,7 @@
                 showConfirmDialog,
                 showTaskDetailModal,
                 modalTask,
+                currentTask,
                 t2vForm,
                 i2vForm,
                 s2vForm,

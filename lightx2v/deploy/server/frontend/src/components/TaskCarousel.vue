@@ -20,7 +20,9 @@ import {
     downloadFile,
     getTaskFileFromCache,
     apiRequest,
-    copyShareLink
+    copyShareLink,
+    currentTask,
+    startPollingTask
 } from '../utils/other'
 
 const { t } = useI18n()
@@ -34,8 +36,7 @@ const props = defineProps({
     }
 })
 
-// 响应式数据
-const currentTaskIndex = ref(0)
+// 响应式数据å
 const isVideoLoaded = ref(false)
 const isVideoError = ref(false)
 const videoElement = ref(null)
@@ -50,15 +51,16 @@ const sortedTasks = computed(() => {
     })
 })
 
-const currentTask = computed(() => {
-    return sortedTasks.value[currentTaskIndex.value] || null
-})
-
 const taskStatus = computed(() => currentTask.value?.status || 'CREATED')
 const isCompleted = computed(() => taskStatus.value === 'SUCCEED')
 const isRunning = computed(() => ['CREATED', 'PENDING', 'RUNNING'].includes(taskStatus.value))
 const isFailed = computed(() => taskStatus.value === 'FAILED')
 const isCancelled = computed(() => taskStatus.value === 'CANCEL')
+
+// 当前任务索引（用于显示）
+const currentTaskIndex = computed(() => {
+    return sortedTasks.value.findIndex(task => task.task_id === currentTask.value?.task_id)
+})
 
 // 获取视频URL
 const videoUrl = computed(() => {
@@ -72,33 +74,65 @@ const imageUrl = computed(() => {
     return getTaskFileUrlSync(currentTask.value.task_id, 'input_image')
 })
 
-// 获取进度百分比
-const progressPercentage = computed(() => {
-    if (!isRunning.value || !currentTask.value) return 0
-    return getOverallProgress(currentTask.value)
-})
+// 更新当前任务数据并启动轮询
+const updateCurrentTaskData = async (task) => {
+    if (!task?.task_id) return
+    
+    try {
+        const response = await apiRequest(`/api/v1/task/query?task_id=${task.task_id}`)
+        if (response && response.ok) {
+            const updatedTask = await response.json()
+            // 更新全局currentTask
+            currentTask.value = updatedTask
+            console.log('TaskCarousel: 更新任务数据', updatedTask)
+            
+            // 如果任务还在进行中，开始轮询状态
+            if (['CREATED', 'PENDING', 'RUNNING'].includes(updatedTask.status)) {
+                startPollingTask(updatedTask.task_id)
+            }
+        }
+    } catch (error) {
+        console.warn(`TaskCarousel: 获取任务数据失败 task_id=${task.task_id}`, error.message)
+    }
+}
 
-// 获取进度文本
-const progressText = computed(() => {
-    if (!isRunning.value || !currentTask.value) return ''
-    return getProgressInfo(currentTask.value)
-})
+
 
 // 任务切换方法
 const goToPreviousTask = () => {
     if (sortedTasks.value.length <= 1) return
-    currentTaskIndex.value = currentTaskIndex.value > 0 
-        ? currentTaskIndex.value - 1 
-        : sortedTasks.value.length - 1
+    
+    const currentIndex = sortedTasks.value.findIndex(task => task.task_id === currentTask.value?.task_id)
+    if (currentIndex === -1) return
+    
+    const newIndex = currentIndex > 0 ? currentIndex - 1 : sortedTasks.value.length - 1
+    const newTask = sortedTasks.value[newIndex]
+    currentTask.value = newTask
     resetVideoState()
+    // 更新新任务的数据并启动轮询
+    updateCurrentTaskData(newTask)
 }
 
 const goToNextTask = () => {
     if (sortedTasks.value.length <= 1) return
-    currentTaskIndex.value = currentTaskIndex.value < sortedTasks.value.length - 1 
-        ? currentTaskIndex.value + 1 
-        : 0
+    
+    const currentIndex = sortedTasks.value.findIndex(task => task.task_id === currentTask.value?.task_id)
+    if (currentIndex === -1) return
+    
+    const newIndex = currentIndex < sortedTasks.value.length - 1 ? currentIndex + 1 : 0
+    const newTask = sortedTasks.value[newIndex]
+    currentTask.value = newTask
     resetVideoState()
+    // 更新新任务的数据并启动轮询
+    updateCurrentTaskData(newTask)
+}
+
+// 处理任务指示器点击
+const handleTaskIndicatorClick = (task) => {
+    currentTask.value = task
+    resetVideoState()
+    // 更新任务数据并启动轮询
+    updateCurrentTaskData(task)
 }
 
 // 重置视频状态
@@ -160,6 +194,7 @@ const handleShareTask = async () => {
         showAlert('分享失败，请重试', 'danger')
     }
 }
+
 
 // 获取文件扩展名
 const getFileExtension = (fileKey) => {
@@ -248,6 +283,13 @@ const handleKeydown = (event) => {
 // 生命周期
 onMounted(() => {
     document.addEventListener('keydown', handleKeydown)
+    // 初始化时设置第一个任务为当前任务
+    if (sortedTasks.value.length > 0 && !currentTask.value) {
+        const firstTask = sortedTasks.value[0]
+        currentTask.value = firstTask
+        // 更新任务数据并启动轮询
+        updateCurrentTaskData(firstTask)
+    }
 })
 
 onUnmounted(() => {
@@ -305,20 +347,41 @@ onUnmounted(() => {
                     <!-- 进度条 -->
                     <div class="progress-overlay">
                         <div class="progress-container">
-                            <div class="progress-header">
-                                <div class="progress-status">
-                                    {{ getTaskStatusDisplay(taskStatus) }}
-                                </div>
-                            </div>
                             
-                            <div class="progress-info">
-                                <span class="progress-text">{{ progressText }}</span>
-                                <span class="progress-percentage">{{ Math.round(progressPercentage) }}%</span>
-                            </div>
-                            
-                            <div class="progress-bar">
-                                <div class="progress-line">
-                                    <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
+                            <!-- 进度条-->
+                            <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(taskStatus)">
+                                <div v-for="(subtask, index) in (currentTask?.subtasks || [])" :key="index">
+                                    <!-- PENDING状态：显示排队信息 -->
+                                    <div v-if="subtask.status === 'PENDING'" class="queue-info">
+                                        <div v-if="subtask.estimated_pending_order !== null && subtask.estimated_pending_order !== undefined && subtask.estimated_pending_order >= 0" class="queue-visualization">
+                                            <div class="queue-people">
+                                                <i v-for="n in Math.min(Math.max(subtask.estimated_pending_order, 0), 10)"
+                                                   :key="n"
+                                                   class="fas fa-user queue-person"></i>
+                                                <span v-if="subtask.estimated_pending_order > 10" class="queue-more">
+                                                    +{{ subtask.estimated_pending_order - 10 }}
+                                                </span>
+                                            </div>
+                                            <span class="queue-text">
+                                                {{ t('queuePosition') }}: {{ subtask.estimated_pending_order }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <!-- RUNNING状态：显示进度条 -->
+                                    <div v-else-if="subtask.status === 'RUNNING'" class="progress-container">
+                                        <div class="minimal-progress-bar">
+                                            <div class="progress-line">
+                                                <div class="progress-fill" :style="{ width: getSubtaskProgress(subtask) + '%' }"></div>
+                                                <div class="moving-dot" :style="{ left: getSubtaskProgress(subtask) + '%' }"></div>
+                                            </div>
+                                        </div>
+                                        <div class="progress-info">
+                                            <span class="estimated-time">
+                                                {{ getSubtaskProgress(subtask) }}%
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -411,7 +474,7 @@ onUnmounted(() => {
             <div 
                 v-for="(task, index) in sortedTasks" 
                 :key="task.task_id"
-                @click="currentTaskIndex = index"
+                @click="handleTaskIndicatorClick(task)"
                 class="indicator hover:bg-laser-purple hover:scale-110"
                 :class="index === currentTaskIndex? 'bg-laser-purple': 'bg-gray-400/30'">
             </div>
@@ -573,13 +636,6 @@ onUnmounted(() => {
     text-align: center;
 }
 
-.progress-header {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1rem;
-}
-
 .progress-status {
     font-size: 0.75rem;
     color: #8b5cf6;
@@ -591,7 +647,7 @@ onUnmounted(() => {
 
 .progress-info {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
     margin-bottom: 1rem;
     font-size: 0.875rem;
@@ -615,10 +671,9 @@ onUnmounted(() => {
 .progress-line {
     position: relative;
     width: 100%;
-    height: 4px;
+    height: 2px;
     background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-    overflow: hidden;
+    border-radius: 1px;
 }
 
 .progress-fill {
@@ -627,9 +682,95 @@ onUnmounted(() => {
     left: 0;
     height: 100%;
     background: linear-gradient(90deg, #8b5cf6, #a855f7);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+    border-radius: 1px;
+    transition: width 0.5s ease;
+}
+
+.moving-dot {
+    position: absolute;
+    top: -4px;
+    width: 10px;
+    height: 10px;
+    background: linear-gradient(45deg, #8b5cf6, #a855f7);
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+    transition: left 0.5s ease;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+    }
+    50% {
+        transform: scale(1.2);
+        box-shadow: 0 0 15px rgba(139, 92, 246, 0.8);
+    }
+}
+
+/* TaskDetails进度条样式 */
+.minimal-progress-bar {
+    margin-bottom: 0.75rem;
+}
+
+.queue-info {
+    margin-top: 0.75rem;
+    text-align: center;
+}
+
+.queue-visualization {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.queue-people {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.queue-person {
+    font-size: 0.875rem;
+    color: #f59e0b;
+    opacity: 0.8;
+}
+
+.queue-more {
+    font-size: 0.75rem;
+    color: #f59e0b;
+    font-weight: 600;
+    margin-left: 0.25rem;
+}
+
+.queue-text {
+    font-size: 0.75rem;
+    color: #f59e0b;
+    font-weight: 500;
+}
+
+.estimated-time {
+    display: flex;
+    align-items: center;
+    font-size: 0.875rem;
+    color: #22c55e;
+    font-weight: 600;
+    animation: countdown 1s ease-in-out infinite;
+}
+
+@keyframes countdown {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.05);
+    }
 }
 
 /* 错误状态 */

@@ -537,9 +537,9 @@ onUnmounted(() => {
 
                                                 <!-- PENDING状态：显示排队信息 -->
                                                 <div v-if="subtask.status === 'PENDING'" class="queue-info">
-                                                    <div v-if="subtask.estimated_pending_order !== null" class="queue-visualization">
+                                                    <div v-if="subtask.estimated_pending_order !== null && subtask.estimated_pending_order !== undefined && subtask.estimated_pending_order >= 0" class="queue-visualization">
                                                         <div class="queue-people">
-                                                            <i v-for="n in Math.min(subtask.estimated_pending_order, 10)"
+                                                            <i v-for="n in Math.min(Math.max(subtask.estimated_pending_order, 0), 10)"
                                                                :key="n"
                                                                class="fas fa-user queue-person"></i>
                                                             <span v-if="subtask.estimated_pending_order > 10" class="queue-more">
