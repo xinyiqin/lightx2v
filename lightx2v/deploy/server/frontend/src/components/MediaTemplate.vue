@@ -4,6 +4,10 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
+// 音频播放状态管理
+const playingAudioId = ref(null)
+const audioDurations = ref({})
+
 import {
     getTemplateFileUrl,
     getHistoryImageUrl,
@@ -16,6 +20,8 @@ import {
     selectAudioTemplate,
     previewAudioHistory,
     previewAudioTemplate,
+    stopAudioPlayback,
+    setAudioStopCallback,
     clearImageHistory,
     clearAudioHistory,
     templatePaginationInfo,
@@ -31,6 +37,80 @@ import {
     getImageHistory,
     getAudioHistory,
 } from '../utils/other'
+
+// 格式化音频时长
+const formatDuration = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '--:--'
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+// 获取音频时长
+const getAudioDuration = async (url, id) => {
+    if (audioDurations.value[id]) return audioDurations.value[id]
+    
+    return new Promise((resolve) => {
+        const audio = new Audio()
+        audio.addEventListener('loadedmetadata', () => {
+            audioDurations.value[id] = audio.duration
+            resolve(audio.duration)
+        })
+        audio.addEventListener('error', () => {
+            resolve(0)
+        })
+        audio.src = url
+    })
+}
+
+// 处理音频预览播放/停止
+const handleAudioPreview = async (item, isTemplate = false) => {
+    const id = isTemplate ? `template_${item.filename}` : `history_${item.filename}`
+    const url = isTemplate ? getTemplateFileUrl(item.filename, 'audios') : item.url
+    
+    // 如果当前正在播放这个音频，则停止
+    if (playingAudioId.value === id) {
+        playingAudioId.value = null
+        stopAudioPlayback() // 调用停止音频播放函数
+        return
+    }
+    
+    // 停止其他正在播放的音频
+    playingAudioId.value = null
+    stopAudioPlayback() // 先停止当前播放的音频
+    
+    // 播放新音频
+    try {
+        // 设置停止回调，当音频停止时更新UI状态
+        setAudioStopCallback(() => {
+            playingAudioId.value = null
+        })
+        
+        if (isTemplate) {
+            previewAudioTemplate(item)
+        } else {
+            previewAudioHistory({ url })
+        }
+        playingAudioId.value = id
+        
+        // 获取音频时长
+        await getAudioDuration(url, id)
+    } catch (error) {
+        console.error('音频播放失败:', error)
+    }
+}
+
+// 检查是否正在播放
+const isPlaying = (item, isTemplate = false) => {
+    const id = isTemplate ? `template_${item.filename}` : `history_${item.filename}`
+    return playingAudioId.value === id
+}
+
+// 获取音频时长显示
+const getDurationDisplay = (item, isTemplate = false) => {
+    const id = isTemplate ? `template_${item.filename}` : `history_${item.filename}`
+    return formatDuration(audioDurations.value[id])
+}
 </script>
 
 <template>
@@ -40,7 +120,7 @@ import {
                             <div v-if="showImageTemplates || showAudioTemplates"
                                 class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
                                 @click="showImageTemplates = false; showAudioTemplates = false">
-                                <div class="bg-secondary rounded-xl p-6 max-w-4xl w-full mx-4 h-[90vh] overflow-hidden"
+                                <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 h-[90vh] overflow-hidden"
                                     @click.stop>
                                     <!-- 浮窗头部 -->
                                     <div class="flex items-center justify-between mb-4">
@@ -223,13 +303,20 @@ import {
                                                             <div
                                                                 class="text-white font-medium group-hover:text-gradient-primary transition-colors">
                                                                 {{ history.filename }}</div>
-                                                            <div class="text-gray-400 text-sm">{{ t('audioFile') }}</div>
+                                                            <div class="text-gray-400 text-sm flex items-center gap-2">
+                                                                <span>{{ t('audioFile') }}</span>
+                                                                <span class="text-laser-purple">•</span>
+                                                                <span>{{ getDurationDisplay(history, false) }}</span>
+                                                            </div>
                                                     </div>
-                                                    <button @click.stop="previewAudioHistory(history)"
-                                                            class="px-3 py-2 bg-laser-purple/20 hover:bg-laser-purple/30 text-gradient-primary rounded-lg transition-all cursor-pointer relative z-10"
+                                                    <button @click.stop="handleAudioPreview(history, false)"
+                                                            class="px-3 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2"
+                                                            :class="isPlaying(history, false) 
+                                                                ? 'text-red-400' 
+                                                                : 'text-gradient-primary'"
                                                             style="pointer-events: auto;">
-                                                        <i class="fas fa-play mr-2"></i>
-                                                            {{ t('preview') }}
+                                                        <i :class="isPlaying(history, false) ? 'fas fa-stop' : 'fas fa-play'"></i>
+                                                        <span>{{ isPlaying(history, false) ? t('stop') : t('preview') }}</span>
                                                     </button>
                                                 </div>
                                             </div>
@@ -296,13 +383,20 @@ import {
                                                 <div class="flex-1">
                                                         <div class="text-white font-medium">{{ template.filename }}
                                                         </div>
-                                                        <div class="text-gray-400 text-sm">{{ t('audioTemplates') }}</div>
+                                                        <div class="text-gray-400 text-sm flex items-center gap-2">
+                                                            <span>{{ t('audioTemplates') }}</span>
+                                                            <span class="text-laser-purple">•</span>
+                                                            <span>{{ getDurationDisplay(template, true) }}</span>
+                                                        </div>
                                                 </div>
-                                                <button @click.stop="previewAudioTemplate(template)"
-                                                        class="px-3 py-2 bg-laser-purple/20 hover:bg-laser-purple/30 text-gradient-primary rounded-lg transition-all cursor-pointer relative z-10"
+                                                <button @click.stop="handleAudioPreview(template, true)"
+                                                        class="px-3 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2"
+                                                        :class="isPlaying(template, true) 
+                                                            ? 'text-red-400' 
+                                                            : 'text-gradient-primary'"
                                                         style="pointer-events: auto;">
-                                                    <i class="fas fa-play mr-2"></i>
-                                                        {{ t('preview') }}
+                                                    <i :class="isPlaying(template, true) ? 'fas fa-stop' : 'fas fa-play'"></i>
+                                                    <span>{{ isPlaying(template, true) ? t('stop')  : t('preview') }}</span>
                                                 </button>
                                             </div>
                                         </div>

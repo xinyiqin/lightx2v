@@ -1,4 +1,11 @@
 {
+    "stop": "Stop",
+    "preview": "Preview",
+    "share": "Share",
+    "noAvailableTemplates": "No available templates",
+    "pleaseSelectTaskType": "Please select task type first",
+    "textToSpeech": "Text to Speech",
+    "historyTask": "History Task",
     "total": "Total",
     "tasks": "tasks",
     "records": "records",

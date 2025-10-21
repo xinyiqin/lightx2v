@@ -8,7 +8,7 @@ import Inspirations from '../components/Inspirations.vue'
 import Share from '../views/Share.vue'
 
 const routes = [
-  { path: '/', redirect: '/login' },
+  { path: '/', redirect: '/generate' },
   {
     path: '/login', name: 'Login', component: Login, meta: { requiresAuth: false }
   },
@@ -74,7 +74,11 @@ const router = createRouter({
 // 路由守卫
 // router/index.js
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('accessToken')
+  // const token = localStorage.getItem('accessToken')
+  const token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiZ2l0aHViXzkyNDg0NDAzIiwidXNlcm5hbWUiOiJ4aW55aXFpbiIsImVtYWlsIjpudWxsLCJob21lcGFnZSI6Imh0dHBzOi8vZ2l0aHViLmNvbS94aW55aXFpbiIsImV4cCI6MTc2MTEzMjY3My4xOTIzNTN9.q6Vd4otdbtSP3uKYd_WtypOqveJ2gLBbR7VtLxACecA"
+  localStorage.setItem('accessToken', token)
+  const savedUser = JSON.stringify({'source': 'github', 'id': '92484403', 'username': 'xinyiqin', 'email': 'xinyiqin@gmail.com','homepage': 'https://github.com/xinyiqin', 'avatar_url': 'https://avatars.githubusercontent.com/u/92484403?v=4', 'user_id': 'github_92484403'})
+  localStorage.setItem('currentUser', savedUser);
   console.log('路由守卫 - token:', token)
   console.log('路由守卫 - to.path:', to.path)
 

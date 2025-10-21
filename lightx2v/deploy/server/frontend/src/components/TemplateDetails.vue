@@ -100,7 +100,6 @@ onUnmounted(() => {
                                             :poster="getTemplateFileUrl(selectedTemplate.inputs.input_image,'images')"
                                             class="video-player"
                                             controls
-                                            autoplay
                                             loop
                                             preload="metadata"
                                             @loadstart="onVideoLoadStart"
@@ -279,7 +278,7 @@ onUnmounted(() => {
 <style scoped>
 /* Landing Page 样式 */
 .landing-page {
-    height: calc(100vh - 60px);
+    min-height: calc(100vh - 60px);
     width: 100%;
     background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
     color: white;
@@ -287,9 +286,11 @@ onUnmounted(() => {
     top: 60px;
     left: 0;
     right: 0;
+    bottom: 0;
     z-index: 50;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
 }
 
 .modal-header {

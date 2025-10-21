@@ -1019,10 +1019,42 @@
                     showAlert('音频文件URL获取失败', 'danger');
                     return;
                 }
+
+                // 停止当前播放的音频
+                if (currentPlayingAudio) {
+                    currentPlayingAudio.pause();
+                    currentPlayingAudio.currentTime = 0;
+                    currentPlayingAudio = null;
+                }
+
                 const audio = new Audio(audioUrl);
+                currentPlayingAudio = audio;
+                
+                // 监听音频播放结束事件
+                audio.addEventListener('ended', () => {
+                    currentPlayingAudio = null;
+                    // 调用停止回调
+                    if (audioStopCallback) {
+                        audioStopCallback();
+                        audioStopCallback = null;
+                    }
+                });
+
+                audio.addEventListener('error', () => {
+                    console.error('音频播放失败:', audio.error);
+                    showAlert('音频播放失败', 'danger');
+                    currentPlayingAudio = null;
+                    // 调用停止回调
+                    if (audioStopCallback) {
+                        audioStopCallback();
+                        audioStopCallback = null;
+                    }
+                });
+
                 audio.play().catch(error => {
                     console.error('音频播放失败:', error);
                     showAlert('音频播放失败', 'danger');
+                    currentPlayingAudio = null;
                 });
             };
 
@@ -1163,17 +1195,39 @@
                     console.log('开始录音...');
 
                     // 检查浏览器支持
-                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                        throw new Error('浏览器不支持录音功能');
+                    if (!navigator.mediaDevices) {
+                        throw new Error('该浏览器不支持录音功能');
+                    }
+
+                    if (!navigator.mediaDevices.getUserMedia) {
+                        throw new Error('浏览器不支持录音功能，请确保使用HTTPS协议访问');
                     }
 
                     if (!window.MediaRecorder) {
-                        throw new Error('浏览器不支持MediaRecorder');
+                        throw new Error('浏览器不支持MediaRecorder，请更新到最新版本浏览器');
+                    }
+
+                    // 检查HTTPS协议
+                    console.log('当前协议:', location.protocol, '主机名:', location.hostname);
+                    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && !location.hostname.includes('127.0.0.1')) {
+                        throw new Error(`录音功能需要HTTPS协议，当前使用${location.protocol}协议。请使用HTTPS访问网站或通过localhost:端口号访问`);
                     }
 
                     console.log('浏览器支持检查通过，请求麦克风权限...');
+                    
+                    // 记录浏览器支持状态用于调试
+                    const browserSupport = {
+                        mediaDevices: !!navigator.mediaDevices,
+                        getUserMedia: !!navigator.mediaDevices?.getUserMedia,
+                        MediaRecorder: !!window.MediaRecorder,
+                        protocol: location.protocol,
+                        hostname: location.hostname,
+                        userAgent: navigator.userAgent
+                    };
+                    console.log('浏览器支持状态:', browserSupport);
 
                     // 请求麦克风权限
+                    console.log('正在请求麦克风权限...');
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
@@ -1181,6 +1235,7 @@
                             sampleRate: 44100
                         }
                     });
+                    console.log('麦克风权限获取成功，音频流:', stream);
 
                     // 创建MediaRecorder
                     mediaRecorder.value = new MediaRecorder(stream, {
@@ -1232,13 +1287,41 @@
                     let errorMessage = t('recordingFailed');
 
                     if (error.name === 'NotAllowedError') {
-                        errorMessage = '麦克风权限被拒绝，请在浏览器设置中允许麦克风访问';
+                        errorMessage = '麦克风权限被拒绝。请点击Chrome地址栏左侧的🔒或🎤图标，选择"允许"麦克风访问，然后刷新页面重试';
                     } else if (error.name === 'NotFoundError') {
-                        errorMessage = '未找到麦克风设备';
+                        errorMessage = '未找到麦克风设备，请检查设备连接或使用其他设备';
                     } else if (error.name === 'NotSupportedError') {
-                        errorMessage = '浏览器不支持录音功能，请使用HTTPS访问';
+                        errorMessage = '浏览器不支持录音功能，请使用Chrome、Firefox、Safari或Edge浏览器';
+                    } else if (error.name === 'NotReadableError') {
+                        errorMessage = '麦克风被其他应用占用，请关闭其他使用麦克风的程序后重试';
+                    } else if (error.name === 'OverconstrainedError') {
+                        errorMessage = '麦克风设备不支持所需的录音参数，请使用其他麦克风设备';
+                    } else if (error.name === 'SecurityError') {
+                        errorMessage = '安全限制：请确保使用HTTPS协议访问网站';
                     } else if (error.message) {
                         errorMessage = error.message;
+                    }
+
+                    // 添加调试信息
+                    const debugInfo = {
+                        userAgent: navigator.userAgent,
+                        protocol: location.protocol,
+                        hostname: location.hostname,
+                        mediaDevices: !!navigator.mediaDevices,
+                        getUserMedia: !!navigator.mediaDevices?.getUserMedia,
+                        MediaRecorder: !!window.MediaRecorder,
+                        isSecureContext: window.isSecureContext,
+                        chromeVersion: navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] || '未知'
+                    };
+                    console.log('浏览器调试信息:', debugInfo);
+                    
+                    // 如果是Chrome但仍有问题，提供特定建议
+                    if (navigator.userAgent.includes('Chrome')) {
+                        console.log('检测到Chrome浏览器，可能的问题:');
+                        console.log('1. 请确保使用HTTPS协议或localhost访问');
+                        console.log('2. 检查Chrome地址栏是否有麦克风权限');
+                        console.log('3. 尝试在Chrome设置中重置网站权限');
+                        console.log('4. 确保没有其他应用占用麦克风');
                     }
 
                     showAlert(errorMessage, 'danger');
@@ -1376,8 +1459,6 @@
                         // 重置当前任务类型的表单（保留模型选择，清空图片、音频和提示词）
                         selectedTaskId.value = selectedTaskId.value;
                         selectModel(currentForm.model_cls);
-
-                        switchToProjectsView(true);
 
                     } else {
                         const error = await response.json();
@@ -4115,6 +4196,30 @@
                 }
             };
 
+            // 全局音频播放状态管理
+            let currentPlayingAudio = null;
+            let audioStopCallback = null;
+
+            // 停止音频播放
+            const stopAudioPlayback = () => {
+                if (currentPlayingAudio) {
+                    currentPlayingAudio.pause();
+                    currentPlayingAudio.currentTime = 0;
+                    currentPlayingAudio = null;
+                    
+                    // 调用停止回调
+                    if (audioStopCallback) {
+                        audioStopCallback();
+                        audioStopCallback = null;
+                    }
+                }
+            };
+
+            // 设置音频停止回调
+            const setAudioStopCallback = (callback) => {
+                audioStopCallback = callback;
+            };
+
             // 预览音频历史记录 - 使用URL
             const previewAudioHistory = (history) => {
                 console.log('预览音频历史:', history);
@@ -4124,10 +4229,42 @@
                     showAlert('音频历史URL获取失败', 'danger');
                     return;
                 }
+
+                // 停止当前播放的音频
+                if (currentPlayingAudio) {
+                    currentPlayingAudio.pause();
+                    currentPlayingAudio.currentTime = 0;
+                    currentPlayingAudio = null;
+                }
+
                 const audio = new Audio(audioUrl);
+                currentPlayingAudio = audio;
+                
+                // 监听音频播放结束事件
+                audio.addEventListener('ended', () => {
+                    currentPlayingAudio = null;
+                    // 调用停止回调
+                    if (audioStopCallback) {
+                        audioStopCallback();
+                        audioStopCallback = null;
+                    }
+                });
+
+                audio.addEventListener('error', () => {
+                    console.error('音频播放失败:', audio.error);
+                    showAlert('音频播放失败', 'danger');
+                    currentPlayingAudio = null;
+                    // 调用停止回调
+                    if (audioStopCallback) {
+                        audioStopCallback();
+                        audioStopCallback = null;
+                    }
+                });
+
                 audio.play().catch(error => {
                     console.error('音频播放失败:', error);
                     showAlert('音频播放失败', 'danger');
+                    currentPlayingAudio = null;
                 });
             };
 
@@ -5495,6 +5632,8 @@
                 selectImageTemplate,
                 selectAudioTemplate,
                 previewAudioTemplate,
+                stopAudioPlayback,
+                setAudioStopCallback,
                 getTemplateFile,
                 imageTemplates,
                 audioTemplates,

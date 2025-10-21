@@ -36,7 +36,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="login-container w-full min-h-screen flex items-center justify-center p-4">
+  <div class="login-container w-full min-h-screen flex items-center justify-center p-2 sm:p-4 md:p-6">
     <FloatingParticles />
 
     <!-- 主卡片容器 -->
@@ -45,7 +45,7 @@ onMounted(async () => {
         <div class="grid grid-cols-1 lg:grid-cols-2 h-auto lg:h-full">
 
           <!-- 左侧：登录区域 -->
-          <div class="flex flex-col items-center justify-center">
+          <div class="flex flex-col items-center justify-start pt-4 sm:pt-6 md:pt-8 lg:pt-12 xl:pt-16">
             <LoginCard />
           </div>
 

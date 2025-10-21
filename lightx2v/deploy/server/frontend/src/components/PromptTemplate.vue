@@ -13,7 +13,7 @@ const { t, locale } = useI18n()
         <div v-cloak>
                 <div v-if="showPromptModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
                 @click="showPromptModal = false">
-                <div class="bg-secondary rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden"
+                <div class="bg-gray-900 rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden"
                     @click.stop>
                     <!-- 浮窗头部 -->
                     <div class="flex items-center justify-between mb-4">

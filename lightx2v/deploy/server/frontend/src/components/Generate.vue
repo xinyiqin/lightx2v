@@ -1,10 +1,292 @@
 <script setup>
+import {
+            submitting,
+            templateLoading,
+            // 任务类型下拉菜单
+            showTaskTypeMenu,
+            showModelMenu,
+
+            isLoggedIn,
+            loading,
+            loginLoading,
+            initLoading,
+            downloadLoading,
+
+            // 录音相关
+            isRecording,
+            recordingDuration,
+            startRecording,
+            stopRecording,
+            formatRecordingDuration,
+            taskSearchQuery,
+            currentUser,
+            models,
+            tasks,
+            alert,
+            showErrorDetails,
+            showFailureDetails,
+            confirmDialog,
+            showConfirmDialog,
+            showTaskDetailModal,
+            modalTask,
+            t2vForm,
+            i2vForm,
+            s2vForm,
+            getCurrentForm,
+            i2vImagePreview,
+            s2vImagePreview,
+            s2vAudioPreview,
+            getCurrentImagePreview,
+            getCurrentAudioPreview,
+            setCurrentImagePreview,
+            setCurrentAudioPreview,
+            updateUploadedContentStatus,
+            availableTaskTypes,
+            availableModelClasses,
+            currentTaskHints,
+            currentHintIndex,
+            startHintRotation,
+            stopHintRotation,
+            filteredTasks,
+            selectedTaskId,
+            selectedTask,
+            selectedModel,
+            loadingTaskFiles,
+            statusFilter,
+            pagination,
+            paginationInfo,
+            currentTaskPage,
+            taskPageSize,
+            taskPageInput,
+            paginationKey,
+            taskMenuVisible,
+            toggleTaskMenu,
+            closeAllTaskMenus,
+            handleClickOutside,
+            showAlert,
+            setLoading,
+            apiCall,
+            logout,
+            loadModels,
+            sidebarCollapsed,
+            sidebarWidth,
+            showExpandHint,
+            showGlow,
+            isDefaultStateHidden,
+            hideDefaultState,
+            showDefaultState,
+            isCreationAreaExpanded,
+            hasUploadedContent,
+            isContracting,
+            expandCreationArea,
+            contractCreationArea,
+            taskFileCache,
+            taskFileCacheLoaded,
+            templateFileCache,
+            templateFileCacheLoaded,
+            loadTaskFiles,
+            downloadFile,
+            viewFile,
+            handleImageUpload,
+            selectTask,
+            selectModel,
+            resetForm,
+            triggerImageUpload,
+            triggerAudioUpload,
+            removeImage,
+            removeAudio,
+            handleAudioUpload,
+            loadImageAudioTemplates,
+            selectImageTemplate,
+            selectAudioTemplate,
+            previewAudioTemplate,
+            getTemplateFile,
+            imageTemplates,
+            audioTemplates,
+            showImageTemplates,
+            showAudioTemplates,
+            mediaModalTab,
+            templatePagination,
+            templatePaginationInfo,
+            templateCurrentPage,
+            templatePageSize,
+            templatePageInput,
+            templatePaginationKey,
+            imageHistory,
+            audioHistory,
+            showTemplates,
+            showHistory,
+            showPromptModal,
+            promptModalTab,
+            submitTask,
+            fileToBase64,
+            formatTime,
+            refreshTasks,
+            goToPage,
+            jumpToPage,
+            getVisiblePages,
+            goToTemplatePage,
+            jumpToTemplatePage,
+            getVisibleTemplatePages,
+            goToInspirationPage,
+            jumpToInspirationPage,
+            getVisibleInspirationPages,
+            preloadTaskFilesUrl,
+            preloadTemplateFilesUrl,
+            loadTaskFilesFromCache,
+            saveTaskFilesToCache,
+            getTaskFileFromCache,
+            setTaskFileToCache,
+            getTaskFileUrlFromApi,
+            getTaskFileUrl,
+            getTaskFileUrlSync,
+            getTemplateFileUrlFromApi,
+            getTemplateFileUrl,
+            getTemplateFileUrlAsync,
+            loadTemplateFilesFromCache,
+            saveTemplateFilesToCache,
+            loadFromCache,
+            saveToCache,
+            clearAllCache,
+            getStatusBadgeClass,
+            viewSingleResult,
+            cancelTask,
+            resumeTask,
+            deleteTask,
+            startPollingTask,
+            stopPollingTask,
+            reuseTask,
+            showTaskCreator,
+            toggleSidebar,
+            clearPrompt,
+            getTaskItemClass,
+            getStatusIndicatorClass,
+            getTaskTypeBtnClass,
+            getModelBtnClass,
+            getTaskTypeIcon,
+            getTaskTypeName,
+            getPromptPlaceholder,
+            getStatusTextClass,
+            getImagePreview,
+            getTaskInputUrl,
+            getTaskInputImage,
+            getTaskInputAudio,
+            getHistoryImageUrl,
+            getUserAvatarUrl,
+            getCurrentImagePreviewUrl,
+            getCurrentAudioPreviewUrl,
+            handleThumbnailError,
+            handleImageError,
+            handleImageLoad,
+            handleAudioError,
+            handleAudioLoad,
+            getTaskStatusDisplay,
+            getTaskStatusColor,
+            getTaskStatusIcon,
+            getTaskDuration,
+            getRelativeTime,
+            getTaskHistory,
+            getActiveTasks,
+            getOverallProgress,
+            getProgressTitle,
+            getProgressInfo,
+            getSubtaskProgress,
+            getSubtaskStatusText,
+            formatEstimatedTime,
+            formatDuration,
+            searchTasks,
+            filterTasksByStatus,
+            filterTasksByType,
+            getAlertClass,
+            getAlertBorderClass,
+            getAlertTextClass,
+            getAlertIcon,
+            getAlertIconBgClass,
+            getPromptTemplates,
+            selectPromptTemplate,
+            promptHistory,
+            getPromptHistory,
+            addTaskToHistory,
+            getLocalTaskHistory,
+            selectPromptHistory,
+            clearPromptHistory,
+            getImageHistory,
+            getAudioHistory,
+            selectImageHistory,
+            selectAudioHistory,
+            previewAudioHistory,
+            clearImageHistory,
+            clearAudioHistory,
+            getAudioMimeType,
+            getAuthHeaders,
+            startResize,
+            sidebar,
+            switchToCreateView,
+            switchToProjectsView,
+            switchToInspirationView,
+            switchToLoginView,
+            openTaskDetailModal,
+            closeTaskDetailModal,
+            // 灵感广场相关
+            inspirationSearchQuery,
+            selectedInspirationCategory,
+            inspirationItems,
+            InspirationCategories,
+            loadInspirationData,
+            selectInspirationCategory,
+            handleInspirationSearch,
+            loadMoreInspiration,
+            inspirationPagination,
+            inspirationPaginationInfo,
+            inspirationCurrentPage,
+            inspirationPageSize,
+            inspirationPageInput,
+            inspirationPaginationKey,
+            // 精选模版相关
+            featuredTemplates,
+            featuredTemplatesLoading,
+            loadFeaturedTemplates,
+            getRandomFeaturedTemplates,
+            // 工具函数
+            formatDate,
+            // 模板详情弹窗相关
+            showTemplateDetailModal,
+            selectedTemplate,
+            previewTemplateDetail,
+            closeTemplateDetailModal,
+            useTemplate,
+            // 图片放大弹窗相关
+            showImageZoomModal,
+            zoomedImageUrl,
+            showImageZoom,
+            closeImageZoomModal,
+            // 模板素材应用相关
+            applyTemplateImage,
+            applyTemplateAudio,
+            applyTemplatePrompt,
+            copyPrompt,
+            // 视频播放控制
+            playVideo,
+            pauseVideo,
+            toggleVideoPlay,
+            pauseAllVideos,
+            updateVideoIcon,
+            onVideoLoaded,
+            onVideoError,
+            onVideoEnded,
+            generateShareUrl,
+            copyShareLink,
+            shareToSocial,
+            openTaskFromRoute
+        } from '../utils/other'
+
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { watch, onMounted, computed, ref, nextTick, onUnmounted } from 'vue'
 import ModelDropdown from './ModelDropdown.vue'
 import MediaTemplate from './MediaTemplate.vue'
 import Voice_tts from './Voice_tts.vue'
+import TaskCarousel from './TaskCarousel.vue'
 
 // Props
 const props = defineProps({
@@ -30,6 +312,36 @@ const isDragOver = ref(false)
 // 语音合成模态框状态
 const showVoiceTTSModal = ref(false)
 
+// 当前任务状态
+const currentTask = ref(null)
+
+// 处理提交任务并滚动到任务区域
+const handleSubmitTask = async () => {
+    try {
+        // 提交任务
+        await submitTask()
+        
+        // 等待一小段时间确保任务已创建
+        await nextTick()
+        
+        // 滚动到任务区域
+        scrollToTaskArea()
+    } catch (error) {
+        console.error('提交任务失败:', error)
+    }
+}
+
+// 滚动到任务区域
+const scrollToTaskArea = () => {
+    const taskArea = document.querySelector('.task-carousel')
+    if (taskArea) {
+        taskArea.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start' 
+        })
+    }
+}
+
 // 处理语音合成完成后的回调
 const handleTTSComplete = (audioBlob) => {
     // 创建File对象
@@ -54,6 +366,43 @@ const handleTTSComplete = (audioBlob) => {
     
     // 显示成功提示
     showAlert('语音合成完成，已自动添加到音频素材', 'success')
+}
+
+// 跳转到项目页面
+const goToProjects = () => {
+    // 构建查询参数，包含当前的表单数据
+    const query = {}
+    
+    // 添加任务类型
+    if (selectedTaskId.value) {
+        query.taskType = selectedTaskId.value
+    }
+    
+    // 添加模型
+    if (selectedModel.value) {
+        query.model = selectedModel.value
+    }
+    
+    // 添加提示词
+    if (getCurrentForm().prompt) {
+        query.prompt = getCurrentForm().prompt
+    }
+    
+    // 添加图片（如果有）
+    if (getCurrentImagePreview()) {
+        query.hasImage = 'true'
+    }
+    
+    // 添加音频（如果有）
+    if (getCurrentAudioPreview()) {
+        query.hasAudio = 'true'
+    }
+    
+    // 跳转到项目页面
+    router.push({
+        path: '/projects',
+        query: query
+    })
 }
 
 // 获取随机精选模版
@@ -143,92 +492,6 @@ const updateScreenSize = () => {
 
 // 监听屏幕尺寸变化
 let resizeHandler = null
-
-import {
-            submitting,
-            templateLoading,
-            showTaskTypeMenu,
-            showModelMenu,
-            isRecording,
-            recordingDuration,
-            startRecording,
-            stopRecording,
-            formatRecordingDuration,
-            getCurrentForm,
-            getCurrentImagePreview,
-            getCurrentAudioPreview,
-            availableTaskTypes,
-            availableModelClasses,
-            currentTaskHints,
-            currentHintIndex,
-            selectedTaskId,
-            isCreationAreaExpanded,
-            isContracting,
-            expandCreationArea,
-            contractCreationArea,
-            handleImageUpload,
-            selectTask,
-            selectModel,
-            triggerImageUpload,
-            triggerAudioUpload,
-            removeImage,
-            removeAudio,
-            handleAudioUpload,
-            selectImageTemplate,
-            selectAudioTemplate,
-            previewAudioTemplate,
-            imageTemplates,
-            audioTemplates,
-            showImageTemplates,
-            showAudioTemplates,
-            mediaModalTab,
-            templatePaginationInfo,
-            templateCurrentPage,
-            templatePageInput,
-            imageHistory,
-            audioHistory,
-            showPromptModal,
-            promptModalTab,
-            submitTask,
-            goToTemplatePage,
-            jumpToTemplatePage,
-            getVisibleTemplatePages,
-            getTemplateFileUrl,
-            clearPrompt,
-            getTaskTypeIcon,
-            getTaskTypeName,
-            getPromptPlaceholder,
-            getHistoryImageUrl,
-            getCurrentImagePreviewUrl,
-            getCurrentAudioPreviewUrl,
-            handleAudioError,
-            getImageHistory,
-            getAudioHistory,
-            selectImageHistory,
-            selectAudioHistory,
-            previewAudioHistory,
-            clearImageHistory,
-            clearAudioHistory,
-            getAudioMimeType,
-            selectedModel,
-            // 精选模版相关
-            featuredTemplates,
-            featuredTemplatesLoading,
-            loadFeaturedTemplates,
-            getRandomFeaturedTemplates,
-            previewTemplateDetail,
-            useTemplate,
-            applyTemplateImage,
-            applyTemplateAudio,
-            playVideo,
-            pauseVideo,
-            toggleVideoPlay,
-            onVideoLoaded,
-            onVideoError,
-            onVideoEnded,
-            handleThumbnailError,
-            switchToInspirationView,
-        } from '../utils/other'
 
 // 路由监听和URL同步
 watch(() => route.query, (newQuery) => {
@@ -399,9 +662,9 @@ onUnmounted(() => {
 
 
                         <!-- 任务创建面板 -->
-                        <div class="max-w-4xl mx-auto" id="task-creator">
+                        <div class="max-w-4xl mx-auto min-h-[80vh] flex flex-col" id="task-creator">
                             <!-- 合并的创作区域 -->
-                            <div class="creation-area-container">
+                            <div class="creation-area-container flex-1 flex flex-col justify-center">
 
                                 <div class="default-state-container">
                                     <!-- 两个并列的下拉菜单 -->
@@ -426,7 +689,7 @@ onUnmounted(() => {
 
                                     <div class="text-center">
 
-                                        <h2 class="text-4xl font-bold text-laser-purple mb-6">{{ t('whatDoYouWantToDo') }}</h2>
+                                        <h2 class="text-3xl sm:text-3xl md:text-4xl lg:text-4xl font-bold text-laser-purple mb-6">{{ t('whatDoYouWantToDo') }}</h2>
 
                                         <!-- 动态滚动提示 -->
                                         <div class="hint-container mb-8 pb-10">
@@ -448,7 +711,7 @@ onUnmounted(() => {
                                     </div>
 
                                     <!-- 展开开关 -->
-                                    <div class="relative group cursor-pointer max-w-3/5" @click="expandCreationArea">
+                                    <div class="relative group cursor-pointer" @click="expandCreationArea">
                                         <button
                                             class="cursor-pointer relative bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base text-white hover:border-laser-purple hover:bg-laser-purple hover:text-gray-900 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 resize-none min-w-[250px] max-w-[400px] group"
                                         >
@@ -617,10 +880,10 @@ onUnmounted(() => {
                                                     <div class="flex flex-col items-center space-y-2">
                                                         <button @click.stop="showVoiceTTSModal = true"
                                                             class="w-12 h-12 flex items-center justify-center bg-white/15 text-white p-3 rounded-full transition-all duration-200 hover:scale-110 shadow-lg"
-                                                            title="语音合成">
+                                                            :title="t(' textToSpeech ')">
                                                             <i class="fas fa-volume-up text-lg"></i>
                                                         </button>
-                                                        <span class="text-xs text-gray-300">语音合成</span>
+                                                        <span class="text-xs text-gray-300">{{ t('textToSpeech') }}</span>
                                                     </div>
 
                                         </div>
@@ -687,7 +950,7 @@ onUnmounted(() => {
                                         </div>
                                 <!-- 提交按钮 -->
                                 <div class="flex justify-center mt-6">
-                                    <button @click="submitTask" :disabled="submitting || templateLoading"
+                                    <button @click="handleSubmitTask" :disabled="submitting || templateLoading"
                                             class="cursor-pointer relative bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base text-white hover:border-laser-purple hover:bg-laser-purple hover:text-gray-900 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 resize-none min-w-[250px] max-w-[400px] group"
                                             :class="{ 'disabled': submitting || templateLoading }">
                                         
@@ -709,27 +972,47 @@ onUnmounted(() => {
                 </div>
                         </div>
 
+                    <!-- 任务区域 -->
+                    <div v-if="tasks.length > 0" class="task-carousel mt-10">
+                        <div class="flex-1 p-6">
+                            <div class="relative flex items-center justify-center mb-4 mb-6">
+                                <!-- 标题 -->
+                                <h2 class="text-3xl sm:text-3xl md:text-4xl lg:text-4xl font-bold text-laser-purple">{{ t('historyTask') }}</h2>
+                                <!-- 更多按钮 -->
+                                <button @click="switchToProjectsView()"
+                                    class="absolute right-0 flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-gray-600/20 rounded transition-all duration-200"
+                                    :title="t('viewMore')">
+                                <span class="text-sm">{{ t('more') }}</span>
+                                <i class="fas fa-arrow-right text-xs"></i>
+                            </button>
+                            </div>
+                            <div class="mx-auto">
+                                <TaskCarousel :tasks="tasks" />
+                            </div>
+                        </div>
+                    </div>
+
 
                     <!-- 精选模版区域 -->
-                    <div v-if="currentFeaturedTemplates.length > 0" class="flex-1 flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-gray-700/30">
-                        <div class="flex-1 p-4 lg:p-6">
+                    <div v-if="currentFeaturedTemplates.length > 0" class="flex-1 flex flex-col min-h-0 mt-20">
+                        <div class="flex-1 p-6">
                             <!-- 控制区域 -->
-                            <div class="flex-col flex items-center justify-center mb-4 lg:mb-6 gap-3 lg:gap-4">
-                                <!-- 左侧：发现文字和随机按钮 -->
-                                <div class="flex items-center gap-3 lg:gap-4">
-                                    <h2 class="text-2xl lg:text-3xl font-bold text-white">{{ t('discover') }}</h2>
+                            <div class="relative flex items-center justify-center mb-4 mb-6">
+                                <!-- 标题和随机按钮 -->
+                                <div class="flex items-center gap-4">
+                                    <h2 class="text-3xl sm:text-3xl md:text-4xl lg:text-4xl font-bold text-laser-purple">{{ t('discover') }}</h2>
                                     <!-- 随机图标按钮 -->
                                     <button @click="refreshRandomTemplates"
                                             :disabled="featuredTemplatesLoading"
-                                            class="w-8 h-8 lg:w-10 lg:h-10 flex items-center justify-center bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                                            class="w-10 h-10 flex items-center justify-center bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
                                             :title="t('refreshRandomTemplates')">
                                         <i class="fas fa-random text-sm lg:text-lg"
                                            :class="{ 'animate-spin': featuredTemplatesLoading }"></i>
                                     </button>
                                 </div>
-                                <!-- 右侧：更多按钮 -->
+                                <!-- 更多按钮 -->
                                 <button @click="switchToInspirationView()"
-                                    class="flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-gray-600/20 rounded transition-all duration-200"
+                                    class="absolute right-0 flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-gray-600/20 rounded transition-all duration-200"
                                     :title="t('viewMore')">
                                 <span class="text-sm">{{ t('more') }}</span>
                                 <i class="fas fa-arrow-right text-xs"></i>

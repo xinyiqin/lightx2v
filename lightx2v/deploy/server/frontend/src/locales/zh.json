@@ -1,4 +1,11 @@
 {
+    "stop": "停止",
+    "preview": "预览",
+    "share": "分享",
+    "noAvailableTemplates": "暂无可用素材",
+    "pleaseSelectTaskType": "请先选择任务类型",
+    "textToSpeech": "文本转语音",
+    "historyTask": "历史任务",
     "total": "共",
     "tasks": "条",
     "records": "条",

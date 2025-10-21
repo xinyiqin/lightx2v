@@ -159,21 +159,32 @@
                       type="range" 
                       min="-50" 
                       max="100" 
-                      v-model="speedRate" 
+                      v-model="speechRate" 
                       class="mini-slider"
                     />
-                    <span class="mini-display">{{ getSpeedDisplayValue(speedRate) }}</span>
+                    <span class="mini-display">{{ getSpeechRateDisplayValue(speechRate) }}</span>
                   </div>
                   <div class="control-item">
                     <label>音量:</label>
                     <input 
                       type="range" 
-                      min="-100" 
+                      min="-50" 
                       max="100" 
                       v-model="loudnessRate" 
                       class="mini-slider"
                     />
                     <span class="mini-display">{{ getLoudnessDisplayValue(loudnessRate) }}</span>
+                  </div>
+                  <div class="control-item">
+                    <label>音调:</label>
+                    <input 
+                      type="range" 
+                      min="-12" 
+                      max="12" 
+                      v-model="pitch" 
+                      class="mini-slider"
+                    />
+                    <span class="mini-display">{{ getPitchDisplayValue(pitch) }}</span>
                   </div>
                   <!-- Emotion controls - only show if voice has emotions -->
                   <div v-if="voice.emotions && voice.emotions.length > 0" class="control-item">
@@ -211,6 +222,7 @@
       <audio :src="audioUrl" controls class="audio-controls"></audio>
     </div>
   </div>
+</div>
 
   <!-- Filter Panel Overlay -->
   <div v-if="showFilterPanel" class="filter-overlay" @click="closeFilterPanel">
@@ -297,11 +309,10 @@
       </div>
     </div>
   </div>
-</div>
 </template>
 
 <script>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import DropdownMenu from './DropdownMenu.vue'
 
 export default {
@@ -316,12 +327,14 @@ export default {
     const selectedVoice = ref('')
     const selectedVoiceResourceId = ref('')
     const searchQuery = ref('')
-    const speedRate = ref(0)
+    const speechRate = ref(0)
     const loudnessRate = ref(0)
+    const pitch = ref(0)
     const emotionScale = ref(3)
     const selectedEmotion = ref('neutral')
     const isGenerating = ref(false)
     const audioUrl = ref('')
+    const currentAudio = ref(null) // 当前播放的音频对象
     const voices = ref([])
     const emotions = ref([])
     const voiceListContainer = ref(null)
@@ -385,8 +398,20 @@ export default {
       }
     })
 
+    // 组件卸载时清理音频资源
+    onUnmounted(() => {
+      if (currentAudio.value) {
+        currentAudio.value.pause()
+        currentAudio.value = null
+      }
+      // 清理音频URL
+      if (audioUrl.value) {
+        URL.revokeObjectURL(audioUrl.value)
+      }
+    })
+
     // 监听参数变化，自动重新生成音频
-    watch([speedRate, loudnessRate, emotionScale, selectedEmotion], () => {
+    watch([speechRate, loudnessRate, pitch, emotionScale, selectedEmotion], () => {
       if (selectedVoice.value && inputText.value.trim() && !isGenerating.value) {
         generateTTS()
       }
@@ -564,6 +589,14 @@ export default {
       }
 
       if (!selectedVoice.value) return
+      
+      // 停止当前播放的音频
+      if (currentAudio.value) {
+        currentAudio.value.pause()
+        currentAudio.value.currentTime = 0
+        currentAudio.value = null
+      }
+      
       console.log('contextText', contextText.value)
       isGenerating.value = true
       try {
@@ -578,8 +611,9 @@ export default {
             context_texts: contextText.value,
             emotion: selectedEmotion.value,
             emotion_scale: emotionScale.value,
-            speed_rate: speedRate.value,
+            speech_rate: speechRate.value,
             loudness_rate: loudnessRate.value,
+            pitch: pitch.value,
             resource_id: selectedVoiceResourceId.value
           })
         })
@@ -590,6 +624,7 @@ export default {
           
           // 自动播放生成的音频
           const audio = new Audio(audioUrl.value)
+          currentAudio.value = audio // 保存当前播放的音频对象
           audio.play().catch(error => {
             console.log('自动播放被阻止:', error)
             // 如果自动播放失败，用户仍可以手动播放
@@ -668,19 +703,26 @@ export default {
       resetScrollPosition()
     }
 
-    // Convert speed rate to display value (0.5x to 2.0x)
-    const getSpeedDisplayValue = (value) => {
+    // Convert speech rate to display value (0.5x to 2.0x)
+    const getSpeechRateDisplayValue = (value) => {
       // Map -50 to 100 range to 0.5x to 2.0x
       const ratio = (parseInt(value) + 50) / 150 // Convert to 0-1 range
-      const speed = 0.5 + (ratio * 1.5) // Convert to 0.5-2.0 range
-      return `${speed.toFixed(1)}x`
+      const speechRate = 0.5 + (ratio * 1.5) // Convert to 0.5-2.0 range
+      return `${speechRate.toFixed(1)}x`
     }
 
     // Convert loudness rate to display value (-100 to 100)
     const getLoudnessDisplayValue = (value) => {
-      // Map -100 to 100 range to -50 to 100 for API
-      const apiValue = Math.round((parseInt(value) + 100) * 150 / 200 - 50)
-      return `${value}%`
+      // Map -50 to 100 range to 50 to 200
+      const apiValue = Math.round(parseInt(value)+100)
+      return `${apiValue}%`
+    }
+
+    // Convert pitch to display value (-100 to 100)
+    const getPitchDisplayValue = (value) => {
+      // Map -12 to 12 range to -100 to 100 for API
+      const apiValue = Math.round(parseInt(value) * 100 / 12)
+      return `${apiValue}`
     }
 
     // Convert language code to Chinese display name
@@ -702,8 +744,9 @@ export default {
       contextText,
       selectedVoice,
       searchQuery,
-      speedRate,
+      speechRate,
       loudnessRate,
+      pitch,
       emotionScale,
       selectedEmotion,
       isGenerating,
@@ -728,8 +771,9 @@ export default {
       selectGender,
       resetFilters,
       applyFilters,
-      getSpeedDisplayValue,
+      getSpeechRateDisplayValue,
       getLoudnessDisplayValue,
+      getPitchDisplayValue,
       getLanguageDisplayName,
       emotionItems,
       handleEmotionSelect,
@@ -1193,18 +1237,22 @@ export default {
   background: rgba(0, 0, 0, 0.5);
   z-index: 1000;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
+  padding: 0 16px 16px 16px;
+  box-sizing: border-box;
 }
 
 .filter-panel {
   background: #2d2d2d;
-  width: 100%;
+  width: 85%;
   max-width: 600px;
-  max-height: 80vh;
-  border-radius: 20px 20px 0 0;
-  overflow: hidden;
+  height: 85vh;
+  max-height: calc(100vh - 32px);
+  border-radius: 20px;
   animation: slideUp 0.3s ease-out;
+  display: flex;
+  flex-direction: column;
 }
 
 @keyframes slideUp {
@@ -1252,8 +1300,10 @@ export default {
 
 .filter-content {
   padding: 20px;
-  max-height: 60vh;
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
+  max-height: calc(100% - 140px); /* 为header和actions预留空间 */
 }
 
 .filter-section {
@@ -1309,7 +1359,10 @@ export default {
   display: flex;
   gap: 12px;
   padding: 20px;
+  border-radius: 0 0 20px 20px;
   border-top: 1px solid #404040;
+  flex-shrink: 0;
+  background: #2d2d2d;
 }
 
 .filter-reset-btn {
@@ -1346,5 +1399,6 @@ export default {
   background: #7c3aed;
   border-color: #7c3aed;
 }
+
 
 </style>

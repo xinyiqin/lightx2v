@@ -442,6 +442,10 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                             <div class="flex-1 overflow-y-auto p-10 content-area main-scrollbar">
                                 <!-- 历史任务功能区 -->
                                 <div class="max-w-4xl mx-auto" id="task-creator">
+                                                                        <!-- 标题区域 -->
+                                        <div class="text-center mb-8">
+                                                <h1 class="text-3xl font-bold text-white mb-2">{{ t('historyTask') }}</h1>
+                                        </div>
                                     <!-- 搜索和筛选区域 -->
                                     <div class="flex flex-col md:flex-row gap-4 mb-6">
                                 <!-- 搜索框 -->

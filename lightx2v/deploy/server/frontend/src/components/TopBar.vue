@@ -28,7 +28,7 @@ const goToHome = () => {
                     <div class="top-bar-left">
                         <button @click="goToHome" class="logo-button" :title="t('goToHome')">
                             <i class="fas fa-film text-gradient-primary mr-2 text-xl"></i>
-                            <span class="text-lg text-white">LightX2V</span>
+                            <span class="text-lg text-white font-bold">LightX2V</span>
                         </button>
                     </div>
 
@@ -36,22 +36,21 @@ const goToHome = () => {
                     <div class="top-bar-right">
 
                             <!-- 语言切换按钮 -->
-                            <div class="language-switcher mr-6">
+                            <div class="mr-6">
                                 <button @click="switchLang"
-                                    class="w-10 h-10 text-gradient-primary items-center px-1 py-1
-                                           rounded-lg bg-laser-purple border border-laser-purple hover:border-laser-purple
+                                    class="cursor-pointer w-8 h-8 text-white items-center px-1 py-1
+                                           rounded-lg hover:border-laser-purple
                                            transition-all duration-200 text-sm hover:scale-105"
                                     :title="t('switchLanguage')">
-                                    <span class="text-lg">{{ languageOptions.find(lang => lang.code ===
+                                    <span class="text-lg font-bold">{{ languageOptions.find(lang => lang.code ===
                                         (locale === 'zh' ? 'en' : 'zh'))?.flag }}</span>
                                 </button>
                             </div>
 
                         <div class="user-info">
                             <div>
-                                    <avatar v-if="currentUser.avatar" :src="getUserAvatarUrl(currentUser)"
-                                        :alt="currentUser.username" class="size-10">
-                                    </avatar>
+                                    <img v-if="currentUser.avatar_url" :src="currentUser.avatar_url"
+                                        :alt="currentUser.username" class="w-10 h-10 rounded-full object-cover">
                                     <i v-else class="fi fi-rr-circle-user text-2xl"></i>
 
                             </div>
@@ -62,7 +61,7 @@ const goToHome = () => {
                                 <span v-else>未登录</span>
                             </div>
                             <div v-if="currentUser.username">
-                                <button @click="logout" class="text-gradient-primary" :title="t('logout')">
+                                <button @click="logout" class="text-white" :title="t('logout')">
                                     <i class="fas fa-sign-out-alt"></i>
                                 </button>
                             </div>

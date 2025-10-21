@@ -5,10 +5,10 @@ const { t, locale } = useI18n()
 </script>
 <template>
   <!-- 左侧功能区 -->
-  <div class="relative w-20 pl-5 flex flex-col z-10">
+  <div class="relative w-20 flex flex-col z-10 pl-5">
     <!-- 功能导航 -->
     <div class="p-2 flex flex-col justify-center h-full mobile-nav-buttons" style="margin-top: -10vh;">
-      <nav class="lg:space-y-3 md:space-y-3 sm:space-x-3 flex flex-col">
+      <nav class="flex flex-col sm:space-x-3 md:space-y-3 lg:space-y-3">
 
         <!-- 生成视频功能 -->
         <div

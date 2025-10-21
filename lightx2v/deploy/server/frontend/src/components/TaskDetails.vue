@@ -276,7 +276,6 @@ onUnmounted(() => {
                                             :poster="getTaskFileUrlSync(modalTask.task_id, 'input_image')"
                                             class="video-player"
                                             controls
-                                            autoplay
                                             loop
                                             preload="metadata"
                                             @loadstart="onVideoLoadStart"
@@ -785,6 +784,9 @@ onUnmounted(() => {
     right: 0;
     bottom: 0;
     z-index: 60;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
 }
 
 .modal-header {
