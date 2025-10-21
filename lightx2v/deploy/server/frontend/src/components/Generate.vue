@@ -346,24 +346,24 @@ const scrollToTaskArea = () => {
 const handleTTSComplete = (audioBlob) => {
     // 创建File对象
     const audioFile = new File([audioBlob], 'tts_audio.mp3', { type: 'audio/mpeg' })
-    
+
     // 模拟文件上传事件
     const dataTransfer = new DataTransfer()
     dataTransfer.items.add(audioFile)
     const fileList = dataTransfer.files
-    
+
     const event = {
         target: {
             files: fileList
         }
     }
-    
+
     // 处理音频上传
     handleAudioUpload(event)
-    
+
     // 关闭模态框
     showVoiceTTSModal.value = false
-    
+
     // 显示成功提示
     showAlert('语音合成完成，已自动添加到音频素材', 'success')
 }
@@ -953,7 +953,7 @@ onUnmounted(() => {
                                     <button @click="handleSubmitTask" :disabled="submitting || templateLoading"
                                             class="cursor-pointer relative bg-dark-light/80 border border-laser-purple rounded-full pl-10 pr-10 py-6 text-base text-white hover:border-laser-purple hover:bg-laser-purple hover:text-gray-900 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 resize-none min-w-[250px] max-w-[400px] group"
                                             :class="{ 'disabled': submitting || templateLoading }">
-                                        
+
                                         <i v-if="submitting" class="fas fa-spinner fa-spin text-xl mr-3"></i>
                                         <i v-else-if="templateLoading" class="fas fa-spinner fa-spin text-xl mr-3"></i>
                                         <i v-else class="fi fi-sr-cursor-finger-click text-lg text-gradient-icon transition-all duration-300 pointer-events-none group-hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.6)] group-hover:animate-pulse"></i>

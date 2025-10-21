@@ -34,14 +34,14 @@ def get_default_config():
 
 
 def set_config(args):
-    assert not (args.save_result_path and args.return_result_tensor), "save_result_path and return_result_tensor cannot be set at the same time"
-
     config = get_default_config()
     config.update({k: v for k, v in vars(args).items() if k not in ALL_INPUT_INFO_KEYS})
 
-    with open(config["config_json"], "r") as f:
-        config_json = json.load(f)
-    config.update(config_json)
+    if config.get("config_json", None) is not None:
+        logger.info(f"Loading some config from {config['config_json']}")
+        with open(config["config_json"], "r") as f:
+            config_json = json.load(f)
+        config.update(config_json)
 
     if os.path.exists(os.path.join(config["model_path"], "config.json")):
         with open(os.path.join(config["model_path"], "config.json"), "r") as f:

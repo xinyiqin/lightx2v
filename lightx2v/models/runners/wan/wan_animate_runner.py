@@ -18,11 +18,11 @@ from lightx2v.models.input_encoders.hf.animate.face_encoder import FaceEncoder
 from lightx2v.models.input_encoders.hf.animate.motion_encoder import Generator
 from lightx2v.models.networks.wan.animate_model import WanAnimateModel
 from lightx2v.models.runners.wan.wan_runner import WanRunner
+from lightx2v.server.metrics import monitor_cli
 from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import load_weights, remove_substrings_from_keys
-from lightx2v.server.metrics import monitor_cli
 
 
 @RUNNER_REGISTER("wan2.2_animate")
@@ -292,6 +292,12 @@ class WanAnimateRunner(WanRunner):
             gc.collect()
         return images
 
+    @ProfilingContext4DebugL1(
+        "Init run segment",
+        recorder_mode=GET_RECORDER_MODE(),
+        metrics_func=monitor_cli.lightx2v_run_init_run_segment_duration,
+        metrics_labels=["WanAnimateRunner"],
+    )
     def init_run_segment(self, segment_idx):
         start = segment_idx * self.move_frames
         end = start + self.config["target_video_length"]

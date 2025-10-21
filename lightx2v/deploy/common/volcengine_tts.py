@@ -1,101 +1,109 @@
 # -*- coding: utf-8 -*-
 
-import requests
-import json
-import base64
-import os
-import argparse
-import sys
-from loguru import logger
 import asyncio
+import base64
+import json
+import os
+import sys
+
+import aiohttp
+from loguru import logger
 
 
 class VolcEngineTTSClient:
     """
     VolcEngine TTS客户端
-    
+
     参数范围说明:
         - speech_rate: -50~100 (100代表2倍速, -50代表0.5倍速, 0为正常语速)
         - loudness_rate: -50~100 (100代表2倍音量, -50代表0.5倍音量, 0为正常音量)
         - emotion_scale: 1-5
     """
-    def __init__(self):
+
+    def __init__(self, voices_list_file=None):
         self.url = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
         self.appid = os.getenv("VOLCENGINE_APPID")
         self.access_token = os.getenv("VOLCENGINE_ACCESS_TOKEN")
-        self.session = requests.Session()
-        
-    async def check_response(self, response, prefix):
-        """检查响应状态"""
-        logger.info(f"{prefix}: status_code: {response.status_code}")
-        if response.status_code != 200:
-            logger.warning(f"{prefix}: HTTP error response: {response.status_code}")
-            return False
-        return True
+        self.proxy = os.getenv("HTTPS_PROXY", None)
+        if self.proxy:
+            logger.info(f"volcengine tts use proxy: {self.proxy}")
+        if voices_list_file is not None:
+            with open(voices_list_file, "r", encoding="utf-8") as f:
+                self.voices_list = json.load(f)
+        else:
+            self.voices_list = None
 
+    def get_voice_list(self):
+        return self.voices_list
 
     async def tts_http_stream(self, headers, params, audio_save_path):
         """执行TTS流式请求"""
         try:
-            logger.info(f"请求的url: {self.url}")
-            logger.info(f"请求的headers: {headers}")
-            logger.info(f"请求的params: {params}")
-            
-            response = self.session.post(self.url, headers=headers, json=params, stream=True)
-            
-            if not await self.check_response(response, "VolcEngineTTSClient tts request"):
-                return False
-                
-            # 打印response headers
-            logid = response.headers.get('X-Tt-Logid')
-            logger.info(f"X-Tt-Logid: {logid}")
-
-            # 用于存储音频数据
+            logger.info(f"volcengine tts params: {params}")
             audio_data = bytearray()
             total_audio_size = 0
-            
-            for chunk in response.iter_lines(decode_unicode=True):
-                if not chunk:
-                    continue
-                data = json.loads(chunk)
 
-                if data.get("code", 0) == 0 and "data" in data and data["data"]:
-                    chunk_audio = base64.b64decode(data["data"])
-                    audio_size = len(chunk_audio)
-                    total_audio_size += audio_size
-                    audio_data.extend(chunk_audio)
-                    continue
-                if data.get("code", 0) == 0 and "sentence" in data and data["sentence"]:
-                    logger.info(f"sentence_data: {data}")
-                    continue
-                if data.get("code", 0) == 20000000:
-                    break
-                if data.get("code", 0) > 0:
-                    logger.warning(f"error response: {data}")
-                    break
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.url, json=params, headers=headers, proxy=self.proxy) as response:
+                    response.raise_for_status()
+                    async for chunk in response.content:
+                        if not chunk:
+                            continue
+                        try:
+                            data = json.loads(chunk.decode("utf-8").strip())
+                            if data.get("code", 0) == 0 and "data" in data and data["data"]:
+                                chunk_audio = base64.b64decode(data["data"])
+                                audio_size = len(chunk_audio)
+                                total_audio_size += audio_size
+                                audio_data.extend(chunk_audio)
+                                continue
+                            if data.get("code", 0) == 0 and "sentence" in data and data["sentence"]:
+                                continue
+                            if data.get("code", 0) == 20000000:
+                                break
+                            if data.get("code", 0) > 0:
+                                logger.warning(f"volcengine tts error response: {data}")
+                                break
+                        except Exception as e:
+                            logger.warning(f"Failed to parse volcengine tts chunk: {e}")
 
-            # 保存音频文件
+            # save audio file
             if audio_data:
                 with open(audio_save_path, "wb") as f:
                     f.write(audio_data)
-                logger.info(f"文件保存在{audio_save_path},文件大小: {len(audio_data) / 1024:.2f} KB")
-                # 确保生成的音频有正确的访问权限
+                logger.info(f"audio saved to {audio_save_path}, audio size: {len(audio_data) / 1024:.2f} KB")
+                # set correct permissions
                 os.chmod(audio_save_path, 0o644)
                 return True
             else:
-                logger.warning("No audio data received")
+                logger.warning("No tts audio data received")
                 return False
 
         except Exception as e:
             logger.warning(f"VolcEngineTTSClient tts request failed: {e}")
             return False
-        finally:
-            response.close()
 
-    async def tts_request(self, text, voice_type="zh_female_vv_uranus_bigtts", context_texts="", emotion="", emotion_scale=4, speech_rate=0, loudness_rate=0, pitch=0, output="tts_output.mp3", resource_id="seed-tts-2.0", app_key="aGjiRDfUWi", uid="123123", format="mp3", sample_rate=24000, enable_timestamp=True):
+    async def tts_request(
+        self,
+        text,
+        voice_type="zh_female_vv_uranus_bigtts",
+        context_texts="",
+        emotion="",
+        emotion_scale=4,
+        speech_rate=0,
+        loudness_rate=0,
+        pitch=0,
+        output="tts_output.mp3",
+        resource_id="seed-tts-2.0",
+        app_key="aGjiRDfUWi",
+        uid="123123",
+        format="mp3",
+        sample_rate=24000,
+        enable_timestamp=True,
+    ):
         """
         执行TTS请求
-        
+
         Args:
             text: 要转换的文本
             voice_type: 声音类型
@@ -120,7 +128,7 @@ class VolcEngineTTSClient:
         if not (-50 <= loudness_rate <= 100):
             logger.warning(f"loudness_rate {loudness_rate} 超出有效范围 [-50, 100]，将使用默认值 0")
             loudness_rate = 0
-            
+
         if not (1 <= emotion_scale <= 5):
             logger.warning(f"emotion_scale {emotion_scale} 超出有效范围 [1, 5]，将使用默认值 3")
             emotion_scale = 3
@@ -135,7 +143,7 @@ class VolcEngineTTSClient:
             "X-Api-Resource-Id": resource_id,
             "X-Api-App-Key": app_key,
             "Content-Type": "application/json",
-            "Connection": "keep-alive"
+            "Connection": "keep-alive",
         }
         additions = json.dumps({"explicit_language":"zh",
                                 "disable_markdown_filter": True,
@@ -146,10 +154,8 @@ class VolcEngineTTSClient:
                                 }
                             })
         payload = {
-            "user": {
-                "uid": uid
-            },
-            "req_params":{
+            "user": {"uid": uid},
+            "req_params": {
                 "text": text,
                 "speaker": voice_type,
                 "audio_params": {
@@ -161,8 +167,8 @@ class VolcEngineTTSClient:
                     "speech_rate": speech_rate,
                     "loudness_rate": loudness_rate
                 },
-                "additions": additions
-            }
+                "additions": additions,
+            },
         }
         success = await self.tts_http_stream(headers=headers, params=payload, audio_save_path=output)
         if success:
@@ -171,18 +177,15 @@ class VolcEngineTTSClient:
             logger.warning(f"VolcEngineTTSClient tts request for '{text}': failed")
         return success
 
-    def close(self):
-        """关闭会话"""
-        self.session.close()
 
 async def test(args):
     """
     TTS测试函数
-    
+
     Args:
         args: list, e.g. [text, voice_type, emotion, emotion_scale, speech_rate, loudness_rate, output, resource_id, app_key, uid, format, sample_rate, enable_timestamp]
               Provide as many as needed, from left to right.
-              
+
     Parameter ranges:
         - speech_rate: -50~100 (100代表2倍速, -50代表0.5倍速, 0为正常语速)
         - loudness_rate: -50~100 (100代表2倍音量, -50代表0.5倍音量, 0为正常音量)
@@ -206,7 +209,7 @@ async def test(args):
         "uid": "123123",
         "format": "mp3",
         "sample_rate": 24000,
-        "enable_timestamp": True
+        "enable_timestamp": True,
     }
     keys = list(params.keys())
     # 覆盖默认参数
@@ -241,4 +244,3 @@ async def test(args):
 
 if __name__ == "__main__":
     asyncio.run(test(sys.argv[1:]))
-

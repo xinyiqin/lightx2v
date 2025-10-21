@@ -3,8 +3,8 @@
      <div class="flex items-center justify-between p-4 border-b border-gray-700">
      <h3 class="text-xl font-semibold text-white">语音合成</h3>
      <div class="flex items-center gap-2">
-       <button 
-         @click="applySelectedVoice" 
+       <button
+         @click="applySelectedVoice"
          :disabled="!selectedVoice || !inputText.trim() || isGenerating"
          class="header-apply-button"
          title="应用当前选择的声音"
@@ -59,16 +59,16 @@
                   <span class="arco-input-group-prefix">
                     <i class="fas fa-search"></i>
                   </span>
-                  <input 
+                  <input
                     v-model="searchQuery"
-                    placeholder="搜索音色" 
+                    placeholder="搜索音色"
                     class="arco-input arco-input-size-default"
                   />
                 </span>
               </span>
             </div>
           </div>
-          
+
           <!-- Filter Button -->
           <button @click="toggleFilterPanel" class="filter-button">
             <i class="fas fa-filter"></i>
@@ -82,21 +82,21 @@
       <div class="voice-list-container" ref="voiceListContainer">
         <div class="arco-radio-group arco-radio-size-default arco-radio-mode-outline" role="radiogroup">
           <div class="voice-grid">
-            <label 
-              v-for="(voice, index) in filteredVoices" 
+            <label
+              v-for="(voice, index) in filteredVoices"
               :key="index"
               class="arco-radio m-0 p-0"
               :class="{ 'arco-radio-checked': selectedVoice === voice.voice_type }"
             >
-              <input 
-                type="radio" 
+              <input
+                type="radio"
                 :value="voice.voice_type"
                 v-model="selectedVoice"
                 @change="onVoiceSelect(voice)"
               />
-              <div 
+              <div
                 class="voice-card"
-                :class="{ 
+                :class="{
                   'voice-card-selected': selectedVoice === voice.voice_type,
                   'voice-card-controlled': selectedVoice === voice.voice_type && showControls
                 }"
@@ -107,17 +107,17 @@
                 </div>
                 <div class="voice-avatar-container">
                   <!-- Female Avatar -->
-                  <img 
+                  <img
                     v-if="isFemaleVoice(voice.voice_type)"
-                    src="../../public/female.svg" 
+                    src="../../public/female.svg"
                     alt="Female Avatar"
                     class="voice-avatar"
                     :class="{ 'voice-avatar-disabled': selectedVoice === voice.voice_type }"
                   />
                   <!-- Male Avatar -->
-                  <img 
+                  <img
                     v-else
-                    src="../../public/male.svg" 
+                    src="../../public/male.svg"
                     alt="Male Avatar"
                     class="voice-avatar"
                     :class="{ 'voice-avatar-disabled': selectedVoice === voice.voice_type }"
@@ -140,8 +140,8 @@
                       <span class="scene-tag">{{ voice.scene }}</span>
                     </div>
                     <div class="voice-languages" v-if="voice.language && voice.language.length > 0">
-                      <span 
-                        v-for="langCode in voice.language" 
+                      <span
+                        v-for="langCode in voice.language"
                         :key="langCode"
                         class="language-tag"
                       >
@@ -150,7 +150,7 @@
                     </div>
                   </div>
                 </div>
-                
+
                 <!-- TTS Controls Panel -->
                 <div v-if="selectedVoice === voice.voice_type && showControls" class="voice-controls-panel">
                   <div class="control-item">
@@ -189,11 +189,11 @@
                   <!-- Emotion controls - only show if voice has emotions -->
                   <div v-if="voice.emotions && voice.emotions.length > 0" class="control-item">
                     <label>情感强度:</label>
-                    <input 
-                      type="range" 
-                      min="1" 
-                      max="5" 
-                      v-model="emotionScale" 
+                    <input
+                      type="range"
+                      min="1"
+                      max="5"
+                      v-model="emotionScale"
                       class="mini-slider"
                     />
                     <span class="mini-display">{{ emotionScale }}</span>
@@ -234,15 +234,15 @@
           <i class="fas fa-times"></i>
         </button>
       </div>
-      
+
       <!-- Filter Content -->
       <div class="filter-content">
         <!-- Scene Filter -->
         <div class="filter-section">
           <h4 class="filter-section-title">场景</h4>
           <div class="filter-options">
-            <button 
-              v-for="category in categories" 
+            <button
+              v-for="category in categories"
               :key="category"
               @click="selectCategory(category)"
               class="filter-option"
@@ -257,8 +257,8 @@
         <div class="filter-section">
           <h4 class="filter-section-title">版本</h4>
           <div class="filter-options">
-            <button 
-              v-for="v in version" 
+            <button
+              v-for="v in version"
               :key="v"
               @click="selectVersion(v)"
               class="filter-option"
@@ -273,8 +273,8 @@
         <div class="filter-section">
           <h4 class="filter-section-title">语言</h4>
           <div class="filter-options">
-            <button 
-              v-for="lang in languages" 
+            <button
+              v-for="lang in languages"
               :key="lang"
               @click="selectLanguage(lang)"
               class="filter-option"
@@ -289,8 +289,8 @@
         <div class="filter-section">
           <h4 class="filter-section-title">性别</h4>
           <div class="filter-options">
-            <button 
-              v-for="gender in genders" 
+            <button
+              v-for="gender in genders"
               :key="gender"
               @click="selectGender(gender)"
               class="filter-option"
@@ -301,7 +301,7 @@
           </div>
         </div>
       </div>
-      
+
       <!-- Filter Actions -->
       <div class="filter-actions">
         <button @click="resetFilters" class="filter-reset-btn">重置</button>
@@ -340,7 +340,7 @@ export default {
     const voiceListContainer = ref(null)
     const showControls = ref(false)
     const showFilterPanel = ref(false)
-    
+
     // Category filtering
     const selectedCategory = ref('全部场景')
     const categories = ref(['全部场景', '通用场景', '客服场景', '教育场景', '趣味口音', '角色扮演', '有声阅读', '多语种', '多情感', '视频配音'])
@@ -360,7 +360,7 @@ export default {
         console.log('音色数据', data)
         voices.value = data.voices || []
         emotions.value = data.emotions || []
-        
+
         // Map languages data to language options
         if (data.languages && Array.isArray(data.languages)) {
           const languageOptions = ['全部语言']
@@ -369,7 +369,7 @@ export default {
           })
           languages.value = languageOptions
         }
-        
+
         // Extract gender options from voices data
         if (voices.value && voices.value.length > 0) {
           const genderSet = new Set()
@@ -378,7 +378,7 @@ export default {
               genderSet.add(voice.gender)
             }
           })
-          
+
           const genderOptions = ['全部性别']
           // Convert English gender to Chinese display
           genderSet.forEach(gender => {
@@ -458,18 +458,18 @@ export default {
           }
         })
       }
-      
+
       // If no emotions found or no neutral emotion in the list, add neutral as default
       if (items.length === 0 || !items.find(item => item.value === 'neutral')) {
         items.unshift({ value: 'neutral', label: '中性' })
       }
-      
+
       return items
     })
 
     const filteredVoices = computed(() => {
       let filtered = [...voices.value] // 创建副本，避免修改原始数据
-      
+
       console.log('原始音色数据:', voices.value.length)
       console.log('筛选条件:', {
         category: selectedCategory.value,
@@ -478,19 +478,19 @@ export default {
         gender: selectedGender.value,
         search: searchQuery.value
       })
-        
+
       // Filter by category
       if (selectedCategory.value !== '全部场景') {
         filtered = filtered.filter(voice => voice.scene === selectedCategory.value)
         console.log('分类筛选后:', filtered.length)
       }
-      
+
       // Filter by version
       if (selectedVersion.value !== '全部版本') {
         filtered = filtered.filter(voice => voice.version === selectedVersion.value)
         console.log('版本筛选后:', filtered.length)
       }
-      
+
       // Filter by language
       if (selectedLanguage.value !== '全部语言') {
         // Convert Chinese language display back to language code for filtering
@@ -504,18 +504,18 @@ export default {
           '西语': 'es',
           '日语': 'ja'
         }
-        
+
         if (languageMap[selectedLanguage.value]) {
           languageFilter = languageMap[selectedLanguage.value]
         }
-        
+
         filtered = filtered.filter(voice => {
           // Check if voice.language array contains the language code
           return voice.language && Array.isArray(voice.language) && voice.language.includes(languageFilter)
         })
         console.log('语言筛选后:', filtered.length)
       }
-      
+
       // Filter by gender
       if (selectedGender.value !== '全部性别') {
         // Convert Chinese gender display back to English for filtering
@@ -525,19 +525,19 @@ export default {
         } else if (selectedGender.value === '男性') {
           genderFilter = 'male'
         }
-        
+
         filtered = filtered.filter(voice => voice.gender === genderFilter)
         console.log('性别筛选后:', filtered.length)
       }
-      
+
       // Filter by search query
       if (searchQuery.value) {
-        filtered = filtered.filter(voice => 
+        filtered = filtered.filter(voice =>
           voice.name.toLowerCase().includes(searchQuery.value.toLowerCase())
         )
         console.log('搜索筛选后:', filtered.length)
       }
-      
+
       console.log('最终筛选结果:', filtered.length)
       return filtered
     })
@@ -574,10 +574,10 @@ export default {
       if (voice.emotions && !voice.emotions.includes(selectedEmotion.value)) {
         selectedEmotion.value = ''
       }
-      
+
       // Reset scroll position when voice is selected
       resetScrollPosition()
-      
+
       // Auto-generate TTS when voice is selected and text is available
       await generateTTS()
     }
@@ -621,7 +621,7 @@ export default {
         if (response.ok) {
           const blob = await response.blob()
           audioUrl.value = URL.createObjectURL(blob)
-          
+
           // 自动播放生成的音频
           const audio = new Audio(audioUrl.value)
           currentAudio.value = audio // 保存当前播放的音频对象
