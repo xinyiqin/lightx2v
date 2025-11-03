@@ -5,7 +5,7 @@
     <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px] flex-shrink-0">
       <h3 class="text-xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-3 tracking-tight">
         <i class="fas fa-volume-up text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-        <span>语音合成</span>
+        <span>{{ t('voiceSynthesis') }}</span>
       </h3>
       <div class="flex items-center gap-2">
         <!-- 应用按钮 - Apple 风格 -->
@@ -13,7 +13,7 @@
           @click="applySelectedVoice"
           :disabled="!selectedVoice || !inputText.trim() || isGenerating"
           class="w-9 h-9 flex items-center justify-center bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full transition-all duration-200 hover:scale-110 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-          title="应用当前选择的声音">
+          :title="t('applySelectedVoice')">
           <i class="fas fa-check text-sm"></i>
         </button>
         <!-- 关闭按钮 - Apple 风格 -->
@@ -31,7 +31,7 @@
             <div v-if="audioUrl" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl p-5 transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]">
           <div class="flex items-center gap-3 mb-3">
             <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-            <h6 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">生成的音频</h6>
+            <h6 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('generatedAudio') }}</h6>
           </div>
           <audio :src="audioUrl" controls class="w-full rounded-xl"></audio>
         </div>
@@ -39,11 +39,11 @@
         <div>
           <label class="block text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">
             <i class="fas fa-keyboard mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-            输入要转换的文本
+            {{ t('enterTextToConvert') }}
           </label>
           <textarea
             v-model="inputText"
-            placeholder="你好，请问我有什么可以帮您？"
+            :placeholder="t('ttsPlaceholder')"
             class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200 resize-none min-h-[100px]"
             rows="4"
           ></textarea>
@@ -53,12 +53,12 @@
         <div>
           <label class="block text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">
             <i class="fas fa-magic mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-            语音指令
-            <span class="text-xs text-[#86868b] dark:text-[#98989d] ml-2">（仅适用于v2.0音色）</span>
+            {{ t('voiceInstruction') }}
+            <span class="text-xs text-[#86868b] dark:text-[#98989d] ml-2">{{ t('voiceInstructionHint') }}</span>
           </label>
           <textarea
             v-model="contextText"
-            placeholder="使用指令控制合成语音细节，包括但不限于情绪、语境、方言、语气、速度、音调等，例如：带点害羞又藏着温柔期待的语气说"
+            :placeholder="t('voiceInstructionPlaceholder')"
             class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl px-5 py-3 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200 resize-none"
             rows="2"
           ></textarea>
@@ -69,7 +69,7 @@
           <div class="flex items-center justify-between mb-4">
             <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">
               <i class="fas fa-microphone-alt mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-              选择音色
+              {{ t('selectVoice') }}
             </label>
             <div class="flex items-center gap-3">
               <!-- 搜索框 - Apple 风格 -->
@@ -77,7 +77,7 @@
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] dark:text-[#98989d] text-xs pointer-events-none z-10"></i>
                 <input
                   v-model="searchQuery"
-                  placeholder="搜索音色"
+                  :placeholder="t('searchVoice')"
                   class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-lg py-2 pl-9 pr-3 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 transition-all duration-200"
                   type="text"
                 />
@@ -87,7 +87,7 @@
               <button @click="toggleFilterPanel"
                 class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-lg transition-all duration-200 text-sm font-medium tracking-tight">
                 <i class="fas fa-filter text-xs"></i>
-                <span>筛选</span>
+                <span>{{ t('filter') }}</span>
               </button>
             </div>
           </div>
@@ -168,7 +168,7 @@
                   <div v-if="selectedVoice === voice.voice_type && showControls" class="absolute top-full left-0 right-0 mt-2 bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-50 space-y-3">
                     <!-- 语速控制 -->
                     <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">语速:</label>
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('speechRate') }}:</label>
                       <input 
                         type="range" 
                         min="-50" 
@@ -180,7 +180,7 @@
                     </div>
                     <!-- 音量控制 -->
                     <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">音量:</label>
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('volume') }}:</label>
                       <input 
                         type="range" 
                         min="-50" 
@@ -192,7 +192,7 @@
                     </div>
                     <!-- 音调控制 -->
                     <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">音调:</label>
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('pitch') }}:</label>
                       <input 
                         type="range" 
                         min="-12" 
@@ -204,7 +204,7 @@
                     </div>
                     <!-- 情感控制 - 仅当音色支持时显示 -->
                     <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">情感强度:</label>
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('emotionIntensity') }}:</label>
                       <input
                         type="range"
                         min="1"
@@ -215,12 +215,12 @@
                       <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ emotionScale }}</span>
                     </div>
                     <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">情感类型:</label>
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('emotionType') }}:</label>
                       <div class="flex-1">
                         <DropdownMenu
                           :items="emotionItems"
                           :selected-value="selectedEmotion"
-                          placeholder="中性"
+                          :placeholder="t('neutral')"
                           @select-item="handleEmotionSelect"
                         />
                       </div>
@@ -243,7 +243,7 @@
       <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
         <h3 class="text-lg font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-2 tracking-tight">
           <i class="fas fa-filter text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-          <span>筛选音色</span>
+          <span>{{ t('filterVoices') }}</span>
         </h3>
         <button @click="closeFilterPanel"
           class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100">
@@ -256,7 +256,7 @@
         <div class="space-y-6">
           <!-- 场景筛选 -->
           <div>
-            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">场景</h4>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">{{ t('scene') }}</h4>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="category in categories"
@@ -267,14 +267,14 @@
                   ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
               >
-                {{ category }}
+                {{ translateCategory(category) }}
               </button>
             </div>
           </div>
 
           <!-- 版本筛选 -->
           <div>
-            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">版本</h4>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">{{ t('version') }}</h4>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="v in version"
@@ -285,14 +285,14 @@
                   ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
               >
-                {{ v }}
+                {{ translateVersion(v) }}
               </button>
             </div>
           </div>
 
           <!-- 语言筛选 -->
           <div>
-            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">语言</h4>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">{{ t('language') }}</h4>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="lang in languages"
@@ -303,14 +303,14 @@
                   ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
               >
-                {{ lang }}
+                {{ translateLanguage(lang) }}
               </button>
             </div>
           </div>
 
           <!-- 性别筛选 -->
           <div>
-            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">性别</h4>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">{{ t('gender') }}</h4>
             <div class="flex flex-wrap gap-2">
               <button
                 v-for="gender in genders"
@@ -321,7 +321,7 @@
                   ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
               >
-                {{ gender }}
+                {{ translateGender(gender) }}
               </button>
             </div>
           </div>
@@ -332,11 +332,11 @@
       <div class="flex gap-3 px-6 py-4 border-t border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
         <button @click="resetFilters"
           class="flex-1 px-5 py-3 bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 text-[#1d1d1f] dark:text-[#f5f5f7] rounded-full transition-all duration-200 font-medium text-[15px] tracking-tight hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98]">
-          重置
+          {{ t('reset') }}
         </button>
         <button @click="applyFilters"
           class="flex-1 px-5 py-3 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full transition-all duration-200 font-semibold text-[15px] tracking-tight hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100">
-          完成
+          {{ t('done') }}
         </button>
       </div>
     </div>
@@ -345,6 +345,7 @@
 
 <script>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import DropdownMenu from './DropdownMenu.vue'
 
 export default {
@@ -354,6 +355,7 @@ export default {
   },
   emits: ['tts-complete', 'close-modal'],
   setup(props, { emit }) {
+    const { t } = useI18n()
     const inputText = ref('')
     const contextText = ref('')
     const selectedVoice = ref('')
@@ -373,7 +375,7 @@ export default {
     const showControls = ref(false)
     const showFilterPanel = ref(false)
 
-    // Category filtering
+    // Category filtering - 存储原始中文值
     const selectedCategory = ref('全部场景')
     const categories = ref(['全部场景', '通用场景', '客服场景', '教育场景', '趣味口音', '角色扮演', '有声阅读', '多语种', '多情感', '视频配音'])
     const selectedVersion = ref('全部版本')
@@ -382,6 +384,44 @@ export default {
     const languages = ref(['全部语言'])
     const selectedGender = ref('全部性别')
     const genders = ref(['全部性别'])
+    
+    // 翻译映射函数
+    const translateCategory = (category) => {
+      const map = {
+        '全部场景': t('allScenes'),
+        '通用场景': t('generalScene'),
+        '客服场景': t('customerServiceScene'),
+        '教育场景': t('educationScene'),
+        '趣味口音': t('funAccent'),
+        '角色扮演': t('rolePlaying'),
+        '有声阅读': t('audiobook'),
+        '多语种': t('multilingual'),
+        '多情感': t('multiEmotion'),
+        '视频配音': t('videoDubbing')
+      }
+      return map[category] || category
+    }
+    
+    const translateVersion = (ver) => {
+      return ver === '全部版本' ? t('allVersions') : ver
+    }
+    
+    const translateLanguage = (lang) => {
+      if (lang === '全部语言') return t('allLanguages')
+      
+      // 语言名称映射 - 中文到翻译键（如果有的话直接显示）
+      // 对于后端返回的中文语言名，直接显示即可，因为它们是通用的
+      return lang
+    }
+    
+    const translateGender = (gender) => {
+      const map = {
+        '全部性别': t('allGenders'),
+        '女性': t('female'),
+        '男性': t('male')
+      }
+      return map[gender] || gender
+    }
 
 
     // Load voices data
@@ -412,7 +452,7 @@ export default {
           })
 
           const genderOptions = ['全部性别']
-          // Convert English gender to Chinese display
+          // Convert English gender to localized display - 保留中文作为内部值
           genderSet.forEach(gender => {
             if (gender === 'female') {
               genderOptions.push('女性')
@@ -493,7 +533,7 @@ export default {
 
       // If no emotions found or no neutral emotion in the list, add neutral as default
       if (items.length === 0 || !items.find(item => item.value === 'neutral')) {
-        items.unshift({ value: 'neutral', label: '中性' })
+        items.unshift({ value: 'neutral', label: t('neutral') })
       }
 
       return items
@@ -617,7 +657,7 @@ export default {
     // Generate TTS and auto-play
     const generateTTS = async () => {
       if (!inputText.value.trim()) {
-        inputText.value = '你好，请问我有什么可以帮您？'
+        inputText.value = t('ttsPlaceholder')
       }
 
       if (!selectedVoice.value) return
@@ -666,7 +706,7 @@ export default {
         }
       } catch (error) {
         console.error('TTS generation error:', error)
-        alert('语音生成失败，请重试')
+        alert(t('ttsGenerationFailed'))
       } finally {
         isGenerating.value = false
       }
@@ -683,7 +723,7 @@ export default {
           })
           .catch(error => {
             console.error('Error converting audio to blob:', error)
-            alert('应用音频失败，请重试')
+            alert(t('applyAudioFailed'))
           })
       }
     }
@@ -772,6 +812,7 @@ export default {
 
 
     return {
+      t,
       inputText,
       contextText,
       selectedVoice,
@@ -818,7 +859,11 @@ export default {
       languages,
       selectedGender,
       genders,
-      resetScrollPosition
+      resetScrollPosition,
+      translateCategory,
+      translateVersion,
+      translateLanguage,
+      translateGender
     }
   }
 }
