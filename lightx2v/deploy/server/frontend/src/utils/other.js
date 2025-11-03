@@ -528,8 +528,8 @@
             };
 
             // 方法
-            const showAlert = (message, type = 'info') => {
-                alert.value = { show: true, message, type };
+            const showAlert = (message, type = 'info', action = null) => {
+                alert.value = { show: true, message, type, action };
                 setTimeout(() => {
                     alert.value.show = false;
                 }, 5000);
@@ -1463,12 +1463,16 @@
                         selectedTaskId.value = selectedTaskId.value;
                         selectModel(currentForm.model_cls);
 
+                        // 返回新创建的任务ID
+                        return result.task_id;
                     } else {
                         const error = await response.json();
                         showAlert(`${t('taskSubmitFailedAlert')}: ${error.message},${error.detail}`, 'danger');
+                        return null;
                     }
                 } catch (error) {
                     showAlert(`${t('submitTaskFailedAlert')}: ${error.message}`, 'danger');
+                    return null;
                 } finally {
                     submitting.value = false;
                 }
@@ -2320,14 +2324,15 @@
                     if (response && response.ok) {
                         showAlert(t('taskCancelSuccessAlert'), 'success');
 
-                        // 如果当前在任务详情界面，先刷新任务列表，然后重新获取任务信息
+                        // 如果当前在任务详情界面，刷新任务后关闭详情弹窗
                         if (fromDetailPage) {
                             refreshTasks(true); // 强制刷新
                             const updatedTask = tasks.value.find(t => t.task_id === taskId);
                             if (updatedTask) {
-                                selectedTask.value = updatedTask;
+                                modalTask.value = updatedTask;
                             }
                             await nextTick();
+                            closeTaskDetailModal();
                         } else {
                             refreshTasks(true); // 强制刷新
                         }
@@ -2394,53 +2399,7 @@
                                 currentForm.prompt = task.params.prompt;
                             }
 
-                            // 尝试从localStorage获取任务历史数据
-                            const taskHistory = JSON.parse(localStorage.getItem('taskHistory') || '[]');
-                            const historyItem = taskHistory.find(item => item.task_id === task.task_id);
-
-                            if (historyItem) {
-                                // 从localStorage恢复图片和音频
-                                if (historyItem.imageFile && historyItem.imageFile.blob) {
-                                    // 重新创建File对象
-                                    const imageFile = new File([historyItem.imageFile.blob], historyItem.imageFile.name, { type: historyItem.imageFile.type });
-                                    currentForm.imageFile = imageFile;
-                                    setCurrentImagePreview(URL.createObjectURL(imageFile));
-                                }
-
-                                if (historyItem.audioFile && historyItem.audioFile.blob) {
-                                    // 重新创建File对象
-                                    let mimeType = historyItem.audioFile.type;
-                                    if (!mimeType || mimeType === 'application/octet-stream') {
-                                        const filename = historyItem.audioFile.name || 'audio.wav';
-                                        const ext = filename.toLowerCase().split('.').pop();
-                                        const mimeTypes = {
-                                            'mp3': 'audio/mpeg',
-                                            'wav': 'audio/wav',
-                                            'mp4': 'audio/mp4',
-                                            'aac': 'audio/aac',
-                                            'ogg': 'audio/ogg',
-                                            'm4a': 'audio/mp4',
-                                            'webm': 'audio/webm'
-                                        };
-                                        mimeType = mimeTypes[ext] || 'audio/mpeg';
-                                    }
-                                    const audioFile = new File([historyItem.audioFile.blob], historyItem.audioFile.name, { type: mimeType });
-                                    currentForm.audioFile = audioFile;
-                                    console.log('复用任务 - 从localStorage恢复音频文件:', {
-                                        name: audioFile.name,
-                                        type: audioFile.type,
-                                        size: audioFile.size
-                                    });
-                                    // 使用FileReader生成data URL，与正常上传保持一致
-                                    const reader = new FileReader();
-                                    reader.onload = (e) => {
-                                        setCurrentAudioPreview(e.target.result);
-                                        console.log('复用任务 - 音频预览已设置:', e.target.result.substring(0, 50) + '...');
-                                    };
-                                    reader.readAsDataURL(audioFile);
-                                }
-                            } else {
-                                // 如果localStorage中没有，尝试从后端获取任务文件
+                            // localStorage 不再保存文件内容，直接从后端获取任务文件
                                 try {
                                     // 使用现有的函数获取图片和音频URL
                                     const imageUrl = await getTaskInputImage(task);
@@ -2514,7 +2473,6 @@
                                     }
                                 } catch (error) {
                                     console.warn('Failed to load task data from backend:', error);
-                                }
                             }
 
                             showAlert(t('taskMaterialReuseSuccessAlert'), 'success');
@@ -2615,8 +2573,9 @@
                         showAlert(t('taskDeletedSuccessAlert'), 'success');
                         refreshTasks(true); // 强制刷新
 
-                        // 如果是从任务详情页删除，则跳转回主页
+                        // 如果是从任务详情页删除，删除成功后关闭详情弹窗
                         if (fromDetailPage) {
+                            closeTaskDetailModal();
                             if (!selectedTaskId.value) {
                                 if (availableTaskTypes.value.includes('s2v')) {
                                     selectTask('s2v');
@@ -2730,53 +2689,7 @@
                         currentForm.prompt = task.params.prompt;
                     }
 
-                    // 尝试从localStorage获取任务历史数据
-                    const taskHistory = JSON.parse(localStorage.getItem('taskHistory') || '[]');
-                    const historyItem = taskHistory.find(item => item.task_id === task.task_id);
-
-                    if (historyItem) {
-                        // 从localStorage恢复图片和音频
-                        if (historyItem.imageFile && historyItem.imageFile.blob) {
-                            // 重新创建File对象
-                            const imageFile = new File([historyItem.imageFile.blob], historyItem.imageFile.name, { type: historyItem.imageFile.type });
-                            currentForm.imageFile = imageFile;
-                            setCurrentImagePreview(URL.createObjectURL(imageFile));
-                        }
-
-                        if (historyItem.audioFile && historyItem.audioFile.blob) {
-                            // 重新创建File对象
-                            let mimeType = historyItem.audioFile.type;
-                            if (!mimeType || mimeType === 'application/octet-stream') {
-                                const filename = historyItem.audioFile.name || 'audio.wav';
-                                const ext = filename.toLowerCase().split('.').pop();
-                                const mimeTypes = {
-                                    'mp3': 'audio/mpeg',
-                                    'wav': 'audio/wav',
-                                    'mp4': 'audio/mp4',
-                                    'aac': 'audio/aac',
-                                    'ogg': 'audio/ogg',
-                                    'm4a': 'audio/mp4',
-                                    'webm': 'audio/webm'
-                                };
-                                mimeType = mimeTypes[ext] || 'audio/mpeg';
-                            }
-                            const audioFile = new File([historyItem.audioFile.blob], historyItem.audioFile.name, { type: mimeType });
-                            currentForm.audioFile = audioFile;
-                            console.log('复用任务 - 从localStorage恢复音频文件:', {
-                                name: audioFile.name,
-                                type: audioFile.type,
-                                size: audioFile.size
-                            });
-                            // 使用FileReader生成data URL，与正常上传保持一致
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                                setCurrentAudioPreview(e.target.result);
-                                console.log('复用任务 - 音频预览已设置:', e.target.result.substring(0, 50) + '...');
-                            };
-                            reader.readAsDataURL(audioFile);
-                        }
-                    } else {
-                        // 如果localStorage中没有，尝试从后端获取任务文件
+                    // localStorage 不再保存文件内容，直接从后端获取任务文件
                         try {
                             // 使用现有的函数获取图片和音频URL
                             const imageUrl = await getTaskInputImage(task);
@@ -2843,18 +2756,36 @@
                                         };
                                         reader.readAsDataURL(file);
                                     }
-
                                 } catch (error) {
                                     console.warn('Failed to load audio file:', error);
                                 }
                             }
                         } catch (error) {
                             console.warn('Failed to load task data from backend:', error);
-                        }
                     }
 
                     showAlert(t('taskMaterialReuseSuccessAlert'), 'success');
+                    
+                    // 检查当前路由，如果已经在 generate 页面，则滚动到生成区域
+                    const currentRoute = router.currentRoute.value;
+                    if (currentRoute.path === '/generate') {
+                        // 关闭任务详情弹窗
+                        if (showTaskDetailModal.value) {
+                            closeTaskDetailModal();
+                        }
+                        // 等待 DOM 更新后滚动到生成区域
+                        await nextTick();
+                        const creationArea = document.querySelector('#task-creator');
+                        if (creationArea) {
+                            creationArea.scrollIntoView({ 
+                                behavior: 'smooth', 
+                                block: 'start' 
+                            });
+                        }
+                    } else {
+                        // 不在 generate 页面，跳转过去
                     switchToCreateView();
+                    }
                 } catch (error) {
                     console.error('Failed to reuse task:', error);
                     showAlert(t('loadTaskDataFailedAlert'), 'danger');
@@ -2876,11 +2807,111 @@
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
+                    showAlert(t('downloadSuccessAlert'), 'success');
                 } catch (error) {
                     console.error('Download failed:', error);
                     showAlert(t('downloadFailedAlert'), 'danger');
                 }
             };
+
+
+            // 处理文件下载
+            const handleDownloadFile = async (taskId, fileKey, fileName) => {
+                try {
+                    console.log('开始下载文件:', { taskId, fileKey, fileName })
+
+                    // 处理文件名，确保有正确的后缀名
+                    let finalFileName = fileName
+                    if (fileName && typeof fileName === 'string') {
+                        // 检查是否已有后缀名
+                        const hasExtension = /\.[a-zA-Z0-9]+$/.test(fileName)
+                        if (!hasExtension) {
+                            // 没有后缀名，根据文件类型添加
+                            const extension = getFileExtension(fileKey)
+                            finalFileName = `${fileName}.${extension}`
+                            console.log('添加后缀名:', finalFileName)
+                        }
+                    } else {
+                        // 没有文件名，使用默认名称
+                        finalFileName = `${fileKey}.${getFileExtension(fileKey)}`
+                    }
+
+                    // 先尝试从缓存获取
+                    let fileData = getTaskFileFromCache(taskId, fileKey)
+                    console.log('缓存中的文件数据:', fileData)
+
+                    if (fileData && fileData.blob) {
+                        // 缓存中有blob数据，直接使用
+                        console.log('使用缓存中的文件数据')
+                        downloadFile({ ...fileData, name: finalFileName })
+                        return
+                    }
+
+                    if (fileData && fileData.url) {
+                        // 缓存中有URL，使用URL下载
+                        console.log('使用缓存中的URL下载:', fileData.url)
+                        try {
+                            const response = await fetch(fileData.url)
+                            console.log('文件响应状态:', response.status, response.ok)
+
+                            if (response.ok) {
+                                const blob = await response.blob()
+                                console.log('文件blob大小:', blob.size)
+
+                                const downloadData = {
+                                    blob: blob,
+                                    name: finalFileName
+                                }
+                                console.log('构造的文件数据:', downloadData)
+                                downloadFile(downloadData)
+                                return
+                            } else {
+                                console.error('文件响应失败:', response.status, response.statusText)
+                            }
+                        } catch (error) {
+                            console.error('使用缓存URL下载失败:', error)
+                        }
+                    }
+
+                    if (!fileData) {
+                        console.log('缓存中没有文件，尝试异步获取...')
+                        // 缓存中没有，尝试异步获取
+                        const url = await getTaskFileUrl(taskId, fileKey)
+                        console.log('获取到的文件URL:', url)
+
+                        if (url) {
+                            const response = await fetch(url)
+                            console.log('文件响应状态:', response.status, response.ok)
+
+                            if (response.ok) {
+                                const blob = await response.blob()
+                                console.log('文件blob大小:', blob.size)
+
+                                fileData = {
+                                    blob: blob,
+                                    name: finalFileName
+                                }
+                                console.log('构造的文件数据:', fileData)
+                            } else {
+                                console.error('文件响应失败:', response.status, response.statusText)
+                            }
+                        } else {
+                            console.error('无法获取文件URL')
+                        }
+                    }
+
+                    if (fileData && fileData.blob) {
+                        console.log('开始下载文件:', fileData.name)
+                        downloadFile(fileData)
+                    } else {
+                        console.error('文件数据无效:', fileData)
+                        showAlert(t('fileUnavailableAlert'), 'danger')
+                    }
+                } catch (error) {
+                    console.error('下载失败:', error)
+                    showAlert(t('downloadFailedAlert'), 'danger')
+                }
+            }       
 
             const viewFile = (fileInfo) => {
                 if (!fileInfo || !fileInfo.url) {
@@ -2978,9 +3009,9 @@
 
             const getTaskTypeIcon = (taskType) => {
                 const iconMap = {
-                    't2v': 'fas fa-font',
-                    'i2v': 'fas fa-image',
-                    's2v': 'fas fa-user'
+                    't2v': 'fas fa-font',  // 文字A形图标
+                    'i2v': 'fas fa-image',     // 图像图标
+                    's2v': 'fas fa-user' // 人物图标
                 };
                 return iconMap[taskType] || 'fas fa-video';
             };
@@ -3195,6 +3226,9 @@
             // 统一的初始化函数
             const init = async () => {
                 try {
+                    // 0. 初始化主题
+                    initTheme();
+
                     // 1. 加载模型和任务数据
                     await loadModels();
 
@@ -3394,9 +3428,19 @@
 
                                         // 显示任务完成提示
                                         if (updatedTask.status === 'SUCCEED') {
-                                            showAlert('视频生成完成！', 'success');
+                                            showAlert('视频生成完成！', 'success', {
+                                                label: t('view'),
+                                                onClick: () => {
+                                                    openTaskDetailModal(updatedTask);
+                                                }
+                                            });
                                         } else if (updatedTask.status === 'FAILED') {
-                                            showAlert('视频生成失败，请查看详情', 'danger');
+                                            showAlert('视频生成失败，请查看详情', 'danger', {
+                                                label: t('view'),
+                                                onClick: () => {
+                                                    openTaskDetailModal(updatedTask);
+                                                }
+                                            });
                                         } else if (updatedTask.status === 'CANCEL') {
                                             showAlert('任务已取消', 'warning');
                                         }
@@ -3889,83 +3933,32 @@
 
             // addPromptToHistory函数已删除，现在prompt历史直接从taskHistory中获取
 
-            // 保存完整的任务历史（包括提示词、图片、音频）
+            // 保存完整的任务历史（只保存元数据，不保存文件内容）
             const addTaskToHistory = (taskType, formData) => {
                 console.log('开始保存任务历史:', { taskType, formData });
-                console.log('formData.imageFile:', formData.imageFile);
-                console.log('formData.audioFile:', formData.audioFile);
 
                 const historyItem = {
                     id: Date.now(),
                     timestamp: new Date().toISOString(),
                     taskType: taskType,
                     prompt: formData.prompt || '',
-                    imageFile: null,
-                    audioFile: null
-                };
-
-                let filesToProcess = 0;
-                let filesProcessed = 0;
-
-                // 检查需要处理的文件数量
-                if (formData.imageFile) {
-                    filesToProcess++;
-                    console.log('需要处理图片文件:', formData.imageFile.name, formData.imageFile.type, formData.imageFile.size);
-                }
-                if (formData.audioFile) {
-                    filesToProcess++;
-                    console.log('需要处理音频文件:', formData.audioFile.name, formData.audioFile.type, formData.audioFile.size);
-                }
-
-                console.log('总共需要处理文件数量:', filesToProcess);
-
-                const processFile = () => {
-                    filesProcessed++;
-                    console.log(`文件处理进度: ${filesProcessed}/${filesToProcess}`);
-                    if (filesProcessed === filesToProcess) {
-                        // 所有文件都处理完成，保存历史记录
-                        console.log('所有文件处理完成，开始保存历史记录:', historyItem);
-                        saveTaskHistoryItem(historyItem);
-                    }
-                };
-
-                // 保存图片文件
-                if (formData.imageFile) {
-                    const reader = new FileReader();
-                    reader.onload = function (e) {
-                        historyItem.imageFile = {
+                    // 只保存文件元数据，不保存文件内容
+                    imageFile: formData.imageFile ? {
                             name: formData.imageFile.name,
                             type: formData.imageFile.type,
-                            size: formData.imageFile.size,
-                            data: e.target.result
-                        };
-                        console.log('图片文件处理完成:', formData.imageFile.name);
-                        processFile();
-                    };
-                    reader.readAsDataURL(formData.imageFile);
-                }
-
-                // 保存音频文件
-                if (formData.audioFile) {
-                    const reader = new FileReader();
-                    reader.onload = function (e) {
-                        historyItem.audioFile = {
+                        size: formData.imageFile.size
+                        // 不再保存 data 字段，避免占用大量存储空间
+                    } : null,
+                    audioFile: formData.audioFile ? {
                             name: formData.audioFile.name,
                             type: formData.audioFile.type,
-                            size: formData.audioFile.size,
-                            data: e.target.result
+                        size: formData.audioFile.size
+                        // 不再保存 data 字段，避免占用大量存储空间
+                    } : null
                         };
-                        console.log('音频文件处理完成:', formData.audioFile.name);
-                        processFile();
-                    };
-                    reader.readAsDataURL(formData.audioFile);
-                }
 
-                // 如果没有文件需要处理，直接保存
-                if (filesToProcess === 0) {
-                    console.log('没有文件需要处理，直接保存历史记录');
+                console.log('保存任务历史（仅元数据）:', historyItem);
                     saveTaskHistoryItem(historyItem);
-                }
             };
 
             // 保存任务历史项到localStorage
@@ -3988,29 +3981,38 @@
                         existingHistory.push(historyItem);
                         existingHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-                        // 限制历史记录数量，删除最旧的记录（最晚的记录）
-                        if (existingHistory.length > 20) {
-                            // 删除最前面的记录（最旧的）
-                            existingHistory.splice(0, existingHistory.length - 20);
+                        // 限制历史记录数量为10条（不再保存文件内容，所以可以适当减少）
+                        if (existingHistory.length > 10) {
+                            existingHistory.splice(0, existingHistory.length - 10);
                         }
 
-                        // 尝试保存到localStorage，如果失败则清理空间
+                        // 保存到localStorage
                         try {
                             localStorage.setItem('taskHistory', JSON.stringify(existingHistory));
-                            console.log('任务历史已保存:', historyItem);
+                            console.log('任务历史已保存（仅元数据）:', historyItem);
                         } catch (storageError) {
                             if (storageError.name === 'QuotaExceededError') {
                                 console.warn('localStorage空间不足，尝试清理旧数据...');
 
-                                // 清理策略：保留最新的10条记录
-                                const cleanedHistory = existingHistory.slice(-10);
+                                // 清理策略1：只保留最新的5条记录
+                                const cleanedHistory = existingHistory.slice(-5);
 
                                 try {
                                     localStorage.setItem('taskHistory', JSON.stringify(cleanedHistory));
                                     console.log('任务历史已保存（清理后）:', historyItem);
                                 } catch (secondError) {
-                                    console.error('即使清理后仍无法保存，localStorage空间严重不足:', secondError);
-                                    showAlert('历史记录保存失败：存储空间不足', 'warning');
+                                    console.error('清理后仍无法保存，尝试清理所有缓存...');
+                                    
+                                    // 清理策略2：清理所有任务历史，只保存当前这一条
+                                    try {
+                                        localStorage.setItem('taskHistory', JSON.stringify([historyItem]));
+                                        console.log('任务历史已保存（完全清理后）');
+                                        showAlert('历史记录空间已清理', 'info');
+                                    } catch (thirdError) {
+                                        console.error('即使完全清理后仍无法保存:', thirdError);
+                                        // 不再显示警告，因为历史记录不是必需的功能
+                                        console.warn('历史记录功能暂时不可用，将从任务列表恢复数据');
+                                    }
                                 }
                             } else {
                                 throw storageError;
@@ -4021,9 +4023,8 @@
                     }
                 } catch (error) {
                     console.error('保存任务历史失败:', error);
-                    if (error.name === 'QuotaExceededError') {
-                        showAlert('历史记录保存失败：存储空间不足', 'warning');
-                    }
+                    // 不再显示警告给用户，因为可以从任务列表恢复数据
+                    console.warn('历史记录保存失败，将依赖任务列表数据');
                 }
             };
 
@@ -4952,12 +4953,12 @@
             };
 
             // 预览模板详情
-            const previewTemplateDetail = (item) => {
+            const previewTemplateDetail = (item, updateRoute = true) => {
                 selectedTemplate.value = item;
                 showTemplateDetailModal.value = true;
 
-                // 更新路由到模板详情页面
-                if (item?.task_id) {
+                // 只在需要时更新路由到模板详情页面
+                if (updateRoute && item?.task_id) {
                     router.push(`/template/${item.task_id}`);
                 }
             };
@@ -5218,8 +5219,10 @@
                 console.log('openTaskDetailModal called with task:', task);
                 modalTask.value = task;
                 showTaskDetailModal.value = true;
-                // 更新URL路由
-                if (task?.task_id) {
+                // 只有不在 /generate 页面时才更新路由
+                // 在 /generate 页面打开任务详情时，保持在当前页面
+                const currentRoute = router.currentRoute.value;
+                if (task?.task_id && currentRoute.path !== '/generate') {
                     router.push(`/task/${task.task_id}`);
                 }
             };
@@ -5227,8 +5230,14 @@
             const closeTaskDetailModal = () => {
                 showTaskDetailModal.value = false;
                 modalTask.value = null;
-                // 返回项目页面
+                // 只有当前路由是 /task/:id 时才跳转回 Projects
+                // 如果在其他页面（如 /generate）打开的弹窗，关闭时保持在原页面
+                const currentRoute = router.currentRoute.value;
+                if (currentRoute.path.startsWith('/task/')) {
+                    // 从任务详情路由打开的，返回 Projects 页面
                 router.push({ name: 'Projects' });
+                }
+                // 如果不是任务详情路由，不做任何路由跳转，保持在当前页面
             };
 
             // 新增：分享功能相关方法
@@ -5266,7 +5275,14 @@
                     const shareUrl = `${window.location.origin}${data.share_url}`;
 
                     await navigator.clipboard.writeText(shareUrl);
-                    showAlert(t('shareLinkCopied'), 'success');
+                    
+                    // 显示带操作按钮的alert
+                    showAlert(t('shareLinkCopied'), 'success', {
+                        label: t('view'),
+                        onClick: () => {
+                            window.open(shareUrl, '_blank');
+                        }
+                    });
                 } catch (err) {
                     console.error('复制失败:', err);
                     showAlert(t('copyFailed'), 'error');
@@ -5347,7 +5363,12 @@
                 try {
                     const shareUrl = generateTemplateShareUrl(templateId);
                     await navigator.clipboard.writeText(shareUrl);
-                    showAlert(t('templateShareLinkCopied'), 'success');
+                    showAlert(t('templateShareLinkCopied'), 'success', {
+                        label: t('view'),
+                        onClick: () => {
+                            window.open(shareUrl, '_blank');
+                        }
+                    });
                 } catch (err) {
                     console.error('复制模板分享链接失败:', err);
                     showAlert(t('copyFailed'), 'error');
@@ -5421,6 +5442,70 @@
             // 精选模版相关数据
             const featuredTemplates = ref([]);
             const featuredTemplatesLoading = ref(false);
+
+            // 主题管理
+            const theme = ref('dark'); // 'light', 'dark', 'auto' - 默认深色模式
+            
+            // 初始化主题
+            const initTheme = () => {
+                const savedTheme = localStorage.getItem('theme') || 'dark'; // 默认深色模式
+                theme.value = savedTheme;
+                applyTheme(savedTheme);
+            };
+
+            // 应用主题
+            const applyTheme = (newTheme) => {
+                const html = document.documentElement;
+                
+                if (newTheme === 'dark') {
+                    html.classList.add('dark');
+                    html.style.colorScheme = 'dark';
+                    console.log('已切换到深色模式');
+                } else if (newTheme === 'light') {
+                    html.classList.remove('dark');
+                    html.style.colorScheme = 'light';
+                    console.log('已切换到浅色模式');
+                } else {
+                    // auto - 跟随系统
+                    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    if (prefersDark) {
+                        html.classList.add('dark');
+                    } else {
+                        html.classList.remove('dark');
+                    }
+                    html.style.colorScheme = 'auto';
+                    console.log('已切换到自动模式（跟随系统）');
+                }
+            };
+
+            // 切换主题
+            const toggleTheme = () => {
+                const themes = ['auto', 'light', 'dark'];
+                const currentIndex = themes.indexOf(theme.value);
+                const nextIndex = (currentIndex + 1) % themes.length;
+                const nextTheme = themes[nextIndex];
+                
+                theme.value = nextTheme;
+                localStorage.setItem('theme', nextTheme);
+                applyTheme(nextTheme);
+                
+                const themeNames = {
+                    'auto': '跟随系统',
+                    'light': '浅色模式',
+                    'dark': '深色模式'
+                };
+                showAlert(`已切换到${themeNames[nextTheme]}`, 'info');
+            };
+
+            // 获取主题图标
+            const getThemeIcon = () => {
+                const iconMap = {
+                    'auto': 'fas fa-adjust',
+                    'light': 'fas fa-sun',
+                    'dark': 'fas fa-moon'
+                };
+                return iconMap[theme.value] || 'fas fa-adjust';
+            };
 
             // 不需要认证的API调用（用于获取模版数据）
             const publicApiCall = async (endpoint, options = {}) => {
@@ -5628,6 +5713,7 @@
                 templateFileCacheLoaded,
                 loadTaskFiles,
                 downloadFile,
+                handleDownloadFile,
                 viewFile,
                 handleImageUpload,
                 selectTask,
@@ -5836,4 +5922,9 @@
                 pollingInterval,
                 pollingTasks,
                 apiRequest,
+                // 主题相关
+                theme,
+                initTheme,
+                toggleTheme,
+                getThemeIcon,
             };

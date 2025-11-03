@@ -18,11 +18,13 @@ import {
     cancelTask,
     resumeTask,
     downloadFile,
+    handleDownloadFile,
     getTaskFileFromCache,
     apiRequest,
     copyShareLink,
     currentTask,
-    startPollingTask
+    startPollingTask,
+    openTaskDetailModal,
 } from '../utils/other'
 
 const { t } = useI18n()
@@ -152,22 +154,6 @@ const onVideoError = () => {
     isVideoLoaded.value = false
 }
 
-// 处理下载
-const handleDownload = async () => {
-    if (!currentTask.value?.outputs?.output_video) return
-    
-    try {
-        await downloadFile(
-            currentTask.value.task_id, 
-            'output_video', 
-            currentTask.value.outputs.output_video
-        )
-        showAlert('下载成功', 'success')
-    } catch (error) {
-        console.error('下载失败:', error)
-        showAlert('下载失败，请重试', 'danger')
-    }
-}
 
 // 处理取消任务
 const handleCancel = async () => {
@@ -175,7 +161,6 @@ const handleCancel = async () => {
     
     try {
         await cancelTask(currentTask.value.task_id)
-        showAlert('任务已取消', 'info')
     } catch (error) {
         console.error('取消任务失败:', error)
         showAlert('取消任务失败，请重试', 'danger')
@@ -188,10 +173,22 @@ const handleShareTask = async () => {
     
     try {
         await copyShareLink(currentTask.value.task_id, 'task')
-        showAlert('分享链接已复制到剪贴板', 'success')
+        // copyShareLink 函数内部已经显示了带"查看"按钮的 alert，不需要再次调用
     } catch (error) {
         console.error('分享失败:', error)
         showAlert('分享失败，请重试', 'danger')
+    }
+}
+
+// 处理重试任务
+const handleRetry = async () => {
+    if (!currentTask.value?.task_id) return
+    
+    try {
+        await resumeTask(currentTask.value.task_id)
+    } catch (error) {
+        console.error('重试任务失败:', error)
+        showAlert('重试任务失败，请重试', 'danger')
     }
 }
 
@@ -202,73 +199,6 @@ const getFileExtension = (fileKey) => {
     if (fileKey.includes('image')) return 'jpg'
     if (fileKey.includes('audio')) return 'mp3'
     return 'file'
-}
-
-// 处理文件下载
-const handleDownloadFile = async (taskId, fileKey, fileName) => {
-    try {
-        console.log('开始下载文件:', { taskId, fileKey, fileName })
-
-        // 处理文件名，确保有正确的后缀名
-        let finalFileName = fileName
-        if (fileName && typeof fileName === 'string') {
-            // 检查是否已有后缀名
-            const hasExtension = /\.[a-zA-Z0-9]+$/.test(fileName)
-            if (!hasExtension) {
-                // 没有后缀名，根据文件类型添加
-                const extension = getFileExtension(fileKey)
-                finalFileName = `${fileName}.${extension}`
-                console.log('添加后缀名:', finalFileName)
-            }
-        } else {
-            // 没有文件名，使用默认名称
-            finalFileName = `${fileKey}.${getFileExtension(fileKey)}`
-        }
-
-        // 先尝试从缓存获取
-        let fileData = getTaskFileFromCache(taskId, fileKey)
-        console.log('缓存中的文件数据:', fileData)
-
-        if (fileData && fileData.blob) {
-            // 缓存中有blob数据，直接使用
-            console.log('使用缓存中的文件数据')
-            const url = URL.createObjectURL(fileData.blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = finalFileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
-            showAlert('文件下载成功', 'success')
-            return
-        }
-
-        // 缓存中没有，从服务器获取
-        console.log('从服务器获取文件')
-        const response = await apiRequest(`/api/v1/tasks/${taskId}/files/${fileKey}`, {
-            method: 'GET',
-            responseType: 'blob'
-        })
-
-        if (response && response.data) {
-            // 创建下载链接
-            const url = URL.createObjectURL(response.data)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = finalFileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
-            showAlert('文件下载成功', 'success')
-        } else {
-            throw new Error('文件数据为空')
-        }
-    } catch (error) {
-        console.error('下载文件失败:', error)
-        showAlert(`下载失败: ${error.message}`, 'danger')
-    }
 }
 
 // 键盘事件处理
@@ -298,38 +228,44 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="task-carousel-container">
-            <div class="task-counter">
+    <!-- Apple 风格任务轮播 -->
+    <div class="w-full max-w-[500px] mx-auto">
+        <!-- 任务计数器 - Apple 风格 -->
+        <div class="flex justify-center items-center text-sm font-medium text-[#86868b] dark:text-[#98989d] mb-4 tracking-tight">
                 {{ currentTaskIndex + 1 }} / {{ sortedTasks.length }}
             </div>
 
-        <div class="video-section">
-            <!-- 导航箭头 -->
+        <!-- 视频区域 -->
+        <div class="flex flex-col items-center gap-6 relative">
+            <!-- 左侧导航箭头 - Apple 极简风格 -->
             <button 
                 v-if="sortedTasks.length > 1"
                 @click="goToPreviousTask"
-                class="nav-button nav-button-left bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                class="absolute top-1/2 -translate-y-1/2 left-[-60px] md:left-[-60px] sm:left-[-30px] w-[44px] h-[44px] rounded-full border-0 cursor-pointer flex items-center justify-center text-base transition-all duration-200 ease-out z-10 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed"
                 :disabled="sortedTasks.length <= 1">
                 <i class="fas fa-chevron-left"></i>
             </button>
 
+            <!-- 右侧导航箭头 - Apple 极简风格 -->
             <button 
                 v-if="sortedTasks.length > 1"
                 @click="goToNextTask"
-                class="nav-button nav-button-right bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                class="absolute top-1/2 -translate-y-1/2 right-[-60px] md:right-[-60px] sm:right-[-30px] w-[44px] h-[44px] rounded-full border-0 cursor-pointer flex items-center justify-center text-base transition-all duration-200 ease-out z-10 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed"
                 :disabled="sortedTasks.length <= 1">
                 <i class="fas fa-chevron-right"></i>
             </button>
 
-            <div class="video-container">
+            <!-- 视频容器 - Apple 圆角和阴影 -->
+            <div class="w-full max-w-[500px] md:max-w-[400px] sm:max-w-[300px] aspect-[9/16] bg-black dark:bg-[#000000] rounded-[16px] overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.15)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] relative cursor-pointer transition-all duration-200 hover:shadow-[0_12px_32px_rgba(0,0,0,0.2)] dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.6)]"
+                @click="openTaskDetailModal(currentTask)"
+                :title="t('viewTaskDetails')">
                 <!-- 已完成：显示视频播放器 -->
                 <video
                     v-if="isCompleted && videoUrl"
                     :src="videoUrl"
                     :poster="imageUrl"
-                    class="video-player"
+                    class="w-full h-full object-contain"
                     controls
-                    loop
                     preload="metadata"
                     @loadeddata="onVideoLoaded"
                     @error="onVideoError"
@@ -337,47 +273,50 @@ onUnmounted(() => {
                     {{ t('browserNotSupported') }}
                 </video>
 
-                <!-- 进行中：显示图片缩略图 + 进度条 -->
-                <div v-else-if="isRunning" class="video-placeholder">
+                <!-- 进行中：Apple 风格加载状态 -->
+                <div v-else-if="isRunning" class="w-full h-full flex flex-col items-center justify-center relative bg-[#f5f5f7] dark:bg-[#1c1c1e]">
                     <!-- 背景图片 -->
-                    <div v-if="imageUrl" class="background-image">
-                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="dimmed-image">
+                    <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
+                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-20 blur-sm">
                     </div>
                     
-                    <!-- 进度条 -->
-                    <div class="progress-overlay">
-                        <div class="progress-container">
+                    <!-- 进度内容覆盖层 -->
+                    <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
+                        <div class="w-full max-w-[280px] text-center">
                             
-                            <!-- 进度条-->
+                            <!-- 进度条 -->
                             <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(taskStatus)">
                                 <div v-for="(subtask, index) in (currentTask?.subtasks || [])" :key="index">
-                                    <!-- PENDING状态：显示排队信息 -->
-                                    <div v-if="subtask.status === 'PENDING'" class="queue-info">
-                                        <div v-if="subtask.estimated_pending_order !== null && subtask.estimated_pending_order !== undefined && subtask.estimated_pending_order >= 0" class="queue-visualization">
-                                            <div class="queue-people">
+                                    <!-- PENDING状态：Apple 风格排队显示 -->
+                                    <div v-if="subtask.status === 'PENDING'" class="mt-4 text-center">
+                                        <div v-if="subtask.estimated_pending_order !== null && subtask.estimated_pending_order !== undefined && subtask.estimated_pending_order >= 0" class="flex flex-col items-center gap-3">
+                                            <!-- 排队图标 -->
+                                            <div class="flex flex-wrap justify-center gap-1.5 mb-2">
                                                 <i v-for="n in Math.min(Math.max(subtask.estimated_pending_order, 0), 10)"
                                                    :key="n"
-                                                   class="fas fa-user queue-person"></i>
-                                                <span v-if="subtask.estimated_pending_order > 10" class="queue-more">
+                                                   class="fas fa-circle text-[8px] text-[#86868b] dark:text-[#98989d] opacity-60"></i>
+                                                <span v-if="subtask.estimated_pending_order > 10" class="text-xs text-[#86868b] dark:text-[#98989d] font-medium ml-0.5">
                                                     +{{ subtask.estimated_pending_order - 10 }}
                                                 </span>
                                             </div>
-                                            <span class="queue-text">
+                                            <!-- 排队文字 -->
+                                            <span class="text-sm text-[#1d1d1f] dark:text-[#f5f5f7] font-medium tracking-tight">
                                                 {{ t('queuePosition') }}: {{ subtask.estimated_pending_order }}
                                             </span>
                                         </div>
                                     </div>
 
-                                    <!-- RUNNING状态：显示进度条 -->
-                                    <div v-else-if="subtask.status === 'RUNNING'" class="progress-container">
-                                        <div class="minimal-progress-bar">
-                                            <div class="progress-line">
-                                                <div class="progress-fill" :style="{ width: getSubtaskProgress(subtask) + '%' }"></div>
-                                                <div class="moving-dot" :style="{ left: getSubtaskProgress(subtask) + '%' }"></div>
+                                    <!-- RUNNING状态：Apple 风格进度条 -->
+                                    <div v-else-if="subtask.status === 'RUNNING'" class="w-full text-center">
+                                        <!-- 进度条 -->
+                                        <div class="mb-4">
+                                            <div class="relative w-full h-1 bg-black/8 dark:bg-white/8 rounded-full overflow-hidden">
+                                                <div class="absolute top-0 left-0 h-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full transition-all duration-500 ease-out" :style="{ width: getSubtaskProgress(subtask) + '%' }"></div>
                                             </div>
                                         </div>
-                                        <div class="progress-info">
-                                            <span class="estimated-time">
+                                        <!-- 百分比显示 -->
+                                        <div class="flex justify-center items-center">
+                                            <span class="text-2xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight animate-progress">
                                                 {{ getSubtaskProgress(subtask) }}%
                                             </span>
                                         </div>
@@ -388,54 +327,54 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- 失败：显示图片缩略图 + 错误信息 -->
-                <div v-else-if="isFailed" class="video-placeholder error-placeholder">
+                <!-- 失败：Apple 风格错误状态 -->
+                <div v-else-if="isFailed" class="w-full h-full flex flex-col items-center justify-center relative bg-[#fef2f2] dark:bg-[#2c1b1b]">
                     <!-- 背景图片 -->
-                    <div v-if="imageUrl" class="background-image">
-                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="dimmed-image">
+                    <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
+                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-10 blur-sm">
                     </div>
                     
                     <!-- 错误信息 -->
-                    <div class="error-overlay">
-                        <div class="error-icon">
-                            <i class="fas fa-exclamation-triangle"></i>
+                    <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
+                        <div class="w-12 h-12 rounded-full bg-red-500/10 dark:bg-red-400/10 flex items-center justify-center mb-4">
+                            <i class="fas fa-exclamation-triangle text-2xl text-red-500 dark:text-red-400"></i>
                         </div>
-                        <p class="error-text">{{ t('videoGeneratingFailed') }}</p>
+                        <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-sm text-center font-medium tracking-tight">{{ t('videoGeneratingFailed') }}</p>
                     </div>
                 </div>
 
-                <!-- 已取消：显示图片缩略图 + 取消信息 -->
-                <div v-else-if="isCancelled" class="video-placeholder cancel-placeholder">
+                <!-- 已取消：Apple 风格取消状态 -->
+                <div v-else-if="isCancelled" class="w-full h-full flex flex-col items-center justify-center relative bg-[#f5f5f7] dark:bg-[#1c1c1e]">
                     <!-- 背景图片 -->
-                    <div v-if="imageUrl" class="background-image">
-                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="dimmed-image">
+                    <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
+                        <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-10 blur-sm">
                     </div>
                     
                     <!-- 取消信息 -->
-                    <div class="cancel-overlay">
-                        <div class="cancel-icon">
-                            <i class="fas fa-ban"></i>
+                    <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
+                        <div class="w-12 h-12 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4">
+                            <i class="fas fa-ban text-2xl text-[#86868b] dark:text-[#98989d]"></i>
                         </div>
-                        <p class="cancel-text">{{ t('taskCancelled') }}</p>
+                        <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-sm text-center font-medium tracking-tight">{{ t('taskCancelled') }}</p>
                     </div>
                 </div>
 
-                <!-- 默认状态 -->
-                <div v-else class="video-placeholder">
-                    <div class="loading-spinner">
-                        <i class="fas fa-video"></i>
+                <!-- 默认状态：Apple 风格 -->
+                <div v-else class="w-full h-full flex flex-col items-center justify-center relative bg-[#f5f5f7] dark:bg-[#1c1c1e]">
+                    <div class="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4 z-[2]">
+                        <i class="fas fa-video text-3xl text-[#86868b] dark:text-[#98989d]"></i>
                     </div>
-                    <p class="loading-text">{{ t('videoNotAvailable') }}</p>
+                    <p class="text-[#86868b] dark:text-[#98989d] text-sm z-[2] tracking-tight">{{ t('videoNotAvailable') }}</p>
                 </div>
             </div>
 
-            <!-- 操作按钮 -->
-            <div class="action-buttons">
+            <!-- Apple 风格操作按钮 -->
+            <div class="flex justify-center gap-3">
                 <!-- 已完成：下载按钮 -->
                 <button 
                     v-if="isCompleted && currentTask?.outputs?.output_video"
                     @click="handleDownloadFile(currentTask.task_id, 'output_video', currentTask.outputs.output_video)"
-                    class="action-button bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                    class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95"
                     :title="t('download')">
                     <i class="fas fa-download"></i>
                 </button>
@@ -444,7 +383,7 @@ onUnmounted(() => {
                 <button 
                     v-if="isCompleted && currentTask?.outputs?.output_video"
                     @click="handleShareTask"
-                    class="action-button bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                    class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:scale-105 active:scale-95"
                     :title="t('share')">
                     <i class="fas fa-share-alt"></i>
                 </button>
@@ -453,480 +392,51 @@ onUnmounted(() => {
                 <button 
                     v-if="isRunning"
                     @click="handleCancel"
-                    class="action-button bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                    class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-red-500 dark:text-red-400 hover:scale-105 active:scale-95"
                     :title="t('cancel')">
                     <i class="fas fa-times"></i>
                 </button>
 
-                <!-- 失败：重试按钮 -->
+                <!-- 失败或取消：重试按钮 -->
                 <button 
-                    v-if="isFailed"
+                    v-if="isFailed || isCancelled"
                     @click="handleRetry"
-                    class="action-button bg-laser-purple/20 hover:bg-laser-purple/40 text-laser-purple rounded-full transition-all duration-300 hover:scale-110"
+                    class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:scale-105 active:scale-95"
                     :title="t('retry')">
                     <i class="fas fa-redo"></i>
                 </button>
             </div>
         </div>
 
-        <!-- 任务指示器 -->
-        <div v-if="sortedTasks.length > 1" class="task-indicators">
+        <!-- Apple 风格任务指示器 -->
+        <div v-if="sortedTasks.length > 1" class="flex justify-center gap-2 mt-5">
             <div 
                 v-for="(task, index) in sortedTasks" 
                 :key="task.task_id"
                 @click="handleTaskIndicatorClick(task)"
-                class="indicator hover:bg-laser-purple hover:scale-110"
-                :class="index === currentTaskIndex? 'bg-laser-purple': 'bg-gray-400/30'">
+                class="w-2 h-2 rounded-full cursor-pointer transition-all duration-200 ease-out"
+                :class="index === currentTaskIndex 
+                    ? 'bg-[#1d1d1f] dark:bg-[#f5f5f7] scale-110' 
+                    : 'bg-[#86868b]/30 dark:bg-[#98989d]/30 hover:bg-[#86868b]/50 dark:hover:bg-[#98989d]/50 hover:scale-105'">
             </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.task-carousel-container {
-    width: 100%;
-    max-width: 500px;
-    margin: 0 auto;
-}
-
-.task-counter {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-bottom: 1rem;
-}
-
-.task-info {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.25rem;
-}
-
-.task-type {
-    font-size: 0.75rem;
-    color: #8b5cf6;
-    font-weight: 500;
-}
-
-.task-time {
-    font-size: 0.75rem;
-    color: #9ca3af;
-}
-
-/* 视频区域 */
-.video-section {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1.5rem;
-    position: relative;
-}
-
-.video-container {
-    width: 100%;
-    max-width: 500px;
-    aspect-ratio: 9/16;
-    background: #000;
-    border-radius: 1rem;
-    overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
-    position: relative;
-}
-
-/* 导航按钮 */
-.nav-button {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    transition: all 0.2s ease;
-    z-index: 10;
-    backdrop-filter: blur(10px);
-}
-
-
-.nav-button:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-}
-
-.nav-button-left {
-    left: -60px;
-}
-
-.nav-button-right {
-    right: -60px;
-}
-
-.video-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-}
-
-.background-image {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 1;
-}
-
-.dimmed-image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: brightness(0.3) blur(2px);
-}
-
-.loading-spinner {
-    font-size: 3rem;
-    color: #8b5cf6;
-    margin-bottom: 1rem;
-    z-index: 2;
-}
-
-.loading-text {
-    color: #9ca3af;
-    font-size: 0.875rem;
-    z-index: 2;
-}
-
-.video-player {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-
-/* 进度条覆盖层 */
-.progress-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 2;
-    padding: 2rem;
-}
-
-.progress-container {
-    width: 100%;
-    max-width: 300px;
-    text-align: center;
-}
-
-.progress-status {
-    font-size: 0.75rem;
-    color: #8b5cf6;
-    background: rgba(139, 92, 246, 0.1);
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.375rem;
-    border: 1px solid rgba(139, 92, 246, 0.2);
-}
-
-.progress-info {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
-    color: #ffffff;
-}
-
-.progress-text {
-    flex: 1;
-    text-align: left;
-}
-
-.progress-percentage {
-    font-weight: 600;
-    color: #8b5cf6;
-}
-
-.progress-bar {
-    margin-top: 0.75rem;
-}
-
-.progress-line {
-    position: relative;
-    width: 100%;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 1px;
-}
-
-.progress-fill {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: linear-gradient(90deg, #8b5cf6, #a855f7);
-    border-radius: 1px;
-    transition: width 0.5s ease;
-}
-
-.moving-dot {
-    position: absolute;
-    top: -4px;
-    width: 10px;
-    height: 10px;
-    background: linear-gradient(45deg, #8b5cf6, #a855f7);
-    border-radius: 50%;
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
-    transition: left 0.5s ease;
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
-    }
-    50% {
-        transform: scale(1.2);
-        box-shadow: 0 0 15px rgba(139, 92, 246, 0.8);
-    }
-}
-
-/* TaskDetails进度条样式 */
-.minimal-progress-bar {
-    margin-bottom: 0.75rem;
-}
-
-.queue-info {
-    margin-top: 0.75rem;
-    text-align: center;
-}
-
-.queue-visualization {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.queue-people {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
-}
-
-.queue-person {
-    font-size: 0.875rem;
-    color: #f59e0b;
-    opacity: 0.8;
-}
-
-.queue-more {
-    font-size: 0.75rem;
-    color: #f59e0b;
-    font-weight: 600;
-    margin-left: 0.25rem;
-}
-
-.queue-text {
-    font-size: 0.75rem;
-    color: #f59e0b;
-    font-weight: 500;
-}
-
-.estimated-time {
-    display: flex;
-    align-items: center;
-    font-size: 0.875rem;
-    color: #22c55e;
-    font-weight: 600;
-    animation: countdown 1s ease-in-out infinite;
-}
-
-@keyframes countdown {
-    0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.8;
-        transform: scale(1.05);
-    }
-}
-
-/* 错误状态 */
-.error-placeholder {
-    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-}
-
-.error-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 2;
-    padding: 2rem;
-}
-
-.error-icon {
-    font-size: 3rem;
-    color: #ef4444;
-    margin-bottom: 1rem;
-    animation: pulse 2s infinite;
-}
-
-.error-text {
-    color: #ffffff;
-    font-size: 0.875rem;
-    text-align: center;
-    font-weight: 500;
-}
-
-/* 取消状态 */
-.cancel-placeholder {
-    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-}
-
-.cancel-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 2;
-    padding: 2rem;
-}
-
-.cancel-icon {
-    font-size: 3rem;
-    color: #9ca3af;
-    margin-bottom: 1rem;
-}
-
-.cancel-text {
-    color: #ffffff;
-    font-size: 0.875rem;
-    text-align: center;
-    font-weight: 500;
-}
-
-/* 操作按钮 */
-.action-buttons {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-}
-
-.action-button {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.2rem;
-    transition: all 0.2s ease;
-    border: none;
-    cursor: pointer;
-    backdrop-filter: blur(10px);
-}
-
-
-
-
-/* 任务指示器 */
-.task-indicators {
-    display: flex;
-    justify-content: center;
-    gap: 0.5rem;
-    margin-top: 1rem;
-}
-
-.indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-
-
-/* 动画 */
-@keyframes pulse {
+/* Apple 风格动画 */
+@keyframes progress {
     0%, 100% {
         opacity: 1;
     }
     50% {
-        opacity: 0.7;
+        opacity: 0.85;
     }
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {    
-    .video-container {
-        max-width: 400px;
+.animate-progress {
+    animation: progress 1.5s ease-in-out infinite;
     }
-    
-    .nav-button-left {
-        left: -30px;
-    }
-    
-    .nav-button-right {
-        right: -30px;
-    }
-    
-    .progress-overlay,
-    .error-overlay,
-    .cancel-overlay {
-        padding: 1rem;
-    }
-    
-    .action-button {
-        width: 45px;
-        height: 45px;
-        font-size: 1rem;
-    }
-}
 
-@media (max-width: 480px) {
-    .video-container {
-        max-width: 300px;
-    }
-    .nav-button-left {
-        left: -30px;
-    }
-    
-    .nav-button-right {
-        right: -30px;
-    }
-}
+/* 所有其他样式已通过 Tailwind CSS 的 dark: 前缀在 template 中定义 */
 </style>

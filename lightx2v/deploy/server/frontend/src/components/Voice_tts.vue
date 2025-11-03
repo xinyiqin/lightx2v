@@ -1,311 +1,343 @@
 <template>
-     <!-- 模态框头部 -->
-     <div class="flex items-center justify-between p-4 border-b border-gray-700">
-     <h3 class="text-xl font-semibold text-white">语音合成</h3>
-     <div class="flex items-center gap-2">
-       <button
-         @click="applySelectedVoice"
-         :disabled="!selectedVoice || !inputText.trim() || isGenerating"
-         class="header-apply-button"
-         title="应用当前选择的声音"
-       >
-         <i class="fas fa-check"></i>
-       </button>
-       <button @click="closeModal"
-           class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition-all duration-200">
-           <i class="fas fa-times text-lg"></i>
-       </button>
-     </div>
-     </div>
-    <!-- 模态框内容 -->
-<div class="h-full overflow-y-auto p-4 main-scrollbar">
-  <div class="voice-tts-container">
-
-    <!-- Text Input Section -->
-    <div class="text-input-section">
-      <h6 class="section-title">输入要转换的文本</h6>
-      <div class="input-wrapper">
-        <textarea
-          v-model="inputText"
-          placeholder="你好，请问我有什么可以帮您？"
-          class="text-input"
-          rows="4"
-        ></textarea>
+  <!-- 模态框容器 - Apple 极简风格 -->
+  <div class="flex flex-col h-full bg-white dark:bg-[#1e1e1e] overflow-hidden">
+    <!-- 模态框头部 - Apple 风格 -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px] flex-shrink-0">
+      <h3 class="text-xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-3 tracking-tight">
+        <i class="fas fa-volume-up text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+        <span>语音合成</span>
+      </h3>
+      <div class="flex items-center gap-2">
+        <!-- 应用按钮 - Apple 风格 -->
+        <button
+          @click="applySelectedVoice"
+          :disabled="!selectedVoice || !inputText.trim() || isGenerating"
+          class="w-9 h-9 flex items-center justify-center bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full transition-all duration-200 hover:scale-110 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          title="应用当前选择的声音">
+          <i class="fas fa-check text-sm"></i>
+        </button>
+        <!-- 关闭按钮 - Apple 风格 -->
+        <button @click="closeModal"
+          class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100">
+          <i class="fas fa-times text-sm"></i>
+        </button>
       </div>
     </div>
 
-        <!-- Text Input Section -->
-     <div class="text-input-section">
-      <h6 class="section-title">语音指令（仅适用于v2.0音色）</h6>
-      <div class="input-wrapper">
-        <textarea
-          v-model="contextText"
-          placeholder="使用指令控制合成语音细节，包括但不限于情绪、语境、方言、语气、速度、音调等（仅适用于v2.0音色），例如：带点害羞又藏着温柔期待的语气说"
-          class="text-input"
-          rows="1"
-        ></textarea>
-      </div>
-    </div>
+    <!-- 模态框内容 - Apple 风格 -->
+    <div class="flex-1 overflow-y-auto p-6 main-scrollbar">
+      <div class="max-w-5xl mx-auto space-y-6">
+        <!-- 音频播放器 - Apple 风格 -->
+            <div v-if="audioUrl" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl p-5 transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]">
+          <div class="flex items-center gap-3 mb-3">
+            <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+            <h6 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">生成的音频</h6>
+          </div>
+          <audio :src="audioUrl" controls class="w-full rounded-xl"></audio>
+        </div>
+        <!-- 文本输入区域 - Apple 风格 -->
+        <div>
+          <label class="block text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">
+            <i class="fas fa-keyboard mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+            输入要转换的文本
+          </label>
+          <textarea
+            v-model="inputText"
+            placeholder="你好，请问我有什么可以帮您？"
+            class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200 resize-none min-h-[100px]"
+            rows="4"
+          ></textarea>
+        </div>
 
-    <!-- Voice Selection Section -->
-    <div class="voice-selection-section">
-      <div class="header-controls">
-        <h6 class="section-title">选择音色</h6>
-        <div class="filter-controls">
-          <div class="search-wrapper">
-            <div class="arco-input-group-wrapper arco-input-group-wrapper-default">
-              <span class="arco-input-group">
-                <span class="arco-input-inner-wrapper arco-input-inner-wrapper-has-prefix arco-input-inner-wrapper-default">
-                  <span class="arco-input-group-prefix">
-                    <i class="fas fa-search"></i>
-                  </span>
-                  <input
-                    v-model="searchQuery"
-                    placeholder="搜索音色"
-                    class="arco-input arco-input-size-default"
-                  />
-                </span>
-              </span>
+        <!-- 语音指令区域 - Apple 风格 -->
+        <div>
+          <label class="block text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">
+            <i class="fas fa-magic mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+            语音指令
+            <span class="text-xs text-[#86868b] dark:text-[#98989d] ml-2">（仅适用于v2.0音色）</span>
+          </label>
+          <textarea
+            v-model="contextText"
+            placeholder="使用指令控制合成语音细节，包括但不限于情绪、语境、方言、语气、速度、音调等，例如：带点害羞又藏着温柔期待的语气说"
+            class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl px-5 py-3 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200 resize-none"
+            rows="2"
+          ></textarea>
+        </div>
+
+        <!-- 音色选择区域 - Apple 风格 -->
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">
+              <i class="fas fa-microphone-alt mr-2 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+              选择音色
+            </label>
+            <div class="flex items-center gap-3">
+              <!-- 搜索框 - Apple 风格 -->
+              <div class="relative w-52">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] dark:text-[#98989d] text-xs pointer-events-none z-10"></i>
+                <input
+                  v-model="searchQuery"
+                  placeholder="搜索音色"
+                  class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-lg py-2 pl-9 pr-3 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 transition-all duration-200"
+                  type="text"
+                />
+              </div>
+
+              <!-- 筛选按钮 - Apple 风格 -->
+              <button @click="toggleFilterPanel"
+                class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-lg transition-all duration-200 text-sm font-medium tracking-tight">
+                <i class="fas fa-filter text-xs"></i>
+                <span>筛选</span>
+              </button>
             </div>
           </div>
-
-          <!-- Filter Button -->
-          <button @click="toggleFilterPanel" class="filter-button">
-            <i class="fas fa-filter"></i>
-            <span>筛选</span>
-          </button>
-        </div>
-      </div>
-
-
-      <!-- Voice List -->
-      <div class="voice-list-container" ref="voiceListContainer">
-        <div class="arco-radio-group arco-radio-size-default arco-radio-mode-outline" role="radiogroup">
-          <div class="voice-grid">
-            <label
-              v-for="(voice, index) in filteredVoices"
-              :key="index"
-              class="arco-radio m-0 p-0"
-              :class="{ 'arco-radio-checked': selectedVoice === voice.voice_type }"
-            >
-              <input
-                type="radio"
-                :value="voice.voice_type"
-                v-model="selectedVoice"
-                @change="onVoiceSelect(voice)"
-              />
-              <div
-                class="voice-card"
-                :class="{
-                  'voice-card-selected': selectedVoice === voice.voice_type,
-                  'voice-card-controlled': selectedVoice === voice.voice_type && showControls
-                }"
+          <!-- 音色列表容器 - Apple 风格 -->
+          <div class="bg-white/50 dark:bg-[#2c2c2e]/50 backdrop-blur-[10px] border border-black/6 dark:border-white/6 rounded-2xl p-5 max-h-[500px] overflow-y-auto main-scrollbar pr-3" ref="voiceListContainer">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label
+                v-for="(voice, index) in filteredVoices"
+                :key="index"
+                class="relative m-0 p-0 cursor-pointer"
               >
-                <!-- V2 Tag -->
-                <div v-if="voice.version === '2.0'" class="version-tag">
-                  v2
-                </div>
-                <div class="voice-avatar-container">
-                  <!-- Female Avatar -->
-                  <img
-                    v-if="isFemaleVoice(voice.voice_type)"
-                    src="../../public/female.svg"
-                    alt="Female Avatar"
-                    class="voice-avatar"
-                    :class="{ 'voice-avatar-disabled': selectedVoice === voice.voice_type }"
-                  />
-                  <!-- Male Avatar -->
-                  <img
-                    v-else
-                    src="../../public/male.svg"
-                    alt="Male Avatar"
-                    class="voice-avatar"
-                    :class="{ 'voice-avatar-disabled': selectedVoice === voice.voice_type }"
-                  />
-                  <!-- Loading indicator -->
-                  <div v-if="isGenerating && selectedVoice === voice.voice_type" class="loading-indicator">
-                    <i class="fas fa-spinner fa-spin"></i>
+                <input
+                  type="radio"
+                  :value="voice.voice_type"
+                  v-model="selectedVoice"
+                  @change="onVoiceSelect(voice)"
+                  class="sr-only"
+                />
+                <div
+                  class="relative flex items-center p-4 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                  :class="{
+                    'border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)]': selectedVoice === voice.voice_type
+                  }"
+                >
+                  <!-- V2 标签 - Apple 风格 -->
+                  <div v-if="voice.version === '2.0'" class="absolute top-2 right-2 px-2 py-1 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white text-[10px] font-semibold rounded-md z-10">
+                    v2.0
                   </div>
-                  <!-- Settings button for selected voice -->
-                  <div v-if="!isGenerating && selectedVoice === voice.voice_type" class="settings-button" @click="toggleControls">
-                    <i class="fas fa-cog"></i>
-                  </div>
-                </div>
-                <div class="voice-info">
-                  <div class="voice-name">
-                    {{ voice.name }}
-                  </div>
-                  <div class="voice-tags">
-                    <div class="voice-scene" v-if="voice.scene">
-                      <span class="scene-tag">{{ voice.scene }}</span>
+                  
+                  <!-- 头像容器 -->
+                  <div class="relative mr-3 flex-shrink-0">
+                    <!-- Female Avatar -->
+                    <img
+                      v-if="isFemaleVoice(voice.voice_type)"
+                      src="../../public/female.svg"
+                      alt="Female Avatar"
+                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                      :class="{ 'opacity-60': selectedVoice === voice.voice_type }"
+                    />
+                    <!-- Male Avatar -->
+                    <img
+                      v-else
+                      src="../../public/male.svg"
+                      alt="Male Avatar"
+                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                      :class="{ 'opacity-60': selectedVoice === voice.voice_type }"
+                    />
+                    <!-- Loading 指示器 - Apple 风格 -->
+                    <div v-if="isGenerating && selectedVoice === voice.voice_type" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white z-20">
+                      <i class="fas fa-spinner fa-spin text-xs"></i>
                     </div>
-                    <div class="voice-languages" v-if="voice.language && voice.language.length > 0">
+                    <!-- 设置按钮 - Apple 风格 -->
+                    <div v-if="!isGenerating && selectedVoice === voice.voice_type" @click.stop="toggleControls" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20">
+                      <i class="fas fa-cog text-xs"></i>
+                    </div>
+                  </div>
+                  
+                  <!-- 音色信息 -->
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-1 tracking-tight truncate">
+                      {{ voice.name }}
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-if="voice.scene" class="inline-block px-2 py-0.5 bg-black/5 dark:bg-white/5 text-[#86868b] dark:text-[#98989d] rounded text-[11px] font-medium">
+                        {{ voice.scene }}
+                      </span>
                       <span
                         v-for="langCode in voice.language"
                         :key="langCode"
-                        class="language-tag"
+                        class="inline-block px-2 py-0.5 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded text-[11px] font-medium"
                       >
                         {{ getLanguageDisplayName(langCode) }}
                       </span>
                     </div>
                   </div>
-                </div>
 
-                <!-- TTS Controls Panel -->
-                <div v-if="selectedVoice === voice.voice_type && showControls" class="voice-controls-panel">
-                  <div class="control-item">
-                    <label>语速:</label>
-                    <input 
-                      type="range" 
-                      min="-50" 
-                      max="100" 
-                      v-model="speechRate" 
-                      class="mini-slider"
-                    />
-                    <span class="mini-display">{{ getSpeechRateDisplayValue(speechRate) }}</span>
-                  </div>
-                  <div class="control-item">
-                    <label>音量:</label>
-                    <input 
-                      type="range" 
-                      min="-50" 
-                      max="100" 
-                      v-model="loudnessRate" 
-                      class="mini-slider"
-                    />
-                    <span class="mini-display">{{ getLoudnessDisplayValue(loudnessRate) }}</span>
-                  </div>
-                  <div class="control-item">
-                    <label>音调:</label>
-                    <input 
-                      type="range" 
-                      min="-12" 
-                      max="12" 
-                      v-model="pitch" 
-                      class="mini-slider"
-                    />
-                    <span class="mini-display">{{ getPitchDisplayValue(pitch) }}</span>
-                  </div>
-                  <!-- Emotion controls - only show if voice has emotions -->
-                  <div v-if="voice.emotions && voice.emotions.length > 0" class="control-item">
-                    <label>情感强度:</label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="5"
-                      v-model="emotionScale"
-                      class="mini-slider"
-                    />
-                    <span class="mini-display">{{ emotionScale }}</span>
-                  </div>
-                  <div v-if="voice.emotions && voice.emotions.length > 0" class="control-item">
-                    <label>情感类型:</label>
-                    <DropdownMenu
-                      :items="emotionItems"
-                      :selected-value="selectedEmotion"
-                      placeholder="中性"
-                      @select-item="handleEmotionSelect"
-                      class="mini-dropdown"
-                    />
+                  <!-- TTS 控制面板 - Apple 风格 -->
+                  <div v-if="selectedVoice === voice.voice_type && showControls" class="absolute top-full left-0 right-0 mt-2 bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-50 space-y-3">
+                    <!-- 语速控制 -->
+                    <div class="flex items-center gap-3">
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">语速:</label>
+                      <input 
+                        type="range" 
+                        min="-50" 
+                        max="100" 
+                        v-model="speechRate" 
+                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                      />
+                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getSpeechRateDisplayValue(speechRate) }}</span>
+                    </div>
+                    <!-- 音量控制 -->
+                    <div class="flex items-center gap-3">
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">音量:</label>
+                      <input 
+                        type="range" 
+                        min="-50" 
+                        max="100" 
+                        v-model="loudnessRate" 
+                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                      />
+                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getLoudnessDisplayValue(loudnessRate) }}</span>
+                    </div>
+                    <!-- 音调控制 -->
+                    <div class="flex items-center gap-3">
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">音调:</label>
+                      <input 
+                        type="range" 
+                        min="-12" 
+                        max="12" 
+                        v-model="pitch" 
+                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                      />
+                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getPitchDisplayValue(pitch) }}</span>
+                    </div>
+                    <!-- 情感控制 - 仅当音色支持时显示 -->
+                    <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">情感强度:</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="5"
+                        v-model="emotionScale"
+                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                      />
+                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ emotionScale }}</span>
+                    </div>
+                    <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
+                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">情感类型:</label>
+                      <div class="flex-1">
+                        <DropdownMenu
+                          :items="emotionItems"
+                          :selected-value="selectedEmotion"
+                          placeholder="中性"
+                          @select-item="handleEmotionSelect"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </label>
+              </label>
+            </div>
           </div>
         </div>
+
       </div>
     </div>
-
-    <!-- Audio Player -->
-    <div class="audio-player" v-if="audioUrl">
-      <h6>生成的音频:</h6>
-      <audio :src="audioUrl" controls class="audio-controls"></audio>
-    </div>
   </div>
-</div>
 
-  <!-- Filter Panel Overlay -->
-  <div v-if="showFilterPanel" class="filter-overlay" @click="closeFilterPanel">
-    <div class="filter-panel" @click.stop>
-      <!-- Filter Panel Header -->
-      <div class="filter-header">
-        <h3 class="filter-title">筛选</h3>
-        <button @click="closeFilterPanel" class="filter-close-btn">
-          <i class="fas fa-times"></i>
+  <!-- 筛选面板遮罩 - Apple 风格 -->
+  <div v-if="showFilterPanel" class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" @click="closeFilterPanel">
+    <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] flex flex-col" @click.stop>
+      <!-- 筛选面板头部 - Apple 风格 -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
+        <h3 class="text-lg font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-2 tracking-tight">
+          <i class="fas fa-filter text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+          <span>筛选音色</span>
+        </h3>
+        <button @click="closeFilterPanel"
+          class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100">
+          <i class="fas fa-times text-sm"></i>
         </button>
       </div>
 
-      <!-- Filter Content -->
-      <div class="filter-content">
-        <!-- Scene Filter -->
-        <div class="filter-section">
-          <h4 class="filter-section-title">场景</h4>
-          <div class="filter-options">
-            <button
-              v-for="category in categories"
-              :key="category"
-              @click="selectCategory(category)"
-              class="filter-option"
-              :class="{ 'filter-option-selected': selectedCategory === category }"
-            >
-              {{ category }}
-            </button>
+      <!-- 筛选内容 - Apple 风格 -->
+      <div class="flex-1 overflow-y-auto p-6 main-scrollbar">
+        <div class="space-y-6">
+          <!-- 场景筛选 -->
+          <div>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">场景</h4>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="category in categories"
+                :key="category"
+                @click="selectCategory(category)"
+                class="px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 tracking-tight"
+                :class="selectedCategory === category
+                  ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
+                  : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
+              >
+                {{ category }}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Version Filter -->
-        <div class="filter-section">
-          <h4 class="filter-section-title">版本</h4>
-          <div class="filter-options">
-            <button
-              v-for="v in version"
-              :key="v"
-              @click="selectVersion(v)"
-              class="filter-option"
-              :class="{ 'filter-option-selected': selectedVersion === v }"
-            >
-              {{ v }}
-            </button>
+          <!-- 版本筛选 -->
+          <div>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">版本</h4>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="v in version"
+                :key="v"
+                @click="selectVersion(v)"
+                class="px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 tracking-tight"
+                :class="selectedVersion === v
+                  ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
+                  : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
+              >
+                {{ v }}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Language Filter -->
-        <div class="filter-section">
-          <h4 class="filter-section-title">语言</h4>
-          <div class="filter-options">
-            <button
-              v-for="lang in languages"
-              :key="lang"
-              @click="selectLanguage(lang)"
-              class="filter-option"
-              :class="{ 'filter-option-selected': selectedLanguage === lang }"
-            >
-              {{ lang }}
-            </button>
+          <!-- 语言筛选 -->
+          <div>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">语言</h4>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="lang in languages"
+                :key="lang"
+                @click="selectLanguage(lang)"
+                class="px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 tracking-tight"
+                :class="selectedLanguage === lang
+                  ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
+                  : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
+              >
+                {{ lang }}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Gender Filter -->
-        <div class="filter-section">
-          <h4 class="filter-section-title">性别</h4>
-          <div class="filter-options">
-            <button
-              v-for="gender in genders"
-              :key="gender"
-              @click="selectGender(gender)"
-              class="filter-option"
-              :class="{ 'filter-option-selected': selectedGender === gender }"
-            >
-              {{ gender }}
-            </button>
+          <!-- 性别筛选 -->
+          <div>
+            <h4 class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 tracking-tight">性别</h4>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="gender in genders"
+                :key="gender"
+                @click="selectGender(gender)"
+                class="px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 tracking-tight"
+                :class="selectedGender === gender
+                  ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.3)]'
+                  : 'bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'"
+              >
+                {{ gender }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Filter Actions -->
-      <div class="filter-actions">
-        <button @click="resetFilters" class="filter-reset-btn">重置</button>
-        <button @click="applyFilters" class="filter-apply-btn">完成</button>
+      <!-- 筛选操作按钮 - Apple 风格 -->
+      <div class="flex gap-3 px-6 py-4 border-t border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
+        <button @click="resetFilters"
+          class="flex-1 px-5 py-3 bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 text-[#1d1d1f] dark:text-[#f5f5f7] rounded-full transition-all duration-200 font-medium text-[15px] tracking-tight hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98]">
+          重置
+        </button>
+        <button @click="applyFilters"
+          class="flex-1 px-5 py-3 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full transition-all duration-200 font-semibold text-[15px] tracking-tight hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100">
+          完成
+        </button>
       </div>
     </div>
   </div>
@@ -793,612 +825,18 @@ export default {
 </script>
 
 <style scoped>
-.voice-tts-container {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-  position: relative;
-  overflow: visible;
-  height: auto;
-  min-height: fit-content;
-}
+/* Apple 风格极简设计 - 大部分样式已通过 Tailwind CSS 在 template 中定义 */
 
-
-.header-apply-button {
-  width: 32px;
-  height: 32px;
-  background: #8b5cf6;
-  color: white;
-  border: none;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
-}
-
-.header-apply-button:hover:not(:disabled) {
-  background: #7c3aed;
-  transform: scale(1.1);
-}
-
-.header-apply-button:disabled {
-  background: #c9cdd4;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.text-input-section {
-  margin-bottom: 30px;
-}
-
-.section-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 12px;
-  color: #ffffff;
-}
-
-.input-wrapper {
-  margin-bottom: 16px;
-}
-
-.text-input {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #374151;
-  border-radius: 6px;
-  font-size: 14px;
-  resize: vertical;
-  min-height: 100px;
-  background: #374151;
-  color: #ffffff;
-}
-
-.text-input:focus {
-  outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.1);
-}
-
-.voice-selection-section {
-  margin-bottom: 30px;
-  position: relative;
-  overflow: visible;
-  height: auto;
-}
-
-.header-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.filter-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.search-wrapper {
-  width: 218px;
-  flex-shrink: 0;
-}
-
-.filter-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
-  color: #ffffff;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filter-button:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.arco-input-group-wrapper {
-  width: 100%;
-}
-
-.arco-input-group {
-  display: flex;
-  align-items: center;
-}
-
-.arco-input-inner-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  border: 1px solid #374151;
-  border-radius: 6px;
-  background: #374151;
-}
-
-.arco-input-inner-wrapper:focus-within {
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.1);
-}
-
-.arco-input-group-prefix {
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  color: #86909c;
-}
-
-.arco-input-group-prefix svg {
-  color: #86909c;
-}
-
-.arco-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: none;
-  outline: none;
-  font-size: 14px;
-  color: #ffffff;
-  background: transparent;
-}
-
-.arco-icon {
-    color: #86909c;
-}
-
-.voice-list-container {
-  background: #1f2937;
-  border-radius: 8px;
-  padding: 20px;
-  max-height: 600px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  height: auto;
-  min-height: fit-content;
-}
-
-.voice-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-}
-
-.voice-card {
-  display: flex;
-  align-items: center;
-  padding: 16px;
-  border: 1px solid #374151;
-  border-radius: 8px;
-  background: #374151;
-  cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.voice-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.voice-card-selected {
-  border-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.15);
-}
-
-.voice-card-controlled {
-  border-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.2);
-}
-
-.voice-avatar-container {
-  position: relative;
-  margin-right: 12px;
-}
-
-.voice-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: white;
-  transition: all 0.3s ease;
-}
-
-.voice-avatar-disabled {
-  filter: grayscale(30%) brightness(0.6);
-}
-
-.loading-indicator {
-    position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
-  background: rgba(139, 92, 246, 0.8);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s ease;
-  z-index: 20;
-}
-
-.voice-info {
-  flex: 1;
-}
-
-.voice-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #ffffff;
-  margin-bottom: 4px;
-}
-
-.voice-tags {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.voice-languages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.scene-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  background: #4b5563;
-  color: #d1d5db;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.language-tag {
-  display: inline-block;
-  padding: 2px 6px;
-  background: rgba(139, 92, 246, 0.2);
-  color: #a78bfa;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-
-.audio-player {
-  background: rgba(255, 255, 255, 0.05);
-  padding: 20px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.audio-player h6 {
-  color: #ffffff;
-  margin-bottom: 8px;
-}
-
-.audio-controls {
-  width: 100%;
-  margin-top: 8px;
-}
-
-
-/* Hide radio input */
-.arco-radio input[type="radio"] {
+/* 隐藏 radio input */
+.sr-only {
   position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Version tag styles */
-.version-tag {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: #8b5cf6;
-  color: white;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 8px;
-  z-index: 10;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  line-height: 1;
-  min-width: 20px;
-  text-align: center;
-}
-
-/* Settings button styles */
-.settings-button {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
-  background: rgba(139, 92, 246, 0.8);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s ease;
-  z-index: 20;
-}
-
-.settings-button:hover {
-  background: #7c3aed;
-  transform: translate(-50%, -50%) scale(1.1);
-}
-
-/* Voice controls panel styles */
-.voice-controls-panel {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-radius: 8px;
-  padding: 12px;
-  margin-top: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.control-item {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.control-item label {
-  font-size: 12px;
-  color: #ffffff;
-  min-width: 40px;
-}
-
-.mini-slider {
-  flex: 1;
-  height: 4px;
-  background: #4b5563;
-  border-radius: 2px;
-  outline: none;
-}
-
-.mini-slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  background: #8b5cf6;
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.mini-display {
-  font-size: 11px;
-  color: #ffffff;
-  min-width: 30px;
-  text-align: center;
-}
-
-.mini-select {
-  flex: 1;
-  padding: 4px 8px;
-  border: 1px solid #4b5563;
-  border-radius: 4px;
-  font-size: 12px;
-  background: #374151;
-  color: #ffffff;
-}
-
-.mini-dropdown {
-  min-width: 100px;
-  font-size: 12px;
-}
-
-.mini-dropdown :deep(.inline-flex) {
-  padding: 4px 8px !important;
-  font-size: 12px !important;
-  min-height: 28px !important;
-}
-
-/* Filter Panel Styles */
-.filter-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px 16px 16px;
-  box-sizing: border-box;
-}
-
-.filter-panel {
-  background: #2d2d2d;
-  width: 85%;
-  max-width: 600px;
-  height: 85vh;
-  max-height: calc(100vh - 32px);
-  border-radius: 20px;
-  animation: slideUp 0.3s ease-out;
-  display: flex;
-  flex-direction: column;
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-
-.filter-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  border-bottom: 1px solid #404040;
-}
-
-.filter-title {
-  color: #ffffff;
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.filter-close-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: none;
-  color: #ffffff;
-  font-size: 18px;
-  cursor: pointer;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.2s ease;
-}
-
-.filter-close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.filter-content {
-  padding: 20px;
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  max-height: calc(100% - 140px); /* 为header和actions预留空间 */
-}
-
-.filter-section {
-  margin-bottom: 24px;
-}
-
-.filter-section:last-child {
-  margin-bottom: 0;
-}
-
-.filter-section-title {
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 500;
-  margin: 0 0 12px 0;
-}
-
-.filter-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.filter-option {
-  padding: 8px 16px;
-  background: #404040;
-  border: 1px solid #555555;
-  border-radius: 20px;
-  color: #cccccc;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+  border-width: 0;
 }
-
-.filter-option:hover {
-  background: #505050;
-  border-color: #666666;
-}
-
-.filter-option-selected {
-  background: #8b5cf6;
-  border-color: #8b5cf6;
-  color: #ffffff;
-}
-
-.filter-option-selected:hover {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-
-.filter-actions {
-  display: flex;
-  gap: 12px;
-  padding: 20px;
-  border-radius: 0 0 20px 20px;
-  border-top: 1px solid #404040;
-  flex-shrink: 0;
-  background: #2d2d2d;
-}
-
-.filter-reset-btn {
-  flex: 1;
-  padding: 12px;
-  background: #404040;
-  border: 1px solid #555555;
-  border-radius: 8px;
-  color: #cccccc;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filter-reset-btn:hover {
-  background: #505050;
-  border-color: #666666;
-}
-
-.filter-apply-btn {
-  flex: 2;
-  padding: 12px;
-  background: #8b5cf6;
-  border: 1px solid #8b5cf6;
-  border-radius: 8px;
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filter-apply-btn:hover {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-
-
 </style>

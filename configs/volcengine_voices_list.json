@@ -145,6 +145,19 @@
       "emotions": []
     },
     {
+      "name": "知性灿灿",
+      "voice_type": "saturn_zh_female_cancan_tob",
+      "gender": "female",
+      "version": "2.0",
+      "resource_id": "seed-tts-2.0",
+      "voice_category": "roleplay",
+      "scene": "角色扮演",
+      "language": [
+        "chinese"
+      ],
+      "emotions": []
+    },
+    {
       "name": "温柔女神",
       "voice_type": "ICL_zh_female_wenrounvshen_239eff5e8ffa_tob",
       "gender": "female",
