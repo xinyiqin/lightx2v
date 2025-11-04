@@ -5209,9 +5209,13 @@
                             setTimeout(() => {
                                 expandCreationArea();
                                 setTimeout(() => {
-                                    const taskCreator = document.querySelector('#task-creator');
-                                    if (taskCreator) {
-                                        taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    // 滚动到顶部（TopBar 之后的位置，约60px）
+                                    const mainScrollable = document.querySelector('.main-scrollbar');
+                                    if (mainScrollable) {
+                                        mainScrollable.scrollTo({
+                                            top: 60,
+                                            behavior: 'smooth'
+                                        });
                                     }
                                 }, 100);
                             }, 100);
@@ -5219,9 +5223,13 @@
                             // 已经在生成页面，直接展开和滚动
                             expandCreationArea();
                             setTimeout(() => {
-                                const taskCreator = document.querySelector('#task-creator');
-                                if (taskCreator) {
-                                    taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // 滚动到顶部（TopBar 之后的位置，约60px）
+                                const mainScrollable = document.querySelector('.main-scrollbar');
+                                if (mainScrollable) {
+                                    mainScrollable.scrollTo({
+                                        top: 60,
+                                        behavior: 'smooth'
+                                    });
                                 }
                             }, 100);
                         }
@@ -5324,9 +5332,13 @@
                             setTimeout(() => {
                                 expandCreationArea();
                                 setTimeout(() => {
-                                    const taskCreator = document.querySelector('#task-creator');
-                                    if (taskCreator) {
-                                        taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    // 滚动到顶部（TopBar 之后的位置，约60px）
+                                    const mainScrollable = document.querySelector('.main-scrollbar');
+                                    if (mainScrollable) {
+                                        mainScrollable.scrollTo({
+                                            top: 60,
+                                            behavior: 'smooth'
+                                        });
                                     }
                                 }, 100);
                             }, 100);
@@ -5334,9 +5346,13 @@
                             // 已经在生成页面，直接展开和滚动
                             expandCreationArea();
                             setTimeout(() => {
-                                const taskCreator = document.querySelector('#task-creator');
-                                if (taskCreator) {
-                                    taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // 滚动到顶部（TopBar 之后的位置，约60px）
+                                const mainScrollable = document.querySelector('.main-scrollbar');
+                                if (mainScrollable) {
+                                    mainScrollable.scrollTo({
+                                        top: 60,
+                                        behavior: 'smooth'
+                                    });
                                 }
                             }, 100);
                         }
