@@ -1,4 +1,3 @@
-import glob
 import os
 
 import torch
@@ -19,9 +18,8 @@ class WanDistillModel(WanModel):
     post_weight_class = WanPostWeights
     transformer_weight_class = WanTransformerWeights
 
-    def __init__(self, model_path, config, device, ckpt_config_key="dit_distill_ckpt"):
-        self.ckpt_config_key = ckpt_config_key
-        super().__init__(model_path, config, device)
+    def __init__(self, model_path, config, device, model_type="wan2.1"):
+        super().__init__(model_path, config, device, model_type)
 
     def _load_ckpt(self, unified_dtype, sensitive_layer):
         # For the old t2v distill model: https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill
@@ -34,21 +32,4 @@ class WanDistillModel(WanModel):
                 for key in weight_dict.keys()
             }
             return weight_dict
-
-        if self.config.get("enable_dynamic_cfg", False):
-            safetensors_path = find_hf_model_path(self.config, self.model_path, self.ckpt_config_key, subdir="distill_cfg_models")
-        else:
-            safetensors_path = find_hf_model_path(self.config, self.model_path, self.ckpt_config_key, subdir="distill_models")
-
-        if os.path.isfile(safetensors_path):
-            logger.info(f"loading checkpoint from {safetensors_path} ...")
-            safetensors_files = glob.glob(safetensors_path)
-        else:
-            logger.info(f"loading checkpoint from {safetensors_path} ...")
-            safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
-        weight_dict = {}
-        for file_path in safetensors_files:
-            file_weights = self._load_safetensor_to_dict(file_path, unified_dtype, sensitive_layer)
-            weight_dict.update(file_weights)
-
-        return weight_dict
+        return super()._load_ckpt(unified_dtype, sensitive_layer)

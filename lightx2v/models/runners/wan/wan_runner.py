@@ -29,7 +29,6 @@ from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import *
-from lightx2v.utils.utils import best_output_size
 
 
 @RUNNER_REGISTER("wan2.1")
@@ -48,7 +47,7 @@ class WanRunner(DefaultRunner):
             self.init_device,
         )
         if self.config.get("lora_configs") and self.config.lora_configs:
-            assert not self.config.get("dit_quantized", False) or self.config.mm_config.get("weight_auto_quant", False)
+            assert not self.config.get("dit_quantized", False)
             lora_wrapper = WanLoraWrapper(model)
             for lora_config in self.config.lora_configs:
                 lora_path = lora_config["path"]
@@ -129,7 +128,6 @@ class WanRunner(DefaultRunner):
             tokenizer_path=tokenizer_path,
             shard_fn=None,
             cpu_offload=t5_offload,
-            offload_granularity=self.config.get("t5_offload_granularity", "model"),  # support ['model', 'block']
             t5_quantized=t5_quantized,
             t5_quantized_ckpt=t5_quantized_ckpt,
             quant_scheme=t5_quant_scheme,
@@ -147,7 +145,7 @@ class WanRunner(DefaultRunner):
             vae_device = torch.device("cuda")
 
         vae_config = {
-            "vae_pth": find_torch_model_path(self.config, "vae_pth", self.vae_name),
+            "vae_path": find_torch_model_path(self.config, "vae_path", self.vae_name),
             "device": vae_device,
             "parallel": self.config["parallel"],
             "use_tiling": self.config.get("use_tiling_vae", False),
@@ -170,7 +168,7 @@ class WanRunner(DefaultRunner):
             vae_device = torch.device("cuda")
 
         vae_config = {
-            "vae_pth": find_torch_model_path(self.config, "vae_pth", self.vae_name),
+            "vae_path": find_torch_model_path(self.config, "vae_path", self.vae_name),
             "device": vae_device,
             "parallel": self.config["parallel"],
             "use_tiling": self.config.get("use_tiling_vae", False),
@@ -179,16 +177,16 @@ class WanRunner(DefaultRunner):
             "dtype": GET_DTYPE(),
             "load_from_rank0": self.config.get("load_from_rank0", False),
         }
-        if self.config.get("use_tiny_vae", False):
-            tiny_vae_path = find_torch_model_path(self.config, "tiny_vae_path", self.tiny_vae_name)
-            vae_decoder = self.tiny_vae_cls(vae_pth=tiny_vae_path, device=self.init_device, need_scaled=self.config.get("need_scaled", False)).to("cuda")
+        if self.config.get("use_tae", False):
+            tae_path = find_torch_model_path(self.config, "tae_path", self.tiny_vae_name)
+            vae_decoder = self.tiny_vae_cls(vae_path=tae_path, device=self.init_device, need_scaled=self.config.get("need_scaled", False)).to("cuda")
         else:
             vae_decoder = self.vae_cls(**vae_config)
         return vae_decoder
 
     def load_vae(self):
         vae_encoder = self.load_vae_encoder()
-        if vae_encoder is None or self.config.get("use_tiny_vae", False):
+        if vae_encoder is None or self.config.get("use_tae", False):
             vae_decoder = self.load_vae_decoder()
         else:
             vae_decoder = vae_encoder
@@ -274,7 +272,7 @@ class WanRunner(DefaultRunner):
     @ProfilingContext4DebugL1(
         "Run VAE Encoder",
         recorder_mode=GET_RECORDER_MODE(),
-        metrics_func=monitor_cli.lightx2v_run_vae_encode_duration,
+        metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration,
         metrics_labels=["WanRunner"],
     )
     def run_vae_encoder(self, first_frame, last_frame=None):
@@ -445,22 +443,39 @@ class MultiModelStruct:
 class Wan22MoeRunner(WanRunner):
     def __init__(self, config):
         super().__init__(config)
+        self.high_noise_model_path = os.path.join(self.config["model_path"], "high_noise_model")
+        if not os.path.isdir(self.high_noise_model_path):
+            self.high_noise_model_path = os.path.join(self.config["model_path"], "distill_models", "high_noise_model")
+        if self.config.get("dit_quantized", False) and self.config.get("high_noise_quantized_ckpt", None):
+            self.high_noise_model_path = self.config["high_noise_quantized_ckpt"]
+        elif self.config.get("high_noise_original_ckpt", None):
+            self.high_noise_model_path = self.config["high_noise_original_ckpt"]
+
+        self.low_noise_model_path = os.path.join(self.config["model_path"], "low_noise_model")
+        if not os.path.isdir(self.low_noise_model_path):
+            self.low_noise_model_path = os.path.join(self.config["model_path"], "distill_models", "low_noise_model")
+        if self.config.get("dit_quantized", False) and self.config.get("low_noise_quantized_ckpt", None):
+            self.low_noise_model_path = self.config["low_noise_quantized_ckpt"]
+        elif not self.config.get("dit_quantized", False) and self.config.get("low_noise_original_ckpt", None):
+            self.low_noise_model_path = self.config["low_noise_original_ckpt"]
 
     def load_transformer(self):
         # encoder -> high_noise_model -> low_noise_model -> vae -> video_output
         high_noise_model = WanModel(
-            os.path.join(self.config["model_path"], "high_noise_model"),
+            self.high_noise_model_path,
             self.config,
             self.init_device,
+            model_type="wan2.2_moe_high_noise",
         )
         low_noise_model = WanModel(
-            os.path.join(self.config["model_path"], "low_noise_model"),
+            self.low_noise_model_path,
             self.config,
             self.init_device,
+            model_type="wan2.2_moe_low_noise",
         )
 
         if self.config.get("lora_configs") and self.config["lora_configs"]:
-            assert not self.config.get("dit_quantized", False) or self.config["mm_config"].get("weight_auto_quant", False)
+            assert not self.config.get("dit_quantized", False)
 
             for lora_config in self.config["lora_configs"]:
                 lora_path = lora_config["path"]
@@ -495,7 +510,7 @@ class Wan22DenseRunner(WanRunner):
     @ProfilingContext4DebugL1(
         "Run VAE Encoder",
         recorder_mode=GET_RECORDER_MODE(),
-        metrics_func=monitor_cli.lightx2v_run_vae_encode_duration,
+        metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration,
         metrics_labels=["Wan22DenseRunner"],
     )
     def run_vae_encoder(self, img):
@@ -516,10 +531,10 @@ class Wan22DenseRunner(WanRunner):
         # to tensor
         img = TF.to_tensor(img).sub_(0.5).div_(0.5).cuda().unsqueeze(1)
         vae_encoder_out = self.get_vae_encoder_output(img)
-        self.config.lat_w, self.config.lat_h = ow // self.config.vae_stride[2], oh // self.config.vae_stride[1]
-
-        return vae_encoder_out
+        latent_w, latent_h = ow // self.config["vae_stride"][2], oh // self.config["vae_stride"][1]
+        latent_shape = self.get_latent_shape_with_lat_hw(latent_h, latent_w)
+        return vae_encoder_out, latent_shape
 
     def get_vae_encoder_output(self, img):
-        z = self.vae_encoder.encode(img.to(GET_DTYPE()))
+        z = self.vae_encoder.encode(img.unsqueeze(0).to(GET_DTYPE()))
         return z

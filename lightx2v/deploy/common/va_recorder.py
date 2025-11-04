@@ -1,6 +1,5 @@
 import os
 import queue
-import signal
 import socket
 import subprocess
 import threading
@@ -58,11 +57,13 @@ class VARecorder:
         # TCP socket for send and recv video and audio data
         self.video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.video_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.video_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.video_socket.bind(("127.0.0.1", self.video_port))
         self.video_socket.listen(1)
 
         self.audio_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.audio_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.audio_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.audio_socket.bind(("127.0.0.1", self.audio_port))
         self.audio_socket.listen(1)
 
@@ -82,15 +83,22 @@ class VARecorder:
                         break
                     # Convert audio data to 16-bit integer format
                     audios = torch.clamp(torch.round(data * 32767), -32768, 32767).to(torch.int16)
-                    self.audio_conn.send(audios[None].cpu().numpy().tobytes())
+                    try:
+                        self.audio_conn.send(audios[None].cpu().numpy().tobytes())
+                    except (BrokenPipeError, OSError, ConnectionResetError) as e:
+                        logger.info(f"Audio connection closed, stopping worker: {type(e).__name__}")
+                        return
                     fail_time = 0
-                except:  # noqa
+                except (BrokenPipeError, OSError, ConnectionResetError):
+                    logger.info("Audio connection closed during queue processing")
+                    break
+                except Exception:
                     logger.error(f"Send audio data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Audio push worker thread failed {fail_time} times, stopping...")
                         break
-        except:  # noqa
+        except Exception:
             logger.error(f"Audio push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Audio push worker thread stopped")
@@ -112,24 +120,28 @@ class VARecorder:
                         break
 
                     # Convert to numpy and scale to [0, 255], convert RGB to BGR for OpenCV/FFmpeg
-                    if not self.realtime:
-                        frames = (data * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
-                        self.video_conn.send(frames.tobytes())
-                    else:
-                        for i in range(data.shape[0]):
-                            t0 = time.time()
-                            frame = (data[i] * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                    for i in range(data.shape[0]):
+                        t0 = time.time()
+                        frame = (data[i] * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                        try:
                             self.video_conn.send(frame.tobytes())
+                        except (BrokenPipeError, OSError, ConnectionResetError) as e:
+                            logger.info(f"Video connection closed, stopping worker: {type(e).__name__}")
+                            return
+                        if self.realtime:
                             time.sleep(max(0, packet_secs - (time.time() - t0)))
 
                     fail_time = 0
-                except:  # noqa
+                except (BrokenPipeError, OSError, ConnectionResetError):
+                    logger.info("Video connection closed during queue processing")
+                    break
+                except Exception:
                     logger.error(f"Send video data error: {traceback.format_exc()}")
                     fail_time += 1
                     if fail_time > max_fail_time:
                         logger.error(f"Video push worker thread failed {fail_time} times, stopping...")
                         break
-        except:  # noqa
+        except Exception:
             logger.error(f"Video push worker thread error: {traceback.format_exc()}")
         finally:
             logger.info("Video push worker thread stopped")
@@ -138,6 +150,14 @@ class VARecorder:
         """Start ffmpeg process that connects to our TCP sockets"""
         ffmpeg_cmd = [
             "ffmpeg",
+            "-fflags",
+            "nobuffer",
+            "-analyzeduration",
+            "0",
+            "-probesize",
+            "32",
+            "-flush_packets",
+            "1",
             "-f",
             "s16le",
             "-ar",
@@ -363,42 +383,111 @@ class VARecorder:
         if self.video_queue:
             self.video_queue.put(None)
 
-        # Wait for threads to finish
+        # Wait for threads to finish processing queued data (increased timeout)
+        queue_timeout = 30  # Increased from 5s to 30s to allow sufficient time for large video frames
         if self.audio_thread and self.audio_thread.is_alive():
-            self.audio_thread.join(timeout=5)
+            self.audio_thread.join(timeout=queue_timeout)
             if self.audio_thread.is_alive():
-                logger.warning("Audio push thread did not stop gracefully")
+                logger.error(f"Audio push thread did not stop after {queue_timeout}s")
         if self.video_thread and self.video_thread.is_alive():
-            self.video_thread.join(timeout=5)
+            self.video_thread.join(timeout=queue_timeout)
             if self.video_thread.is_alive():
-                logger.warning("Video push thread did not stop gracefully")
+                logger.error(f"Video push thread did not stop after {queue_timeout}s")
 
-        # Close TCP connections, sockets
+        # Shutdown connections to signal EOF to FFmpeg
+        # shutdown(SHUT_WR) will wait for send buffer to flush, no explicit sleep needed
         if self.audio_conn:
-            self.audio_conn.close()
-        if self.video_conn:
-            self.video_conn.close()
-        if self.audio_socket:
-            self.audio_socket.close()
-        if self.video_socket:
-            self.video_socket.close()
+            try:
+                self.audio_conn.getpeername()
+                self.audio_conn.shutdown(socket.SHUT_WR)
+                logger.info("Audio connection shutdown initiated")
+            except OSError:
+                # Connection already closed, skip shutdown
+                pass
 
-        while self.audio_queue and self.audio_queue.qsize() > 0:
-            self.audio_queue.get_nowait()
-        while self.video_queue and self.video_queue.qsize() > 0:
-            self.video_queue.get_nowait()
+        if self.video_conn:
+            try:
+                self.video_conn.getpeername()
+                self.video_conn.shutdown(socket.SHUT_WR)
+                logger.info("Video connection shutdown initiated")
+            except OSError:
+                # Connection already closed, skip shutdown
+                pass
+
+        if self.ffmpeg_process:
+            is_local_file = not self.livestream_url.startswith(("rtmp://", "http"))
+            # Local MP4 files need time to write moov atom and finalize the container
+            timeout_seconds = 30 if is_local_file else 10
+            logger.info(f"Waiting for FFmpeg to finalize file (timeout={timeout_seconds}s, local_file={is_local_file})")
+            logger.info(f"FFmpeg output: {self.livestream_url}")
+
+            try:
+                returncode = self.ffmpeg_process.wait(timeout=timeout_seconds)
+                if returncode == 0:
+                    logger.info(f"FFmpeg process exited successfully (exit code: {returncode})")
+                else:
+                    logger.warning(f"FFmpeg process exited with non-zero code: {returncode}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"FFmpeg process did not exit within {timeout_seconds}s, sending SIGTERM...")
+                try:
+                    self.ffmpeg_process.terminate()  # SIGTERM
+                    returncode = self.ffmpeg_process.wait(timeout=5)
+                    logger.warning(f"FFmpeg process terminated with SIGTERM (exit code: {returncode})")
+                except subprocess.TimeoutExpired:
+                    logger.error("FFmpeg process still running after SIGTERM, killing with SIGKILL...")
+                    self.ffmpeg_process.kill()
+                    self.ffmpeg_process.wait()  # Wait for kill to complete
+                    logger.error("FFmpeg process killed with SIGKILL")
+            finally:
+                self.ffmpeg_process = None
+
+        if self.audio_conn:
+            try:
+                self.audio_conn.close()
+            except Exception as e:
+                logger.debug(f"Error closing audio connection: {e}")
+            finally:
+                self.audio_conn = None
+
+        if self.video_conn:
+            try:
+                self.video_conn.close()
+            except Exception as e:
+                logger.debug(f"Error closing video connection: {e}")
+            finally:
+                self.video_conn = None
+
+        if self.audio_socket:
+            try:
+                self.audio_socket.close()
+            except Exception as e:
+                logger.debug(f"Error closing audio socket: {e}")
+            finally:
+                self.audio_socket = None
+
+        if self.video_socket:
+            try:
+                self.video_socket.close()
+            except Exception as e:
+                logger.debug(f"Error closing video socket: {e}")
+            finally:
+                self.video_socket = None
+
+        if self.audio_queue:
+            while self.audio_queue.qsize() > 0:
+                try:
+                    self.audio_queue.get_nowait()
+                except:  # noqa
+                    break
+        if self.video_queue:
+            while self.video_queue.qsize() > 0:
+                try:
+                    self.video_queue.get_nowait()
+                except:  # noqa
+                    break
         self.audio_queue = None
         self.video_queue = None
-        logger.warning("Cleaned audio and video queues")
-
-        # Stop ffmpeg process
-        if self.ffmpeg_process:
-            self.ffmpeg_process.send_signal(signal.SIGINT)
-            try:
-                self.ffmpeg_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.ffmpeg_process.kill()
-            logger.warning("FFmpeg recorder process stopped")
+        logger.info("VARecorder stopped and resources cleaned up")
 
     def __del__(self):
         self.stop(wait=False)

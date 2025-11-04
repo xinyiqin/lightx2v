@@ -364,6 +364,8 @@ class WanAudioRunner(WanRunner):  # type:ignore
             monitor_cli.lightx2v_input_audio_len.observe(audio_len)
 
         expected_frames = min(max(1, int(video_duration * target_fps)), audio_len)
+        if expected_frames < int(video_duration * target_fps):
+            logger.warning(f"Input video duration is greater than actual audio duration, using audio duration instead: audio_duration={audio_len / target_fps}, video_duration={video_duration}")
 
         # Segment audio
         audio_segments = self._audio_processor.segment_audio(audio_array, expected_frames, self.config.get("target_video_length", 81), self.prev_frame_length)
@@ -470,7 +472,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
     @ProfilingContext4DebugL1(
         "Run VAE Encoder",
         recorder_mode=GET_RECORDER_MODE(),
-        metrics_func=monitor_cli.lightx2v_run_vae_encode_duration,
+        metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration,
         metrics_labels=["WanAudioRunner"],
     )
     def run_vae_encoder(self, img):
@@ -533,7 +535,12 @@ class WanAudioRunner(WanRunner):  # type:ignore
             self.vae_encoder = self.load_vae_encoder()
 
         _, nframe, height, width = self.model.scheduler.latents.shape
-        with ProfilingContext4DebugL1("vae_encoder in init run segment"):
+        with ProfilingContext4DebugL1(
+            "vae_encoder in init run segment",
+            recorder_mode=GET_RECORDER_MODE(),
+            metrics_func=monitor_cli.lightx2v_run_vae_encoder_pre_latent_duration,
+            metrics_labels=["WanAudioRunner"],
+        ):
             if self.config["model_cls"] == "wan2.2_audio":
                 if prev_video is not None:
                     prev_latents = self.vae_encoder.encode(prev_frames.to(dtype))
@@ -645,6 +652,14 @@ class WanAudioRunner(WanRunner):  # type:ignore
                 video_seg,
                 source_fps=self.config.get("fps", 16),
                 target_fps=target_fps,
+            )
+
+        if "video_super_resolution" in self.config and self.vsr_model is not None:
+            logger.info(f"Applying video super resolution with scale {self.config['video_super_resolution']['scale']}")
+            video_seg = self.vsr_model.super_resolve_frames(
+                video_seg,
+                seed=self.config["video_super_resolution"]["seed"],
+                scale=self.config["video_super_resolution"]["scale"],
             )
 
         if self.va_recorder:
@@ -783,7 +798,7 @@ class WanAudioRunner(WanRunner):  # type:ignore
         """Load transformer with LoRA support"""
         base_model = WanAudioModel(self.config["model_path"], self.config, self.init_device)
         if self.config.get("lora_configs") and self.config["lora_configs"]:
-            assert not self.config.get("dit_quantized", False) or self.config["mm_config"].get("weight_auto_quant", False)
+            assert not self.config.get("dit_quantized", False)
             lora_wrapper = WanLoraWrapper(base_model)
             for lora_config in self.config["lora_configs"]:
                 lora_path = lora_config["path"]
@@ -855,7 +870,7 @@ class Wan22AudioRunner(WanAudioRunner):
         else:
             vae_device = torch.device("cuda")
         vae_config = {
-            "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.2_VAE.pth"),
+            "vae_path": find_torch_model_path(self.config, "vae_path", "Wan2.2_VAE.pth"),
             "device": vae_device,
             "cpu_offload": vae_offload,
             "offload_cache": self.config.get("vae_offload_cache", False),
@@ -871,7 +886,7 @@ class Wan22AudioRunner(WanAudioRunner):
         else:
             vae_device = torch.device("cuda")
         vae_config = {
-            "vae_pth": find_torch_model_path(self.config, "vae_pth", "Wan2.2_VAE.pth"),
+            "vae_path": find_torch_model_path(self.config, "vae_path", "Wan2.2_VAE.pth"),
             "device": vae_device,
             "cpu_offload": vae_offload,
             "offload_cache": self.config.get("vae_offload_cache", False),

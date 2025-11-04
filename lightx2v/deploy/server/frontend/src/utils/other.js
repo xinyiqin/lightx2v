@@ -1082,6 +1082,11 @@
             };
 
             const selectTask = (taskType) => {
+                for (const t of models.value.map(m => m.task)) {
+                    if (getTaskTypeName(t) === taskType) {
+                        taskType = t;
+                    }
+                }
                 selectedTaskId.value = taskType;
 
                 // 根据任务类型恢复对应的预览
@@ -1661,7 +1666,7 @@
                 // 先从缓存获取
                 const cachedFile = getTemplateFileFromCache(fileKey);
                 if (cachedFile) {
-                    console.log('从缓存获取模板文件url', { fileKey});
+                    /* console.log('从缓存获取模板文件url', { fileKey});*/
                     return cachedFile.url;
                 }
                 // 如果缓存中没有，返回null，让调用方知道需要异步获取

@@ -24,10 +24,9 @@
     "audio_encoder_cpu_offload": false,
     "audio_adapter_cpu_offload": false,
     "adapter_quantized": true,
-    "adapter_quant_scheme": "fp8",
+    "adapter_quant_scheme": "fp8-q8f",
     "vae_cpu_offload": false,
     "use_tiling_vae": false,
-    "mm_config": {
-        "mm_type": "W-fp8-channel-sym-A-fp8-channel-sym-dynamic-Q8F"
-    }
+    "dit_quantized": true,
+    "dit_quant_scheme": "fp8-q8f"
 }

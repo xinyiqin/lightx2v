@@ -1,5 +1,5 @@
 import gc
-import json
+import glob
 import os
 
 import torch
@@ -44,53 +44,37 @@ class WanModel(CompiledMethodsMixin):
     pre_weight_class = WanPreWeights
     transformer_weight_class = WanTransformerWeights
 
-    def __init__(self, model_path, config, device):
+    def __init__(self, model_path, config, device, model_type="wan2.1"):
         super().__init__()
         self.model_path = model_path
         self.config = config
         self.cpu_offload = self.config.get("cpu_offload", False)
         self.offload_granularity = self.config.get("offload_granularity", "block")
+        self.model_type = model_type
 
         if self.config["seq_parallel"]:
             self.seq_p_group = self.config.get("device_mesh").get_group(mesh_dim="seq_p")
         else:
             self.seq_p_group = None
 
-        if self.config.get("lora_configs") and self.config.lora_configs:
-            self.init_empty_model = True
-        else:
-            self.init_empty_model = False
-
         self.clean_cuda_cache = self.config.get("clean_cuda_cache", False)
-        self.dit_quantized = self.config["mm_config"].get("mm_type", "Default") != "Default"
-
+        self.dit_quantized = self.config.get("dit_quantized", False)
         if self.dit_quantized:
-            dit_quant_scheme = self.config["mm_config"].get("mm_type").split("-")[1]
-            if self.config["model_cls"] == "wan2.1_distill":
-                dit_quant_scheme = "distill_" + dit_quant_scheme
-            if dit_quant_scheme == "gguf":
-                self.dit_quantized_ckpt = find_gguf_model_path(config, "dit_quantized_ckpt", subdir=dit_quant_scheme)
-                self.config["use_gguf"] = True
-            else:
-                self.dit_quantized_ckpt = find_hf_model_path(
-                    config,
-                    self.model_path,
-                    "dit_quantized_ckpt",
-                    subdir=dit_quant_scheme,
-                )
-            quant_config_path = os.path.join(self.dit_quantized_ckpt, "config.json")
-            if os.path.exists(quant_config_path):
-                with open(quant_config_path, "r") as f:
-                    quant_model_config = json.load(f)
-                self.config.update(quant_model_config)
-        else:
-            self.dit_quantized_ckpt = None
-            assert not self.config.get("lazy_load", False)
-
-        self.weight_auto_quant = self.config["mm_config"].get("weight_auto_quant", False)
-        if self.dit_quantized:
-            assert self.weight_auto_quant or self.dit_quantized_ckpt is not None
-
+            assert self.config.get("dit_quant_scheme", "Default") in [
+                "Default-Force-FP32",
+                "fp8-vllm",
+                "int8-vllm",
+                "fp8-q8f",
+                "int8-q8f",
+                "fp8-b128-deepgemm",
+                "fp8-sgl",
+                "int8-sgl",
+                "int8-torchao",
+                "nvfp4",
+                "mxfp4",
+                "mxfp6-mxfp8",
+                "mxfp8",
+            ]
         self.device = device
         self._init_infer_class()
         self._init_weights()
@@ -136,6 +120,20 @@ class WanModel(CompiledMethodsMixin):
                 return True
         return False
 
+    def _should_init_empty_model(self):
+        if self.config.get("lora_configs") and self.config["lora_configs"]:
+            if self.model_type in ["wan2.1"]:
+                return True
+            if self.model_type in ["wan2.2_moe_high_noise"]:
+                for lora_config in self.config["lora_configs"]:
+                    if lora_config["name"] == "high_noise_model":
+                        return True
+            if self.model_type in ["wan2.2_moe_low_noise"]:
+                for lora_config in self.config["lora_configs"]:
+                    if lora_config["name"] == "low_noise_model":
+                        return True
+        return False
+
     def _load_safetensor_to_dict(self, file_path, unified_dtype, sensitive_layer):
         remove_keys = self.remove_keys if hasattr(self, "remove_keys") else []
 
@@ -152,40 +150,51 @@ class WanModel(CompiledMethodsMixin):
             }
 
     def _load_ckpt(self, unified_dtype, sensitive_layer):
-        safetensors_path = find_hf_model_path(self.config, self.model_path, "dit_original_ckpt", subdir="original")
-        safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
+        if self.config.get("dit_original_ckpt", None):
+            safetensors_path = self.config["dit_original_ckpt"]
+        else:
+            safetensors_path = self.model_path
+
+        if os.path.isdir(safetensors_path):
+            safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
+        else:
+            safetensors_files = [safetensors_path]
 
         weight_dict = {}
         for file_path in safetensors_files:
             if self.config.get("adapter_model_path", None) is not None:
                 if self.config["adapter_model_path"] == file_path:
                     continue
+            logger.info(f"Loading weights from {file_path}")
             file_weights = self._load_safetensor_to_dict(file_path, unified_dtype, sensitive_layer)
             weight_dict.update(file_weights)
+
         return weight_dict
 
     def _load_quant_ckpt(self, unified_dtype, sensitive_layer):
         remove_keys = self.remove_keys if hasattr(self, "remove_keys") else []
-        ckpt_path = self.dit_quantized_ckpt
-        index_files = [f for f in os.listdir(ckpt_path) if f.endswith(".index.json")]
-        if not index_files:
-            raise FileNotFoundError(f"No *.index.json found in {ckpt_path}")
 
-        index_path = os.path.join(ckpt_path, index_files[0])
-        logger.info(f" Using safetensors index: {index_path}")
+        if self.config.get("dit_quantized_ckpt", None):
+            safetensors_path = self.config["dit_quantized_ckpt"]
+        else:
+            safetensors_path = self.model_path
 
-        with open(index_path, "r") as f:
-            index_data = json.load(f)
+        if os.path.isdir(safetensors_path):
+            safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
+        else:
+            safetensors_files = [safetensors_path]
+            safetensors_path = os.path.dirname(safetensors_path)
 
         weight_dict = {}
-        for filename in set(index_data["weight_map"].values()):
-            safetensor_path = os.path.join(ckpt_path, filename)
+        for safetensor_path in safetensors_files:
+            if self.config.get("adapter_model_path", None) is not None:
+                if self.config["adapter_model_path"] == safetensor_path:
+                    continue
             with safe_open(safetensor_path, framework="pt") as f:
                 logger.info(f"Loading weights from {safetensor_path}")
                 for k in f.keys():
                     if any(remove_key in k for remove_key in remove_keys):
                         continue
-
                     if f.get_tensor(k).dtype in [
                         torch.float16,
                         torch.bfloat16,
@@ -198,9 +207,16 @@ class WanModel(CompiledMethodsMixin):
                     else:
                         weight_dict[k] = f.get_tensor(k).to(self.device)
 
+        if self.config.get("dit_quant_scheme", "Default") == "nvfp4":
+            calib_path = os.path.join(safetensors_path, "calib.pt")
+            logger.info(f"[CALIB] Loaded calibration data from: {calib_path}")
+            calib_data = torch.load(calib_path, map_location="cpu")
+            for k, v in calib_data["absmax"].items():
+                weight_dict[k.replace(".weight", ".input_absmax")] = v.to(self.device)
+
         return weight_dict
 
-    def _load_quant_split_ckpt(self, unified_dtype, sensitive_layer):
+    def _load_quant_split_ckpt(self, unified_dtype, sensitive_layer):  # Need rewrite
         lazy_load_model_path = self.dit_quantized_ckpt
         logger.info(f"Loading splited quant model from {lazy_load_model_path}")
         pre_post_weight_dict = {}
@@ -247,7 +263,7 @@ class WanModel(CompiledMethodsMixin):
         if weight_dict is None:
             is_weight_loader = self._should_load_weights()
             if is_weight_loader:
-                if not self.dit_quantized or self.weight_auto_quant:
+                if not self.dit_quantized:
                     # Load original weights
                     weight_dict = self._load_ckpt(unified_dtype, sensitive_layer)
                 else:
@@ -270,7 +286,7 @@ class WanModel(CompiledMethodsMixin):
         # Initialize weight containers
         self.pre_weight = self.pre_weight_class(self.config)
         self.transformer_weights = self.transformer_weight_class(self.config)
-        if not self.init_empty_model:
+        if not self._should_init_empty_model():
             self._apply_weights()
 
     def _apply_weights(self, weight_dict=None):

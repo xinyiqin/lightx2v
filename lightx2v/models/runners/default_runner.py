@@ -11,6 +11,7 @@ from requests.exceptions import RequestException
 from lightx2v.server.metrics import monitor_cli
 from lightx2v.utils.envs import *
 from lightx2v.utils.generate_task_id import generate_task_id
+from lightx2v.utils.global_paras import CALIB
 from lightx2v.utils.memory_profiler import peak_memory_decorator
 from lightx2v.utils.profiler import *
 from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
@@ -72,6 +73,15 @@ class DefaultRunner(BaseRunner):
         else:
             raise ValueError(f"Unsupported VFI model: {self.config['video_frame_interpolation']['algo']}")
 
+    def load_vsr_model(self):
+        if "video_super_resolution" in self.config:
+            from lightx2v.models.runners.vsr.vsr_wrapper import VSRWrapper
+
+            logger.info("Loading VSR model...")
+            return VSRWrapper(self.config["video_super_resolution"]["model_path"])
+        else:
+            return None
+
     @ProfilingContext4DebugL2("Load models")
     def load_model(self):
         self.model = self.load_transformer()
@@ -79,6 +89,7 @@ class DefaultRunner(BaseRunner):
         self.image_encoder = self.load_image_encoder()
         self.vae_encoder, self.vae_decoder = self.load_vae()
         self.vfi_model = self.load_vfi_model() if "video_frame_interpolation" in self.config else None
+        self.vsr_model = self.load_vsr_model() if "video_super_resolution" in self.config else None
 
     def check_sub_servers(self, task_type):
         urls = self.config.get("sub_servers", {}).get(task_type, [])
@@ -166,6 +177,10 @@ class DefaultRunner(BaseRunner):
                 self.model.transformer_weights.clear()
             self.model.pre_weight.clear()
             del self.model
+        if self.config.get("do_mm_calib", False):
+            calib_path = os.path.join(os.getcwd(), "calib.pt")
+            torch.save(CALIB, calib_path)
+            logger.info(f"[CALIB] Saved calibration data successfully to: {calib_path}")
         torch.cuda.empty_cache()
         gc.collect()
 
@@ -248,6 +263,7 @@ class DefaultRunner(BaseRunner):
     def init_run(self):
         self.gen_video_final = None
         self.get_video_segment_num()
+
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.model = self.load_transformer()
 
