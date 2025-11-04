@@ -65,7 +65,7 @@ const scrollToCreationArea = () => {
     const mainScrollable = document.querySelector('.main-scrollbar');
     if (mainScrollable) {
         mainScrollable.scrollTo({
-            top: 60,
+            top: 0,
             behavior: 'smooth'
         });
     }

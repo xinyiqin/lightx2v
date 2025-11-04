@@ -367,11 +367,11 @@ const handleUseTemplate = async (item) => {
     await nextTick()
     // 延迟一下确保展开动画完成
     setTimeout(() => {
-        // 滚动到顶部（TopBar 之后的位置，约60px）
+        // 滚动到顶部
         const mainScrollable = document.querySelector('.main-scrollbar');
         if (mainScrollable) {
             mainScrollable.scrollTo({
-                top: 60,
+                top: 0,
                 behavior: 'smooth'
             });
         }

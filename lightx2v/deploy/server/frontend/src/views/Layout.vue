@@ -43,19 +43,19 @@ const handleTTSComplete = (audioBlob) => {
 
 <template>
   <!-- 主容器 - Apple 极简风格 - 配合80%缩放铺满屏幕 -->
-  <div class="bg-[#f5f5f7] dark:bg-[#000000] transition-colors duration-300 w-full h-full">
+  <div class="bg-[#f5f5f7] dark:bg-[#000000] transition-colors duration-300 w-full h-full overflow-y-auto main-scrollbar">
     <!-- 主内容区域 -->
-    <div class="flex flex-col w-full h-full">
+    <div class="flex flex-col w-full min-h-full">
       <!-- 顶部导航栏 -->
       <TopBar />
 
       <!-- 内容区域 - 响应式布局 -->
-      <div class="flex flex-col sm:flex-row flex-1 h-full">
+      <div class="flex flex-col sm:flex-row flex-1">
         <!-- 左侧/底部导航栏 - 响应式 -->
         <LeftBar />
 
         <!-- 路由视图内容 -->
-        <div class="flex-1 overflow-y-auto main-scrollbar pb-16 sm:pb-20">
+        <div class="flex-1 pb-16 sm:pb-20">
           <router-view></router-view>
         </div>
       </div>
