@@ -54,13 +54,14 @@ const closeWithRoute = () => {
 
 // 滚动到生成区域（仅在 generate 页面）
 const scrollToCreationArea = () => {
-    const creationArea = document.querySelector('#task-creator')
-    if (creationArea) {
-        creationArea.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
-        })
+    const mainScrollable = document.querySelector('.main-scrollbar');
+    if (mainScrollable) {
+        mainScrollable.scrollTo({
+            top: 60,
+            behavior: 'smooth'
+        });
     }
+
 }
 
 // 包装 useTemplate 函数，在 generate 页面时滚动到生成区域

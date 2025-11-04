@@ -326,7 +326,7 @@
     "userGeneratedVideo": "生成的视频",
     "noImage": "暂无图片",
     "noAudio": "暂无音频",
-    "taskCompletedSuccessfully": "LightX2V 已成功为您生成视频",
+    "taskCompletedSuccessfully": "视频生成完成！",
     "onlyUseImage": "仅使用图片",
     "onlyUseAudio": "仅使用音频",
     "reUseImage": "复用图片",

@@ -58,6 +58,9 @@
             const showTaskDetailModal = ref(false);
             const modalTask = ref(null);
 
+            // TTS 模态框状态
+            const showVoiceTTSModal = ref(false);
+
             // TaskCarousel当前任务状态
             const currentTask = ref(null);
 
@@ -2780,11 +2783,22 @@
                         }
                         // 等待 DOM 更新后滚动到生成区域
                         await nextTick();
-                        const creationArea = document.querySelector('#task-creator');
-                        if (creationArea) {
-                            creationArea.scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'start'
+                        // 如果之前有展开过创作区域，保持展开状态
+                        const creationArea = document.querySelector('.creation-area');
+                        if (isCreationAreaExpanded.value) {
+                            // 延迟一点时间确保DOM更新完成
+                            setTimeout(() => {
+                                if (creationArea) {
+                                    creationArea.classList.add('show');
+                                }
+                            }, 50);
+                        }
+                        // 滚动到顶部（TopBar 之后的位置，约60px）
+                        const mainScrollable = document.querySelector('.main-scrollbar');
+                        if (mainScrollable) {
+                            mainScrollable.scrollTo({
+                                top: 60,
+                                behavior: 'smooth'
                             });
                         }
                     } else {
@@ -3433,21 +3447,21 @@
 
                                         // 显示任务完成提示
                                         if (updatedTask.status === 'SUCCEED') {
-                                            showAlert('视频生成完成！', 'success', {
+                                            showAlert(t('taskCompletedSuccessfully'), 'success', {
                                                 label: t('view'),
                                                 onClick: () => {
                                                     openTaskDetailModal(updatedTask);
                                                 }
                                             });
                                         } else if (updatedTask.status === 'FAILED') {
-                                            showAlert('视频生成失败，请查看详情', 'danger', {
+                                            showAlert(t('videoGeneratingFailed'), 'danger', {
                                                 label: t('view'),
                                                 onClick: () => {
                                                     openTaskDetailModal(updatedTask);
                                                 }
                                             });
                                         } else if (updatedTask.status === 'CANCEL') {
-                                            showAlert('任务已取消', 'warning');
+                                            showAlert(t('taskCancelled'), 'warning');
                                         }
                                     }
                                 }
@@ -5702,6 +5716,7 @@
                 showConfirmDialog,
                 showTaskDetailModal,
                 modalTask,
+                showVoiceTTSModal,
                 currentTask,
                 t2vForm,
                 i2vForm,

@@ -278,15 +278,14 @@ import {
             generateShareUrl,
             copyShareLink,
             shareToSocial,
-            openTaskFromRoute
+            openTaskFromRoute,
+            showVoiceTTSModal
         } from '../utils/other'
 
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { watch, onMounted, computed, ref, nextTick, onUnmounted } from 'vue'
 import ModelDropdown from './ModelDropdown.vue'
-import MediaTemplate from './MediaTemplate.vue'
-import Voice_tts from './Voice_tts.vue'
 import TaskCarousel from './TaskCarousel.vue'
 
 // Props
@@ -310,8 +309,6 @@ const screenSize = ref('large') // 'small' 或 'large'
 // 拖拽状态
 const isDragOver = ref(false)
 
-// 语音合成模态框状态
-const showVoiceTTSModal = ref(false)
 
 // 处理提交任务并滚动到任务区域
 const handleSubmitTask = async () => {
@@ -350,21 +347,11 @@ const scrollToTaskArea = () => {
     if (taskArea) {
         taskArea.scrollIntoView({
             behavior: 'smooth',
-            block: 'start'
+            block: 'center'
         })
     }
 }
 
-// 滚动到生成区域
-const scrollToCreationArea = () => {
-    const creationArea = document.querySelector('#task-creator')
-    if (creationArea) {
-        creationArea.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
-        })
-    }
-}
 
 // 包装 useTemplate 函数，在应用模板后滚动到生成区域
 const handleUseTemplate = async (item) => {
@@ -373,35 +360,17 @@ const handleUseTemplate = async (item) => {
     await nextTick()
     // 延迟一下确保展开动画完成
     setTimeout(() => {
-        scrollToCreationArea()
+        // 滚动到顶部（TopBar 之后的位置，约60px）
+        const mainScrollable = document.querySelector('.main-scrollbar');
+        if (mainScrollable) {
+            mainScrollable.scrollTo({
+                top: 60,
+                behavior: 'smooth'
+            });
+        }
     }, 100)
 }
 
-// 处理语音合成完成后的回调
-const handleTTSComplete = (audioBlob) => {
-    // 创建File对象
-    const audioFile = new File([audioBlob], 'tts_audio.mp3', { type: 'audio/mpeg' })
-
-    // 模拟文件上传事件
-    const dataTransfer = new DataTransfer()
-    dataTransfer.items.add(audioFile)
-    const fileList = dataTransfer.files
-
-    const event = {
-        target: {
-            files: fileList
-        }
-    }
-
-    // 处理音频上传
-    handleAudioUpload(event)
-
-    // 关闭模态框
-    showVoiceTTSModal.value = false
-
-    // 显示成功提示
-    showAlert('语音合成完成，已自动添加到音频素材', 'success')
-}
 
 // 跳转到项目页面
 const goToProjects = () => {
@@ -1127,10 +1096,6 @@ onUnmounted(() => {
                 </div>
             </div>
 
-                <MediaTemplate />
-
-                <!-- 语音合成模态框 -->
-                <Voice_tts v-if="showVoiceTTSModal" @tts-complete="handleTTSComplete" @close-modal="showVoiceTTSModal = false" />
 
                 <!-- GitHub 仓库链接 - Apple 极简风格 -->
                 <div class="fixed bottom-6 right-6 z-50">

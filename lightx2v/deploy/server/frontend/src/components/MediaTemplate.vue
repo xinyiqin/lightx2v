@@ -49,7 +49,7 @@ const formatDuration = (seconds) => {
 // 获取音频时长
 const getAudioDuration = async (url, id) => {
     if (audioDurations.value[id]) return audioDurations.value[id]
-
+    
     return new Promise((resolve) => {
         const audio = new Audio()
         audio.addEventListener('loadedmetadata', () => {
@@ -67,32 +67,32 @@ const getAudioDuration = async (url, id) => {
 const handleAudioPreview = async (item, isTemplate = false) => {
     const id = isTemplate ? `template_${item.filename}` : `history_${item.filename}`
     const url = isTemplate ? getTemplateFileUrl(item.filename, 'audios') : item.url
-
+    
     // 如果当前正在播放这个音频，则停止
     if (playingAudioId.value === id) {
         playingAudioId.value = null
         stopAudioPlayback() // 调用停止音频播放函数
         return
     }
-
+    
     // 停止其他正在播放的音频
     playingAudioId.value = null
     stopAudioPlayback() // 先停止当前播放的音频
-
+    
     // 播放新音频
     try {
         // 设置停止回调，当音频停止时更新UI状态
         setAudioStopCallback(() => {
             playingAudioId.value = null
         })
-
+        
         if (isTemplate) {
             previewAudioTemplate(item)
         } else {
             previewAudioHistory({ url })
         }
         playingAudioId.value = id
-
+        
         // 获取音频时长
         await getAudioDuration(url, id)
     } catch (error) {
@@ -338,7 +338,7 @@ watch(audioTemplates, (newTemplates) => {
                                                     </div>
                                                     <button @click.stop="handleAudioPreview(history, false)"
                                                             class="px-4 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2 flex-shrink-0 tracking-tight"
-                                                            :class="isPlaying(history, false)
+                                                            :class="isPlaying(history, false) 
                                                                 ? 'text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300'
                                                                 : 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:text-[color:var(--brand-primary)]/80 dark:hover:text-[color:var(--brand-primary-light)]/80'"
                                                             style="pointer-events: auto;">
@@ -418,7 +418,7 @@ watch(audioTemplates, (newTemplates) => {
                                                 </div>
                                                 <button @click.stop="handleAudioPreview(template, true)"
                                                         class="px-4 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2 flex-shrink-0 tracking-tight"
-                                                        :class="isPlaying(template, true)
+                                                        :class="isPlaying(template, true) 
                                                             ? 'text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300'
                                                             : 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:text-[color:var(--brand-primary)]/80 dark:hover:text-[color:var(--brand-primary-light)]/80'"
                                                         style="pointer-events: auto;">
