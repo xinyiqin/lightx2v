@@ -5165,25 +5165,36 @@
                         return;
                     }
 
-                    // 通过代理获取文件blob
-                    const blob = await fetchFileThroughProxy(template.inputs.input_image, 'images');
-                    if (!blob) {
-                        console.error('无法获取模板图片文件:', template.inputs.input_image);
-                        showAlert(t('applyImageFailed'), 'danger');
-                        return;
-                    }
-
-                    const filename = template.inputs.input_image || 'template_image.jpg';
-                    const file = new File([blob], filename, { type: blob.type });
-
                     // 根据任务类型设置图片
                     const currentForm = getCurrentForm();
                     if (currentForm) {
-                        currentForm.imageFile = file;
                         currentForm.imageUrl = imageUrl;
                     }
 
+                    // 设置预览
                     setCurrentImagePreview(imageUrl);
+
+                    // 加载图片文件（与useTemplate相同的逻辑）
+                    try {
+                        const imageResponse = await fetch(imageUrl);
+                        if (imageResponse.ok) {
+                            const blob = await imageResponse.blob();
+                            const filename = template.inputs.input_image || 'template_image.jpg';
+                            const file = new File([blob], filename, { type: blob.type });
+                            if (currentForm) {
+                                currentForm.imageFile = file;
+                            }
+                            console.log('模板图片文件已加载');
+                        } else {
+                            console.warn('Failed to fetch image from URL:', imageUrl);
+                            showAlert(t('applyImageFailed'), 'danger');
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('Failed to load template image file:', error);
+                        showAlert(t('applyImageFailed'), 'danger');
+                        return;
+                    }
                     updateUploadedContentStatus();
                     
                     // 关闭所有弹窗的辅助函数
@@ -5272,41 +5283,52 @@
                         return;
                     }
 
-                    // 通过代理获取文件blob
-                    const blob = await fetchFileThroughProxy(template.inputs.input_audio, 'audios');
-                    if (!blob) {
-                        console.error('无法获取模板音频文件:', template.inputs.input_audio);
-                        showAlert(t('applyAudioFailed'), 'danger');
-                        return;
-                    }
-
-                    const filename = template.inputs.input_audio || 'template_audio.mp3';
-
-                    // 根据文件扩展名确定正确的MIME类型
-                    let mimeType = blob.type;
-                    if (!mimeType || mimeType === 'application/octet-stream') {
-                        const ext = filename.toLowerCase().split('.').pop();
-                        const mimeTypes = {
-                            'mp3': 'audio/mpeg',
-                            'wav': 'audio/wav',
-                            'mp4': 'audio/mp4',
-                            'aac': 'audio/aac',
-                            'ogg': 'audio/ogg',
-                            'm4a': 'audio/mp4'
-                        };
-                        mimeType = mimeTypes[ext] || 'audio/mpeg';
-                    }
-
-                    const file = new File([blob], filename, { type: mimeType });
-
                     // 设置音频文件
                     const currentForm = getCurrentForm();
                     if (currentForm) {
-                        currentForm.audioFile = file;
                         currentForm.audioUrl = audioUrl;
                     }
 
+                    // 设置预览
                     setCurrentAudioPreview(audioUrl);
+
+                    // 加载音频文件（与useTemplate相同的逻辑）
+                    try {
+                        const audioResponse = await fetch(audioUrl);
+                        if (audioResponse.ok) {
+                            const blob = await audioResponse.blob();
+                            const filename = template.inputs.input_audio || 'template_audio.mp3';
+
+                            // 根据文件扩展名确定正确的MIME类型
+                            let mimeType = blob.type;
+                            if (!mimeType || mimeType === 'application/octet-stream') {
+                                const ext = filename.toLowerCase().split('.').pop();
+                                const mimeTypes = {
+                                    'mp3': 'audio/mpeg',
+                                    'wav': 'audio/wav',
+                                    'mp4': 'audio/mp4',
+                                    'aac': 'audio/aac',
+                                    'ogg': 'audio/ogg',
+                                    'm4a': 'audio/mp4'
+                                };
+                                mimeType = mimeTypes[ext] || 'audio/mpeg';
+                            }
+
+                            const file = new File([blob], filename, { type: mimeType });
+                            if (currentForm) {
+                                currentForm.audioFile = file;
+                            }
+                            console.log('模板音频文件已加载');
+                        } else {
+                            console.warn('Failed to fetch audio from URL:', audioUrl);
+                            showAlert(t('applyAudioFailed'), 'danger');
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('Failed to load template audio file:', error);
+                        showAlert(t('applyAudioFailed'), 'danger');
+                        return;
+                    }
                     updateUploadedContentStatus();
                     
                     // 关闭所有弹窗的辅助函数
