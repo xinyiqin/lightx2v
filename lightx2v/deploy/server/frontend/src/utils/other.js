@@ -530,11 +530,54 @@
                 return getCachedUrl(`current_audio_preview`, () => preview);
             };
 
+            // Alert定时器，用于清除之前的定时器
+            let alertTimeout = null;
+            
             // 方法
             const showAlert = (message, type = 'info', action = null) => {
-                alert.value = { show: true, message, type, action };
-                setTimeout(() => {
+                // 清除之前的定时器
+                if (alertTimeout) {
+                    clearTimeout(alertTimeout);
+                    alertTimeout = null;
+                }
+                
+                // 如果当前有alert正在显示，先关闭它
+                if (alert.value && alert.value.show) {
                     alert.value.show = false;
+                    // 等待transition完成（约400ms）后再显示新的alert
+                    setTimeout(() => {
+                        createNewAlert(message, type, action);
+                    }, 450);
+                } else {
+                    // 如果没有alert在显示，立即创建新的
+                    createNewAlert(message, type, action);
+                }
+            };
+            
+            // 创建新alert的辅助函数
+            const createNewAlert = (message, type, action) => {
+                // 创建全新的对象，使用时间戳确保每次都是新对象
+                const newAlert = {
+                    show: true,
+                    message: String(message),
+                    type: String(type),
+                    action: action ? {
+                        label: String(action.label),
+                        onClick: action.onClick
+                    } : null,
+                    // 添加一个时间戳确保每次都是新对象，用于key
+                    _timestamp: Date.now()
+                };
+                
+                // 直接赋值新对象
+                alert.value = newAlert;
+                
+                // 设置自动关闭定时器
+                alertTimeout = setTimeout(() => {
+                    if (alert.value && alert.value.show) {
+                        alert.value.show = false;
+                    }
+                    alertTimeout = null;
                 }, 5000);
             };
 
@@ -5045,52 +5088,267 @@
                 zoomedImageUrl.value = '';
             };
 
-            // 应用模板图片
-            const applyTemplateImage = (template) => {
-                if (template?.inputs?.input_image) {
-                    const imageUrl = getTemplateFileUrl(template.inputs.input_image, 'images');
-                    // 这里需要根据当前任务类型设置图片
-                    if (selectedTaskId.value === 'i2v' || selectedTaskId.value === 's2v') {
-                        // 模拟文件上传，将图片URL转换为File对象
-                        fetch(imageUrl)
-                            .then(response => response.blob())
-                            .then(blob => {
-                                const file = new File([blob], 'template_image.jpg', { type: blob.type });
-                                if (selectedTaskId.value === 'i2v') {
-                                    i2vForm.value.imageFile = file;
-                                } else if (selectedTaskId.value === 's2v') {
-                                    s2vForm.value.imageFile = file;
-                                }
-                                setCurrentImagePreview(imageUrl);
-                                updateUploadedContentStatus();
-                                showAlert(t('imageApplied'), 'success');
-                            })
-                            .catch(error => {
-                                console.error('应用图片失败:', error);
-                                showAlert(t('applyImageFailed'), 'danger');
-                            });
+            // 通过后端API代理获取文件（避免CORS问题）
+            const fetchFileThroughProxy = async (fileKey, fileType) => {
+                try {
+                    // 尝试通过后端API代理获取文件
+                    const proxyUrl = `/api/v1/template/asset/${fileType}/${fileKey}`;
+                    const response = await apiRequest(proxyUrl);
+                    
+                    if (response && response.ok) {
+                        return await response.blob();
                     }
+                    
+                    // 如果代理API不存在，尝试直接获取URL然后fetch
+                    const fileUrl = await getTemplateFileUrlAsync(fileKey, fileType);
+                    if (!fileUrl) {
+                        return null;
+                    }
+                    
+                    // 检查是否是同源URL
+                    const urlObj = new URL(fileUrl, window.location.origin);
+                    const isSameOrigin = urlObj.origin === window.location.origin;
+                    
+                    if (isSameOrigin) {
+                        // 同源，直接fetch
+                        const directResponse = await fetch(fileUrl);
+                        if (directResponse.ok) {
+                            return await directResponse.blob();
+                        }
+                    } else {
+                        // 跨域，尝试使用no-cors模式（但这样无法读取响应）
+                        // 或者使用img/audio元素加载（不适用于需要File对象的情况）
+                        // 这里我们尝试直接fetch，如果失败会抛出错误
+                        try {
+                            const directResponse = await fetch(fileUrl, { mode: 'cors' });
+                            if (directResponse.ok) {
+                                return await directResponse.blob();
+                            }
+                        } catch (corsError) {
+                            console.warn('CORS错误，尝试使用代理:', corsError);
+                            // 如果后端有代理API，应该使用上面的代理方式
+                            // 如果没有，这里会返回null，然后调用方会显示错误
+                        }
+                    }
+                    
+                    return null;
+                } catch (error) {
+                    console.error('获取文件失败:', error);
+                    return null;
+                }
+            };
+
+            // 应用模板图片
+            const applyTemplateImage = async (template) => {
+                if (!template?.inputs?.input_image) {
+                    showAlert(t('applyImageFailed'), 'danger');
+                    return;
+                }
+
+                try {
+                    // 先设置任务类型（如果模板有任务类型）
+                    if (template.task_type && (template.task_type === 'i2v' || template.task_type === 's2v')) {
+                        selectedTaskId.value = template.task_type;
+                    }
+
+                    // 检查当前任务类型是否支持图片
+                    if (selectedTaskId.value !== 'i2v' && selectedTaskId.value !== 's2v') {
+                        showAlert(t('applyImageFailed'), 'danger');
+                        return;
+                    }
+
+                    // 获取图片URL（用于预览）
+                    const imageUrl = await getTemplateFileUrlAsync(template.inputs.input_image, 'images');
+                    if (!imageUrl) {
+                        console.error('无法获取模板图片URL:', template.inputs.input_image);
+                        showAlert(t('applyImageFailed'), 'danger');
+                        return;
+                    }
+
+                    // 通过代理获取文件blob
+                    const blob = await fetchFileThroughProxy(template.inputs.input_image, 'images');
+                    if (!blob) {
+                        console.error('无法获取模板图片文件:', template.inputs.input_image);
+                        showAlert(t('applyImageFailed'), 'danger');
+                        return;
+                    }
+
+                    const filename = template.inputs.input_image || 'template_image.jpg';
+                    const file = new File([blob], filename, { type: blob.type });
+
+                    // 根据任务类型设置图片
+                    const currentForm = getCurrentForm();
+                    if (currentForm) {
+                        currentForm.imageFile = file;
+                        currentForm.imageUrl = imageUrl;
+                    }
+
+                    setCurrentImagePreview(imageUrl);
+                    updateUploadedContentStatus();
+                    
+                    // 关闭所有弹窗的辅助函数
+                    const closeAllModals = () => {
+                        closeTaskDetailModal(); // 使用函数确保状态完全重置
+                        showVoiceTTSModal.value = false;
+                        closeTemplateDetailModal(); // 使用函数确保状态完全重置
+                        showImageTemplates.value = false;
+                        showAudioTemplates.value = false;
+                        showPromptModal.value = false;
+                        closeImageZoomModal(); // 使用函数确保状态完全重置
+                    };
+                    
+                    // 跳转到创作区域的函数
+                    const scrollToCreationArea = () => {
+                        // 先关闭所有弹窗
+                        closeAllModals();
+                        
+                        // 如果不在生成页面，先切换视图
+                        if (router.currentRoute.value.path !== '/generate') {
+                            switchToCreateView();
+                            // 等待路由切换完成后再展开和滚动
+                            setTimeout(() => {
+                                expandCreationArea();
+                                setTimeout(() => {
+                                    const taskCreator = document.querySelector('#task-creator');
+                                    if (taskCreator) {
+                                        taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }, 100);
+                            }, 100);
+                        } else {
+                            // 已经在生成页面，直接展开和滚动
+                            expandCreationArea();
+                            setTimeout(() => {
+                                const taskCreator = document.querySelector('#task-creator');
+                                if (taskCreator) {
+                                    taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }, 100);
+                        }
+                    };
+                    
+                    showAlert(t('imageApplied'), 'success', {
+                        label: t('view'),
+                        onClick: scrollToCreationArea
+                    });
+                } catch (error) {
+                    console.error('应用图片失败:', error);
+                    showAlert(t('applyImageFailed'), 'danger');
                 }
             };
 
             // 应用模板音频
-            const applyTemplateAudio = (template) => {
-                if (template?.inputs?.input_audio && selectedTaskId.value === 's2v') {
-                    const audioUrl = getTemplateFileUrl(template.inputs.input_audio, 'audios');
-                    // 模拟文件上传，将音频URL转换为File对象
-                    fetch(audioUrl)
-                        .then(response => response.blob())
-                        .then(blob => {
-                            const file = new File([blob], 'template_audio.mp3', { type: blob.type });
-                            s2vForm.value.audioFile = file;
-                            setCurrentAudioPreview(audioUrl);
-                            updateUploadedContentStatus();
-                            showAlert(t('audioApplied'), 'success');
-                        })
-                        .catch(error => {
-                            console.error('应用音频失败:', error);
-                            showAlert(t('applyAudioFailed'), 'danger');
-                        });
+            const applyTemplateAudio = async (template) => {
+                if (!template?.inputs?.input_audio) {
+                    showAlert(t('applyAudioFailed'), 'danger');
+                    return;
+                }
+
+                try {
+                    // 先设置任务类型（如果模板有任务类型）
+                    if (template.task_type && template.task_type === 's2v') {
+                        selectedTaskId.value = template.task_type;
+                    }
+
+                    // 检查当前任务类型是否支持音频
+                    if (selectedTaskId.value !== 's2v') {
+                        showAlert(t('applyAudioFailed'), 'danger');
+                        return;
+                    }
+
+                    // 获取音频URL（用于预览）
+                    const audioUrl = await getTemplateFileUrlAsync(template.inputs.input_audio, 'audios');
+                    if (!audioUrl) {
+                        console.error('无法获取模板音频URL:', template.inputs.input_audio);
+                        showAlert(t('applyAudioFailed'), 'danger');
+                        return;
+                    }
+
+                    // 通过代理获取文件blob
+                    const blob = await fetchFileThroughProxy(template.inputs.input_audio, 'audios');
+                    if (!blob) {
+                        console.error('无法获取模板音频文件:', template.inputs.input_audio);
+                        showAlert(t('applyAudioFailed'), 'danger');
+                        return;
+                    }
+
+                    const filename = template.inputs.input_audio || 'template_audio.mp3';
+
+                    // 根据文件扩展名确定正确的MIME类型
+                    let mimeType = blob.type;
+                    if (!mimeType || mimeType === 'application/octet-stream') {
+                        const ext = filename.toLowerCase().split('.').pop();
+                        const mimeTypes = {
+                            'mp3': 'audio/mpeg',
+                            'wav': 'audio/wav',
+                            'mp4': 'audio/mp4',
+                            'aac': 'audio/aac',
+                            'ogg': 'audio/ogg',
+                            'm4a': 'audio/mp4'
+                        };
+                        mimeType = mimeTypes[ext] || 'audio/mpeg';
+                    }
+
+                    const file = new File([blob], filename, { type: mimeType });
+
+                    // 设置音频文件
+                    const currentForm = getCurrentForm();
+                    if (currentForm) {
+                        currentForm.audioFile = file;
+                        currentForm.audioUrl = audioUrl;
+                    }
+
+                    setCurrentAudioPreview(audioUrl);
+                    updateUploadedContentStatus();
+                    
+                    // 关闭所有弹窗的辅助函数
+                    const closeAllModals = () => {
+                        closeTaskDetailModal(); // 使用函数确保状态完全重置
+                        showVoiceTTSModal.value = false;
+                        closeTemplateDetailModal(); // 使用函数确保状态完全重置
+                        showImageTemplates.value = false;
+                        showAudioTemplates.value = false;
+                        showPromptModal.value = false;
+                        closeImageZoomModal(); // 使用函数确保状态完全重置
+                    };
+                    
+                    // 跳转到创作区域的函数
+                    const scrollToCreationArea = () => {
+                        // 先关闭所有弹窗
+                        closeAllModals();
+                        
+                        // 如果不在生成页面，先切换视图
+                        if (router.currentRoute.value.path !== '/generate') {
+                            switchToCreateView();
+                            // 等待路由切换完成后再展开和滚动
+                            setTimeout(() => {
+                                expandCreationArea();
+                                setTimeout(() => {
+                                    const taskCreator = document.querySelector('#task-creator');
+                                    if (taskCreator) {
+                                        taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }, 100);
+                            }, 100);
+                        } else {
+                            // 已经在生成页面，直接展开和滚动
+                            expandCreationArea();
+                            setTimeout(() => {
+                                const taskCreator = document.querySelector('#task-creator');
+                                if (taskCreator) {
+                                    taskCreator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }, 100);
+                        }
+                    };
+                    
+                    showAlert(t('audioApplied'), 'success', {
+                        label: t('view'),
+                        onClick: scrollToCreationArea
+                    });
+                } catch (error) {
+                    console.error('应用音频失败:', error);
+                    showAlert(t('applyAudioFailed'), 'danger');
                 }
             };
 
@@ -5106,22 +5364,230 @@
                 }
             };
 
+            // 复制文本到剪贴板的辅助函数（支持移动端降级）
+            const copyToClipboard = async (text) => {
+                // 检查是否支持现代 Clipboard API
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        return true;
+                    } catch (error) {
+                        console.warn('Clipboard API 失败，尝试降级方案:', error);
+                        // 降级到传统方法
+                    }
+                }
+                
+                // 降级方案：使用传统方法（适用于移动端和不支持Clipboard API的浏览器）
+                try {
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    
+                    // 移动端需要元素可见且可聚焦，所以先设置可见样式
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '0';
+                    textArea.style.top = '0';
+                    textArea.style.width = '2em';
+                    textArea.style.height = '2em';
+                    textArea.style.padding = '0';
+                    textArea.style.border = 'none';
+                    textArea.style.outline = 'none';
+                    textArea.style.boxShadow = 'none';
+                    textArea.style.background = 'transparent';
+                    textArea.style.opacity = '0';
+                    textArea.style.zIndex = '-1';
+                    textArea.setAttribute('readonly', '');
+                    textArea.setAttribute('aria-hidden', 'true');
+                    textArea.setAttribute('tabindex', '-1');
+                    
+                    document.body.appendChild(textArea);
+                    
+                    // 聚焦元素（移动端需要）
+                    textArea.focus();
+                    textArea.select();
+                    
+                    // 移动端需要 setSelectionRange
+                    if (textArea.setSelectionRange) {
+                        textArea.setSelectionRange(0, text.length);
+                    }
+                    
+                    // 尝试复制
+                    let successful = false;
+                    try {
+                        successful = document.execCommand('copy');
+                    } catch (e) {
+                        console.warn('execCommand 执行失败:', e);
+                    }
+                    
+                    // 立即移除元素
+                    document.body.removeChild(textArea);
+                    
+                    if (successful) {
+                        return true;
+                    } else {
+                        // 如果仍然失败，尝试另一种方法：在视口中心创建可见的输入框
+                        return await fallbackCopyToClipboard(text);
+                    }
+                } catch (error) {
+                    console.error('复制失败，尝试备用方案:', error);
+                    // 尝试备用方案
+                    return await fallbackCopyToClipboard(text);
+                }
+            };
+            
+            // 备用复制方案：显示一个可选择的文本区域（Apple风格）
+            const fallbackCopyToClipboard = async (text) => {
+                return new Promise((resolve) => {
+                    // 创建遮罩层
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.5);
+                        backdrop-filter: blur(8px);
+                        -webkit-backdrop-filter: blur(8px);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    `;
+                    
+                    // 创建弹窗容器（Apple风格）
+                    const container = document.createElement('div');
+                    container.style.cssText = `
+                        background: rgba(255, 255, 255, 0.95);
+                        backdrop-filter: blur(20px) saturate(180%);
+                        -webkit-backdrop-filter: blur(20px) saturate(180%);
+                        border-radius: 20px;
+                        padding: 24px;
+                        max-width: 90%;
+                        width: 100%;
+                        max-width: 500px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    `;
+                    
+                    // 深色模式支持
+                    if (document.documentElement.classList.contains('dark')) {
+                        container.style.background = 'rgba(30, 30, 30, 0.95)';
+                    }
+                    
+                    const title = document.createElement('div');
+                    title.textContent = t('copyLink') || '复制链接';
+                    title.style.cssText = `
+                        font-size: 18px;
+                        font-weight: 600;
+                        color: #1d1d1f;
+                        margin-bottom: 12px;
+                        text-align: center;
+                    `;
+                    if (document.documentElement.classList.contains('dark')) {
+                        title.style.color = '#f5f5f7';
+                    }
+                    
+                    const message = document.createElement('div');
+                    message.textContent = t('pleaseCopyManually') || '请手动选择并复制下面的文本';
+                    message.style.cssText = `
+                        color: #86868b;
+                        font-size: 14px;
+                        margin-bottom: 16px;
+                        text-align: center;
+                    `;
+                    if (document.documentElement.classList.contains('dark')) {
+                        message.style.color = '#98989d';
+                    }
+                    
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = text;
+                    input.readOnly = true;
+                    input.style.cssText = `
+                        width: 100%;
+                        padding: 12px 16px;
+                        font-size: 14px;
+                        border: 1px solid rgba(0, 0, 0, 0.1);
+                        border-radius: 12px;
+                        background: rgba(255, 255, 255, 0.8);
+                        color: #1d1d1f;
+                        margin-bottom: 16px;
+                        box-sizing: border-box;
+                        -webkit-appearance: none;
+                        appearance: none;
+                    `;
+                    if (document.documentElement.classList.contains('dark')) {
+                        input.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                        input.style.background = 'rgba(44, 44, 46, 0.8)';
+                        input.style.color = '#f5f5f7';
+                    }
+                    
+                    const button = document.createElement('button');
+                    button.textContent = t('close') || '关闭';
+                    button.style.cssText = `
+                        width: 100%;
+                        padding: 12px 24px;
+                        background: var(--brand-primary, #007AFF);
+                        color: white;
+                        border: none;
+                        border-radius: 12px;
+                        cursor: pointer;
+                        font-size: 15px;
+                        font-weight: 600;
+                        transition: all 0.2s;
+                    `;
+                    button.onmouseover = () => {
+                        button.style.opacity = '0.9';
+                        button.style.transform = 'scale(1.02)';
+                    };
+                    button.onmouseout = () => {
+                        button.style.opacity = '1';
+                        button.style.transform = 'scale(1)';
+                    };
+                    
+                    container.appendChild(title);
+                    container.appendChild(message);
+                    container.appendChild(input);
+                    container.appendChild(button);
+                    overlay.appendChild(container);
+                    
+                    const close = () => {
+                        document.body.removeChild(overlay);
+                        resolve(false); // 返回false表示需要用户手动复制
+                    };
+                    
+                    button.onclick = close;
+                    overlay.onclick = (e) => {
+                        if (e.target === overlay) close();
+                    };
+                    
+                    document.body.appendChild(overlay);
+                    
+                    // 选中文本（延迟以确保DOM已渲染）
+                    setTimeout(() => {
+                        input.focus();
+                        input.select();
+                        if (input.setSelectionRange) {
+                            input.setSelectionRange(0, text.length);
+                        }
+                    }, 150);
+                });
+            };
+
             // 复制Prompt到剪贴板
             const copyPrompt = async (promptText) => {
                 if (!promptText) return;
 
                 try {
-                    await navigator.clipboard.writeText(promptText);
-                    showAlert(t('promptCopied'), 'success');
+                    // 使用辅助函数复制，支持移动端
+                    const success = await copyToClipboard(promptText);
+                    if (success) {
+                        showAlert(t('promptCopied'), 'success');
+                    }
+                    // 如果返回false，说明已经显示了手动复制的弹窗，不需要额外提示
                 } catch (error) {
-                    // 降级方案：使用传统方法
-                    const textArea = document.createElement('textarea');
-                    textArea.value = promptText;
-                    document.body.appendChild(textArea);
-                    textArea.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(textArea);
-                    showAlert(t('promptCopied'), 'success');
+                    console.error('复制Prompt失败:', error);
+                    showAlert(t('copyFailed'), 'error');
                 }
             };
 
@@ -5337,15 +5803,20 @@
                     const data = await response.json();
                     const shareUrl = `${window.location.origin}${data.share_url}`;
 
-                    await navigator.clipboard.writeText(shareUrl);
-
-                    // 显示带操作按钮的alert
-                    showAlert(t('shareLinkCopied'), 'success', {
-                        label: t('view'),
-                        onClick: () => {
-                            window.open(shareUrl, '_blank');
-                        }
-                    });
+                    // 使用辅助函数复制，支持移动端
+                    const success = await copyToClipboard(shareUrl);
+                    
+                    // 如果成功复制，显示成功提示
+                    if (success) {
+                        // 显示带操作按钮的alert
+                        showAlert(t('shareLinkCopied'), 'success', {
+                            label: t('view'),
+                            onClick: () => {
+                                window.open(shareUrl, '_blank');
+                            }
+                        });
+                    }
+                    // 如果返回false，说明已经显示了手动复制的弹窗，不需要额外提示
                 } catch (err) {
                     console.error('复制失败:', err);
                     showAlert(t('copyFailed'), 'error');
@@ -5425,13 +5896,19 @@
             const copyTemplateShareLink = async (templateId) => {
                 try {
                     const shareUrl = generateTemplateShareUrl(templateId);
-                    await navigator.clipboard.writeText(shareUrl);
-                    showAlert(t('templateShareLinkCopied'), 'success', {
-                        label: t('view'),
-                        onClick: () => {
-                            window.open(shareUrl, '_blank');
-                        }
-                    });
+                    // 使用辅助函数复制，支持移动端
+                    const success = await copyToClipboard(shareUrl);
+                    
+                    // 如果成功复制，显示成功提示
+                    if (success) {
+                        showAlert(t('templateShareLinkCopied'), 'success', {
+                            label: t('view'),
+                            onClick: () => {
+                                window.open(shareUrl, '_blank');
+                            }
+                        });
+                    }
+                    // 如果返回false，说明已经显示了手动复制的弹窗，不需要额外提示
                 } catch (err) {
                     console.error('复制模板分享链接失败:', err);
                     showAlert(t('copyFailed'), 'error');

@@ -341,7 +341,7 @@ onMounted(async () => {
 
                 <!-- 右侧信息区域 - Apple 风格 - 响应式 -->
                 <div class="flex items-center justify-center w-full order-2">
-                    <div class="w-full max-w-[500px]">
+                    <div class="w-full max-w-[300px] sm:max-w-[500px]">
                         <!-- 标题 - Apple 风格 - 响应式字体 -->
                         <h1 class="text-2xl sm:text-3xl lg:text-4xl xl:text-5xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 sm:mb-4 tracking-tight leading-tight text-center lg:text-left">
                             {{ getShareTitle() }}

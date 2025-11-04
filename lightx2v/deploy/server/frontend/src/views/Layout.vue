@@ -55,7 +55,7 @@ const handleTTSComplete = (audioBlob) => {
         <LeftBar />
 
         <!-- 路由视图内容 -->
-        <div class="flex-1 overflow-y-auto main-scrollbar">
+        <div class="flex-1 overflow-y-auto main-scrollbar pb-16 sm:pb-20">
           <router-view></router-view>
         </div>
       </div>

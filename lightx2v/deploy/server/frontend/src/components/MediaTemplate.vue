@@ -7,6 +7,8 @@ const { t } = useI18n()
 // 音频播放状态管理
 const playingAudioId = ref(null)
 const audioDurations = ref({})
+// 图像加载失败状态
+const imageLoadFailed = ref({})
 
 import {
     getTemplateFileUrl,
@@ -110,6 +112,30 @@ const isPlaying = (item, isTemplate = false) => {
 const getDurationDisplay = (item, isTemplate = false) => {
     const id = isTemplate ? `template_${item.filename}` : `history_${item.filename}`
     return formatDuration(audioDurations.value[id])
+}
+
+// 获取音频对应的图像URL
+const getAudioImageUrl = (item, isTemplate = false) => {
+    if (isTemplate) {
+        // 对于模板，如果有 input_image 字段，获取对应的图像URL
+        if (item.inputs && item.inputs.input_image) {
+            return getTemplateFileUrl(item.inputs.input_image, 'images')
+        }
+        // 如果没有 input_image，尝试使用相同的 filename（可能在同一目录下）
+        // 这里假设音频文件名和图像文件名可能相同或有关联
+        return null
+    } else {
+        // 对于历史记录，可能没有对应的图像，返回 null
+        return null
+    }
+}
+
+// 检查是否有对应的图像
+const hasAudioImage = (item, isTemplate = false) => {
+    if (isTemplate) {
+        return item.inputs && item.inputs.input_image
+    }
+    return false
 }
 
 // 预加载音频时长
@@ -322,10 +348,16 @@ watch(audioTemplates, (newTemplates) => {
                                                 <div v-for="(history, index) in audioHistory" :key="index"
                                                     @click="selectAudioHistory(history)"
                                                     class="flex items-center gap-4 p-4 rounded-2xl border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all cursor-pointer bg-white/80 dark:bg-[#2c2c2e]/80 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)] group">
+                                                        <!-- 头像容器 - 如果有图像则显示图像，否则显示图标 -->
                                                         <div
-                                                            class="w-12 h-12 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-xl flex items-center justify-center flex-shrink-0">
-                                                        <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
-                                                    </div>
+                                                            class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15">
+                                                            <img v-if="getAudioImageUrl(history, false) && !imageLoadFailed[`history_${history.filename}`]" 
+                                                                :src="getAudioImageUrl(history, false)" 
+                                                                :alt="history.filename"
+                                                                class="w-full h-full object-cover"
+                                                                @error="imageLoadFailed[`history_${history.filename}`] = true">
+                                                            <i v-else class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                                                        </div>
                                                     <div class="flex-1 min-w-0">
                                                             <div
                                                                 class="text-[#1d1d1f] dark:text-[#f5f5f7] font-medium group-hover:text-[color:var(--brand-primary)] dark:group-hover:text-[color:var(--brand-primary-light)] transition-colors truncate tracking-tight">
@@ -403,10 +435,16 @@ watch(audioTemplates, (newTemplates) => {
                                             <div v-for="template in audioTemplates" :key="template.filename"
                                                 @click="selectAudioTemplate(template)"
                                                 class="flex items-center gap-4 p-4 rounded-2xl border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all cursor-pointer bg-white/80 dark:bg-[#2c2c2e]/80 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)] group">
+                                                    <!-- 头像容器 - 如果有图像则显示图像，否则显示图标 -->
                                                     <div
-                                                        class="w-12 h-12 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-xl flex items-center justify-center flex-shrink-0">
-                                                    <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
-                                                </div>
+                                                        class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15">
+                                                        <img v-if="hasAudioImage(template, true) && !imageLoadFailed[`template_${template.filename}`]" 
+                                                            :src="getAudioImageUrl(template, true)" 
+                                                            :alt="template.filename"
+                                                            class="w-full h-full object-cover"
+                                                            @error="imageLoadFailed[`template_${template.filename}`] = true">
+                                                        <i v-else class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                                                    </div>
                                                 <div class="flex-1 min-w-0">
                                                         <div class="text-[#1d1d1f] dark:text-[#f5f5f7] font-medium group-hover:text-[color:var(--brand-primary)] dark:group-hover:text-[color:var(--brand-primary-light)] transition-colors truncate tracking-tight">{{ template.filename }}
                                                         </div>

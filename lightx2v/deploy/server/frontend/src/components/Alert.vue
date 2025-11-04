@@ -8,8 +8,23 @@ const { t, locale } = useI18n()
 // 处理操作按钮点击
 const handleActionClick = () => {
     if (alert.value.action && alert.value.action.onClick) {
+        // 先执行action的回调
         alert.value.action.onClick()
+        // 立即关闭alert
         alert.value.show = false
+    }
+}
+
+// 处理transition离开完成后的回调
+const handleAfterLeave = () => {
+    // 只有在alert确实关闭时才重置，避免覆盖正在显示的alert
+    if (alert.value && !alert.value.show) {
+        // 延迟一小段时间再重置，确保不会影响后续的alert显示
+        setTimeout(() => {
+            if (alert.value && !alert.value.show) {
+                alert.value = { show: false, message: '', type: 'info', action: null }
+            }
+        }, 50)
     }
 }
 
@@ -64,8 +79,10 @@ onUnmounted(() => {
                     enter-active-class="alert-enter-active"
                     leave-active-class="alert-leave-active"
                     enter-from-class="alert-enter-from"
-                    leave-to-class="alert-leave-to">
+                    leave-to-class="alert-leave-to"
+                    @after-leave="handleAfterLeave">
                     <div v-if="alert.show"
+                        :key="alert._timestamp || alert.message"
                         class="fixed left-1/2 transform -translate-x-1/2 z-[9999] w-auto min-w-[280px] sm:min-w-[320px] max-w-[calc(100vw-3rem)] sm:max-w-xl px-6 sm:px-6 transition-all duration-500 ease-out"
                         :style="alertPosition">
                         <div class="alert-container">
@@ -74,18 +91,21 @@ onUnmounted(() => {
                                 <div class="alert-icon-wrapper">
                                     <i :class="getAlertIcon(alert.type)" class="alert-icon"></i>
                                 </div>
-                                <!-- 消息文本和操作按钮（一行显示） -->
+                                <!-- 消息文本 -->
                                 <div class="alert-message">
                                     <span>{{ alert.message }}</span>
+                                </div>
+                                <!-- 操作按钮和关闭按钮（右侧，紧挨着） -->
+                                <div class="alert-actions">
                                     <!-- 操作链接 - Apple 风格 -->
                                     <button v-if="alert.action" @click="handleActionClick" class="alert-action-link">
                                         {{ alert.action.label }}
                                     </button>
+                                    <!-- 关闭按钮 -->
+                                    <button @click="alert.show = false" class="alert-close-btn" aria-label="Close">
+                                        <i class="fas fa-times"></i>
+                                    </button>
                                 </div>
-                                <!-- 关闭按钮 -->
-                                <button @click="alert.show = false" class="alert-close-btn" aria-label="Close">
-                                    <i class="fas fa-times"></i>
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -150,14 +170,19 @@ onUnmounted(() => {
     line-height: 1.5;
     color: #1d1d1f;
     letter-spacing: -0.01em;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 15px;
+    min-width: 0; /* 允许文本收缩 */
 }
 
 :global(.dark) .alert-message {
     color: #f5f5f7;
+}
+
+/* 操作按钮和关闭按钮容器 */
+.alert-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 /* 关闭按钮 */
@@ -197,12 +222,13 @@ onUnmounted(() => {
 
 /* 操作链接 - Apple 风格下划线文本 */
 .alert-action-link {
-    display: inline;
+    display: inline-flex;
+    align-items: center;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--brand-primary);
-    font-size: inherit;
+    font-size: 14px;
     font-weight: 600;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -210,6 +236,7 @@ onUnmounted(() => {
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
+    height: 24px; /* 与关闭按钮高度一致 */
 }
 
 .alert-action-link:hover {
@@ -266,6 +293,11 @@ onUnmounted(() => {
 
     .alert-action-link {
         font-size: 13px;
+        height: 22px; /* 移动端稍微小一点 */
+    }
+
+    .alert-actions {
+        gap: 6px; /* 移动端间距更小 */
     }
 }
 </style>
