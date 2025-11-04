@@ -124,7 +124,7 @@ class VolcEngineTTSClient:
         if not (-50 <= speech_rate <= 100):
             logger.warning(f"speech_rate {speech_rate} 超出有效范围 [-50, 100]，将使用默认值 0")
             speech_rate = 0
-            
+
         if not (-50 <= loudness_rate <= 100):
             logger.warning(f"loudness_rate {loudness_rate} 超出有效范围 [-50, 100]，将使用默认值 0")
             loudness_rate = 0
@@ -132,11 +132,11 @@ class VolcEngineTTSClient:
         if not (1 <= emotion_scale <= 5):
             logger.warning(f"emotion_scale {emotion_scale} 超出有效范围 [1, 5]，将使用默认值 3")
             emotion_scale = 3
-            
+
         if not (-12 <= pitch <= 12):
             logger.warning(f"pitch {pitch} 超出有效范围 [-12, 12]，将使用默认值 0")
             pitch = 0
-            
+
         headers = {
             "X-Api-App-Id": self.appid,
             "X-Api-Access-Key": self.access_token,
@@ -145,14 +145,9 @@ class VolcEngineTTSClient:
             "Content-Type": "application/json",
             "Connection": "keep-alive",
         }
-        additions = json.dumps({"explicit_language":"zh",
-                                "disable_markdown_filter": True,
-                                "enable_timestamp": True,
-                                "context_texts": [context_texts] if context_texts else None,
-                                "post_process": {
-                                    "pitch": pitch
-                                }
-                            })
+        additions = json.dumps(
+            {"explicit_language": "zh", "disable_markdown_filter": True, "enable_timestamp": True, "context_texts": [context_texts] if context_texts else None, "post_process": {"pitch": pitch}}
+        )
         payload = {
             "user": {"uid": uid},
             "req_params": {
@@ -165,7 +160,7 @@ class VolcEngineTTSClient:
                     "emotion": emotion,
                     "emotion_scale": emotion_scale,
                     "speech_rate": speech_rate,
-                    "loudness_rate": loudness_rate
+                    "loudness_rate": loudness_rate,
                 },
                 "additions": additions,
             },

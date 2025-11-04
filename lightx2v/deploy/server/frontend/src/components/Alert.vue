@@ -60,7 +60,7 @@ onUnmounted(() => {
 <template>
             <!-- Apple 风格极简提示消息 -->
             <div v-cloak>
-                <transition 
+                <transition
                     enter-active-class="alert-enter-active"
                     leave-active-class="alert-leave-active"
                     enter-from-class="alert-enter-from"
@@ -100,7 +100,7 @@ onUnmounted(() => {
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-radius: 16px;
-    box-shadow: 
+    box-shadow:
         0 4px 6px -1px rgba(0, 0, 0, 0.1),
         0 2px 4px -1px rgba(0, 0, 0, 0.06),
         0 0 0 1px rgba(0, 0, 0, 0.05);
@@ -110,7 +110,7 @@ onUnmounted(() => {
 /* 深色模式下的容器样式 */
 :global(.dark) .alert-container {
     background: rgba(30, 30, 30, 0.95);
-    box-shadow: 
+    box-shadow:
         0 4px 6px -1px rgba(0, 0, 0, 0.3),
         0 2px 4px -1px rgba(0, 0, 0, 0.2),
         0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -255,15 +255,15 @@ onUnmounted(() => {
         padding: 12px 16px;
         gap: 8px;
     }
-    
+
     .alert-message {
         font-size: 13px;
     }
-    
+
     .alert-icon {
         font-size: 16px;
     }
-    
+
     .alert-action-link {
         font-size: 13px;
     }

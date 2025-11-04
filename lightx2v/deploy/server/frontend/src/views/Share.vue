@@ -290,7 +290,7 @@ onMounted(async () => {
                     </div>
                     <h2 class="text-2xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] mb-4 tracking-tight">{{ t('shareNotFound') }}</h2>
                     <p class="text-base text-[#86868b] dark:text-[#98989d] mb-8 tracking-tight">{{ error }}</p>
-                    <button @click="router.push('/')" 
+                    <button @click="router.push('/')"
                             class="inline-flex items-center justify-center gap-2 px-8 py-3 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full text-[15px] font-semibold tracking-tight transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100">
                         <i class="fas fa-home text-sm"></i>
                         <span>{{ t('backToHome') }}</span>
@@ -374,14 +374,14 @@ onMounted(async () => {
 
                         <!-- 操作按钮 - Apple 风格 -->
                         <div class="space-y-3 mb-8">
-                            <button @click="createSimilar" 
+                            <button @click="createSimilar"
                                     class="w-full rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-0 px-8 py-3.5 text-[15px] font-semibold text-white hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100 transition-all duration-200 ease-out tracking-tight flex items-center justify-center gap-2">
                                 <i class="fas fa-magic text-sm"></i>
                                 <span>{{ getShareButtonText() }}</span>
                             </button>
 
                             <!-- 详细信息按钮 -->
-                            <button @click="showDetails = !showDetails" 
+                            <button @click="showDetails = !showDetails"
                                     class="w-full rounded-full bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 px-8 py-3 text-[15px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7] hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98] transition-all duration-200 tracking-tight flex items-center justify-center gap-2">
                                 <i :class="showDetails ? 'fas fa-chevron-up' : 'fas fa-info-circle'" class="text-sm"></i>
                                 <span>{{ showDetails ? t('hideDetails') : t('showDetails') }}</span>
@@ -390,9 +390,9 @@ onMounted(async () => {
 
                         <!-- 技术信息 - Apple 风格 -->
                         <div class="text-center pt-6 border-t border-black/8 dark:border-white/8">
-                            <a href="https://github.com/ModelTC/LightX2V" 
-                               target="_blank" 
-                               rel="noopener noreferrer" 
+                            <a href="https://github.com/ModelTC/LightX2V"
+                               target="_blank"
+                               rel="noopener noreferrer"
                                class="inline-flex items-center gap-2 text-sm text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors tracking-tight">
                                 <i class="fab fa-github text-base"></i>
                                 <span>{{ t('poweredByLightX2V') }}</span>
@@ -427,7 +427,7 @@ onMounted(async () => {
                             <div class="p-6 min-h-[200px]">
                                 <div v-if="getImageMaterials().length > 0">
                                     <div v-for="[inputName, url] in getImageMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
-                                        <img :src="url" :alt="inputName" 
+                                        <img :src="url" :alt="inputName"
                                              class="w-full h-auto object-contain"
                                              @load="console.log('图片加载成功:', inputName, url)"
                                              @error="handleImageError($event, inputName, url)">

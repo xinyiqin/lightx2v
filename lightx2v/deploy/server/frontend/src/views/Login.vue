@@ -36,7 +36,7 @@ onMounted(async () => {
 <template>
   <!-- Apple 极简风格登录页面 -->
   <div class="h-full w-full bg-[#f5f5f7] dark:bg-[#000000] flex items-center justify-center p-4 sm:p-6 md:p-8 transition-colors duration-300">
-    
+
     <!-- 主内容区域 - Apple 风格 -->
     <div class="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-stretch">
 
@@ -81,8 +81,8 @@ onMounted(async () => {
 
     <!-- GitHub 仓库链接 - Apple 极简风格 -->
     <div class="fixed bottom-6 right-6 z-50">
-      <a href="https://github.com/ModelTC/LightX2V" 
-         target="_blank" 
+      <a href="https://github.com/ModelTC/LightX2V"
+         target="_blank"
          rel="noopener noreferrer"
          class="flex items-center gap-2.5 px-4 py-2.5 bg-white/85 dark:bg-[#1e1e1e]/85 backdrop-blur-[40px] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.15)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-100 transition-all duration-200 group"
          title="Star us on GitHub">
@@ -93,7 +93,7 @@ onMounted(async () => {
     </div>
 
     <Alert />
-    
+
     <!-- 全局加载覆盖层 - Apple 风格 -->
     <div v-show="isLoading" class="fixed inset-0 bg-[#f5f5f7] dark:bg-[#000000] flex items-center justify-center z-[9999] transition-opacity duration-300">
       <Loading />

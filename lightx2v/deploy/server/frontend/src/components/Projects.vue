@@ -454,7 +454,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                         <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-[#86868b] dark:text-[#98989d] pointer-events-none z-10"></i>
                                             <input v-model="taskSearchQuery"
                             class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl py-3 pl-11 pr-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200"
-                            :placeholder="t('searchTasks')" 
+                            :placeholder="t('searchTasks')"
                             type="text" />
                             </div>
 
@@ -614,7 +614,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                                     :title="t('reuseTask')">
                                         <i class="fas fa-copy text-sm"></i>
                                                     </button>
-                                    
+
                                     <!-- 取消按钮 - 进行中状态 -->
                                     <button v-if="['CREATED', 'PENDING', 'RUNNING'].includes(task.status)"
                                                                     @click.stop="cancelTask(task.task_id)"
@@ -622,7 +622,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                                     :title="t('cancelTask')">
                                         <i class="fas fa-times text-sm"></i>
                                                             </button>
-                                    
+
                                     <!-- 重试按钮 - 失败/取消状态 -->
                                     <button v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                         @click.stop="resumeTask(task.task_id)"
@@ -630,7 +630,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                                     :title="t('retryTask')">
                                         <i class="fas fa-redo text-sm"></i>
                                                             </button>
-                                    
+
                                     <!-- 下载按钮 - 成功状态 -->
                                                                 <button v-if="task.status === 'SUCCEED'"
                                                                         @click.stop="handleDownloadTask(task)"
@@ -638,7 +638,7 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
                                                                     :title="t('downloadTask')">
                                         <i class="fas fa-download text-sm"></i>
                                                             </button>
-                                    
+
                                     <!-- 删除按钮 - 完成/失败/取消状态 -->
                                     <button v-if="['SUCCEED', 'FAILED', 'CANCEL'].includes(task.status)"
                                                                         @click.stop="deleteTask(task.task_id)"
@@ -668,8 +668,8 @@ watch([taskSearchQuery, statusFilter, currentTaskPage], () => {
 
                     <!-- GitHub 仓库链接 - Apple 极简风格 -->
                     <div class="fixed bottom-6 right-6 z-50">
-                        <a href="https://github.com/ModelTC/LightX2V" 
-                           target="_blank" 
+                        <a href="https://github.com/ModelTC/LightX2V"
+                           target="_blank"
                            rel="noopener noreferrer"
                            class="flex items-center gap-2.5 px-4 py-2.5 bg-white/85 dark:bg-[#1e1e1e]/85 backdrop-blur-[40px] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.15)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-100 transition-all duration-200 group"
                            title="Star us on GitHub">

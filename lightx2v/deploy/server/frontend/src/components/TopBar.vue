@@ -37,8 +37,8 @@ onMounted(() => {
                 <div class="flex justify-between items-center max-w-full mx-auto px-6 py-3">
                     <!-- 左侧 Logo -->
                     <div class="flex items-center">
-                        <button @click="goToHome" 
-                                class="flex items-center gap-2.5 px-3 py-2 bg-transparent border-0 rounded-[10px] cursor-pointer transition-all duration-200 hover:bg-black/4 dark:hover:bg-white/6 hover:-translate-y-px active:scale-[0.97]" 
+                        <button @click="goToHome"
+                                class="flex items-center gap-2.5 px-3 py-2 bg-transparent border-0 rounded-[10px] cursor-pointer transition-all duration-200 hover:bg-black/4 dark:hover:bg-white/6 hover:-translate-y-px active:scale-[0.97]"
                                 :title="t('goToHome')">
                             <i class="fas fa-film text-xl text-[#1d1d1f] dark:text-[#f5f5f7] transition-colors"></i>
                             <span class="text-[17px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-[-0.02em]">LightX2V</span>
@@ -48,15 +48,15 @@ onMounted(() => {
                     <!-- 右侧用户信息和控制 -->
                     <div class="flex items-center gap-4">
                         <!-- 主题切换按钮 -->
-                        <button @click="toggleTheme" 
-                                class="flex items-center justify-center w-9 h-9 p-0 bg-transparent border-0 rounded-lg cursor-pointer transition-all duration-200 hover:bg-black/4 dark:hover:bg-white/8 hover:scale-105 active:scale-95" 
+                        <button @click="toggleTheme"
+                                class="flex items-center justify-center w-9 h-9 p-0 bg-transparent border-0 rounded-lg cursor-pointer transition-all duration-200 hover:bg-black/4 dark:hover:bg-white/8 hover:scale-105 active:scale-95"
                                 :title="'切换主题'">
                             <i :class="getThemeIcon()" class="text-base text-[#86868b] dark:text-[#98989d] transition-all duration-200"></i>
                         </button>
 
                         <!-- 语言切换按钮 - Apple 精致风格 -->
                                 <button @click="switchLang"
-                                class="relative flex items-center justify-center w-9 h-9 p-0 bg-black/2 dark:bg-white/4 border border-black/6 dark:border-white/8 rounded-full cursor-pointer transition-all duration-200 hover:bg-black/6 dark:hover:bg-white/10 hover:border-black/10 dark:hover:border-white/15 hover:scale-110 hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3)] active:scale-100" 
+                                class="relative flex items-center justify-center w-9 h-9 p-0 bg-black/2 dark:bg-white/4 border border-black/6 dark:border-white/8 rounded-full cursor-pointer transition-all duration-200 hover:bg-black/6 dark:hover:bg-white/10 hover:border-black/10 dark:hover:border-white/15 hover:scale-110 hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3)] active:scale-100"
                                     :title="t('switchLanguage')">
                             <span class="text-base leading-none filter grayscale-0 hover:grayscale-0 transition-all">{{ languageOptions.find(lang => lang.code === (locale === 'zh' ? 'en' : 'zh'))?.flag }}</span>
                                 </button>
@@ -65,9 +65,9 @@ onMounted(() => {
                         <div class="flex items-center gap-2.5 px-3 py-1.5 bg-black/2 dark:bg-white/4 border border-black/6 dark:border-white/8 rounded-[20px] transition-all duration-200 hover:bg-black/4 dark:hover:bg-white/8 hover:border-black/8 dark:hover:border-white/12 hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
                             <!-- 用户头像 -->
                             <div class="flex items-center justify-center w-8 h-8 flex-shrink-0">
-                                <img v-if="currentUser.avatar_url" 
+                                <img v-if="currentUser.avatar_url"
                                      :src="currentUser.avatar_url"
-                                     :alt="currentUser.username" 
+                                     :alt="currentUser.username"
                                      class="w-full h-full rounded-full object-cover border border-black/8 dark:border-white/12 shadow-[0_1px_3px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.3)]">
                                 <!-- 默认头像 - Apple 风格圆形图标 -->
                                 <div v-else class="w-full h-full rounded-full bg-gradient-to-br from-[#86868b]/20 to-[#86868b]/10 dark:from-[#98989d]/20 dark:to-[#98989d]/10 border border-black/8 dark:border-white/12 flex items-center justify-center">
@@ -82,17 +82,17 @@ onMounted(() => {
                                 </span>
                                 <span v-else>未登录</span>
                             </div>
-                            
+
                             <!-- 登录/登出按钮 - Apple 精致风格 -->
-                            <button v-if="currentUser.username" 
-                                    @click="logout" 
-                                    class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-red-500/10 dark:hover:bg-red-400/15 hover:scale-110 active:scale-100 flex-shrink-0 group" 
+                            <button v-if="currentUser.username"
+                                    @click="logout"
+                                    class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-red-500/10 dark:hover:bg-red-400/15 hover:scale-110 active:scale-100 flex-shrink-0 group"
                                     :title="t('logout')">
                                 <i class="fas fa-arrow-right-from-bracket text-[13px] text-[#86868b] dark:text-[#98989d] group-hover:text-red-500 dark:group-hover:text-red-400 transition-colors"></i>
                                 </button>
-                            <button v-else 
-                                    @click="login" 
-                                    class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-[color:var(--brand-primary)]/10 dark:hover:bg-[color:var(--brand-primary-light)]/15 hover:scale-110 active:scale-100 flex-shrink-0 group" 
+                            <button v-else
+                                    @click="login"
+                                    class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-[color:var(--brand-primary)]/10 dark:hover:bg-[color:var(--brand-primary-light)]/15 hover:scale-110 active:scale-100 flex-shrink-0 group"
                                     :title="t('login')">
                                 <i class="fas fa-arrow-right-to-bracket text-[13px] text-[#86868b] dark:text-[#98989d] group-hover:text-[color:var(--brand-primary)] dark:group-hover:text-[color:var(--brand-primary-light)] transition-colors"></i>
                                 </button>

@@ -57,7 +57,7 @@
 
             const showTaskDetailModal = ref(false);
             const modalTask = ref(null);
-            
+
             // TaskCarousel当前任务状态
             const currentTask = ref(null);
 
@@ -1032,7 +1032,7 @@
 
                 const audio = new Audio(audioUrl);
                 currentPlayingAudio = audio;
-                
+
                 // 监听音频播放结束事件
                 audio.addEventListener('ended', () => {
                     currentPlayingAudio = null;
@@ -1222,7 +1222,7 @@
                     }
 
                     console.log('浏览器支持检查通过，请求麦克风权限...');
-                    
+
                     // 记录浏览器支持状态用于调试
                     const browserSupport = {
                         mediaDevices: !!navigator.mediaDevices,
@@ -1322,7 +1322,7 @@
                         chromeVersion: navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] || '未知'
                     };
                     console.log('浏览器调试信息:', debugInfo);
-                    
+
                     // 如果是Chrome但仍有问题，提供特定建议
                     if (navigator.userAgent.includes('Chrome')) {
                         console.log('检测到Chrome浏览器，可能的问题:');
@@ -2770,7 +2770,7 @@
                     }
 
                     showAlert(t('taskMaterialReuseSuccessAlert'), 'success');
-                    
+
                     // 检查当前路由，如果已经在 generate 页面，则滚动到生成区域
                     const currentRoute = router.currentRoute.value;
                     if (currentRoute.path === '/generate') {
@@ -2782,9 +2782,9 @@
                         await nextTick();
                         const creationArea = document.querySelector('#task-creator');
                         if (creationArea) {
-                            creationArea.scrollIntoView({ 
-                                behavior: 'smooth', 
-                                block: 'start' 
+                            creationArea.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'start'
                             });
                         }
                     } else {
@@ -2916,7 +2916,7 @@
                     console.error('下载失败:', error)
                     showAlert(t('downloadFailedAlert'), 'danger')
                 }
-            }       
+            }
 
             const viewFile = (fileInfo) => {
                 if (!fileInfo || !fileInfo.url) {
@@ -4007,7 +4007,7 @@
                                     console.log('任务历史已保存（清理后）:', historyItem);
                                 } catch (secondError) {
                                     console.error('清理后仍无法保存，尝试清理所有缓存...');
-                                    
+
                                     // 清理策略2：清理所有任务历史，只保存当前这一条
                                     try {
                                         localStorage.setItem('taskHistory', JSON.stringify([historyItem]));
@@ -4221,7 +4221,7 @@
                     currentPlayingAudio.pause();
                     currentPlayingAudio.currentTime = 0;
                     currentPlayingAudio = null;
-                    
+
                     // 调用停止回调
                     if (audioStopCallback) {
                         audioStopCallback();
@@ -4254,7 +4254,7 @@
 
                 const audio = new Audio(audioUrl);
                 currentPlayingAudio = audio;
-                
+
                 // 监听音频播放结束事件
                 audio.addEventListener('ended', () => {
                     currentPlayingAudio = null;
@@ -5280,7 +5280,7 @@
                     const shareUrl = `${window.location.origin}${data.share_url}`;
 
                     await navigator.clipboard.writeText(shareUrl);
-                    
+
                     // 显示带操作按钮的alert
                     showAlert(t('shareLinkCopied'), 'success', {
                         label: t('view'),
@@ -5450,7 +5450,7 @@
 
             // 主题管理
             const theme = ref('dark'); // 'light', 'dark', 'auto' - 默认深色模式
-            
+
             // 初始化主题
             const initTheme = () => {
                 const savedTheme = localStorage.getItem('theme') || 'dark'; // 默认深色模式
@@ -5461,7 +5461,7 @@
             // 应用主题
             const applyTheme = (newTheme) => {
                 const html = document.documentElement;
-                
+
                 if (newTheme === 'dark') {
                     html.classList.add('dark');
                     html.style.colorScheme = 'dark';
@@ -5489,11 +5489,11 @@
                 const currentIndex = themes.indexOf(theme.value);
                 const nextIndex = (currentIndex + 1) % themes.length;
                 const nextTheme = themes[nextIndex];
-                
+
                 theme.value = nextTheme;
                 localStorage.setItem('theme', nextTheme);
                 applyTheme(nextTheme);
-                
+
                 const themeNames = {
                     'auto': '跟随系统',
                     'light': '浅色模式',

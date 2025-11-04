@@ -79,7 +79,7 @@ const imageUrl = computed(() => {
 // 更新当前任务数据并启动轮询
 const updateCurrentTaskData = async (task) => {
     if (!task?.task_id) return
-    
+
     try {
         const response = await apiRequest(`/api/v1/task/query?task_id=${task.task_id}`)
         if (response && response.ok) {
@@ -87,7 +87,7 @@ const updateCurrentTaskData = async (task) => {
             // 更新全局currentTask
             currentTask.value = updatedTask
             console.log('TaskCarousel: 更新任务数据', updatedTask)
-            
+
             // 如果任务还在进行中，开始轮询状态
             if (['CREATED', 'PENDING', 'RUNNING'].includes(updatedTask.status)) {
                 startPollingTask(updatedTask.task_id)
@@ -103,10 +103,10 @@ const updateCurrentTaskData = async (task) => {
 // 任务切换方法
 const goToPreviousTask = () => {
     if (sortedTasks.value.length <= 1) return
-    
+
     const currentIndex = sortedTasks.value.findIndex(task => task.task_id === currentTask.value?.task_id)
     if (currentIndex === -1) return
-    
+
     const newIndex = currentIndex > 0 ? currentIndex - 1 : sortedTasks.value.length - 1
     const newTask = sortedTasks.value[newIndex]
     currentTask.value = newTask
@@ -117,10 +117,10 @@ const goToPreviousTask = () => {
 
 const goToNextTask = () => {
     if (sortedTasks.value.length <= 1) return
-    
+
     const currentIndex = sortedTasks.value.findIndex(task => task.task_id === currentTask.value?.task_id)
     if (currentIndex === -1) return
-    
+
     const newIndex = currentIndex < sortedTasks.value.length - 1 ? currentIndex + 1 : 0
     const newTask = sortedTasks.value[newIndex]
     currentTask.value = newTask
@@ -158,7 +158,7 @@ const onVideoError = () => {
 // 处理取消任务
 const handleCancel = async () => {
     if (!currentTask.value?.task_id) return
-    
+
     try {
         await cancelTask(currentTask.value.task_id)
     } catch (error) {
@@ -170,7 +170,7 @@ const handleCancel = async () => {
 // 处理分享任务
 const handleShareTask = async () => {
     if (!currentTask.value?.task_id) return
-    
+
     try {
         await copyShareLink(currentTask.value.task_id, 'task')
         // copyShareLink 函数内部已经显示了带"查看"按钮的 alert，不需要再次调用
@@ -183,7 +183,7 @@ const handleShareTask = async () => {
 // 处理重试任务
 const handleRetry = async () => {
     if (!currentTask.value?.task_id) return
-    
+
     try {
         await resumeTask(currentTask.value.task_id)
     } catch (error) {
@@ -238,7 +238,7 @@ onUnmounted(() => {
         <!-- 视频区域 -->
         <div class="flex flex-col items-center gap-6 relative">
             <!-- 左侧导航箭头 - Apple 极简风格 -->
-            <button 
+            <button
                 v-if="sortedTasks.length > 1"
                 @click="goToPreviousTask"
                 class="absolute top-1/2 -translate-y-1/2 left-[-60px] md:left-[-60px] sm:left-[-30px] w-[44px] h-[44px] rounded-full border-0 cursor-pointer flex items-center justify-center text-base transition-all duration-200 ease-out z-10 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed"
@@ -247,7 +247,7 @@ onUnmounted(() => {
             </button>
 
             <!-- 右侧导航箭头 - Apple 极简风格 -->
-            <button 
+            <button
                 v-if="sortedTasks.length > 1"
                 @click="goToNextTask"
                 class="absolute top-1/2 -translate-y-1/2 right-[-60px] md:right-[-60px] sm:right-[-30px] w-[44px] h-[44px] rounded-full border-0 cursor-pointer flex items-center justify-center text-base transition-all duration-200 ease-out z-10 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed"
@@ -279,11 +279,11 @@ onUnmounted(() => {
                     <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
                         <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-20 blur-sm">
                     </div>
-                    
+
                     <!-- 进度内容覆盖层 -->
                     <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
                         <div class="w-full max-w-[280px] text-center">
-                            
+
                             <!-- 进度条 -->
                             <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(taskStatus)">
                                 <div v-for="(subtask, index) in (currentTask?.subtasks || [])" :key="index">
@@ -333,7 +333,7 @@ onUnmounted(() => {
                     <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
                         <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-10 blur-sm">
                     </div>
-                    
+
                     <!-- 错误信息 -->
                     <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
                         <div class="w-12 h-12 rounded-full bg-red-500/10 dark:bg-red-400/10 flex items-center justify-center mb-4">
@@ -349,7 +349,7 @@ onUnmounted(() => {
                     <div v-if="imageUrl" class="absolute top-0 left-0 w-full h-full z-[1]">
                         <img :src="imageUrl" :alt="getTaskTypeName(currentTask?.task_type)" class="w-full h-full object-cover opacity-10 blur-sm">
                     </div>
-                    
+
                     <!-- 取消信息 -->
                     <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2] p-8 md:p-6 sm:p-4">
                         <div class="w-12 h-12 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4">
@@ -371,7 +371,7 @@ onUnmounted(() => {
             <!-- Apple 风格操作按钮 -->
             <div class="flex justify-center gap-3">
                 <!-- 已完成：下载按钮 -->
-                <button 
+                <button
                     v-if="isCompleted && currentTask?.outputs?.output_video"
                     @click="handleDownloadFile(currentTask.task_id, 'output_video', currentTask.outputs.output_video)"
                     class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 active:scale-95"
@@ -380,7 +380,7 @@ onUnmounted(() => {
                 </button>
 
                 <!-- 已完成：分享按钮 -->
-                <button 
+                <button
                     v-if="isCompleted && currentTask?.outputs?.output_video"
                     @click="handleShareTask"
                     class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:scale-105 active:scale-95"
@@ -389,7 +389,7 @@ onUnmounted(() => {
                 </button>
 
                 <!-- 进行中：取消按钮 -->
-                <button 
+                <button
                     v-if="isRunning"
                     @click="handleCancel"
                     class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-red-500 dark:text-red-400 hover:scale-105 active:scale-95"
@@ -398,7 +398,7 @@ onUnmounted(() => {
                 </button>
 
                 <!-- 失败或取消：重试按钮 -->
-                <button 
+                <button
                     v-if="isFailed || isCancelled"
                     @click="handleRetry"
                     class="w-[44px] h-[44px] md:w-[44px] md:h-[44px] sm:w-[40px] sm:h-[40px] rounded-full flex items-center justify-center text-base transition-all duration-200 ease-out border-0 cursor-pointer bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:scale-105 active:scale-95"
@@ -410,13 +410,13 @@ onUnmounted(() => {
 
         <!-- Apple 风格任务指示器 -->
         <div v-if="sortedTasks.length > 1" class="flex justify-center gap-2 mt-5">
-            <div 
-                v-for="(task, index) in sortedTasks" 
+            <div
+                v-for="(task, index) in sortedTasks"
                 :key="task.task_id"
                 @click="handleTaskIndicatorClick(task)"
                 class="w-2 h-2 rounded-full cursor-pointer transition-all duration-200 ease-out"
-                :class="index === currentTaskIndex 
-                    ? 'bg-[#1d1d1f] dark:bg-[#f5f5f7] scale-110' 
+                :class="index === currentTaskIndex
+                    ? 'bg-[#1d1d1f] dark:bg-[#f5f5f7] scale-110'
                     : 'bg-[#86868b]/30 dark:bg-[#98989d]/30 hover:bg-[#86868b]/50 dark:hover:bg-[#98989d]/50 hover:scale-105'">
             </div>
         </div>

@@ -9,8 +9,8 @@ import Share from '../views/Share.vue'
 import { showAlert } from '../utils/other'
 
 const routes = [
-  { 
-    path: '/', 
+  {
+    path: '/',
     redirect: (to) => {
       // 保留查询参数（用于 OAuth 回调）
       return { path: '/generate', query: to.query }
@@ -81,10 +81,10 @@ const router = createRouter({
 // 路由守卫 - 整合和优化后的逻辑
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('accessToken')
-  
+
   // 检查 URL 中是否有 code 参数（OAuth 回调）
   // 可以从路由查询参数或实际 URL 中获取
-  const hasOAuthCode = to.query?.code !== undefined || 
+  const hasOAuthCode = to.query?.code !== undefined ||
                       (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('code') !== null)
 
   // 1. OAuth 回调处理：如果有 code 参数（GitHub/Google 登录回调），直接放行

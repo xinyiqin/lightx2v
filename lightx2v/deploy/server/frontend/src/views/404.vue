@@ -30,16 +30,16 @@ const { t } = useI18n()
       <!-- 操作按钮 - Apple 风格 -->
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
         <!-- 返回首页按钮 -->
-        <RouterLink 
-          to="/generate" 
-          @click="switchToCreateView" 
+        <RouterLink
+          to="/generate"
+          @click="switchToCreateView"
           class="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full text-[15px] font-semibold tracking-tight transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100">
           <i class="fas fa-home text-sm"></i>
           <span>{{ t('goBackHome') || 'Go Back Home' }}</span>
         </RouterLink>
 
         <!-- 返回上一页按钮 -->
-        <button 
+        <button
           @click="$router.go(-1)"
           class="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 text-[#1d1d1f] dark:text-[#f5f5f7] rounded-full text-[15px] font-medium tracking-tight transition-all duration-200 hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98]">
           <i class="fas fa-arrow-left text-sm"></i>

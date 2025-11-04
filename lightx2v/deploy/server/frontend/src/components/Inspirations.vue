@@ -127,7 +127,7 @@ onMounted(() => {
                                                     @keyup.enter="handleInspirationSearch"
                                                     @input="handleInspirationSearch"
                             class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl py-3 pl-11 pr-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200"
-                            :placeholder="t('searchInspiration')" 
+                            :placeholder="t('searchInspiration')"
                             type="text" />
                                             </div>
 
@@ -225,14 +225,14 @@ onMounted(() => {
                                                         :alt="item.params?.prompt || '模板图片'"
                                 class="w-full h-auto object-contain group-hover:scale-[1.02] transition-transform duration-200"
                                                         @error="handleThumbnailError" />
-                            
+
                             <!-- 移动端播放按钮 - Apple 风格 -->
                                                         <button v-if="item?.outputs?.output_video"
                                                             @click.stop="toggleVideoPlay($event)"
                                 class="md:hidden absolute bottom-3 left-1/2 transform -translate-x-1/2 w-10 h-10 rounded-full bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] shadow-[0_2px_8px_rgba(0,0,0,0.2)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex items-center justify-center text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-105 transition-all duration-200 z-20">
                                                             <i class="fas fa-play text-sm"></i>
                                                         </button>
-                            
+
                             <!-- 悬浮操作按钮（下方居中，仅桌面端）- Apple 风格 -->
                             <div class="hidden md:flex absolute bottom-3 left-1/2 transform -translate-x-1/2 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 w-full">
                                 <div class="flex gap-2 pointer-events-auto">
@@ -264,8 +264,8 @@ onMounted(() => {
 
                 <!-- GitHub 仓库链接 - Apple 极简风格 -->
                 <div class="fixed bottom-6 right-6 z-50">
-                    <a href="https://github.com/ModelTC/LightX2V" 
-                       target="_blank" 
+                    <a href="https://github.com/ModelTC/LightX2V"
+                       target="_blank"
                        rel="noopener noreferrer"
                        class="flex items-center gap-2.5 px-4 py-2.5 bg-white/85 dark:bg-[#1e1e1e]/85 backdrop-blur-[40px] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.15)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-100 transition-all duration-200 group"
                        title="Star us on GitHub">

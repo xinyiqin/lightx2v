@@ -25,7 +25,7 @@ const { t } = useI18n()
       <div class="flex flex-col sm:flex-row flex-1 h-full">
         <!-- 左侧/底部导航栏 - 响应式 -->
         <LeftBar />
-        
+
         <!-- 路由视图内容 -->
         <div class="flex-1 overflow-y-auto main-scrollbar">
           <router-view></router-view>

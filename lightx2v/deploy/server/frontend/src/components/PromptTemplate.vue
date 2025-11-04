@@ -14,7 +14,7 @@ const { t } = useI18n()
 <template>
     <!-- 提示词模板和历史记录弹窗 - Apple 极简风格 -->
     <div v-cloak>
-        <div v-if="showPromptModal" 
+        <div v-if="showPromptModal"
              class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center"
              @click="showPromptModal = false">
             <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] backdrop-saturate-[180%] border border-black/8 dark:border-white/8 rounded-3xl p-8 max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]"

@@ -43,13 +43,13 @@ const router = useRouter();
                         <!-- 手机号输入框 - Apple 风格 -->
       <div>
                             <label for="phoneNumber" class="block text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-3 text-left tracking-tight">{{ t('phoneNumber') }}</label>
-                            <input 
-                                v-model="phoneNumber" 
-                                type="tel" 
-                                name="phoneNumber" 
-                                required 
-                                maxlength="11" 
-                                @keyup.enter="handlePhoneEnter" 
+                            <input
+                                v-model="phoneNumber"
+                                type="tel"
+                                name="phoneNumber"
+                                required
+                                maxlength="11"
+                                @keyup.enter="handlePhoneEnter"
                                 class="block w-full rounded-xl bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] tracking-tight"
                             />
       </div>
@@ -66,22 +66,22 @@ const router = useRouter();
                 {{ smsCountdown > 0 ? `${smsCountdown}s` : t('sendSmsCode') }}
             </button>
         </div>
-                            <input 
-                                v-model="verifyCode" 
-                                type="text" 
-                                name="verifyCode" 
-                                required 
-                                maxlength="6" 
-                                @keyup.enter="handleVerifyCodeEnter" 
+                            <input
+                                v-model="verifyCode"
+                                type="text"
+                                name="verifyCode"
+                                required
+                                maxlength="6"
+                                @keyup.enter="handleVerifyCodeEnter"
                                 class="block w-full rounded-xl bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] tracking-tight"
                             />
       </div>
 
                         <!-- 登录按钮 - Apple 风格 -->
                         <div class="pt-4">
-                            <button 
-                                @click="loginWithSms" 
-                                :disabled="!phoneNumber || !verifyCode || loginLoading" 
+                            <button
+                                @click="loginWithSms"
+                                :disabled="!phoneNumber || !verifyCode || loginLoading"
                                 class="w-full rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-0 px-6 py-4 text-base font-semibold text-white hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100 transition-all duration-200 ease-out disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none tracking-tight"
                             >
             {{ loginLoading ? t('loginLoading') : t('login') }}
@@ -101,19 +101,19 @@ const router = useRouter();
 
                     <!-- 第三方登录按钮 - Apple 风格 -->
                     <div class="flex justify-center gap-5">
-                        <button 
-                            @click="loginWithGitHub" 
+                        <button
+                            @click="loginWithGitHub"
                             class="w-14 h-14 flex items-center justify-center bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 rounded-full text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-110 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-100 transition-all duration-200"
-                            :disabled="loginLoading" 
+                            :disabled="loginLoading"
                             :title="t('loginWithGitHub')"
                         >
                             <i class="fab fa-github text-2xl"></i>
                         </button>
 
-                        <button 
-                            @click="loginWithGoogle" 
+                        <button
+                            @click="loginWithGoogle"
                             class="w-14 h-14 flex items-center justify-center bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 rounded-full text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-110 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-100 transition-all duration-200"
-                            :disabled="loginLoading" 
+                            :disabled="loginLoading"
                             :title="t('loginWithGoogle')"
                         >
                             <i class="fab fa-google text-2xl"></i>

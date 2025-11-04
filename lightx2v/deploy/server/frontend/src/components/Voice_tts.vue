@@ -116,7 +116,7 @@
                   <div v-if="voice.version === '2.0'" class="absolute top-2 right-2 px-2 py-1 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white text-[10px] font-semibold rounded-md z-10">
                     v2.0
                   </div>
-                  
+
                   <!-- 头像容器 -->
                   <div class="relative mr-3 flex-shrink-0">
                     <!-- Female Avatar -->
@@ -144,7 +144,7 @@
                       <i class="fas fa-cog text-xs"></i>
                     </div>
                   </div>
-                  
+
                   <!-- 音色信息 -->
                   <div class="flex-1 min-w-0">
                     <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-1 tracking-tight truncate">
@@ -169,11 +169,11 @@
                     <!-- 语速控制 -->
                     <div class="flex items-center gap-3">
                       <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('speechRate') }}:</label>
-                      <input 
-                        type="range" 
-                        min="-50" 
-                        max="100" 
-                        v-model="speechRate" 
+                      <input
+                        type="range"
+                        min="-50"
+                        max="100"
+                        v-model="speechRate"
                         class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                       />
                       <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getSpeechRateDisplayValue(speechRate) }}</span>
@@ -181,11 +181,11 @@
                     <!-- 音量控制 -->
                     <div class="flex items-center gap-3">
                       <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('volume') }}:</label>
-                      <input 
-                        type="range" 
-                        min="-50" 
-                        max="100" 
-                        v-model="loudnessRate" 
+                      <input
+                        type="range"
+                        min="-50"
+                        max="100"
+                        v-model="loudnessRate"
                         class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                       />
                       <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getLoudnessDisplayValue(loudnessRate) }}</span>
@@ -193,11 +193,11 @@
                     <!-- 音调控制 -->
                     <div class="flex items-center gap-3">
                       <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('pitch') }}:</label>
-                      <input 
-                        type="range" 
-                        min="-12" 
-                        max="12" 
-                        v-model="pitch" 
+                      <input
+                        type="range"
+                        min="-12"
+                        max="12"
+                        v-model="pitch"
                         class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                       />
                       <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getPitchDisplayValue(pitch) }}</span>
@@ -384,7 +384,7 @@ export default {
     const languages = ref(['全部语言'])
     const selectedGender = ref('全部性别')
     const genders = ref(['全部性别'])
-    
+
     // 翻译映射函数
     const translateCategory = (category) => {
       const map = {
@@ -401,19 +401,19 @@ export default {
       }
       return map[category] || category
     }
-    
+
     const translateVersion = (ver) => {
       return ver === '全部版本' ? t('allVersions') : ver
     }
-    
+
     const translateLanguage = (lang) => {
       if (lang === '全部语言') return t('allLanguages')
-      
+
       // 语言名称映射 - 中文到翻译键（如果有的话直接显示）
       // 对于后端返回的中文语言名，直接显示即可，因为它们是通用的
       return lang
     }
-    
+
     const translateGender = (gender) => {
       const map = {
         '全部性别': t('allGenders'),
@@ -661,14 +661,14 @@ export default {
       }
 
       if (!selectedVoice.value) return
-      
+
       // 停止当前播放的音频
       if (currentAudio.value) {
         currentAudio.value.pause()
         currentAudio.value.currentTime = 0
         currentAudio.value = null
       }
-      
+
       console.log('contextText', contextText.value)
       isGenerating.value = true
       try {

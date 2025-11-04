@@ -9,7 +9,7 @@ import { showTaskDetailModal,
         handleDownloadFile,
         deleteTask,
         getTaskTypeName,
-        showFailureDetails,  
+        showFailureDetails,
         formatTime,
         getTaskStatusDisplay,
         getStatusTextClass,
@@ -162,7 +162,7 @@ onUnmounted(() => {
                                 {{ t('taskDetails') }}
                             </h3>
                             <div class="flex items-center gap-2">
-                                <button @click="closeWithRoute" 
+                                <button @click="closeWithRoute"
                                         class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-red-500 dark:hover:text-red-400 hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100"
                                         :title="t('close')">
                                     <i class="fas fa-times text-sm"></i>
@@ -205,7 +205,7 @@ onUnmounted(() => {
                                         <!-- 右上角操作按钮 - Apple 极简风格 -->
                                         <div class="absolute top-0 right-0 flex items-center gap-2 z-10">
                                             <!-- 分享按钮 -->
-                                            <button @click="copyShareLink(modalTask.task_id, 'task')" 
+                                            <button @click="copyShareLink(modalTask.task_id, 'task')"
                                                     class="w-10 h-10 flex items-center justify-center bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] border border-black/10 dark:border-white/10 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.12)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] text-[#1d1d1f] dark:text-[#f5f5f7] hover:scale-110 hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] active:scale-100 transition-all duration-200"
                                                     :title="t('share')">
                                                 <i class="fas fa-share-alt text-xs"></i>
@@ -217,7 +217,7 @@ onUnmounted(() => {
                                                 <i class="fas fa-trash text-xs"></i>
                                             </button>
                                         </div>
-                                        
+
                                         <!-- 居中的内容区域 -->
                                         <div class="flex-1 flex items-center justify-center px-8 py-6">
                                             <div class="w-full">
@@ -250,17 +250,17 @@ onUnmounted(() => {
                                                 <!-- 操作按钮 - Apple 风格 -->
                                                 <div class="space-y-2.5">
                                                     <button v-if="modalTask?.outputs?.output_video"
-                                                            @click="handleDownloadFile(modalTask.task_id, 'output_video', modalTask.outputs.output_video)" 
+                                                            @click="handleDownloadFile(modalTask.task_id, 'output_video', modalTask.outputs.output_video)"
                                                             class="w-full rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-0 px-6 py-3 text-[15px] font-semibold text-white hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100 transition-all duration-200 ease-out tracking-tight flex items-center justify-center gap-2">
                                                         <i class="fas fa-download text-sm"></i>
                                                         <span>{{ t('downloadVideo') }}</span>
                                                     </button>
-                                                    <button @click="reuseTask(modalTask)" 
+                                                    <button @click="reuseTask(modalTask)"
                                                             class="w-full rounded-full bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 px-6 py-2.5 text-[15px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7] hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98] transition-all duration-200 tracking-tight flex items-center justify-center gap-2">
                                                         <i class="fas fa-magic text-sm"></i>
                                                         <span>{{ t('reuseTask') }}</span>
                                                     </button>
-                                                    <button @click="showDetails = !showDetails" 
+                                                    <button @click="showDetails = !showDetails"
                                                             class="w-full rounded-full bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 px-6 py-2.5 text-[15px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7] hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98] transition-all duration-200 tracking-tight flex items-center justify-center gap-2">
                                                         <i :class="showDetails ? 'fas fa-chevron-up' : 'fas fa-info-circle'" class="text-sm"></i>
                                                         <span>{{ showDetails ? t('hideDetails') : t('showDetails') }}</span>
@@ -384,7 +384,7 @@ onUnmounted(() => {
                                 <span>{{ t('taskDetails') }}</span>
                             </h3>
                             <div class="flex items-center gap-2">
-                                <button @click="closeWithRoute" 
+                                <button @click="closeWithRoute"
                                         class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-red-500 dark:hover:text-red-400 hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100"
                                         :title="t('close')">
                                     <i class="fas fa-times text-sm"></i>
@@ -452,7 +452,7 @@ onUnmounted(() => {
                                                 <i class="fas fa-trash text-xs"></i>
                                             </button>
                                         </div>
-                                        
+
                                         <!-- 居中的内容区域 -->
                                         <div class="flex-1 flex items-center justify-center px-8 py-6">
                                             <div class="w-full">
@@ -467,7 +467,7 @@ onUnmounted(() => {
                                                         <span v-else>{{ t('taskDetails') }}</span>
                                                     </h1>
                                                 </div>
-                                                
+
                                                 <!-- 进度条 - Apple 风格 -->
                                                 <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(modalTask?.status)" class="mb-6">
                                             <div v-for="(subtask, index) in (modalTask.subtasks || [])" :key="index">
@@ -507,7 +507,7 @@ onUnmounted(() => {
                                                 </div>
                                             </div>
                                         </div>
-                                        
+
                                                 <!-- 描述 - Apple 风格 -->
                                                 <div class="text-sm sm:text-base text-[#86868b] dark:text-[#98989d] text-center mb-6 tracking-tight">
                                                     <p v-if="['RUNNING'].includes(modalTask?.status)" class="mb-0">
@@ -521,8 +521,8 @@ onUnmounted(() => {
                                                     </p>
                                                     <div v-else-if="modalTask?.status === 'FAILED'">
                                                         <p class="mb-4">{{ t('sorryYourVideoGenerationTaskFailed') }}</p>
-                                                        <button v-if="modalTask?.fail_msg" 
-                                                                @click="showFailureDetails = !showFailureDetails" 
+                                                        <button v-if="modalTask?.fail_msg"
+                                                                @click="showFailureDetails = !showFailureDetails"
                                                                 class="text-sm text-[#86868b] dark:text-[#98989d] hover:text-red-500 dark:hover:text-red-400 transition-colors underline underline-offset-2">
                                                             {{ showFailureDetails ? t('hideDetails') : t('viewErrorDetails') }}
                                                         </button>
@@ -573,7 +573,7 @@ onUnmounted(() => {
                                                         <span>{{ t('reuseTask') }}</span>
                                                     </button>
 
-                                                    <button @click="showDetails = !showDetails" 
+                                                    <button @click="showDetails = !showDetails"
                                                             class="w-full rounded-full bg-white dark:bg-[#3a3a3c] border border-black/8 dark:border-white/8 px-6 py-2.5 text-[15px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7] hover:bg-white/80 dark:hover:bg-[#3a3a3c]/80 hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] active:scale-[0.98] transition-all duration-200 tracking-tight flex items-center justify-center gap-2">
                                                         <i :class="showDetails ? 'fas fa-chevron-up' : 'fas fa-info-circle'" class="text-sm"></i>
                                                         <span>{{ showDetails ? t('hideDetails') : t('showDetails') }}</span>
