@@ -5,7 +5,7 @@ const { t, locale } = useI18n()
 </script>
 <template>
   <!-- 左侧功能区 - Apple 极简风格 - 响应式布局 -->
-  <div class="relative flex flex-col z-[5] pl-0 sm:pl-5 w-full sm:w-24">
+  <div class="relative flex flex-col z-[10] pl-0 sm:pl-5 w-full sm:w-24">
     <!-- 功能导航 - Apple 风格统一容器 -->
     <div class="p-2 flex flex-col justify-center h-full mobile-nav-buttons sm:mt-[-10vh]">
       <!-- 统一的圆角矩形容器 - Apple 风格 - 响应式方向 -->
