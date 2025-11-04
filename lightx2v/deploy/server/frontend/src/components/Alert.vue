@@ -19,9 +19,13 @@ const handleActionClick = () => {
 const handleAfterLeave = () => {
     // 只有在alert确实关闭时才重置，避免覆盖正在显示的alert
     if (alert.value && !alert.value.show) {
+        // 记录当前alert的时间戳，用于后续检查
+        const currentTimestamp = alert.value._timestamp
+        
         // 延迟一小段时间再重置，确保不会影响后续的alert显示
         setTimeout(() => {
-            if (alert.value && !alert.value.show) {
+            // 只有当alert仍然关闭，且时间戳没有变化（没有新alert创建）时才重置
+            if (alert.value && !alert.value.show && alert.value._timestamp === currentTimestamp) {
                 alert.value = { show: false, message: '', type: 'info', action: null }
             }
         }, 50)
@@ -33,6 +37,7 @@ const alertPosition = ref({ top: '1rem' })
 
 // 防抖函数
 let scrollTimeout = null
+let scrollContainer = null
 
 // 监听滚动事件，动态调整Alert位置
 const handleScroll = () => {
@@ -43,15 +48,21 @@ const handleScroll = () => {
 
     // 设置新的定时器，防抖处理
     scrollTimeout = setTimeout(() => {
-        const scrollY = window.scrollY
+        // 获取实际的滚动容器
+        const mainScrollable = scrollContainer || document.querySelector('.main-scrollbar')
+        if (!mainScrollable) {
+            alertPosition.value = { top: '1rem' }
+            return
+        }
+
+        const scrollY = mainScrollable.scrollTop
         const viewportHeight = window.innerHeight
 
         // 如果用户滚动了超过50px，将Alert显示在视口内
         if (scrollY > 50) {
             // 计算Alert应该显示的位置，确保在视口内可见
-            // 距离滚动位置20px，但不超过视口底部200px
-            const alertTop = Math.min(scrollY + 20, scrollY + viewportHeight - 200)
-            alertPosition.value = { top: `${alertTop}px` }
+            // 距离顶部80px（TopBar高度 + 一些间距）
+            alertPosition.value = { top: '80px' }
         } else {
             // 在页面顶部时，显示在固定位置
             alertPosition.value = { top: '1rem' }
@@ -60,12 +71,24 @@ const handleScroll = () => {
 }
 
 onMounted(() => {
+    // 查找实际的滚动容器
+    scrollContainer = document.querySelector('.main-scrollbar')
+    
+    if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, { passive: true })
+    }
+    
+    // 也监听 window 的滚动（作为后备）
     window.addEventListener('scroll', handleScroll, { passive: true })
+    
     // 初始化时也调用一次，确保位置正确
     handleScroll()
 })
 
 onUnmounted(() => {
+    if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', handleScroll)
+    }
     window.removeEventListener('scroll', handleScroll)
     if (scrollTimeout) {
         clearTimeout(scrollTimeout)
