@@ -4828,7 +4828,17 @@
             // 移动端视频播放切换
             const toggleVideoPlay = (event) => {
                 const button = event.target.closest('button');
+                if (!button) {
+                    console.error('toggleVideoPlay: 未找到按钮元素');
+                    return;
+                }
+                
                 const video = button.parentElement.querySelector('video');
+                if (!video) {
+                    console.error('toggleVideoPlay: 未找到视频元素');
+                    return;
+                }
+                
                 const icon = button.querySelector('i');
 
                 if (video.paused) {
@@ -4862,12 +4872,27 @@
                         });
                     } else {
                         // 视频未加载完成，显示loading并等待
-                        console.log('视频还没加载完成，等待加载（移动端）');
+                        console.log('视频还没加载完成，等待加载（移动端）, readyState:', video.readyState);
                         icon.className = 'fas fa-spinner fa-spin text-sm';
                         currentLoadingVideo = video;
 
-                        // 等待视频加载完成
-                        video.addEventListener('loadeddata', () => {
+                        // 主动触发视频加载
+                        video.load();
+
+                        // 设置超时保护（10秒后如果还未加载完成，重置状态）
+                        const loadingTimeout = setTimeout(() => {
+                            if (currentLoadingVideo === video) {
+                                console.warn('视频加载超时（移动端）');
+                                icon.className = 'fas fa-play text-sm';
+                                currentLoadingVideo = null;
+                                showAlert('视频加载超时，请重试', 'warning');
+                            }
+                        }, 10000);
+
+                        // 等待视频可以播放
+                        const playHandler = () => {
+                            clearTimeout(loadingTimeout);
+                            
                             // 检查这个视频是否仍然是当前等待加载的视频
                             if (currentLoadingVideo === video) {
                                 currentLoadingVideo = null;
@@ -4886,9 +4911,28 @@
                                 icon.className = 'fas fa-play text-sm';
                                 console.log('视频加载完成但等待已被取消（移动端）');
                             }
-                        }, { once: true });
-                };
-            } else {
+                            
+                            // 移除事件监听器
+                            video.removeEventListener('canplay', playHandler);
+                            video.removeEventListener('error', errorHandler);
+                        };
+                        
+                        const errorHandler = () => {
+                            clearTimeout(loadingTimeout);
+                            console.error('视频加载失败（移动端）');
+                            icon.className = 'fas fa-play text-sm';
+                            currentLoadingVideo = null;
+                            
+                            // 移除事件监听器
+                            video.removeEventListener('canplay', playHandler);
+                            video.removeEventListener('error', errorHandler);
+                        };
+
+                        // 使用 canplay 事件，比 loadeddata 更适合移动端
+                        video.addEventListener('canplay', playHandler, { once: true });
+                        video.addEventListener('error', errorHandler, { once: true });
+                    }
+                } else {
                     video.pause();
                     video.currentTime = 0;
                     icon.className = 'fas fa-play text-sm';

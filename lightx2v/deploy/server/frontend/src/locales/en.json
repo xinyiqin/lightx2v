@@ -199,7 +199,7 @@
     "supportedAudioFormatsShort": "Supported mp3, m4a, wav formats",
     "clearCharacterImageTip": "Upload a clear character image",
     "maxFileSize": "Max file size",
-    "taskDetails": "Task Details",
+    "taskDetail": "Task Details",
     "taskId": "Task ID",
     "taskType": "Task Type",
     "taskStatus": "Task Status",

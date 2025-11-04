@@ -1130,11 +1130,7 @@ onUnmounted(() => {
                 <MediaTemplate />
 
                 <!-- 语音合成模态框 -->
-                <div v-if="showVoiceTTSModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/60 backdrop-blur-sm">
-                    <div class="relative w-full h-full max-w-6xl max-h-[100vh] mx-4 my-8 bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
-                        <Voice_tts @tts-complete="handleTTSComplete" @close-modal="showVoiceTTSModal = false" />
-                    </div>
-                </div>
+                <Voice_tts v-if="showVoiceTTSModal" @tts-complete="handleTTSComplete" @close-modal="showVoiceTTSModal = false" />
 
                 <!-- GitHub 仓库链接 - Apple 极简风格 -->
                 <div class="fixed bottom-6 right-6 z-50">

@@ -770,11 +770,12 @@ body {
             width: 100% !important;
         }
 
-        /* 确保LeftBar容器在小屏幕下居中 */
-        .relative.w-20.pl-5.flex.flex-col.z-10 {
+        /* 确保LeftBar容器在小屏幕下居中，并设置较低的z-index */
+        .relative.flex.flex-col.z-\[5\] {
             margin-left: auto !important;
             margin-right: auto !important;
             padding-left: 0 !important;
+            z-index: 5 !important;
         }
 
         .mobile-nav-btn {

@@ -145,9 +145,9 @@ watch(audioTemplates, (newTemplates) => {
                         <!-- 模板选择浮窗 - Apple 极简风格 -->
                         <div v-cloak>
                             <div v-if="showImageTemplates || showAudioTemplates"
-                                class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center"
+                                class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-1"
                                 @click="showImageTemplates = false; showAudioTemplates = false">
-                                <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] backdrop-saturate-[180%] border border-black/8 dark:border-white/8 rounded-3xl px-10 py-8 max-w-4xl w-full mx-6 h-[90vh] overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
+                                <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl px-6 sm:px-10 py-6 sm:py-8 max-w-4xl w-full h-[90vh] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] flex flex-col"
                                     @click.stop>
                                     <!-- 浮窗头部 - Apple 风格 -->
                                     <div class="flex items-center justify-between mb-8">

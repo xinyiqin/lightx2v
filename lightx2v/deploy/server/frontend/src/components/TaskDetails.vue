@@ -159,7 +159,7 @@ onUnmounted(() => {
                         <div class="flex items-center justify-between px-8 py-5 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
                             <h3 class="text-xl font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center gap-3 tracking-tight">
                                 <i class="fas fa-check-circle text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-                                {{ t('taskDetails') }}
+                                {{ t('taskDetail') }}
                             </h3>
                             <div class="flex items-center gap-2">
                                 <button @click="closeWithRoute"
@@ -381,7 +381,7 @@ onUnmounted(() => {
                                 <i v-if="modalTask?.status === 'FAILED'" class="fas fa-exclamation-triangle text-red-500 dark:text-red-400"></i>
                                 <i v-else-if="modalTask?.status === 'CANCEL'" class="fas fa-ban text-[#86868b] dark:text-[#98989d]"></i>
                                 <i v-else class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-                                <span>{{ t('taskDetails') }}</span>
+                                <span>{{ t('taskDetail') }}</span>
                             </h3>
                             <div class="flex items-center gap-2">
                                 <button @click="closeWithRoute"
@@ -464,7 +464,7 @@ onUnmounted(() => {
                                                         <span v-else-if="modalTask?.status === 'CANCEL'">{{ t('taskCancelled') }}</span>
                                                         <span v-else-if="modalTask?.status === 'RUNNING'">{{ t('taskRunning') }}</span>
                                                         <span v-else-if="modalTask?.status === 'PENDING'">{{ t('taskPending') }}</span>
-                                                        <span v-else>{{ t('taskDetails') }}</span>
+                                                        <span v-else>{{ t('taskDetail') }}</span>
                                                     </h1>
                                                 </div>
 
