@@ -176,7 +176,7 @@ const getCurrentAudioElement = () => {
 const toggleAudioPlayback = () => {
     const audio = getCurrentAudioElement()
     if (!audio) return
-    
+
     if (audio.paused) {
         audio.play().catch(error => {
             console.log('播放失败:', error)
@@ -454,13 +454,13 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                         {{ t('audio') }}
                                                                     </div>
                                                                 </div>
-                                                                
+
                                                                 <!-- 音频时长 -->
                                                                 <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
                                                                     {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
                                                                 </div>
                                                             </div>
-                                                            
+
                                                             <!-- 进度条 -->
                                                             <div class="flex items-center gap-2" v-if="audioDuration > 0">
                                                                 <input
@@ -478,7 +478,7 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                 />
                                                             </div>
                                                         </div>
-                                                        
+
                                                         <!-- 隐藏的音频元素 -->
                                                         <audio
                                                             ref="audioElement"
@@ -824,13 +824,13 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                     {{ t('audio') }}
                                                                 </div>
                                                             </div>
-                                                            
+
                                                             <!-- 音频时长 -->
                                                             <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
                                                                 {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
                                                             </div>
                                                         </div>
-                                                        
+
                                                         <!-- 进度条 -->
                                                         <div class="flex items-center gap-2" v-if="audioDuration > 0">
                                                             <input
@@ -848,7 +848,7 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                             />
                                                         </div>
                                                     </div>
-                                                    
+
                                                     <!-- 隐藏的音频元素 -->
                                                     <audio
                                                         ref="audioElement"

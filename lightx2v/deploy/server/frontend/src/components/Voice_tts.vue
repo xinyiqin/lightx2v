@@ -57,13 +57,13 @@
                     {{ t('synthesizedAudio') }}<span v-if="selectedVoiceData"> - {{ selectedVoiceData.name }}</span>
                   </div>
                 </div>
-                
+
                 <!-- 音频时长 -->
                 <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
                   {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
                 </div>
               </div>
-              
+
               <!-- 进度条 -->
               <div class="flex items-center gap-2" v-if="audioDuration > 0">
                 <input
@@ -94,7 +94,7 @@
               class="hidden"
             ></audio>
           </div>
-          
+
           <!-- 设置面板 - Apple 极简风格（无卡片，直接显示） -->
           <div v-if="selectedVoice" class="flex-shrink-0 lg:w-1/2">
             <div class="space-y-3">
@@ -161,7 +161,7 @@
           </div>
         </div>
       </div>
-      
+
       <!-- 装饰性分割线 - Apple 风格（带V形图标） -->
       <div class="relative flex items-center justify-center py-3">
         <!-- 左侧线条 -->
@@ -806,7 +806,7 @@ export default {
     // 切换播放/暂停
     const toggleAudioPlayback = () => {
       if (!audioElement.value) return
-      
+
       if (audioElement.value.paused) {
         audioElement.value.play().catch(error => {
           console.log('播放失败:', error)

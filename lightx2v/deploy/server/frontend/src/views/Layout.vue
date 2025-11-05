@@ -80,4 +80,3 @@ const handleTTSComplete = (audioBlob) => {
 <style scoped>
 /* Apple 风格极简设计 - 所有样式已通过 Tailwind CSS 在 template 中定义 */
 </style>
-

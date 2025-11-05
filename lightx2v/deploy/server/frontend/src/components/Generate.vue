@@ -666,7 +666,7 @@ const formatAudioPreviewTime = (seconds) => {
 // 切换音频预览播放/暂停
 const toggleAudioPreviewPlayback = () => {
     if (!audioPreviewElement.value) return
-    
+
     if (audioPreviewElement.value.paused) {
         audioPreviewElement.value.play().catch(error => {
             console.log('播放失败:', error)
@@ -725,7 +725,7 @@ watch(() => getCurrentAudioPreview(), (newPreview) => {
     audioPreviewIsPlaying.value = false
     audioPreviewCurrentTime.value = 0
     audioPreviewDuration.value = 0
-    
+
     if (newPreview) {
         // 等待 DOM 更新后加载新音频
         nextTick(() => {
@@ -1016,7 +1016,7 @@ onUnmounted(() => {
                                                                 {{ t('audio') }}
                                                             </div>
                                                         </div>
-                                                        
+
                                                         <!-- 音频时长 -->
                                                         <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0 mr-3">
                                                             {{ formatAudioPreviewTime(audioPreviewCurrentTime) }} / {{ formatAudioPreviewTime(audioPreviewDuration) }}
@@ -1029,7 +1029,7 @@ onUnmounted(() => {
                                                             <i class="fas fa-trash text-sm"></i>
                                                         </button>
                                                     </div>
-                                                    
+
                                                     <!-- 进度条 -->
                                                     <div class="flex items-center gap-2" v-if="audioPreviewDuration > 0">
                                                         <input
@@ -1047,7 +1047,7 @@ onUnmounted(() => {
                                                         />
                                                     </div>
                                                 </div>
-                                                
+
                                                 <!-- 隐藏的音频元素 -->
                                                 <audio
                                                     ref="audioPreviewElement"
