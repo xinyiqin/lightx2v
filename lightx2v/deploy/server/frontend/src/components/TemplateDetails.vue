@@ -64,8 +64,12 @@ const scrollToCreationArea = () => {
 }
 
 // 包装 useTemplate 函数，在 generate 页面时滚动到生成区域
-const handleUseTemplate = async () => {
-    await useTemplate(selectedTemplate.value)
+const handleUseTemplate = () => {
+    const template = selectedTemplate.value
+    if (!template) {
+        return
+    }
+    void useTemplate(template)
     // 如果当前在 generate 页面，滚动到生成区域
     if (route.path === '/generate' || route.name === 'Generate') {
         // 等待 DOM 更新和展开动画完成

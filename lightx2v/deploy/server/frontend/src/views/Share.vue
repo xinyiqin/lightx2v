@@ -388,8 +388,8 @@ onMounted(async () => {
                             </button>
                         </div>
 
-                        <!-- 技术信息 - Apple 风格 -->
-                        <div class="text-center pt-6 border-t border-black/8 dark:border-white/8">
+                        <!-- 技术信息 - Apple 风格 - 响应式 -->
+                        <div class="text-center pt-4 sm:pt-6 border-t border-black/8 dark:border-white/8">
                             <a href="https://github.com/ModelTC/LightX2V"
                                target="_blank"
                                rel="noopener noreferrer"

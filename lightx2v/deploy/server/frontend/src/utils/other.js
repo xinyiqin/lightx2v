@@ -5,12 +5,13 @@
     export const t = i18n.global.t
     export const locale = i18n.global.locale
 
-            // 响应式数据
-            const loading = ref(false);
-            const loginLoading = ref(false);
-            const initLoading = ref(false);
-            const downloadLoading = ref(false);
-            const isLoading = ref(false); // 页面加载loading状态
+        // 响应式数据
+        const loading = ref(false);
+        const loginLoading = ref(false);
+        const initLoading = ref(false);
+        const downloadLoading = ref(false);
+        const downloadLoadingMessage = ref('');
+        const isLoading = ref(false); // 页面加载loading状态
 
             // 录音相关状态
             const isRecording = ref(false);
@@ -33,27 +34,28 @@
             const showTaskTypeMenu = ref(false);
             const showModelMenu = ref(false);
 
-            // 任务状态轮询相关
-            const pollingInterval = ref(null);
-            const pollingTasks = ref(new Set()); // 正在轮询的任务ID集合
-            const confirmDialog = ref({
-                show: false,
-                title: '',
-                message: '',
-                confirmText: '确认', // 使用静态文本，避免翻译依赖
-                warning: null,
-                confirm: () => { }
-            });
-            const submitting = ref(false);
-            const templateLoading = ref(false); // 模板加载状态
-            const taskSearchQuery = ref('');
-            const sidebarCollapsed = ref(false);
-            const showExpandHint = ref(false);
-            const showGlow = ref(false);
-            const isDefaultStateHidden = ref(false);
-            const isCreationAreaExpanded = ref(false);
-            const hasUploadedContent = ref(false);
-            const isContracting = ref(false);
+        // 任务状态轮询相关
+        const pollingInterval = ref(null);
+        const pollingTasks = ref(new Set()); // 正在轮询的任务ID集合
+        const confirmDialog = ref({
+            show: false,
+            title: '',
+            message: '',
+            confirmText: '确认', // 使用静态文本，避免翻译依赖
+            warning: null,
+            confirm: () => { }
+        });
+        const submitting = ref(false);
+        const templateLoading = ref(false); // 模板/任务复用加载状态
+        const templateLoadingMessage = ref('');
+        const taskSearchQuery = ref('');
+        const sidebarCollapsed = ref(false);
+        const showExpandHint = ref(false);
+        const showGlow = ref(false);
+        const isDefaultStateHidden = ref(false);
+        const isCreationAreaExpanded = ref(false);
+        const hasUploadedContent = ref(false);
+        const isContracting = ref(false);
 
             const showTaskDetailModal = ref(false);
             const modalTask = ref(null);
@@ -124,14 +126,15 @@
             const showAudioTemplates = ref(false);
             const mediaModalTab = ref('history');
 
-            // Template分页相关变量
-            const templatePagination = ref(null);
-            const templateCurrentPage = ref(1);
-            const templatePageSize = ref(12); // 图片模板每页12个，音频模板每页10个
-            const templatePageInput = ref(1);
-            const templatePaginationKey = ref(0);
-            const imageHistory = ref([]);
-            const audioHistory = ref([]);
+        // Template分页相关变量
+        const templatePagination = ref(null);
+        const templateCurrentPage = ref(1);
+        const templatePageSize = ref(12); // 图片模板每页12个，音频模板每页10个
+        const templatePageInput = ref(1);
+        const templatePaginationKey = ref(0);
+        const imageHistory = ref([]);
+        const audioHistory = ref([]);
+        const ttsHistory = ref([]);
 
             // 模板文件缓存，避免重复下载
             const currentUser = ref({});
@@ -1136,14 +1139,14 @@
                 document.querySelector('input[type="file"][accept="image/*"]').click();
             };
 
-            const triggerAudioUpload = () => {
-                const audioInput = document.querySelector('input[type="file"][accept="audio/*"]');
-                if (audioInput) {
-                    audioInput.click();
-                } else {
-                    console.warn('音频输入框未找到');
-                }
-            };
+        const triggerAudioUpload = () => {
+            const audioInput = document.querySelector('input[type="file"][data-role="audio-input"]');
+            if (audioInput) {
+                audioInput.click();
+            } else {
+                console.warn('音频输入框未找到');
+            }
+        };
 
             const removeImage = () => {
                 setCurrentImagePreview(null);
@@ -1160,17 +1163,17 @@
                 }
             };
 
-            const removeAudio = () => {
-                setCurrentAudioPreview(null);
-                s2vForm.value.audioFile = null;
-                updateUploadedContentStatus();
-                console.log('音频已移除');
-                // 重置音频文件输入框，确保可以重新选择相同文件
-                const audioInput = document.querySelector('input[type="file"][accept="audio/*"]');
-                if (audioInput) {
-                    audioInput.value = '';
-                }
-            };
+        const removeAudio = () => {
+            setCurrentAudioPreview(null);
+            s2vForm.value.audioFile = null;
+            updateUploadedContentStatus();
+            console.log('音频已移除');
+            // 重置音频文件输入框，确保可以重新选择相同文件
+            const audioInput = document.querySelector('input[type="file"][data-role="audio-input"]');
+            if (audioInput) {
+                audioInput.value = '';
+            }
+        };
 
             const getAudioMimeType = () => {
                 if (s2vForm.value.audioFile) {
@@ -1182,20 +1185,30 @@
             const handleAudioUpload = (event) => {
                 const file = event.target.files[0];
 
-                if (file) {
-                    s2vForm.value.audioFile = file;
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        setCurrentAudioPreview(e.target.result);
-                        updateUploadedContentStatus();
-                        console.log('音频预览已设置:', e.target.result);
-                    };
-                    reader.readAsDataURL(file);
-                } else {
+            if (file && (file.type?.startsWith('audio/') || file.type?.startsWith('video/'))) {
+                const allowedVideoTypes = ['video/mp4', 'video/x-m4v', 'video/mpeg'];
+                if (file.type.startsWith('video/') && !allowedVideoTypes.includes(file.type)) {
+                    showAlert(t('unsupportedVideoFormat'), 'warning');
                     setCurrentAudioPreview(null);
                     updateUploadedContentStatus();
+                    return;
                 }
-            };
+                s2vForm.value.audioFile = file;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    setCurrentAudioPreview(e.target.result);
+                    updateUploadedContentStatus();
+                    console.log('音频预览已设置:', e.target.result);
+                };
+                reader.readAsDataURL(file);
+            } else {
+                setCurrentAudioPreview(null);
+                updateUploadedContentStatus();
+                if (file) {
+                    showAlert(t('unsupportedAudioOrVideo'), 'warning');
+                }
+            }
+        };
 
             // 开始录音
             const startRecording = async () => {
@@ -2563,20 +2576,24 @@
                         confirmText: t('confirmDelete')
                     });
 
-                    if (!confirmed) {
-                        return;
+                if (!confirmed) {
+                    return;
+                }
+                const response = await apiRequest(`/api/v1/task/delete?task_id=${taskId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response && response.ok) {
+                    showAlert(t('taskDeletedSuccessAlert'), 'success');
+                    const deletedTaskIndex = tasks.value.findIndex(task => task.task_id === taskId);
+                    if (deletedTaskIndex !== -1) {
+                        const wasCurrent = currentTask.value?.task_id === taskId;
+                        tasks.value.splice(deletedTaskIndex, 1);
+                        if (wasCurrent) {
+                            currentTask.value = tasks.value[deletedTaskIndex] || tasks.value[deletedTaskIndex - 1] || null;
+                        }
                     }
-
-                    // 显示删除中的提示
-                    showAlert(t('deletingTaskAlert'), 'info');
-
-                    const response = await apiRequest(`/api/v1/task/delete?task_id=${taskId}`, {
-                        method: 'DELETE'
-                    });
-
-                    if (response && response.ok) {
-                        showAlert(t('taskDeletedSuccessAlert'), 'success');
-                        refreshTasks(true); // 强制刷新
+                    refreshTasks(true); // 强制刷新
 
                         // 如果是从任务详情页删除，删除成功后关闭详情弹窗
                         if (fromDetailPage) {
@@ -2669,20 +2686,30 @@
                 }
             };
 
-            const reuseTask = async (task) => {
-                try {
-                    // 跳转到任务创建界面
-                    isCreationAreaExpanded.value=true
-                    if (showTaskDetailModal.value) {
-                        closeTaskDetailModal();
-                    }
+        const reuseTask = async (task) => {
+            if (!task) {
+                showAlert(t('loadTaskDataFailedAlert'), 'danger');
+                return;
+            }
+
+            try {
+                templateLoading.value = true;
+                templateLoadingMessage.value = t('prefillLoadingTask');
+                // 跳转到任务创建界面
+                isCreationAreaExpanded.value = true;
+                if (showTaskDetailModal.value) {
+                    closeTaskDetailModal();
+                }
 
                     // 设置任务类型
                     selectedTaskId.value = task.task_type;
                     console.log('selectedTaskId.value', selectedTaskId.value);
 
-                    // 获取当前表单
-                    const currentForm = getCurrentForm();
+                // 获取当前表单
+                const currentForm = getCurrentForm();
+
+                // 立即切换到创建视图，后续资产异步加载
+                switchToCreateView();
 
                     // 设置模型
                     if (task.params && task.params.model_cls) {
@@ -2719,16 +2746,19 @@
                                 }
                             }
 
-                            // 加载音频文件
-                            if (audioUrl) {
-                                try {
-                                    const audioResponse = await fetch(audioUrl);
-                                    if (audioResponse && audioResponse.ok) {
-                                        const blob = await audioResponse.blob();
-                                        const filename = task.inputs[Object.keys(task.inputs).find(key =>
-                                            key.includes('audio') ||
-                                            task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
-                                        )] || 'audio.wav';
+                        // 加载音频文件
+                        if (audioUrl) {
+                            try {
+                                currentForm.audioUrl = audioUrl;
+                                setCurrentAudioPreview(audioUrl);
+
+                                const audioResponse = await fetch(audioUrl);
+                                if (audioResponse && audioResponse.ok) {
+                                    const blob = await audioResponse.blob();
+                                    const filename = task.inputs[Object.keys(task.inputs).find(key =>
+                                        key.includes('audio') ||
+                                        task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
+                                    )] || 'audio.wav';
 
                                         // 根据文件扩展名确定正确的MIME类型
                                         let mimeType = blob.type;
@@ -2745,178 +2775,190 @@
                                             mimeType = mimeTypes[ext] || 'audio/mpeg';
                                         }
 
-                                        const file = new File([blob], filename, { type: mimeType });
-                                        currentForm.audioFile = file;
-                                        console.log('复用任务 - 从后端加载音频文件:', {
-                                            name: file.name,
-                                            type: file.type,
-                                            size: file.size,
-                                            originalBlobType: blob.type
-                                        });
-                                        // 使用FileReader生成data URL，与正常上传保持一致
-                                        const reader = new FileReader();
-                                        reader.onload = (e) => {
-                                            setCurrentAudioPreview(e.target.result);
-                                            console.log('复用任务 - 音频预览已设置:', e.target.result.substring(0, 50) + '...');
-                                        };
-                                        reader.readAsDataURL(file);
-                                    }
-                                } catch (error) {
-                                    console.warn('Failed to load audio file:', error);
+                                    const file = new File([blob], filename, { type: mimeType });
+                                    currentForm.audioFile = file;
+                                    console.log('复用任务 - 从后端加载音频文件:', {
+                                        name: file.name,
+                                        type: file.type,
+                                        size: file.size,
+                                        originalBlobType: blob.type
+                                    });
                                 }
+                            } catch (error) {
+                                console.warn('Failed to load audio file:', error);
                             }
-                        } catch (error) {
-                            console.warn('Failed to load task data from backend:', error);
-                    }
+                        }
+                    } catch (error) {
+                        console.warn('Failed to load task data from backend:', error);
+                }
 
                     showAlert(t('taskMaterialReuseSuccessAlert'), 'success');
 
-                    // 检查当前路由，如果已经在 generate 页面，则滚动到生成区域
-                    const currentRoute = router.currentRoute.value;
-                    if (currentRoute.path === '/generate') {
-                        // 关闭任务详情弹窗
-                        if (showTaskDetailModal.value) {
-                            closeTaskDetailModal();
-                        }
-                        // 等待 DOM 更新后滚动到生成区域
-                        await nextTick();
-                        const creationArea = document.querySelector('#task-creator');
-                        if (creationArea) {
-                            creationArea.scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'start'
-                            });
-                        }
-                    } else {
-                        // 不在 generate 页面，跳转过去
-                    switchToCreateView();
+            } catch (error) {
+                console.error('Failed to reuse task:', error);
+                showAlert(t('loadTaskDataFailedAlert'), 'danger');
+            } finally {
+                templateLoading.value = false;
+                templateLoadingMessage.value = '';
+            }
+        };
+
+        const downloadFile = async (fileInfo) => {
+            if (!fileInfo || !fileInfo.blob) {
+                showAlert(t('fileUnavailableAlert'), 'danger');
+                return false;
+            }
+
+            const blob = fileInfo.blob;
+            const fileName = fileInfo.name || 'download';
+            const mimeType = blob.type || fileInfo.mimeType || 'application/octet-stream';
+            const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+            if (isMobile && typeof navigator?.canShare === 'function' && typeof navigator?.share === 'function') {
+                try {
+                    const shareFile = new File([blob], fileName, { type: mimeType });
+                    if (navigator.canShare({ files: [shareFile] })) {
+                        await navigator.share({
+                            files: [shareFile],
+                            title: fileName
+                        });
+                        showAlert(t('downloadSuccessAlert'), 'success');
+                        return true;
                     }
                 } catch (error) {
-                    console.error('Failed to reuse task:', error);
-                    showAlert(t('loadTaskDataFailedAlert'), 'danger');
+                    if (error?.name === 'AbortError') {
+                        console.info('User cancelled share dialog');
+                        showAlert(t('downloadCancelledAlert'), 'info');
+                        return false;
+                    }
+                    console.warn('Native share failed, falling back to download link:', error);
                 }
-            };
+            }
 
-            const downloadFile = (fileInfo) => {
-                if (!fileInfo || !fileInfo.blob) {
-                    showAlert(t('fileUnavailableAlert'), 'danger');
+            try {
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objectUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(objectUrl);
+                showAlert(t('downloadSuccessAlert'), 'success');
+                return true;
+            } catch (error) {
+                console.error('Download failed:', error);
+                showAlert(t('downloadFailedAlert'), 'danger');
+                return false;
+            }
+        };
+
+        // 处理文件下载
+        const handleDownloadFile = async (taskId, fileKey, fileName) => {
+            if (downloadLoading.value) {
+                showAlert(t('downloadInProgressNotice'), 'info');
+                return;
+            }
+
+            downloadLoading.value = true;
+            downloadLoadingMessage.value = t('downloadPreparing');
+
+            try {
+                console.log('开始下载文件:', { taskId, fileKey, fileName });
+
+                // 处理文件名，确保有正确的后缀名
+                let finalFileName = fileName;
+                if (fileName && typeof fileName === 'string') {
+                    const hasExtension = /\.[a-zA-Z0-9]+$/.test(fileName);
+                    if (!hasExtension) {
+                        const extension = getFileExtension(fileKey);
+                        finalFileName = `${fileName}.${extension}`;
+                        console.log('添加后缀名:', finalFileName);
+                    }
+                } else {
+                    finalFileName = `${fileKey}.${getFileExtension(fileKey)}`;
+                }
+
+                downloadLoadingMessage.value = t('downloadFetching');
+
+                let downloadUrl = null;
+
+                const cachedData = getTaskFileFromCache(taskId, fileKey);
+                if (cachedData?.url) {
+                    downloadUrl = cachedData.url;
+                }
+
+                if (!downloadUrl) {
+                    downloadUrl = await getTaskFileUrl(taskId, fileKey);
+                }
+
+                if (!downloadUrl) {
+                    throw new Error('无法获取文件URL');
+                }
+
+                const response = await fetch(downloadUrl);
+                if (!response.ok) {
+                    throw new Error(`文件响应失败: ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+                if (isMobileBrowser) {
+                    downloadLoadingMessage.value = '';
+                    downloadLoading.value = false;
+                    showAlert(t('mobileSaveToAlbumTip'), 'info');
+
+                    const blobUrl = URL.createObjectURL(blob);
+                    const previewWindow = window.open('', '_blank', 'noopener,noreferrer');
+
+                    if (previewWindow) {
+                        previewWindow.document.write(`<!DOCTYPE html>
+<html lang="${locale.value || 'en'}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${t('mobileSavePreviewTitle')}</title>
+  <style>
+    body { margin: 0; background: #000; color: #fff; font-family: system-ui, sans-serif; }
+    .wrapper { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 16px; }
+    video { width: 100%; height: auto; border-radius: 16px; max-height: calc(100vh - 160px); }
+    p { text-align: center; line-height: 1.5; font-size: 15px; color: rgba(255,255,255,0.85); }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <video controls playsinline webkit-playsinline preload="auto" src="${blobUrl}"></video>
+    <p>${t('mobileSaveInstruction')}</p>
+  </div>
+  <script>
+    window.addEventListener('pagehide', () => URL.revokeObjectURL('${blobUrl}'));
+    window.addEventListener('beforeunload', () => URL.revokeObjectURL('${blobUrl}'));
+  </script>
+</body>
+</html>`);
+                        previewWindow.document.close();
+                    } else {
+                        URL.revokeObjectURL(blobUrl);
+                        window.location.href = downloadUrl;
+                    }
                     return;
                 }
 
-                try {
-                    const url = URL.createObjectURL(fileInfo.blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = fileInfo.name || 'download';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    showAlert(t('downloadSuccessAlert'), 'success');
-                } catch (error) {
-                    console.error('Download failed:', error);
-                    showAlert(t('downloadFailedAlert'), 'danger');
-                }
-            };
-
-
-            // 处理文件下载
-            const handleDownloadFile = async (taskId, fileKey, fileName) => {
-                try {
-                    console.log('开始下载文件:', { taskId, fileKey, fileName })
-
-                    // 处理文件名，确保有正确的后缀名
-                    let finalFileName = fileName
-                    if (fileName && typeof fileName === 'string') {
-                        // 检查是否已有后缀名
-                        const hasExtension = /\.[a-zA-Z0-9]+$/.test(fileName)
-                        if (!hasExtension) {
-                            // 没有后缀名，根据文件类型添加
-                            const extension = getFileExtension(fileKey)
-                            finalFileName = `${fileName}.${extension}`
-                            console.log('添加后缀名:', finalFileName)
-                        }
-                    } else {
-                        // 没有文件名，使用默认名称
-                        finalFileName = `${fileKey}.${getFileExtension(fileKey)}`
-                    }
-
-                    // 先尝试从缓存获取
-                    let fileData = getTaskFileFromCache(taskId, fileKey)
-                    console.log('缓存中的文件数据:', fileData)
-
-                    if (fileData && fileData.blob) {
-                        // 缓存中有blob数据，直接使用
-                        console.log('使用缓存中的文件数据')
-                        downloadFile({ ...fileData, name: finalFileName })
-                        return
-                    }
-
-                    if (fileData && fileData.url) {
-                        // 缓存中有URL，使用URL下载
-                        console.log('使用缓存中的URL下载:', fileData.url)
-                        try {
-                            const response = await fetch(fileData.url)
-                            console.log('文件响应状态:', response.status, response.ok)
-
-                            if (response.ok) {
-                                const blob = await response.blob()
-                                console.log('文件blob大小:', blob.size)
-
-                                const downloadData = {
-                                    blob: blob,
-                                    name: finalFileName
-                                }
-                                console.log('构造的文件数据:', downloadData)
-                                downloadFile(downloadData)
-                                return
-                            } else {
-                                console.error('文件响应失败:', response.status, response.statusText)
-                            }
-                        } catch (error) {
-                            console.error('使用缓存URL下载失败:', error)
-                        }
-                    }
-
-                    if (!fileData) {
-                        console.log('缓存中没有文件，尝试异步获取...')
-                        // 缓存中没有，尝试异步获取
-                        const url = await getTaskFileUrl(taskId, fileKey)
-                        console.log('获取到的文件URL:', url)
-
-                        if (url) {
-                            const response = await fetch(url)
-                            console.log('文件响应状态:', response.status, response.ok)
-
-                            if (response.ok) {
-                                const blob = await response.blob()
-                                console.log('文件blob大小:', blob.size)
-
-                                fileData = {
-                                    blob: blob,
-                                    name: finalFileName
-                                }
-                                console.log('构造的文件数据:', fileData)
-                            } else {
-                                console.error('文件响应失败:', response.status, response.statusText)
-                            }
-                        } else {
-                            console.error('无法获取文件URL')
-                        }
-                    }
-
-                    if (fileData && fileData.blob) {
-                        console.log('开始下载文件:', fileData.name)
-                        downloadFile(fileData)
-                    } else {
-                        console.error('文件数据无效:', fileData)
-                        showAlert(t('fileUnavailableAlert'), 'danger')
-                    }
-                } catch (error) {
-                    console.error('下载失败:', error)
-                    showAlert(t('downloadFailedAlert'), 'danger')
-                }
+                downloadLoadingMessage.value = t('downloadSaving');
+                await downloadFile({
+                    blob,
+                    name: finalFileName,
+                    mimeType: blob.type
+                });
+            } catch (error) {
+                console.error('下载失败:', error);
+                showAlert(t('downloadFailedAlert'), 'danger');
+            } finally {
+                downloadLoading.value = false;
+                downloadLoadingMessage.value = '';
             }
+        }
 
             const viewFile = (fileInfo) => {
                 if (!fileInfo || !fileInfo.url) {
@@ -5075,10 +5117,10 @@
                 }
                 console.log('使用模板:', item);
 
-                try {
-                    // 开始模板加载
-                    templateLoading.value = true;
-                    showAlert('模板加载中...', 'info');
+            try {
+                // 开始模板加载
+                templateLoading.value = true;
+                templateLoadingMessage.value = t('prefillLoadingTemplate');
 
                     // 先设置任务类型
                     selectedTaskId.value = item.task_type;
@@ -5086,12 +5128,18 @@
                     // 获取当前表单
                     const currentForm = getCurrentForm();
 
-                    // 设置表单数据
-                    currentForm.prompt = item.params?.prompt || '';
-                    currentForm.negative_prompt = item.params?.negative_prompt || '';
-                    currentForm.seed = item.params?.seed || 42;
-                    currentForm.model_cls = item.model_cls || '';
-                    currentForm.stage = item.stage || 'single_stage';
+                // 设置表单数据
+                currentForm.prompt = item.params?.prompt || '';
+                currentForm.negative_prompt = item.params?.negative_prompt || '';
+                currentForm.seed = item.params?.seed || 42;
+                currentForm.model_cls = item.model_cls || '';
+                currentForm.stage = item.stage || 'single_stage';
+
+                // 立即关闭模板详情并切换到创建视图，后续资源异步加载
+                showTemplateDetailModal.value = false;
+                selectedTemplate.value = null;
+                isCreationAreaExpanded.value = true;
+                switchToCreateView();
 
                     // 创建加载Promise数组
                     const loadingPromises = [];
@@ -5191,28 +5239,21 @@
                         loadingPromises.push(audioLoadPromise);
                     }
 
-                    // 等待所有文件加载完成
-                    if (loadingPromises.length > 0) {
-                        await Promise.all(loadingPromises);
-                    }
-
-                    // 关闭模板详情弹窗（不跳转路由）
-                    showTemplateDetailModal.value = false;
-                    selectedTemplate.value = null;
-
-                    // 切换到创建视图
-                    isCreationAreaExpanded.value=true;
-                    switchToCreateView();
-
-                    showAlert(`模板加载完成`, 'success');
-                } catch (error) {
-                    console.error('应用模板失败:', error);
-                    showAlert(`应用模板失败: ${error.message}`, 'danger');
-                } finally {
-                    // 结束模板加载
-                    templateLoading.value = false;
+                // 等待所有文件加载完成
+                if (loadingPromises.length > 0) {
+                    await Promise.all(loadingPromises);
                 }
-            };
+
+                showAlert(`模板加载完成`, 'success');
+            } catch (error) {
+                console.error('应用模板失败:', error);
+                showAlert(`应用模板失败: ${error.message}`, 'danger');
+            } finally {
+                // 结束模板加载
+                templateLoading.value = false;
+                templateLoadingMessage.value = '';
+            }
+        };
 
             // 加载更多灵感
             const loadMoreInspiration = () => {
@@ -5606,25 +5647,95 @@
                     const shuffled = [...featuredTemplates.value].sort(() => 0.5 - Math.random());
                     const randomTemplates = shuffled.slice(0, count);
 
-                    return randomTemplates;
-                } catch (error) {
-                    console.error('获取随机精选模版失败:', error);
-                    return [];
-                } finally {
-                    featuredTemplatesLoading.value = false;
-                }
-            };
+                return randomTemplates;
+            } catch (error) {
+                console.error('获取随机精选模版失败:', error);
+                return [];
+            } finally {
+                featuredTemplatesLoading.value = false;
+            }
+        };
+        const removeTtsHistoryEntry = (entryId) => {
+            if (!entryId) return;
+            const currentHistory = loadTtsHistory().filter(entry => entry.id !== entryId);
+            saveTtsHistory(currentHistory);
+        };
 
-    export {
-                // 任务类型下拉菜单
-                showTaskTypeMenu,
-                showModelMenu,
-                isLoggedIn,
-                loading,
-                loginLoading,
-                initLoading,
-                downloadLoading,
-                isLoading,
+    const loadTtsHistory = () => {
+        try {
+            const stored = localStorage.getItem('ttsHistory');
+            if (!stored) return [];
+            const parsed = JSON.parse(stored);
+            ttsHistory.value = Array.isArray(parsed) ? parsed : [];
+            return ttsHistory.value;
+        } catch (error) {
+            console.error('加载TTS历史失败:', error);
+            ttsHistory.value = [];
+            return [];
+        }
+    };
+
+    const saveTtsHistory = (historyList) => {
+        try {
+            localStorage.setItem('ttsHistory', JSON.stringify(historyList));
+            ttsHistory.value = historyList;
+        } catch (error) {
+            console.error('保存TTS历史失败:', error);
+        }
+    };
+
+    const addTtsHistoryEntry = (text = '', instruction = '') => {
+        const trimmedText = (text || '').trim();
+        const trimmedInstruction = (instruction || '').trim();
+
+        if (!trimmedText && !trimmedInstruction) {
+            return;
+        }
+
+        const currentHistory = loadTtsHistory();
+
+        const existingIndex = currentHistory.findIndex(entry =>
+            entry.text === trimmedText && entry.instruction === trimmedInstruction
+        );
+
+        const timestamp = new Date().toISOString();
+
+        if (existingIndex !== -1) {
+            const existingEntry = currentHistory.splice(existingIndex, 1)[0];
+            existingEntry.timestamp = timestamp;
+            currentHistory.unshift(existingEntry);
+        } else {
+            currentHistory.unshift({
+                id: Date.now(),
+                text: trimmedText,
+                instruction: trimmedInstruction,
+                timestamp
+            });
+        }
+
+        if (currentHistory.length > 20) {
+            currentHistory.length = 20;
+        }
+
+        saveTtsHistory(currentHistory);
+    };
+
+    const clearTtsHistory = () => {
+        ttsHistory.value = [];
+        localStorage.removeItem('ttsHistory');
+    };
+
+export {
+            // 任务类型下拉菜单
+            showTaskTypeMenu,
+            showModelMenu,
+            isLoggedIn,
+            loading,
+            loginLoading,
+            initLoading,
+            downloadLoading,
+            downloadLoadingMessage,
+            isLoading,
 
                 // 录音相关
                 isRecording,
@@ -5633,303 +5744,311 @@
                 stopRecording,
                 formatRecordingDuration,
 
-                loginWithGitHub,
-                loginWithGoogle,
-                // 短信登录相关
-                phoneNumber,
-                verifyCode,
-                smsCountdown,
-                showSmsForm,
-                sendSmsCode,
-                loginWithSms,
-                handlePhoneEnter,
-                handleVerifyCodeEnter,
-                toggleSmsLogin,
-                submitting,
-                templateLoading,
-                taskSearchQuery,
-                currentUser,
-                models,
-                tasks,
-                alert,
-                showErrorDetails,
-                showFailureDetails,
-                confirmDialog,
-                showConfirmDialog,
-                showTaskDetailModal,
-                modalTask,
-                currentTask,
-                t2vForm,
-                i2vForm,
-                s2vForm,
-                getCurrentForm,
-                i2vImagePreview,
-                s2vImagePreview,
-                s2vAudioPreview,
-                getCurrentImagePreview,
-                getCurrentAudioPreview,
-                setCurrentImagePreview,
-                setCurrentAudioPreview,
-                updateUploadedContentStatus,
-                availableTaskTypes,
-                availableModelClasses,
-                currentTaskHints,
-                currentHintIndex,
-                startHintRotation,
-                stopHintRotation,
-                filteredTasks,
-                selectedTaskId,
-                selectedTask,
-                selectedModel,
-                selectedTaskFiles,
-                loadingTaskFiles,
-                statusFilter,
-                pagination,
-                paginationInfo,
-                currentTaskPage,
-                taskPageSize,
-                taskPageInput,
-                paginationKey,
-                taskMenuVisible,
-                toggleTaskMenu,
-                closeAllTaskMenus,
-                handleClickOutside,
-                showAlert,
-                setLoading,
-                apiCall,
-                logout,
-                login,
-                loadModels,
-                sidebarCollapsed,
-                sidebarWidth,
-                showExpandHint,
-                showGlow,
-                isDefaultStateHidden,
-                hideDefaultState,
-                showDefaultState,
-                isCreationAreaExpanded,
-                hasUploadedContent,
-                isContracting,
-                expandCreationArea,
-                contractCreationArea,
-                taskFileCache,
-                taskFileCacheLoaded,
-                templateFileCache,
-                templateFileCacheLoaded,
-                loadTaskFiles,
-                downloadFile,
-                handleDownloadFile,
-                viewFile,
-                handleImageUpload,
-                selectTask,
-                selectModel,
-                resetForm,
-                triggerImageUpload,
-                triggerAudioUpload,
-                removeImage,
-                removeAudio,
-                handleAudioUpload,
-                loadImageAudioTemplates,
-                selectImageTemplate,
-                selectAudioTemplate,
-                previewAudioTemplate,
-                stopAudioPlayback,
-                setAudioStopCallback,
-                getTemplateFile,
-                imageTemplates,
-                audioTemplates,
-                showImageTemplates,
-                showAudioTemplates,
-                mediaModalTab,
-                templatePagination,
-                templatePaginationInfo,
-                templateCurrentPage,
-                templatePageSize,
-                templatePageInput,
-                templatePaginationKey,
-                imageHistory,
-                audioHistory,
-                showTemplates,
-                showHistory,
-                showPromptModal,
-                promptModalTab,
-                submitTask,
-                fileToBase64,
-                formatTime,
-                refreshTasks,
-                goToPage,
-                jumpToPage,
-                getVisiblePages,
-                goToTemplatePage,
-                jumpToTemplatePage,
-                getVisibleTemplatePages,
-                goToInspirationPage,
-                jumpToInspirationPage,
-                getVisibleInspirationPages,
-                preloadTaskFilesUrl,
-                preloadTemplateFilesUrl,
-                loadTaskFilesFromCache,
-                saveTaskFilesToCache,
-                getTaskFileFromCache,
-                setTaskFileToCache,
-                getTaskFileUrlFromApi,
-                getTaskFileUrlSync,
-                getTemplateFileUrlFromApi,
-                getTemplateFileUrl,
-                getTemplateFileUrlAsync,
-                createTemplateFileUrlRef,
-                createTaskFileUrlRef,
-                loadTemplateFilesFromCache,
-                saveTemplateFilesToCache,
-                loadFromCache,
-                saveToCache,
-                clearAllCache,
-                getStatusBadgeClass,
-                viewSingleResult,
-                cancelTask,
-                resumeTask,
-                deleteTask,
-                startPollingTask,
-                stopPollingTask,
-                reuseTask,
-                showTaskCreator,
-                toggleSidebar,
-                clearPrompt,
-                getTaskItemClass,
-                getStatusIndicatorClass,
-                getTaskTypeBtnClass,
-                getModelBtnClass,
-                getTaskTypeIcon,
-                getTaskTypeName,
-                getPromptPlaceholder,
-                getStatusTextClass,
-                getImagePreview,
-                getTaskInputUrl,
-                getTaskInputImage,
-                getTaskInputAudio,
-                getTaskFileUrl,
-                getHistoryImageUrl,
-                getUserAvatarUrl,
-                getCurrentImagePreviewUrl,
-                getCurrentAudioPreviewUrl,
-                handleThumbnailError,
-                handleImageError,
-                handleImageLoad,
-                handleAudioError,
-                handleAudioLoad,
-                getTaskStatusDisplay,
-                getTaskStatusColor,
-                getTaskStatusIcon,
-                getTaskDuration,
-                getRelativeTime,
-                getTaskHistory,
-                getActiveTasks,
-                getOverallProgress,
-                getProgressTitle,
-                getProgressInfo,
-                getSubtaskProgress,
-                getSubtaskStatusText,
-                formatEstimatedTime,
-                formatDuration,
-                searchTasks,
-                filterTasksByStatus,
-                filterTasksByType,
-                getAlertClass,
-                getAlertBorderClass,
-                getAlertTextClass,
-                getAlertIcon,
-                getAlertIconBgClass,
-                getPromptTemplates,
-                selectPromptTemplate,
-                promptHistory,
-                getPromptHistory,
-                addTaskToHistory,
-                getLocalTaskHistory,
-                selectPromptHistory,
-                clearPromptHistory,
-                getImageHistory,
-                getAudioHistory,
-                selectImageHistory,
-                selectAudioHistory,
-                previewAudioHistory,
-                clearImageHistory,
-                clearAudioHistory,
-                clearLocalStorage,
-                getAudioMimeType,
-                getAuthHeaders,
-                startResize,
-                sidebar,
-                switchToCreateView,
-                switchToProjectsView,
-                switchToInspirationView,
-                switchToLoginView,
-                openTaskDetailModal,
-                closeTaskDetailModal,
-                generateShareUrl,
-                copyShareLink,
-                shareToSocial,
-                openTaskFromRoute,
-                generateTemplateShareUrl,
-                copyTemplateShareLink,
-                shareTemplateToSocial,
-                openTemplateFromRoute,
-                // 灵感广场相关
-                inspirationSearchQuery,
-                selectedInspirationCategory,
-                inspirationItems,
-                InspirationCategories,
-                loadInspirationData,
-                selectInspirationCategory,
-                handleInspirationSearch,
-                loadMoreInspiration,
-                inspirationPagination,
-                inspirationPaginationInfo,
-                // 精选模版相关
-                featuredTemplates,
-                featuredTemplatesLoading,
-                loadFeaturedTemplates,
-                getRandomFeaturedTemplates,
-                inspirationCurrentPage,
-                inspirationPageSize,
-                inspirationPageInput,
-                inspirationPaginationKey,
-                // 工具函数
-                formatDate,
-                // 模板详情弹窗相关
-                showTemplateDetailModal,
-                selectedTemplate,
-                previewTemplateDetail,
-                closeTemplateDetailModal,
-                useTemplate,
-                // 图片放大弹窗相关
-                showImageZoomModal,
-                zoomedImageUrl,
-                showImageZoom,
-                closeImageZoomModal,
-                // 模板素材应用相关
-                applyTemplateImage,
-                applyTemplateAudio,
-                applyTemplatePrompt,
-                copyPrompt,
-                // 视频播放控制
-                playVideo,
-                pauseVideo,
-                toggleVideoPlay,
-                pauseAllVideos,
-                updateVideoIcon,
-                onVideoLoaded,
-                onVideoError,
-                onVideoEnded,
-                applyMobileStyles,
-                handleLoginCallback,
-                init,
-                validateToken,
-                pollingInterval,
-                pollingTasks,
-                apiRequest,
-                // 主题相关
-                theme,
-                initTheme,
-                toggleTheme,
-                getThemeIcon,
-            };
+            loginWithGitHub,
+            loginWithGoogle,
+            // 短信登录相关
+            phoneNumber,
+            verifyCode,
+            smsCountdown,
+            showSmsForm,
+            sendSmsCode,
+            loginWithSms,
+            handlePhoneEnter,
+            handleVerifyCodeEnter,
+            toggleSmsLogin,
+            submitting,
+            templateLoading,
+            templateLoadingMessage,
+            taskSearchQuery,
+            currentUser,
+            models,
+            tasks,
+            alert,
+            showErrorDetails,
+            showFailureDetails,
+            confirmDialog,
+            showConfirmDialog,
+            showTaskDetailModal,
+            modalTask,
+            showVoiceTTSModal,
+            currentTask,
+            t2vForm,
+            i2vForm,
+            s2vForm,
+            getCurrentForm,
+            i2vImagePreview,
+            s2vImagePreview,
+            s2vAudioPreview,
+            getCurrentImagePreview,
+            getCurrentAudioPreview,
+            setCurrentImagePreview,
+            setCurrentAudioPreview,
+            updateUploadedContentStatus,
+            availableTaskTypes,
+            availableModelClasses,
+            currentTaskHints,
+            currentHintIndex,
+            startHintRotation,
+            stopHintRotation,
+            filteredTasks,
+            selectedTaskId,
+            selectedTask,
+            selectedModel,
+            selectedTaskFiles,
+            loadingTaskFiles,
+            statusFilter,
+            pagination,
+            paginationInfo,
+            currentTaskPage,
+            taskPageSize,
+            taskPageInput,
+            paginationKey,
+            taskMenuVisible,
+            toggleTaskMenu,
+            closeAllTaskMenus,
+            handleClickOutside,
+            showAlert,
+            setLoading,
+            apiCall,
+            logout,
+            login,
+            loadModels,
+            sidebarCollapsed,
+            sidebarWidth,
+            showExpandHint,
+            showGlow,
+            isDefaultStateHidden,
+            hideDefaultState,
+            showDefaultState,
+            isCreationAreaExpanded,
+            hasUploadedContent,
+            isContracting,
+            expandCreationArea,
+            contractCreationArea,
+            taskFileCache,
+            taskFileCacheLoaded,
+            templateFileCache,
+            templateFileCacheLoaded,
+            loadTaskFiles,
+            downloadFile,
+            handleDownloadFile,
+            viewFile,
+            handleImageUpload,
+            selectTask,
+            selectModel,
+            resetForm,
+            triggerImageUpload,
+            triggerAudioUpload,
+            removeImage,
+            removeAudio,
+            handleAudioUpload,
+            loadImageAudioTemplates,
+            selectImageTemplate,
+            selectAudioTemplate,
+            previewAudioTemplate,
+            stopAudioPlayback,
+            setAudioStopCallback,
+            getTemplateFile,
+            imageTemplates,
+            audioTemplates,
+            showImageTemplates,
+            showAudioTemplates,
+            mediaModalTab,
+            templatePagination,
+            templatePaginationInfo,
+            templateCurrentPage,
+            templatePageSize,
+            templatePageInput,
+            templatePaginationKey,
+            imageHistory,
+            audioHistory,
+            showTemplates,
+            showHistory,
+            showPromptModal,
+            promptModalTab,
+            submitTask,
+            fileToBase64,
+            formatTime,
+            refreshTasks,
+            goToPage,
+            jumpToPage,
+            getVisiblePages,
+            goToTemplatePage,
+            jumpToTemplatePage,
+            getVisibleTemplatePages,
+            goToInspirationPage,
+            jumpToInspirationPage,
+            getVisibleInspirationPages,
+            preloadTaskFilesUrl,
+            preloadTemplateFilesUrl,
+            loadTaskFilesFromCache,
+            saveTaskFilesToCache,
+            getTaskFileFromCache,
+            setTaskFileToCache,
+            getTaskFileUrlFromApi,
+            getTaskFileUrlSync,
+            getTemplateFileUrlFromApi,
+            getTemplateFileUrl,
+            getTemplateFileUrlAsync,
+            createTemplateFileUrlRef,
+            createTaskFileUrlRef,
+            loadTemplateFilesFromCache,
+            saveTemplateFilesToCache,
+            loadFromCache,
+            saveToCache,
+            clearAllCache,
+            getStatusBadgeClass,
+            viewSingleResult,
+            cancelTask,
+            resumeTask,
+            deleteTask,
+            startPollingTask,
+            stopPollingTask,
+            reuseTask,
+            showTaskCreator,
+            toggleSidebar,
+            clearPrompt,
+            getTaskItemClass,
+            getStatusIndicatorClass,
+            getTaskTypeBtnClass,
+            getModelBtnClass,
+            getTaskTypeIcon,
+            getTaskTypeName,
+            getPromptPlaceholder,
+            getStatusTextClass,
+            getImagePreview,
+            getTaskInputUrl,
+            getTaskInputImage,
+            getTaskInputAudio,
+            getTaskFileUrl,
+            getHistoryImageUrl,
+            getUserAvatarUrl,
+            getCurrentImagePreviewUrl,
+            getCurrentAudioPreviewUrl,
+            handleThumbnailError,
+            handleImageError,
+            handleImageLoad,
+            handleAudioError,
+            handleAudioLoad,
+            getTaskStatusDisplay,
+            getTaskStatusColor,
+            getTaskStatusIcon,
+            getTaskDuration,
+            getRelativeTime,
+            getTaskHistory,
+            getActiveTasks,
+            getOverallProgress,
+            getProgressTitle,
+            getProgressInfo,
+            getSubtaskProgress,
+            getSubtaskStatusText,
+            formatEstimatedTime,
+            formatDuration,
+            searchTasks,
+            filterTasksByStatus,
+            filterTasksByType,
+            getAlertClass,
+            getAlertBorderClass,
+            getAlertTextClass,
+            getAlertIcon,
+            getAlertIconBgClass,
+            getPromptTemplates,
+            selectPromptTemplate,
+            promptHistory,
+            getPromptHistory,
+            addTaskToHistory,
+            getLocalTaskHistory,
+            selectPromptHistory,
+            clearPromptHistory,
+            getImageHistory,
+            getAudioHistory,
+            selectImageHistory,
+            selectAudioHistory,
+            previewAudioHistory,
+            clearImageHistory,
+            clearAudioHistory,
+            clearLocalStorage,
+            getAudioMimeType,
+            getAuthHeaders,
+            startResize,
+            sidebar,
+            switchToCreateView,
+            switchToProjectsView,
+            switchToInspirationView,
+            switchToLoginView,
+            openTaskDetailModal,
+            closeTaskDetailModal,
+            generateShareUrl,
+            copyShareLink,
+            shareToSocial,
+            openTaskFromRoute,
+            generateTemplateShareUrl,
+            copyTemplateShareLink,
+            shareTemplateToSocial,
+            openTemplateFromRoute,
+            // 灵感广场相关
+            inspirationSearchQuery,
+            selectedInspirationCategory,
+            inspirationItems,
+            InspirationCategories,
+            loadInspirationData,
+            selectInspirationCategory,
+            handleInspirationSearch,
+            loadMoreInspiration,
+            inspirationPagination,
+            inspirationPaginationInfo,
+            // 精选模版相关
+            featuredTemplates,
+            featuredTemplatesLoading,
+            loadFeaturedTemplates,
+            getRandomFeaturedTemplates,
+            inspirationCurrentPage,
+            inspirationPageSize,
+            inspirationPageInput,
+            inspirationPaginationKey,
+            // 工具函数
+            formatDate,
+            // 模板详情弹窗相关
+            showTemplateDetailModal,
+            selectedTemplate,
+            previewTemplateDetail,
+            closeTemplateDetailModal,
+            useTemplate,
+            // 图片放大弹窗相关
+            showImageZoomModal,
+            zoomedImageUrl,
+            showImageZoom,
+            closeImageZoomModal,
+            // 模板素材应用相关
+            applyTemplateImage,
+            applyTemplateAudio,
+            applyTemplatePrompt,
+            copyPrompt,
+            // 视频播放控制
+            playVideo,
+            pauseVideo,
+            toggleVideoPlay,
+            pauseAllVideos,
+            updateVideoIcon,
+            onVideoLoaded,
+            onVideoError,
+            onVideoEnded,
+            applyMobileStyles,
+            handleLoginCallback,
+            init,
+            validateToken,
+            pollingInterval,
+            pollingTasks,
+            apiRequest,
+            // 主题相关
+            theme,
+            initTheme,
+            toggleTheme,
+            getThemeIcon,
+            loadTtsHistory,
+            removeTtsHistoryEntry,
+            ttsHistory,
+            addTtsHistoryEntry,
+            saveTtsHistory,
+            clearTtsHistory,
+        };
