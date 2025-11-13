@@ -856,17 +856,22 @@ onUnmounted(() => {
 
 </script>
 <template>
-    <div v-if="templateLoading" class="fixed inset-0 z-[120] flex justify-center items-center bg-black/10 dark:bg-black/30 pointer-events-none backdrop-blur-sm">
-        <div class="pointer-events-auto px-5 py-3 rounded-2xl bg-white/85 dark:bg-[#2c2c2e]/85 border border-black/10 dark:border-white/10 backdrop-blur-[14px] shadow-[0_16px_40px_rgba(0,0,0,0.18)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] flex items-center gap-2 text-sm text-[#1d1d1f] dark:text-[#f5f5f7]">
-            <i class="fas fa-spinner fa-spin text-base text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-            <span>{{ templateLoadingMessage || t('prefillLoadingDefault') }}</span>
+    <div
+      v-if="templateLoading || downloadLoading"
+      class="fixed right-6 top-24 sm:top-20 z-[9999] w-auto min-w-[260px] sm:min-w-[300px] max-w-[calc(100vw-2.5rem)] sm:max-w-md px-4 sm:px-5 transition-all duration-300 ease-out"
+    >
+      <div
+        class="pointer-events-auto text-[#1d1d1f] bg-white/95 dark:text-white dark:bg-[#0d0d12]/90 backdrop-blur-[20px] backdrop-saturate-[180%] border border-black/8 dark:border-white/8 rounded-2xl shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1),0_2px_4px_-1px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.05)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.6),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.06)]"
+      >
+        <div class="flex items-center gap-3 px-5 py-3">
+          <div class="flex items-center justify-center w-9 h-9 rounded-full bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]">
+            <i class="fas fa-spinner fa-spin text-sm"></i>
+          </div>
+          <div class="flex-1 text-sm font-medium tracking-tight">
+            {{ templateLoading ? (templateLoadingMessage || t('prefillLoadingDefault')) : (downloadLoadingMessage || t('downloadPreparing')) }}
+          </div>
         </div>
-    </div>
-    <div v-else-if="downloadLoading" class="fixed inset-0 z-[120] flex justify-center items-center bg-black/10 dark:bg-black/30 pointer-events-none backdrop-blur-sm">
-        <div class="pointer-events-auto px-5 py-3 rounded-2xl bg-white/85 dark:bg-[#2c2c2e]/85 border border-black/10 dark:border-white/10 backdrop-blur-[14px] shadow-[0_16px_40px_rgba(0,0,0,0.18)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] flex items-center gap-2 text-sm text-[#1d1d1f] dark:text-[#f5f5f7]">
-            <i class="fas fa-spinner fa-spin text-base text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-            <span>{{ downloadLoadingMessage || t('downloadPreparing') }}</span>
-        </div>
+      </div>
     </div>
                 <!-- 主内容区域 - 响应式布局 -->
                 <div class="flex-1 flex flex-col min-h-0 mobile-content">

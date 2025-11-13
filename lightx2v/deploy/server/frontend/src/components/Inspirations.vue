@@ -43,7 +43,7 @@ import {
             onVideoEnded,
             openTemplateFromRoute,
             copyShareLink,
-            isLoading
+            isPageLoading
         } from '../utils/other'
 
 // 监听模板详情路由
@@ -202,8 +202,8 @@ onMounted(() => {
                                         </div>
 
                 <!-- 灵感内容网格 - Apple 风格 -->
-                <div class="relative">
-                    <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                <div class="space-y-4">
+                    <div v-if="isPageLoading" class="flex items-center justify-center">
                         <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/90 dark:bg-[#2c2c2e]/90 border border-black/8 dark:border-white/8 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] shadow-[0_4px_16px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
                             <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
                             <span>{{ t('loading') }}</span>

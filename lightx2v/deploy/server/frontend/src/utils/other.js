@@ -12,6 +12,7 @@ export const locale = i18n.global.locale
         const downloadLoading = ref(false);
         const downloadLoadingMessage = ref('');
         const isLoading = ref(false); // 页面加载loading状态
+        const isPageLoading = ref(false); // 分页加载loading状态
 
         // 录音相关状态
         const isRecording = ref(false);
@@ -2147,15 +2148,15 @@ export const locale = i18n.global.locale
 
         // 分页相关函数
         const goToPage = async (page) => {
-            isLoading.value = true;
+            isPageLoading.value = true;
             if (page < 1 || page > pagination.value?.total_pages || page === currentTaskPage.value) {
-                isLoading.value = false;
+                isPageLoading.value = false;
                 return;
             }
             currentTaskPage.value = page;
             taskPageInput.value = page; // 同步更新输入框
             await refreshTasks();
-            isLoading.value = false;
+            isPageLoading.value = false;
         };
 
         const jumpToPage = async () => {
@@ -2170,15 +2171,15 @@ export const locale = i18n.global.locale
 
         // Template分页相关函数
         const goToTemplatePage = async (page) => {
-            isLoading.value=true;
+            isPageLoading.value=true;
             if (page < 1 || page > templatePagination.value?.total_pages || page === templateCurrentPage.value) {
-                isLoading.value = false;
+                isPageLoading.value = false;
                 return;
             }
             templateCurrentPage.value = page;
             templatePageInput.value = page; // 同步更新输入框
             await loadImageAudioTemplates();
-            isLoading.value = false;
+            isPageLoading.value = false;
         };
 
         const jumpToTemplatePage = async () => {
@@ -2283,15 +2284,15 @@ export const locale = i18n.global.locale
 
         // 灵感广场分页相关函数
         const goToInspirationPage = async (page) => {
-            isLoading.value = true;
+            isPageLoading.value = true;
             if (page < 1 || page > inspirationPagination.value?.total_pages || page === inspirationCurrentPage.value) {
-                isLoading.value = false;
+                isPageLoading.value = false;
                 return;
             }
             inspirationCurrentPage.value = page;
             inspirationPageInput.value = page; // 同步更新输入框
             await loadInspirationData();
-            isLoading.value = false;
+            isPageLoading.value = false;
         };
 
         const jumpToInspirationPage = async () => {
@@ -4781,10 +4782,10 @@ export const locale = i18n.global.locale
 
         // 选择分类
         const selectInspirationCategory = async (category) => {
-            isLoading.value = true;
+            isPageLoading.value = true;
             // 如果点击的是当前分类，不重复请求
             if (selectedInspirationCategory.value === category) {
-                isLoading.value = false;
+                isPageLoading.value = false;
                 return;
             }
 
@@ -4801,7 +4802,7 @@ export const locale = i18n.global.locale
 
             // 重新加载数据
             await loadInspirationData(); // 强制刷新，不使用缓存
-            isLoading.value = false;
+            isPageLoading.value = false;
         };
 
         // 搜索防抖定时器
@@ -4827,7 +4828,7 @@ export const locale = i18n.global.locale
 
                 // 重新加载数据
                 await loadInspirationData(); // 强制刷新，不使用缓存
-                isLoading.value = false;
+                isPageLoading.value = false;
             }, 500); // 500ms 防抖延迟
         };
 
@@ -6323,6 +6324,7 @@ export {
             downloadLoading,
             downloadLoadingMessage,
             isLoading,
+            isPageLoading,
 
             // 录音相关
             isRecording,

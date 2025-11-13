@@ -36,6 +36,7 @@ import {
     mediaModalTab,
     getImageHistory,
     getAudioHistory,
+    isPageLoading
 } from '../utils/other'
 
 // 格式化音频时长
@@ -147,7 +148,7 @@ watch(audioTemplates, (newTemplates) => {
                             <div v-if="showImageTemplates || showAudioTemplates"
                                 class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center"
                                 @click="showImageTemplates = false; showAudioTemplates = false">
-                                <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] backdrop-saturate-[180%] border border-black/8 dark:border-white/8 rounded-3xl px-10 py-8 max-w-4xl w-full mx-6 h-[90vh] overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
+                                <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[20px] backdrop-saturate-[180%] border border-black/8 dark:border-white/8 rounded-3xl px-8 py-8 max-w-4xl w-full mx-6 h-[90vh] overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
                                     @click.stop>
                                     <!-- 浮窗头部 - Apple 风格 -->
                                     <div class="flex items-center justify-between mb-8">
@@ -271,27 +272,35 @@ watch(audioTemplates, (newTemplates) => {
                                                 </div>
                                             </div>
                                          <div class="overflow-y-auto flex-1 max-h-[60vh] main-scrollbar pr-2 pt-2">
-                                         <div v-if="imageTemplates.length > 0" class="columns-2 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 px-1">
-                                            <div v-for="template in imageTemplates" :key="template.filename"
-                                                @click="selectImageTemplate(template)"
-                                                class="break-inside-avoid mb-4 relative group cursor-pointer rounded-2xl overflow-hidden border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)]">
-                                                    <img :src="getTemplateFileUrl(template.filename,'images')" :alt="template.filename"
-                                                    class="w-full h-auto object-contain" preload="metadata">
+                                            <div class="space-y-4">
+                                                <div v-if="isPageLoading" class="flex items-center justify-center">
+                                                    <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/90 dark:bg-[#2c2c2e]/90 border border-black/8 dark:border-white/8 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] shadow-[0_4px_16px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                                                        <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                        <span>{{ t('loading') }}</span>
+                                                    </div>
+                                                </div>
+                                                <div v-if="imageTemplates.length > 0" class="columns-2 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 px-1">
+                                                    <div v-for="template in imageTemplates" :key="template.filename"
+                                                        @click="selectImageTemplate(template)"
+                                                        class="break-inside-avoid mb-4 relative group cursor-pointer rounded-2xl overflow-hidden border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)]">
+                                                            <img :src="getTemplateFileUrl(template.filename,'images')" :alt="template.filename"
+                                                            class="w-full h-auto object-contain" preload="metadata">
+                                                            <div
+                                                                class="absolute inset-0 bg-black/50 dark:bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                            <i class="fas fa-check text-white text-2xl"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div v-else
+                                                    class="flex flex-col items-center justify-center py-12 text-center">
                                                     <div
-                                                        class="absolute inset-0 bg-black/50 dark:bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                    <i class="fas fa-check text-white text-2xl"></i>
+                                                        class="w-16 h-16 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-full flex items-center justify-center mb-4">
+                                                    <i class="fas fa-image text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-2xl"></i>
+                                                </div>
+                                                    <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-lg font-medium tracking-tight">{{ t('noImageTemplates') }}</p>
                                                 </div>
                                             </div>
-                                        </div>
-                                            <div v-else
-                                                class="flex flex-col items-center justify-center py-12 text-center">
-                                                <div
-                                                    class="w-16 h-16 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-full flex items-center justify-center mb-4">
-                                                <i class="fas fa-image text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-2xl"></i>
-                                            </div>
-                                                <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-lg font-medium tracking-tight">{{ t('noImageTemplates') }}</p>
-                                        </div>
-                                    </div>
+                                         </div>
 
                                     </div>
 
@@ -399,42 +408,50 @@ watch(audioTemplates, (newTemplates) => {
                                                                                         </div>
                                                                                     </div>
                                         <div class="overflow-y-auto flex-1 max-h-[60vh] main-scrollbar pr-2 pt-2">
-                                        <div v-if="audioTemplates.length > 0" class="space-y-3 px-1">
-                                            <div v-for="template in audioTemplates" :key="template.filename"
-                                                @click="selectAudioTemplate(template)"
-                                                class="flex items-center gap-4 p-4 rounded-2xl border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all cursor-pointer bg-white/80 dark:bg-[#2c2c2e]/80 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)] group">
+                                            <div class="space-y-4">
+                                                <div v-if="isPageLoading" class="flex items-center justify-center">
+                                                    <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/90 dark:bg-[#2c2c2e]/90 border border-black/8 dark:border-white/8 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] shadow-[0_4px_16px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                                                        <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                        <span>{{ t('loading') }}</span>
+                                                    </div>
+                                                </div>
+                                                <div v-if="audioTemplates.length > 0" class="space-y-3 px-1">
+                                                    <div v-for="template in audioTemplates" :key="template.filename"
+                                                        @click="selectAudioTemplate(template)"
+                                                        class="flex items-center gap-4 p-4 rounded-2xl border border-black/8 dark:border-white/8 hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all cursor-pointer bg-white/80 dark:bg-[#2c2c2e]/80 hover:bg-white dark:hover:bg-[#3a3a3c] hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)] group">
+                                                            <div
+                                                                class="w-12 h-12 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-xl flex items-center justify-center flex-shrink-0">
+                                                            <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                                                        </div>
+                                                        <div class="flex-1 min-w-0">
+                                                                <div class="text-[#1d1d1f] dark:text-[#f5f5f7] font-medium group-hover:text-[color:var(--brand-primary)] dark:group-hover:text-[color:var(--brand-primary-light)] transition-colors truncate tracking-tight">{{ template.filename }}
+                                                                </div>
+                                                                <div class="text-[#86868b] dark:text-[#98989d] text-sm flex items-center gap-2 tracking-tight">
+                                                                    <span>{{ t('audioTemplates') }}</span>
+                                                                    <span class="text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]">•</span>
+                                                                    <span>{{ getDurationDisplay(template, true) }}</span>
+                                                                </div>
+                                                        </div>
+                                                        <button @click.stop="handleAudioPreview(template, true)"
+                                                                class="px-4 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2 flex-shrink-0 tracking-tight"
+                                                                :class="isPlaying(template, true)
+                                                                    ? 'text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300'
+                                                                    : 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:text-[color:var(--brand-primary)]/80 dark:hover:text-[color:var(--brand-primary-light)]/80'"
+                                                                style="pointer-events: auto;">
+                                                            <i :class="isPlaying(template, true) ? 'fas fa-stop' : 'fas fa-play'"></i>
+                                                            <span class="text-sm font-medium">{{ isPlaying(template, true) ? t('stop')  : t('preview') }}</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div v-else
+                                                    class="flex flex-col items-center justify-center py-12 text-center">
                                                     <div
-                                                        class="w-12 h-12 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-xl flex items-center justify-center flex-shrink-0">
-                                                    <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                                                        class="w-16 h-16 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-full flex items-center justify-center mb-4">
+                                                    <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-2xl"></i>
                                                 </div>
-                                                <div class="flex-1 min-w-0">
-                                                        <div class="text-[#1d1d1f] dark:text-[#f5f5f7] font-medium group-hover:text-[color:var(--brand-primary)] dark:group-hover:text-[color:var(--brand-primary-light)] transition-colors truncate tracking-tight">{{ template.filename }}
-                                                        </div>
-                                                        <div class="text-[#86868b] dark:text-[#98989d] text-sm flex items-center gap-2 tracking-tight">
-                                                            <span>{{ t('audioTemplates') }}</span>
-                                                            <span class="text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]">•</span>
-                                                            <span>{{ getDurationDisplay(template, true) }}</span>
-                                                        </div>
-                                                </div>
-                                                <button @click.stop="handleAudioPreview(template, true)"
-                                                        class="px-4 py-2 rounded-lg transition-all cursor-pointer relative z-10 flex items-center gap-2 flex-shrink-0 tracking-tight"
-                                                        :class="isPlaying(template, true)
-                                                            ? 'text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300'
-                                                            : 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] hover:text-[color:var(--brand-primary)]/80 dark:hover:text-[color:var(--brand-primary-light)]/80'"
-                                                        style="pointer-events: auto;">
-                                                    <i :class="isPlaying(template, true) ? 'fas fa-stop' : 'fas fa-play'"></i>
-                                                    <span class="text-sm font-medium">{{ isPlaying(template, true) ? t('stop')  : t('preview') }}</span>
-                                                </button>
+                                                <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-lg font-medium tracking-tight">目前暂无音频模板</p>
                                             </div>
-                                        </div>
-                                            <div v-else
-                                                class="flex flex-col items-center justify-center py-12 text-center">
-                                                <div
-                                                    class="w-16 h-16 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 rounded-full flex items-center justify-center mb-4">
-                                                <i class="fas fa-music text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-2xl"></i>
                                             </div>
-                                            <p class="text-[#1d1d1f] dark:text-[#f5f5f7] text-lg font-medium tracking-tight">目前暂无音频模板</p>
-                                        </div>
                                         </div>
 
                                         </div>
