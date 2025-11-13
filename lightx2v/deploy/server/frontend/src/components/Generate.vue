@@ -1205,7 +1205,7 @@ onUnmounted(() => {
                                             <textarea v-model="getCurrentForm().prompt"
                                                 class="relative w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] transition-all duration-200 resize-none main-scrollbar placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)]"
                                                 :placeholder="getPromptPlaceholder()"
-                                                rows="1"
+                                                rows="2"
                                                 maxlength="1000"
                                                 required></textarea>
                                         </div>
