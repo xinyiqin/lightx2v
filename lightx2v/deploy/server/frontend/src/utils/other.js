@@ -89,7 +89,7 @@ export const locale = i18n.global.locale
         // 灵感广场分页相关变量
         const inspirationPagination = ref(null);
         const inspirationCurrentPage = ref(1);
-        const inspirationPageSize = ref(12);
+        const inspirationPageSize = ref(20);
         const inspirationPageInput = ref(1);
         const inspirationPaginationKey = ref(0);
 
@@ -133,7 +133,7 @@ export const locale = i18n.global.locale
         // Template分页相关变量
         const templatePagination = ref(null);
         const templateCurrentPage = ref(1);
-        const templatePageSize = ref(12); // 图片模板每页12个，音频模板每页10个
+        const templatePageSize = ref(20); // 图片模板每页12个，音频模板每页10个
         const templatePageInput = ref(1);
         const templatePaginationKey = ref(0);
         const imageHistory = ref([]);
@@ -154,7 +154,7 @@ export const locale = i18n.global.locale
         const statusFilter = ref('ALL');
         const pagination = ref(null);
         const currentTaskPage = ref(1);
-        const taskPageSize = ref(12);
+        const taskPageSize = ref(20);
         const taskPageInput = ref(1);
         const paginationKey = ref(0); // 用于强制刷新分页组件
         const taskMenuVisible = ref({}); // 管理每个任务的菜单显示状态
@@ -4152,10 +4152,9 @@ export const locale = i18n.global.locale
                 // 按时间戳排序，最新的在前
                 uniqueImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-                const result = uniqueImages.slice(0, 20); // 只显示最近20条
-                imageHistory.value = result;
-                console.log('从任务列表获取图片历史:', result.length, '条');
-                return result;
+                imageHistory.value = uniqueImages;
+                console.log('从任务列表获取图片历史:', uniqueImages.length, '条');
+                return uniqueImages;
             } catch (error) {
                 console.error('获取图片历史失败:', error);
                 imageHistory.value = [];
@@ -4179,13 +4178,15 @@ export const locale = i18n.global.locale
                     if (task.inputs && task.inputs.input_audio && !seenAudios.has(task.inputs.input_audio)) {
                         // 获取音频URL
                         const audioUrl = await getTaskFileUrl(task.task_id, 'input_audio');
+                        const imageUrl = task.inputs.input_image ? await getTaskFileUrl(task.task_id, 'input_image') : null;
                         if (audioUrl) {
                             uniqueAudios.push({
                                 filename: task.inputs.input_audio,
                                 url: audioUrl,
                                 taskId: task.task_id,
                                 timestamp: task.create_t,
-                                taskType: task.task_type
+                                taskType: task.task_type,
+                                imageUrl
                             });
                             seenAudios.add(task.inputs.input_audio);
                         }
@@ -4195,10 +4196,9 @@ export const locale = i18n.global.locale
                 // 按时间戳排序，最新的在前
                 uniqueAudios.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-                const result = uniqueAudios.slice(0, 20); // 只显示最近20条
-                audioHistory.value = result;
-                console.log('从任务列表获取音频历史:', result.length, '条');
-                return result;
+                audioHistory.value = uniqueAudios;
+                console.log('从任务列表获取音频历史:', uniqueAudios.length, '条');
+                return uniqueAudios;
             } catch (error) {
                 console.error('获取音频历史失败:', error);
                 audioHistory.value = [];

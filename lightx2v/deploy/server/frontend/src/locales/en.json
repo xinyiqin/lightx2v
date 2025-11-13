@@ -90,7 +90,7 @@
     "noPrompt": "No Prompt",
     "uploadMaterials": "Upload Materials",
     "image": "Image",
-    "audioFile": "Audio File",
+    "historyAudio": "History Audio",
     "myProjects": "My Projects",
     "initializationFailed": "Initialization Failed, Please Refresh The Page",
     "browserNotSupported": "Browser Not Supported",
