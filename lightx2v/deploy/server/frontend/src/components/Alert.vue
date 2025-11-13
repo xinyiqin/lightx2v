@@ -8,8 +8,27 @@ const { t, locale } = useI18n()
 // 处理操作按钮点击
 const handleActionClick = () => {
     if (alert.value.action && alert.value.action.onClick) {
+        // 先执行action的回调
         alert.value.action.onClick()
+        // 立即关闭alert
         alert.value.show = false
+    }
+}
+
+// 处理transition离开完成后的回调
+const handleAfterLeave = () => {
+    // 只有在alert确实关闭时才重置，避免覆盖正在显示的alert
+    if (alert.value && !alert.value.show) {
+        // 记录当前alert的时间戳，用于后续检查
+        const currentTimestamp = alert.value._timestamp
+        
+        // 延迟一小段时间再重置，确保不会影响后续的alert显示
+        setTimeout(() => {
+            // 只有当alert仍然关闭，且时间戳没有变化（没有新alert创建）时才重置
+            if (alert.value && !alert.value.show && alert.value._timestamp === currentTimestamp) {
+                alert.value = { show: false, message: '', type: 'info', action: null }
+            }
+        }, 50)
     }
 }
 
@@ -18,6 +37,7 @@ const alertPosition = ref({ top: '1rem' })
 
 // 防抖函数
 let scrollTimeout = null
+let scrollContainer = null
 
 // 监听滚动事件，动态调整Alert位置
 const handleScroll = () => {
@@ -28,7 +48,14 @@ const handleScroll = () => {
 
     // 设置新的定时器，防抖处理
     scrollTimeout = setTimeout(() => {
-        const scrollY = window.scrollY
+        // 获取实际的滚动容器
+        const mainScrollable = scrollContainer || document.querySelector('.main-scrollbar')
+        if (!mainScrollable) {
+            alertPosition.value = { top: '1rem' }
+            return
+        }
+
+        const scrollY = mainScrollable.scrollTop
         const viewportHeight = window.innerHeight
 
         // 如果用户滚动了超过50px，将Alert显示在视口内
@@ -44,12 +71,24 @@ const handleScroll = () => {
 }
 
 onMounted(() => {
+    // 查找实际的滚动容器
+    scrollContainer = document.querySelector('.main-scrollbar')
+    
+    if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, { passive: true })
+    }
+    
+    // 也监听 window 的滚动（作为后备）
     window.addEventListener('scroll', handleScroll, { passive: true })
+    
     // 初始化时也调用一次，确保位置正确
     handleScroll()
 })
 
 onUnmounted(() => {
+    if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', handleScroll)
+    }
     window.removeEventListener('scroll', handleScroll)
     if (scrollTimeout) {
         clearTimeout(scrollTimeout)
@@ -63,7 +102,8 @@ onUnmounted(() => {
                     enter-active-class="alert-enter-active"
                     leave-active-class="alert-leave-active"
                     enter-from-class="alert-enter-from"
-                    leave-to-class="alert-leave-to">
+                    leave-to-class="alert-leave-to"
+                    @after-leave="handleAfterLeave">
                     <div v-if="alert.show"
                         :key="alert._timestamp || alert.message"
                         class="fixed right-6 z-[9999] w-auto min-w-[260px] sm:min-w-[300px] max-w-[calc(100vw-2.5rem)] sm:max-w-md px-4 sm:px-5 transition-all duration-500 ease-out"
@@ -74,18 +114,21 @@ onUnmounted(() => {
                                 <div class="alert-icon-wrapper">
                                     <i :class="getAlertIcon(alert.type)" class="alert-icon"></i>
                                 </div>
-                                <!-- 消息文本和操作按钮（一行显示） -->
+                                <!-- 消息文本 -->
                                 <div class="alert-message">
                                     <span>{{ alert.message }}</span>
+                                </div>
+                                <!-- 操作按钮和关闭按钮（右侧，紧挨着） -->
+                                <div class="alert-actions">
                                     <!-- 操作链接 - Apple 风格 -->
                                     <button v-if="alert.action" @click="handleActionClick" class="alert-action-link">
                                         {{ alert.action.label }}
                                     </button>
+                                    <!-- 关闭按钮 -->
+                                    <button @click="alert.show = false" class="alert-close-btn" aria-label="Close">
+                                        <i class="fas fa-times"></i>
+                                    </button>
                                 </div>
-                                <!-- 关闭按钮 -->
-                                <button @click="alert.show = false" class="alert-close-btn" aria-label="Close">
-                                    <i class="fas fa-times"></i>
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -187,12 +230,13 @@ onUnmounted(() => {
 
 /* 操作链接 - Apple 风格下划线文本 */
 .alert-action-link {
-    display: inline;
+    display: inline-flex;
+    align-items: center;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--brand-primary);
-    font-size: inherit;
+    font-size: 14px;
     font-weight: 600;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -200,6 +244,7 @@ onUnmounted(() => {
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
+    height: 24px; /* 与关闭按钮高度一致 */
 }
 
 .alert-action-link:hover {
@@ -256,6 +301,11 @@ onUnmounted(() => {
 
     .alert-action-link {
         font-size: 13px;
+        height: 22px; /* 移动端稍微小一点 */
+    }
+
+    .alert-actions {
+        gap: 6px; /* 移动端间距更小 */
     }
 }
 </style>

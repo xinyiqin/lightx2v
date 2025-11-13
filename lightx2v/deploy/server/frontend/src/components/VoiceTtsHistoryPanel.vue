@@ -233,17 +233,18 @@ const getEntryVoiceLabel = (entry) => {
             >
               <div class="relative flex-shrink-0">
                 <img
-                 v-if="isFemaleVoice(entry)"
-                  src="../../public/female.svg"
-                  alt="Female Avatar"
-                  class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                />
-                <img
-                  v-else
-                  src="../../public/male.svg"
-                  alt="Male Avatar"
-                  class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                />
+                      v-if="isFemaleVoice(entry)"
+                      src="../../public/female.svg"
+                      alt="Female Avatar"
+                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                    />
+                    <!-- Male Avatar -->
+                    <img
+                      v-else
+                      src="../../public/male.svg"
+                      alt="Male Avatar"
+                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                    />
               </div>
               <div class="flex-1 min-w-0 space-y-1">
                 <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight truncate">

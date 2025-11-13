@@ -1,6 +1,7 @@
 <template>
-  <!-- 模态框容器 - Apple 极简风格 -->
-  <div class="flex flex-col h-full bg-white dark:bg-[#1e1e1e] overflow-hidden">
+  <!-- 模态框遮罩和容器 - Apple 极简风格 -->
+  <div class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-1">
+    <div class="relative w-full h-full max-w-6xl max-h-[100vh] bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col">
     <!-- 模态框头部 - Apple 风格 -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px] flex-shrink-0">
       <div class="flex items-center gap-3">
@@ -9,7 +10,7 @@
           <span>{{ t('voiceSynthesis') }}</span>
         </h3>
         <button
-          @click="requestOpenHistory('combined')"
+          @click="openHistoryPanel"
           class="w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100"
           :title="t('ttsHistoryTitle')"
         >
@@ -194,7 +195,7 @@
               <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('enterTextToConvert') }}</span>
             
             <button
-              @click="requestOpenHistory('text')"
+              @click="openTextHistoryPanel"
               class="w-8 h-8 flex items-center justify-center rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] transition-all duration-200"
               :title="t('ttsHistoryTabText')"
             >
@@ -219,7 +220,7 @@
               <span class="text-xs text-[#86868b] dark:text-[#98989d]">{{ t('voiceInstructionHint') }}</span>
             
             <button
-              @click="requestOpenHistory('instruction')"
+              @click="openInstructionHistoryPanel"
               class="w-8 h-8 flex items-center justify-center rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] transition-all duration-200"
               :title="t('ttsHistoryTabInstruction')"
             >
@@ -231,7 +232,7 @@
             v-model="contextText"
             :placeholder="t('voiceInstructionPlaceholder')"
             class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl px-5 py-3 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)] transition-all duration-200 resize-none"
-            rows="2"
+            rows="3"
           ></textarea>
         </div>
 
@@ -243,7 +244,7 @@
               <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('selectVoice') }}</span>
             
             <button
-              @click="requestOpenHistory('voice')"
+              @click="openVoiceHistoryPanel"
               class="w-8 h-8 flex items-center justify-center rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] transition-all duration-200"
               :title="t('ttsHistoryTabVoice')"
             >
@@ -290,9 +291,13 @@
                 <div
                   class="relative flex items-center p-4 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                   :class="{
-                    'border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.15)] dark:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.2)]': selectedVoice === voice.voice_type
+                    'border-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/12 dark:bg-[color:var(--brand-primary-light)]/20 shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.35)] ring-2 ring-[color:var(--brand-primary)]/20 dark:ring-[color:var(--brand-primary-light)]/30': selectedVoice === voice.voice_type
                   }"
                 >
+                  <!-- 选中指示器 - Apple 风格 -->
+                  <div v-if="selectedVoice === voice.voice_type" class="absolute top-2 left-2 w-5 h-5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full flex items-center justify-center z-10 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]">
+                    <i class="fas fa-check text-white text-[10px]"></i>
+                  </div>
                   <!-- V2 标签 - Apple 风格 -->
                   <div v-if="voice.version === '2.0'" class="absolute top-2 right-2 px-2 py-1 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white text-[10px] font-semibold rounded-md z-10">
                     v2.0
@@ -306,7 +311,6 @@
                       src="../../public/female.svg"
                       alt="Female Avatar"
                       class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                      :class="{ 'opacity-60': selectedVoice === voice.voice_type }"
                     />
                     <!-- Male Avatar -->
                     <img
@@ -314,15 +318,10 @@
                       src="../../public/male.svg"
                       alt="Male Avatar"
                       class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                      :class="{ 'opacity-60': selectedVoice === voice.voice_type }"
                     />
                     <!-- Loading 指示器 - Apple 风格 -->
                     <div v-if="isGenerating && selectedVoice === voice.voice_type" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white z-20">
                       <i class="fas fa-spinner fa-spin text-xs"></i>
-                    </div>
-                    <!-- 设置按钮 - Apple 风格 -->
-                    <div v-if="!isGenerating && selectedVoice === voice.voice_type" @click.stop="toggleControls" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20">
-                      <i class="fas fa-cog text-xs"></i>
                     </div>
                   </div>
 
@@ -344,69 +343,6 @@
                       </span>
                     </div>
                   </div>
-
-                  <!-- TTS 控制面板 - Apple 风格 -->
-                  <div v-if="selectedVoice === voice.voice_type && showControls" class="absolute top-full left-0 right-0 mt-2 bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-50 space-y-3">
-                    <!-- 语速控制 -->
-                    <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('speechRate') }}:</label>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="100"
-                        v-model="speechRate"
-                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                      />
-                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getSpeechRateDisplayValue(speechRate) }}</span>
-                    </div>
-                    <!-- 音量控制 -->
-                    <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('volume') }}:</label>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="100"
-                        v-model="loudnessRate"
-                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                      />
-                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getLoudnessDisplayValue(loudnessRate) }}</span>
-                    </div>
-                    <!-- 音调控制 -->
-                    <div class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('pitch') }}:</label>
-                      <input
-                        type="range"
-                        min="-12"
-                        max="12"
-                        v-model="pitch"
-                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                      />
-                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ getPitchDisplayValue(pitch) }}</span>
-                    </div>
-                    <!-- 情感控制 - 仅当音色支持时显示 -->
-                    <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('emotionIntensity') }}:</label>
-                      <input
-                        type="range"
-                        min="1"
-                        max="5"
-                        v-model="emotionScale"
-                        class="flex-1 h-1 bg-black/8 dark:bg-white/8 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                      />
-                      <span class="text-xs font-medium text-[#1d1d1f] dark:text-[#f5f5f7] w-12 text-right tracking-tight">{{ emotionScale }}</span>
-                    </div>
-                    <div v-if="voice.emotions && voice.emotions.length > 0" class="flex items-center gap-3">
-                      <label class="text-xs font-medium text-[#86868b] dark:text-[#98989d] w-16 tracking-tight">{{ t('emotionType') }}:</label>
-                      <div class="flex-1">
-                        <DropdownMenu
-                          :items="emotionItems"
-                          :selected-value="selectedEmotion"
-                          :placeholder="t('neutral')"
-                          @select-item="handleEmotionSelect"
-                        />
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </label>
             </div>
@@ -416,8 +352,45 @@
     </div>
   </div>
 
+  <VoiceTtsHistoryPanel
+    :visible="showHistoryPanel"
+    :history="ttsHistory"
+    mode="combined"
+    :get-voice-name="getHistoryVoiceName"
+    @close="closeHistoryPanel"
+    @apply="applyCombinedHistoryEntry"
+    @delete="handleDeleteHistoryEntry"
+  />
+
+  <VoiceTtsHistoryPanel
+    :visible="showTextHistoryPanel"
+    :history="ttsHistory"
+    mode="text"
+    @close="closeTextHistoryPanel"
+    @apply="applyTextHistoryEntry"
+  />
+
+  <VoiceTtsHistoryPanel
+    :visible="showInstructionHistoryPanel"
+    :history="ttsHistory"
+    mode="instruction"
+    @close="closeInstructionHistoryPanel"
+    @apply="applyInstructionHistoryEntry"
+  />
+
+  <VoiceTtsHistoryPanel
+    :visible="showVoiceHistoryPanel"
+    :history="ttsHistory"
+    mode="voice"
+    :get-voice-name="getHistoryVoiceName"
+    @close="closeVoiceHistoryPanel"
+    @apply="applyVoiceHistoryEntry"
+  />
+
+
+
   <!-- 筛选面板遮罩 - Apple 风格 -->
-  <div v-if="showFilterPanel" class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" @click="closeFilterPanel">
+  <div v-if="showFilterPanel" class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" @click="closeFilterPanel">
     <div class="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] flex flex-col" @click.stop>
       <!-- 筛选面板头部 - Apple 风格 -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
@@ -524,17 +497,19 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DropdownMenu from './DropdownMenu.vue'
-import { loadTtsHistory, addTtsHistoryEntry, removeTtsHistoryEntry } from '../utils/other'
+import VoiceTtsHistoryPanel from './VoiceTtsHistoryPanel.vue'
+import { ttsHistory, loadTtsHistory, addTtsHistoryEntry, removeTtsHistoryEntry } from '../utils/other'
 
 export default {
   name: 'VoiceTTS',
   components: {
-    DropdownMenu
+    DropdownMenu,
+    VoiceTtsHistoryPanel
   },
-  emits: ['tts-complete', 'close-modal', 'open-history-panel'],
+  emits: ['tts-complete', 'close-modal'],
   setup(props, { emit }) {
     const { t } = useI18n()
     const inputText = ref('')
@@ -550,11 +525,21 @@ export default {
     const isGenerating = ref(false)
     const audioUrl = ref('')
     const currentAudio = ref(null) // 当前播放的音频对象
+    const audioElement = ref(null) // 音频元素引用
+    const isPlaying = ref(false) // 播放状态
+    const audioDuration = ref(0) // 音频总时长
+    const currentTime = ref(0) // 当前播放时间
+    const shouldAutoPlay = ref(false) // 是否需要自动播放
+    const isDragging = ref(false) // 是否正在拖拽进度条
     const voices = ref([])
     const emotions = ref([])
     const voiceListContainer = ref(null)
     const showControls = ref(false)
     const showFilterPanel = ref(false)
+    const showHistoryPanel = ref(false)
+    const showTextHistoryPanel = ref(false)
+    const showInstructionHistoryPanel = ref(false)
+    const showVoiceHistoryPanel = ref(false)
 
     // Category filtering - 存储原始中文值
     const selectedCategory = ref('全部场景')
@@ -604,8 +589,40 @@ export default {
       return map[gender] || gender
     }
 
-    const requestOpenHistory = (mode) => {
-      emit('open-history-panel', mode)
+    const openHistoryPanel = () => {
+      loadTtsHistory()
+      showHistoryPanel.value = true
+    }
+
+    const closeHistoryPanel = () => {
+      showHistoryPanel.value = false
+    }
+
+    const openTextHistoryPanel = () => {
+      loadTtsHistory()
+      showTextHistoryPanel.value = true
+    }
+
+    const openInstructionHistoryPanel = () => {
+      loadTtsHistory()
+      showInstructionHistoryPanel.value = true
+    }
+
+    const openVoiceHistoryPanel = () => {
+      loadTtsHistory()
+      showVoiceHistoryPanel.value = true
+    }
+
+    const closeTextHistoryPanel = () => {
+      showTextHistoryPanel.value = false
+    }
+
+    const closeInstructionHistoryPanel = () => {
+      showInstructionHistoryPanel.value = false
+    }
+
+    const closeVoiceHistoryPanel = () => {
+      showVoiceHistoryPanel.value = false
     }
 
     const handleDeleteHistoryEntry = (entry) => {
@@ -706,31 +723,6 @@ export default {
     })
 
     // Filter voices based on search query, category, version, language, and gender
-    // Emotion items for dropdown
-    const emotionItems = computed(() => {
-      const items = []
-      const selectedVoiceData = voices.value.find(v => v.voice_type === selectedVoice.value)
-      if (selectedVoiceData && selectedVoiceData.emotions && emotions.value.length > 0) {
-        selectedVoiceData.emotions.forEach(emotionName => {
-          // Find the emotion data from emotions array
-          const emotionData = emotions.value.find(emotion => emotion.name === emotionName)
-          if (emotionData) {
-            items.push({ value: emotionName, label: emotionData.zh })
-          } else {
-            // Fallback if emotion not found in emotions data
-            items.push({ value: emotionName, label: emotionName })
-          }
-        })
-      }
-
-      // If no emotions found or no neutral emotion in the list, add neutral as default
-      if (items.length === 0 || !items.find(item => item.value === 'neutral')) {
-        items.unshift({ value: 'neutral', label: t('neutral') })
-      }
-
-      return items
-    })
-
     const filteredVoices = computed(() => {
       let filtered = [...voices.value] // 创建副本，避免修改原始数据
 
@@ -811,10 +803,38 @@ export default {
       return name.toLowerCase().includes('female')
     }
 
+    // Get selected voice data
+    const selectedVoiceData = computed(() => {
+      return voices.value.find(v => v.voice_type === selectedVoice.value)
+    })
+
+    // Emotion items for dropdown
+    const emotionItems = computed(() => {
+      const items = []
+      if (selectedVoiceData.value && selectedVoiceData.value.emotions && emotions.value.length > 0) {
+        selectedVoiceData.value.emotions.forEach(emotionName => {
+          // Find the emotion data from emotions array
+          const emotionData = emotions.value.find(emotion => emotion.name === emotionName)
+          if (emotionData) {
+            items.push({ value: emotionName, label: emotionData.zh })
+          } else {
+            // Fallback if emotion not found in emotions data
+            items.push({ value: emotionName, label: emotionName })
+          }
+        })
+      }
+
+      // If no emotions found or no neutral emotion in the list, add neutral as default
+      if (items.length === 0 || !items.find(item => item.value === 'neutral')) {
+        items.unshift({ value: 'neutral', label: t('neutral') })
+      }
+
+      return items
+    })
+
     // Get available emotions for selected voice
     const availableEmotions = computed(() => {
-      const selectedVoiceData = voices.value.find(v => v.voice_type === selectedVoice.value)
-      return selectedVoiceData?.emotions || []
+      return selectedVoiceData.value?.emotions || []
     })
 
     // Reset scroll position
@@ -839,9 +859,6 @@ export default {
         selectedEmotion.value = ''
       }
 
-      // Reset scroll position when voice is selected
-      resetScrollPosition()
-
       // Auto-generate TTS when voice is selected and text is available
       await generateTTS()
     }
@@ -855,6 +872,10 @@ export default {
       if (!selectedVoice.value) return
 
       // 停止当前播放的音频
+      if (audioElement.value) {
+        audioElement.value.pause()
+        audioElement.value.currentTime = 0
+      }
       if (currentAudio.value) {
         currentAudio.value.pause()
         currentAudio.value.currentTime = 0
@@ -925,16 +946,19 @@ export default {
       nextTick(() => {
         generateTTS()
       })
+      showHistoryPanel.value = false
     }
 
     const applyTextHistoryEntry = (value) => {
       if (!value) return
       inputText.value = value
+      showTextHistoryPanel.value = false
     }
 
     const applyInstructionHistoryEntry = (value) => {
       if (!value) return
       contextText.value = value
+      showInstructionHistoryPanel.value = false
     }
 
     const applyVoiceHistoryEntry = async (voiceType) => {
@@ -949,6 +973,7 @@ export default {
           generateTTS()
         })
       }
+      showVoiceHistoryPanel.value = false
     }
 
     const getHistoryVoiceName = (entry) => {
@@ -1165,12 +1190,25 @@ export default {
       selectedEmotion,
       isGenerating,
       audioUrl,
+      audioElement,
+      isPlaying,
+      audioDuration,
+      currentTime,
+      isDragging,
+      onProgressChange,
+      onProgressEnd,
       voices,
       voiceListContainer,
       showControls,
       showFilterPanel,
       filteredVoices,
       isFemaleVoice,
+      selectedVoiceData,
+      formatAudioTime,
+      toggleAudioPlayback,
+      onAudioLoaded,
+      onTimeUpdate,
+      onAudioEnded,
       availableEmotions,
       onVoiceSelect,
       generateTTS,
@@ -1205,13 +1243,25 @@ export default {
       translateVersion,
       translateLanguage,
       translateGender,
-      requestOpenHistory,
+      ttsHistory,
+      showHistoryPanel,
+      openHistoryPanel,
+      closeHistoryPanel,
       applyCombinedHistoryEntry,
       applyTextHistoryEntry,
       applyInstructionHistoryEntry,
       applyVoiceHistoryEntry,
       getHistoryVoiceName,
-      handleDeleteHistoryEntry
+      handleDeleteHistoryEntry,
+      showTextHistoryPanel,
+      showInstructionHistoryPanel,
+      showVoiceHistoryPanel,
+      openTextHistoryPanel,
+      openInstructionHistoryPanel,
+      openVoiceHistoryPanel,
+      closeTextHistoryPanel,
+      closeInstructionHistoryPanel,
+      closeVoiceHistoryPanel
     }
   }
 }
@@ -1231,5 +1281,14 @@ export default {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* 深色模式下增强滑动条可见性 */
+.dark input[type="range"]::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.dark input[type="range"]::-moz-range-thumb {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
 </style>
