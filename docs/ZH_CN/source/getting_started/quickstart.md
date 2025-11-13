@@ -27,10 +27,10 @@
 
 #### 1. 拉取镜像
 
-访问 LightX2V 的 [Docker Hub](https://hub.docker.com/r/lightx2v/lightx2v/tags)，选择一个最新日期的 tag，比如 `25101501-cu128`：
+访问 LightX2V 的 [Docker Hub](https://hub.docker.com/r/lightx2v/lightx2v/tags)，选择一个最新日期的 tag，比如 `25111101-cu128`：
 
 ```bash
-docker pull lightx2v/lightx2v:25101501-cu128
+docker pull lightx2v/lightx2v:25111101-cu128
 ```
 
 我们推荐使用`cuda128`环境，以获得更快的推理速度，若需要使用`cuda124`环境，可以使用带`-cu124`后缀的镜像版本：
@@ -51,7 +51,7 @@ docker run --gpus all -itd --ipc=host --name [容器名] -v [挂载设置] --ent
 
 ```bash
 # cuda128
-docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25101501-cu128
+docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25111101-cu128
 
 # cuda124
 docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25101501-cu124
@@ -77,14 +77,12 @@ conda create -n lightx2v python=3.11 -y
 conda activate lightx2v
 ```
 
-#### 步骤 3: 安装依赖
+#### 步骤 3: 安装依赖及代码
 
 ```bash
-# 安装基础依赖
-pip install -r requirements.txt
+pip install -v -e .
 ```
 
-> 💡 **提示**: 混元模型需要在 4.45.2 版本的 transformers 下运行，如果您不需要运行混元模型，可以跳过 transformers 版本限制。
 
 #### 步骤 4: 安装注意力机制算子
 
@@ -102,7 +100,20 @@ cd flash-attention/hopper && python setup.py install
 **选项 C: SageAttention 2（推荐）**
 ```bash
 git clone https://github.com/thu-ml/SageAttention.git
-cd SageAttention && python setup.py install
+cd SageAttention && CUDA_ARCHITECTURES="8.0,8.6,8.9,9.0,12.0" EXT_PARALLEL=4 NVCC_APPEND_FLAGS="--threads 8" MAX_JOBS=32 pip install -v -e .
+```
+
+**选项 D: Q8 Kernels**
+```bash
+git clone https://github.com/KONAKONA666/q8_kernels.git
+cd q8_kernels && git submodule init && git submodule update
+python setup.py install
+```
+
+#### 步骤 5: 验证安装
+```python
+import lightx2v
+print(f"LightX2V 版本: {lightx2v.__version__}")
 ```
 
 ## 🪟 Windows 系统环境搭建

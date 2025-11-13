@@ -27,10 +27,10 @@ We strongly recommend using the Docker environment, which is the simplest and fa
 
 #### 1. Pull Image
 
-Visit LightX2V's [Docker Hub](https://hub.docker.com/r/lightx2v/lightx2v/tags), select a tag with the latest date, such as `25101501-cu128`:
+Visit LightX2V's [Docker Hub](https://hub.docker.com/r/lightx2v/lightx2v/tags), select a tag with the latest date, such as `25111101-cu128`:
 
 ```bash
-docker pull lightx2v/lightx2v:25101501-cu128
+docker pull lightx2v/lightx2v:25111101-cu128
 ```
 
 We recommend using the `cuda128` environment for faster inference speed. If you need to use the `cuda124` environment, you can use image versions with the `-cu124` suffix:
@@ -51,7 +51,7 @@ For mainland China, if the network is unstable when pulling images, you can pull
 
 ```bash
 # cuda128
-docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25101501-cu128
+docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25111101-cu128
 
 # cuda124
 docker pull registry.cn-hangzhou.aliyuncs.com/yongyang/lightx2v:25101501-cu124
@@ -80,11 +80,8 @@ conda activate lightx2v
 #### Step 3: Install Dependencies
 
 ```bash
-# Install basic dependencies
-pip install -r requirements.txt
+pip install -v -e .
 ```
-
-> 💡 **Note**: The Hunyuan model needs to run under transformers version 4.45.2. If you don't need to run the Hunyuan model, you can skip the transformers version restriction.
 
 #### Step 4: Install Attention Operators
 
@@ -102,7 +99,21 @@ cd flash-attention/hopper && python setup.py install
 **Option C: SageAttention 2 (Recommended)**
 ```bash
 git clone https://github.com/thu-ml/SageAttention.git
-cd SageAttention && python setup.py install
+cd SageAttention && CUDA_ARCHITECTURES="8.0,8.6,8.9,9.0,12.0" EXT_PARALLEL=4 NVCC_APPEND_FLAGS="--threads 8" MAX_JOBS=32 pip install -v -e .
+```
+
+**Option D: Q8 Kernels**
+```bash
+git clone https://github.com/KONAKONA666/q8_kernels.git
+cd q8_kernels && git submodule init && git submodule update
+python setup.py install
+```
+
+#### Step 5: Verify Installation
+
+```python
+import lightx2v
+print(f"LightX2V Version: {lightx2v.__version__}")
 ```
 
 ## 🪟 Windows Environment Setup
