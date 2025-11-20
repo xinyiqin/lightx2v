@@ -72,9 +72,63 @@ class BaseWorker:
             tmp_audio_path = stream_audio_path
 
         if input_audio_path and self.is_audio_model() and isinstance(tmp_audio_path, str):
-            audio_data = await data_manager.load_bytes(input_audio_path)
-            with open(tmp_audio_path, "wb") as fout:
-                fout.write(audio_data)
+            # Check if input_audio_path is a directory (multi-person mode)
+            # For directory inputs, the path is like "task_id-input_audio" (no extension)
+            # We check if config.json exists in the directory to determine if it's a directory
+            config_path = f"{input_audio_path}/config.json"
+            is_directory = await data_manager.file_exists(config_path)
+            
+            if is_directory:
+                # Multi-person mode: copy entire directory to tmp_dir
+                os.makedirs(tmp_audio_path, exist_ok=True)
+                
+                # List all files in the directory
+                files = await data_manager.list_files(base_dir=input_audio_path)
+                logger.info(f"Found {len(files)} files in directory {input_audio_path}: {files}")
+                
+                # For S3, list_files returns filenames without prefix
+                # For local, list_files returns filenames from os.listdir
+                # We need to construct the full path for load_bytes
+                # The input_audio_path is already relative to data_manager's base (e.g., "task_id-input_audio")
+                # So we can use it directly with filename
+                
+                # Copy each file from data_manager to tmp_dir
+                for filename in files:
+                    if not filename:  # Skip empty filenames
+                        continue
+                    try:
+                        # Construct the full path relative to data_manager's base
+                        file_path = f"{input_audio_path}/{filename}"
+                        file_data = await data_manager.load_bytes(file_path)
+                        tmp_file_path = os.path.join(tmp_audio_path, filename)
+                        with open(tmp_file_path, "wb") as fout:
+                            fout.write(file_data)
+                        logger.info(f"Copied file {filename} to {tmp_file_path} ({len(file_data)} bytes)")
+                    except Exception as e:
+                        logger.error(f"Failed to copy file {filename} from {file_path}: {e}")
+                        # Continue with other files even if one fails
+                
+                # Verify config.json exists after copying
+                config_file_path = os.path.join(tmp_audio_path, "config.json")
+                if not os.path.exists(config_file_path):
+                    logger.error(f"config.json not found after copying! Files in {tmp_audio_path}: {os.listdir(tmp_audio_path) if os.path.exists(tmp_audio_path) else 'directory does not exist'}")
+                    # Try to manually copy config.json as a fallback
+                    try:
+                        config_data = await data_manager.load_bytes(f"{input_audio_path}/config.json")
+                        with open(config_file_path, "wb") as fout:
+                            fout.write(config_data)
+                        logger.info(f"Manually copied config.json to {config_file_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to manually copy config.json: {e}")
+                else:
+                    logger.info(f"Successfully copied config.json to {config_file_path}")
+                
+                logger.info(f"Copied multi-person audio directory from {input_audio_path} to {tmp_audio_path}")
+            else:
+                # Single file mode: load and save as before
+                audio_data = await data_manager.load_bytes(input_audio_path)
+                with open(tmp_audio_path, "wb") as fout:
+                    fout.write(audio_data)
 
         params["audio_path"] = tmp_audio_path
 
@@ -83,7 +137,6 @@ class BaseWorker:
         tmp_video_path = os.path.join(tmp_dir, output_video_path)
         if data_manager.name == "local":
             tmp_video_path = os.path.join(data_manager.local_dir, output_video_path)
-
         # for stream video output, value is dict
         stream_video_path = params.get("output_video", None)
         if stream_video_path is not None:

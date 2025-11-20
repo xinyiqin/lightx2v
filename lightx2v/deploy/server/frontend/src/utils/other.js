@@ -57,12 +57,15 @@ export const locale = i18n.global.locale
         const isCreationAreaExpanded = ref(false);
         const hasUploadedContent = ref(false);
         const isContracting = ref(false);
+        const faceDetecting = ref(false);  // Face detection loading state
+        const audioSeparating = ref(false);  // Audio separation loading state
 
         const showTaskDetailModal = ref(false);
         const modalTask = ref(null);
 
         // TTS 模态框状态
         const showVoiceTTSModal = ref(false);
+        const showPodcastModal = ref(false);
 
         // TaskCarousel当前任务状态
         const currentTask = ref(null);
@@ -109,6 +112,10 @@ export const locale = i18n.global.locale
         const templateFileCache = ref(new Map());
         const templateFileCacheLoaded = ref(false);
 
+        // Podcast 音频 URL 缓存系统（模仿任务文件缓存）
+        const podcastAudioCache = ref(new Map());
+        const podcastAudioCacheLoaded = ref(false);
+
         // 防重复获取的状态管理
         const templateUrlFetching = ref(new Set()); // 正在获取的URL集合
         const taskUrlFetching = ref(new Map()); // 正在获取的任务URL集合
@@ -116,7 +123,9 @@ export const locale = i18n.global.locale
         // localStorage缓存相关常量
         const TASK_FILE_CACHE_KEY = 'lightx2v_task_files';
         const TEMPLATE_FILE_CACHE_KEY = 'lightx2v_template_files';
+        const PODCAST_AUDIO_CACHE_KEY = 'lightx2v_podcast_audio';
         const TASK_FILE_CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24小时过期
+        const PODCAST_AUDIO_CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24小时过期
         const MODELS_CACHE_KEY = 'lightx2v_models';
         const MODELS_CACHE_EXPIRY = 60 * 60 * 1000; // 1小时过期
         const TEMPLATES_CACHE_KEY = 'lightx2v_templates';
@@ -228,7 +237,8 @@ export const locale = i18n.global.locale
             stage: 'multi_stage',
             imageFile: null,
             prompt: '',
-            seed: 42
+            seed: 42,
+            detectedFaces: []  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
         });
 
         const s2vForm = ref({
@@ -238,7 +248,9 @@ export const locale = i18n.global.locale
             imageFile: null,
             audioFile: null,
             prompt: '',
-            seed: 42
+            seed: 42,
+            detectedFaces: [],  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+            separatedAudios: []  // List of separated audio tracks: [{ speaker_id, audio (base64), roleName, ... }]
         });
 
         // 根据当前选择的任务类型获取对应的表单
@@ -1050,19 +1062,55 @@ export const locale = i18n.global.locale
 
                 if (selectedTaskId.value === 'i2v') {
                     i2vForm.value.imageFile = file;
+                    i2vForm.value.detectedFaces = [];  // Reset detected faces
                 } else if (selectedTaskId.value === 's2v') {
                     s2vForm.value.imageFile = file;
+                    s2vForm.value.detectedFaces = [];  // Reset detected faces
                 }
 
-                // 创建预览
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    setCurrentImagePreview(e.target.result);
-                };
-                reader.readAsDataURL(file);
+                // 获取图片的 http/https URL（用于人脸识别和预览）
+                let imageUrl = null;
+                // 优先使用 template.url（如果是 http/https URL）
+                if (template.url && (template.url.startsWith('http://') || template.url.startsWith('https://'))) {
+                    imageUrl = template.url;
+                } else if (template.inputs && template.inputs.input_image) {
+                    // 如果有 inputs.input_image，使用 getTemplateFileUrlAsync 获取 URL
+                    imageUrl = await getTemplateFileUrlAsync(template.inputs.input_image, 'images');
+                } else if (template.filename) {
+                    // 如果有 filename，尝试使用 getTemplateFileUrlAsync
+                    imageUrl = await getTemplateFileUrlAsync(template.filename, 'images');
+                }
 
-                showImageTemplates.value = false;
-                showAlert('图片素材已选择', 'success');
+                // 创建预览（使用 data URL 作为预览，但使用 http/https URL 进行人脸识别）
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const imageDataUrl = e.target.result;
+                    // 如果有 http/https URL，使用它作为预览；否则使用 data URL
+                    setCurrentImagePreview(imageUrl || imageDataUrl);
+                    updateUploadedContentStatus();
+                    
+                    reader.readAsDataURL(file);
+                    showImageTemplates.value = false;
+                    showAlert('图片素材已选择', 'success');
+                    // Auto detect faces after image is loaded (使用 http/https URL)
+                    if (imageUrl) {
+                        try {
+                            await detectFacesInImage(imageUrl);
+                        } catch (error) {
+                            console.error('Face detection failed:', error);
+                            // Don't show error alert, just log it
+                        }
+                    } else {
+                        // 如果没有 http/https URL，回退到使用 data URL
+                        try {
+                            await detectFacesInImage(imageDataUrl);
+                        } catch (error) {
+                            console.error('Face detection failed:', error);
+                            // Don't show error alert, just log it
+                        }
+                    }
+                };
+                
             } catch (error) {
                 showAlert(`加载图片素材失败: ${error.message}`, 'danger');
             }
@@ -1138,23 +1186,291 @@ export const locale = i18n.global.locale
             });
         };
 
-        const handleImageUpload = (event) => {
+        const handleImageUpload = async (event) => {
             const file = event.target.files[0];
             if (file) {
                 if (selectedTaskId.value === 'i2v') {
                     i2vForm.value.imageFile = file;
+                    i2vForm.value.detectedFaces = [];  // Reset detected faces
                 } else if (selectedTaskId.value === 's2v') {
                     s2vForm.value.imageFile = file;
+                    s2vForm.value.detectedFaces = [];  // Reset detected faces
                 }
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    setCurrentImagePreview(e.target.result);
+                reader.onload = async (e) => {
+                    const imageDataUrl = e.target.result;
+                    setCurrentImagePreview(imageDataUrl);
                     updateUploadedContentStatus();
+                    
+                    // Auto detect faces after image is loaded
+                    try {
+                        await detectFacesInImage(imageDataUrl);
+                    } catch (error) {
+                        console.error('Face detection failed:', error);
+                        // Don't show error alert, just log it
+                    }
                 };
                 reader.readAsDataURL(file);
             } else {
                 // 用户取消了选择，保持原有图片不变
                 // 不做任何操作
+            }
+        };
+
+        // Crop face image from original image based on bbox coordinates
+        const cropFaceImage = (imageUrl, bbox) => {
+            return new Promise((resolve, reject) => {
+                // Validate bbox
+                if (!bbox || bbox.length !== 4) {
+                    reject(new Error('Invalid bbox coordinates'))
+                    return
+                }
+                
+                const [x1, y1, x2, y2] = bbox
+                const width = x2 - x1
+                const height = y2 - y1
+                
+                if (width <= 0 || height <= 0) {
+                    reject(new Error(`Invalid bbox dimensions: ${width}x${height}`))
+                    return
+                }
+                
+                const img = new Image()
+                
+                // For data URLs, crossOrigin is not needed
+                if (imageUrl.startsWith('data:')) {
+                    img.onload = () => {
+                        try {
+                            // Create Canvas to crop image
+                            const canvas = document.createElement('canvas')
+                            canvas.width = width
+                            canvas.height = height
+                            const ctx = canvas.getContext('2d')
+                            
+                            // Draw the cropped region to Canvas
+                            ctx.drawImage(
+                                img,
+                                x1, y1, width, height,  // Source image crop region
+                                0, 0, width, height     // Canvas drawing position
+                            )
+                            
+                            // Convert to base64
+                            const base64 = canvas.toDataURL('image/png')
+                            resolve(base64)
+                        } catch (error) {
+                            reject(error)
+                        }
+                    }
+                    img.onerror = (e) => {
+                        reject(new Error('Failed to load image for cropping'))
+                    }
+                    img.src = imageUrl
+                } else {
+                    // For other URLs, set crossOrigin
+                    img.crossOrigin = 'anonymous'
+                    img.onload = () => {
+                        try {
+                            // Create Canvas to crop image
+                            const canvas = document.createElement('canvas')
+                            canvas.width = width
+                            canvas.height = height
+                            const ctx = canvas.getContext('2d')
+                            
+                            // Draw the cropped region to Canvas
+                            ctx.drawImage(
+                                img,
+                                x1, y1, width, height,  // Source image crop region
+                                0, 0, width, height     // Canvas drawing position
+                            )
+                            
+                            // Convert to base64
+                            const base64 = canvas.toDataURL('image/png')
+                            resolve(base64)
+                        } catch (error) {
+                            reject(error)
+                        }
+                    }
+                    img.onerror = (e) => {
+                        reject(new Error('Failed to load image for cropping (CORS or network error)'))
+                    }
+                    img.src = imageUrl
+                }
+            })
+        }
+
+        // Detect faces in uploaded image
+        const detectFacesInImage = async (imageDataUrl) => {
+            try {
+                // 验证输入
+                if (!imageDataUrl || imageDataUrl.trim() === '') {
+                    console.error('detectFacesInImage: imageDataUrl is empty');
+                    return;
+                }
+                
+                faceDetecting.value = true;
+                
+                // Convert blob URL to data URL (backend can't access blob URLs)
+                // For http/https URLs, send directly to backend
+                let imageInput = imageDataUrl;
+                if (imageDataUrl.startsWith('blob:')) {
+                    // Blob URL: convert to data URL since backend can't access blob URLs
+                    try {
+                        const response = await fetch(imageDataUrl);
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch image: ${response.statusText}`);
+                        }
+                        const blob = await response.blob();
+                        imageInput = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(blob);
+                        });
+                    } catch (error) {
+                        console.error('Failed to convert blob URL to data URL:', error);
+                        throw error;
+                    }
+                }
+                // For data URLs and http/https URLs, send directly to backend
+                
+                // 再次验证 imageInput
+                if (!imageInput || imageInput.trim() === '') {
+                    console.error('detectFacesInImage: imageInput is empty after processing');
+                    return;
+                }
+                
+                const response = await apiCall('/api/v1/face/detect', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        image: imageInput
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Face detection failed:', response.status, response.statusText);
+                    return;
+                }
+
+                const data = await response.json();
+                console.log('Face detection response:', data);
+
+                if (data && data.faces) {
+                    // Crop face images for each detected face
+                    // Use the original imageDataUrl for cropping (cropFaceImage can handle both data URLs and regular URLs)
+                    const facesWithImages = await Promise.all(
+                        data.faces.map(async (face, index) => {
+                            try {
+                                // Crop face image from original image based on bbox
+                                const croppedImage = await cropFaceImage(imageDataUrl, face.bbox)
+                                
+                                // Remove data URL prefix, keep only base64 part (consistent with backend format)
+                                // croppedImage is in format: "data:image/png;base64,xxxxx"
+                                let base64Data = croppedImage
+                                if (croppedImage.includes(',')) {
+                                    base64Data = croppedImage.split(',')[1]
+                                }
+                                
+                                if (!base64Data) {
+                                    console.error(`Failed to extract base64 from cropped image for face ${index}`)
+                                    base64Data = null
+                                }
+                                
+                                return {
+                                    ...face,
+                                    face_image: base64Data,  // Base64 encoded face region image (without data URL prefix)
+                                    roleName: `角色${index + 1}`,
+                                    isEditing: false  // Track editing state for each face
+                                }
+                            } catch (error) {
+                                console.error(`Failed to crop face ${index}:`, error, 'bbox:', face.bbox);
+                                // Return face without face_image if cropping fails
+                                return {
+                                    ...face,
+                                    face_image: null,
+                                    roleName: `角色${index + 1}`,
+                                    isEditing: false
+                                }
+                            }
+                        })
+                    );
+
+                    const currentForm = getCurrentForm();
+                    if (currentForm) {
+                        currentForm.detectedFaces = facesWithImages;
+                        console.log('Updated detectedFaces:', currentForm.detectedFaces.length, 'faces with images');
+                        
+                        // 如果检测到多个人脸，且已经有音频文件（仅在 s2v 模式下），自动进行音频分离
+                        if (facesWithImages.length > 1 && selectedTaskId.value === 's2v' && currentForm.audioFile) {
+                            console.log('Multiple faces detected and audio file exists, auto-separating audio...');
+                            try {
+                                // 优先使用 audioFile（File 对象），因为它包含完整的文件信息
+                                // separateAudioTracks 函数内部会优先使用 audioFile
+                                const audioDataUrl = getCurrentAudioPreview();
+                                if (audioDataUrl) {
+                                    // 自动进行音频分离（separateAudioTracks 会优先使用 audioFile）
+                                    await separateAudioTracks(audioDataUrl, facesWithImages.length);
+                                    console.log('Auto-separated audio for', facesWithImages.length, 'speakers');
+                                } else if (currentForm.audioFile instanceof File) {
+                                    // 如果没有预览 URL，从 audioFile 读取
+                                    const reader = new FileReader();
+                                    reader.onload = async (e) => {
+                                        try {
+                                            // 传递 data URL，但 separateAudioTracks 会优先使用 audioFile
+                                            await separateAudioTracks(e.target.result, facesWithImages.length);
+                                            console.log('Auto-separated audio for', facesWithImages.length, 'speakers');
+                                        } catch (error) {
+                                            console.error('Auto audio separation failed:', error);
+                                        }
+                                    };
+                                    reader.readAsDataURL(currentForm.audioFile);
+                                }
+                            } catch (error) {
+                                console.error('Auto audio separation failed:', error);
+                                // 不显示错误提示，只记录日志
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Face detection error:', error);
+                // Silently fail, don't show error to user
+            } finally {
+                faceDetecting.value = false;
+            }
+        };
+
+        // Update role name for a detected face
+        const updateFaceRoleName = (faceIndex, roleName) => {
+            const currentForm = getCurrentForm();
+            if (currentForm && currentForm.detectedFaces && currentForm.detectedFaces[faceIndex]) {
+                currentForm.detectedFaces[faceIndex].roleName = roleName;
+            }
+        };
+
+        // Toggle editing state for a face
+        const toggleFaceEditing = (faceIndex) => {
+            const currentForm = getCurrentForm();
+            if (currentForm && currentForm.detectedFaces && currentForm.detectedFaces[faceIndex]) {
+                currentForm.detectedFaces[faceIndex].isEditing = !currentForm.detectedFaces[faceIndex].isEditing;
+            }
+        };
+
+        // Save face role name and exit editing
+        const saveFaceRoleName = (faceIndex, roleName) => {
+            updateFaceRoleName(faceIndex, roleName);
+            toggleFaceEditing(faceIndex);
+            
+            // 同步更新所有关联的音频播放器角色名
+            // 只有当任务类型是 s2v 且有分离的音频时才需要更新
+            if (selectedTaskId.value === 's2v' && s2vForm.value.separatedAudios) {
+                s2vForm.value.separatedAudios.forEach((audio, index) => {
+                    // 如果音频的 roleIndex 等于当前修改的 faceIndex，则更新其 roleName
+                    if (audio.roleIndex === faceIndex) {
+                        s2vForm.value.separatedAudios[index].roleName = roleName || `角色${faceIndex + 1}`;
+                    }
+                });
+                // 使用展开运算符确保响应式更新
+                s2vForm.value.separatedAudios = [...s2vForm.value.separatedAudios];
             }
         };
 
@@ -1226,8 +1542,10 @@ export const locale = i18n.global.locale
             setCurrentImagePreview(null);
             if (selectedTaskId.value === 'i2v') {
                 i2vForm.value.imageFile = null;
+                i2vForm.value.detectedFaces = [];
             } else if (selectedTaskId.value === 's2v') {
                 s2vForm.value.imageFile = null;
+                s2vForm.value.detectedFaces = [];
             }
             updateUploadedContentStatus();
             // 重置文件输入框，确保可以重新选择相同文件
@@ -1240,6 +1558,7 @@ export const locale = i18n.global.locale
         const removeAudio = () => {
             setCurrentAudioPreview(null);
             s2vForm.value.audioFile = null;
+            s2vForm.value.separatedAudios = [];
             updateUploadedContentStatus();
             console.log('音频已移除');
             // 重置音频文件输入框，确保可以重新选择相同文件
@@ -1249,6 +1568,39 @@ export const locale = i18n.global.locale
             }
         };
 
+        // Update role assignment for separated audio
+        const updateSeparatedAudioRole = (speakerIndex, roleIndex) => {
+            if (s2vForm.value.separatedAudios && s2vForm.value.separatedAudios[speakerIndex]) {
+                const currentForm = getCurrentForm();
+                const detectedFaces = currentForm?.detectedFaces || [];
+                
+                if (roleIndex >= 0 && roleIndex < detectedFaces.length) {
+                    s2vForm.value.separatedAudios[speakerIndex].roleName = detectedFaces[roleIndex].roleName || `角色${roleIndex + 1}`;
+                    s2vForm.value.separatedAudios[speakerIndex].roleIndex = roleIndex;
+                }
+            }
+        };
+
+        // Update audio name for a separated audio
+        const updateSeparatedAudioName = (audioIndex, audioName) => {
+            if (s2vForm.value.separatedAudios && s2vForm.value.separatedAudios[audioIndex]) {
+                s2vForm.value.separatedAudios[audioIndex].audioName = audioName;
+            }
+        };
+
+        // Toggle editing state for a separated audio
+        const toggleSeparatedAudioEditing = (audioIndex) => {
+            if (s2vForm.value.separatedAudios && s2vForm.value.separatedAudios[audioIndex]) {
+                s2vForm.value.separatedAudios[audioIndex].isEditing = !s2vForm.value.separatedAudios[audioIndex].isEditing;
+            }
+        };
+
+        // Save separated audio name and exit editing
+        const saveSeparatedAudioName = (audioIndex, audioName) => {
+            updateSeparatedAudioName(audioIndex, audioName);
+            toggleSeparatedAudioEditing(audioIndex);
+        };
+
         const getAudioMimeType = () => {
             if (s2vForm.value.audioFile) {
                 return s2vForm.value.audioFile.type;
@@ -1256,7 +1608,85 @@ export const locale = i18n.global.locale
             return 'audio/mpeg'; // 默认类型
         };
 
-        const handleAudioUpload = (event) => {
+        // Separate audio tracks for multiple speakers
+        const separateAudioTracks = async (audioDataUrl, numSpeakers) => {
+            audioSeparating.value = true;  // 开始音频分割，显示加载状态
+            try {
+                // 优先使用 audioFile（如果存在），因为它包含完整的文件信息，避免 data URL 格式问题
+                const currentForm = getCurrentForm();
+                let audioData = audioDataUrl;
+                
+                if (currentForm?.audioFile && currentForm.audioFile instanceof File) {
+                    // 使用 File 对象，读取为 base64，确保格式正确
+                    try {
+                        const fileDataUrl = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(currentForm.audioFile);
+                        });
+                        audioData = fileDataUrl;
+                        console.log('Using audioFile for separation, format:', currentForm.audioFile.type);
+                    } catch (error) {
+                        console.warn('Failed to read audioFile, falling back to audioDataUrl:', error);
+                        // 如果读取失败，继续使用 audioDataUrl
+                    }
+                }
+                
+                const response = await apiCall('/api/v1/audio/separate', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        audio: audioData,
+                        num_speakers: numSpeakers
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Audio separation failed:', response.status, response.statusText);
+                    audioSeparating.value = false;
+                    return;
+                }
+
+                const data = await response.json();
+                console.log('Audio separation response:', data);
+                
+                if (data && data.speakers && data.speakers.length > 0) {
+                    const currentForm = getCurrentForm();
+                    const detectedFaces = currentForm?.detectedFaces || [];
+                    
+                    // Map separated speakers to detected faces
+                    // Initialize with first role if available
+                    const separatedAudios = data.speakers.map((speaker, index) => {
+                        const faceIndex = index < detectedFaces.length ? index : 0;
+                        return {
+                            speaker_id: speaker.speaker_id,
+                            audio: speaker.audio,  // Base64 encoded audio
+                            audioDataUrl: `data:audio/wav;base64,${speaker.audio}`,  // Data URL for preview
+                            audioName: `音色${index + 1}`,  // 音频名称，默认显示为"音色1"、"音色2"等
+                            roleName: detectedFaces[faceIndex]?.roleName || `角色${faceIndex + 1}`,  // 关联的角色名称
+                            roleIndex: faceIndex,
+                            isEditing: false,  // 编辑状态
+                            sample_rate: speaker.sample_rate,
+                            segments: speaker.segments
+                        };
+                    });
+                    
+                    // Update separatedAudios and trigger reactivity
+                    s2vForm.value.separatedAudios = [...separatedAudios];  // Use spread to ensure reactivity
+                    console.log('Updated separatedAudios:', s2vForm.value.separatedAudios.length, 'speakers', s2vForm.value.separatedAudios);
+                } else {
+                    console.warn('No speakers found in separation response:', data);
+                    s2vForm.value.separatedAudios = [];
+                }
+                audioSeparating.value = false;  // 音频分割完成，隐藏加载状态
+            } catch (error) {
+                console.error('Audio separation error:', error);
+                audioSeparating.value = false;  // 发生错误时也要隐藏加载状态
+                throw error;
+            }
+        };
+
+        const handleAudioUpload = async (event) => {
             const file = event.target.files[0];
 
             if (file && (file.type?.startsWith('audio/') || file.type?.startsWith('video/'))) {
@@ -1264,19 +1694,41 @@ export const locale = i18n.global.locale
                 if (file.type.startsWith('video/') && !allowedVideoTypes.includes(file.type)) {
                     showAlert(t('unsupportedVideoFormat'), 'warning');
                     setCurrentAudioPreview(null);
+                    s2vForm.value.separatedAudios = [];
                     updateUploadedContentStatus();
                     return;
                 }
                 s2vForm.value.audioFile = file;
+                
+                // Read file as data URL for preview
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    setCurrentAudioPreview(e.target.result);
+                reader.onload = async (e) => {
+                    const audioDataUrl = e.target.result;
+                    setCurrentAudioPreview(audioDataUrl);
                     updateUploadedContentStatus();
-                    console.log('音频预览已设置:', e.target.result);
+                    
+                    // Check if we have multiple detected faces (roles)
+                    const currentForm = getCurrentForm();
+                    const detectedFaces = currentForm?.detectedFaces || [];
+                    
+                    // If we have more than 1 role, automatically separate audio
+                    if (detectedFaces.length > 1) {
+                        try {
+                            await separateAudioTracks(audioDataUrl, detectedFaces.length);
+                        } catch (error) {
+                            console.error('Audio separation failed:', error);
+                            // Continue with single audio preview if separation fails
+                            s2vForm.value.separatedAudios = [];
+                        }
+                    } else {
+                        // Reset separated audios if only one role
+                        s2vForm.value.separatedAudios = [];
+                    }
                 };
                 reader.readAsDataURL(file);
             } else {
                 setCurrentAudioPreview(null);
+                s2vForm.value.separatedAudios = [];
                 updateUploadedContentStatus();
                 if (file) {
                     showAlert(t('unsupportedAudioOrVideo'), 'warning');
@@ -1527,7 +1979,36 @@ export const locale = i18n.global.locale
                             data: base64
                         };
                     }
-                    if (currentForm.audioFile) {
+                    
+                    // 检测是否为多人模式：有多个分离的音频和多个角色
+                    const isMultiPersonMode = s2vForm.value.separatedAudios && 
+                                            s2vForm.value.separatedAudios.length > 1 &&
+                                            currentForm.detectedFaces && 
+                                            currentForm.detectedFaces.length > 1;
+                    
+                    if (isMultiPersonMode) {
+                        // 多人模式：生成mask图、保存音频文件、生成config.json
+                        try {
+                            const multiPersonData = await prepareMultiPersonAudio(
+                                currentForm.detectedFaces,
+                                s2vForm.value.separatedAudios,
+                                currentForm.imageFile,
+                                currentForm.audioFile  // 传递原始音频文件
+                            );
+                            
+                            formData.input_audio = {
+                                type: 'directory',
+                                data: multiPersonData
+                            };
+                            formData.negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+                        } catch (error) {
+                            console.error('Failed to prepare multi-person audio:', error);
+                            showAlert('准备多人音频失败: ' + error.message, 'danger');
+                            submitting.value = false;
+                            return;
+                        }
+                    } else if (currentForm.audioFile) {
+                        // 单人模式：使用原始音频文件
                         const base64 = await fileToBase64(currentForm.audioFile);
                         formData.input_audio = {
                             type: 'base64',
@@ -1543,23 +2024,69 @@ export const locale = i18n.global.locale
                 });
 
                 if (response && response.ok) {
-                    const result = await response.json();
+                    let result;
+                    try {
+                        result = await response.json();
+                    } catch (error) {
+                        console.error('Failed to parse response JSON:', error);
+                        showAlert('任务提交成功，但解析响应失败', 'warning');
+                        submitting.value = false;
+                        return null;
+                    }
+                    
                     showAlert(t('taskSubmitSuccessAlert'), 'success');
 
-                    // 开始轮询新提交的任务状态
-                    startPollingTask(result.task_id);
-                    // 保存完整的任务历史（包括提示词、图片和音频）
-                    await addTaskToHistory(selectedTaskId.value, currentForm);
-                    resetForm(selectedTaskId.value);
+                    // 开始轮询新提交的任务状态（不等待，异步执行）
+                    try {
+                        startPollingTask(result.task_id);
+                    } catch (error) {
+                        console.error('Failed to start polling task:', error);
+                        // 不阻止流程继续
+                    }
+                    
+                    // 保存完整的任务历史（包括提示词、图片和音频）- 异步执行，不阻塞
+                    // 注意：addTaskToHistory 是同步函数，但为了统一处理，使用 Promise.resolve 包装
+                    Promise.resolve().then(() => {
+                        try {
+                            addTaskToHistory(selectedTaskId.value, currentForm);
+                        } catch (error) {
+                            console.error('Failed to add task to history:', error);
+                        }
+                    }).catch(error => {
+                        console.error('Failed to add task to history:', error);
+                    });
+                    
+                    // 重置表单（异步执行，不阻塞）- 使用 Promise.race 添加超时保护
+                    try {
+                        await Promise.race([
+                            Promise.resolve(resetForm(selectedTaskId.value)),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('resetForm timeout')), 3000))
+                        ]);
+                    } catch (error) {
+                        console.error('Failed to reset form:', error);
+                        // 不阻止流程继续，只记录错误
+                    }
+                    
                     // 重置当前任务类型的表单（保留模型选择，清空图片、音频和提示词）
-                    selectedTaskId.value = selectedTaskId.value;
-                    selectModel(currentForm.model_cls);
+                    try {
+                        selectedTaskId.value = selectedTaskId.value;
+                        selectModel(currentForm.model_cls);
+                    } catch (error) {
+                        console.error('Failed to select model:', error);
+                        // 不阻止流程继续
+                    }
 
                     // 返回新创建的任务ID
                     return result.task_id;
                 } else {
-                    const error = await response.json();
-                    showAlert(`${t('taskSubmitFailedAlert')}: ${error.message},${error.detail}`, 'danger');
+                    let error;
+                    try {
+                        error = await response.json();
+                        showAlert(`${t('taskSubmitFailedAlert')}: ${error.message || 'Unknown error'},${error.detail || ''}`, 'danger');
+                    } catch (parseError) {
+                        console.error('Failed to parse error response:', parseError);
+                        showAlert(`${t('taskSubmitFailedAlert')}: ${response.statusText || 'Unknown error'}`, 'danger');
+                    }
                     return null;
                 }
             } catch (error) {
@@ -1580,6 +2107,107 @@ export const locale = i18n.global.locale
                 };
                 reader.onerror = error => reject(error);
             });
+        };
+
+        // 准备多人模式的音频数据：生成mask图、保存音频文件、生成config.json
+        const prepareMultiPersonAudio = async (detectedFaces, separatedAudios, imageFile, originalAudioFile) => {
+            // 1. 读取原始图片，获取尺寸
+            const imageBase64 = await fileToBase64(imageFile);
+            const imageDataUrl = `data:image/png;base64,${imageBase64}`;
+            
+            // 创建图片对象以获取尺寸
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = imageDataUrl;
+            });
+            const imageWidth = img.naturalWidth;
+            const imageHeight = img.naturalHeight;
+            
+            // 2. 为每个角色生成mask图和音频文件
+            const directoryFiles = {};
+            const talkObjects = [];
+            
+            for (let i = 0; i < detectedFaces.length; i++) {
+                const face = detectedFaces[i];
+                const audioIndex = i < separatedAudios.length ? i : 0;
+                const audio = separatedAudios[audioIndex];
+                
+                // 生成mask图（box部分为白色，其余部分为黑色）
+                const maskBase64 = await generateMaskImage(
+                    face.bbox,
+                    imageWidth,
+                    imageHeight
+                );
+                
+                // 保存mask图
+                const maskFilename = `p${i + 1}_mask.png`;
+                directoryFiles[maskFilename] = maskBase64;
+                
+                // 保存音频文件
+                // 注意：separatedAudios中的audio已经是base64编码的wav格式
+                const audioFilename = `p${i + 1}.wav`;
+                directoryFiles[audioFilename] = audio.audio; // audio.audio是base64编码的wav数据
+                
+                // 添加到talk_objects
+                talkObjects.push({
+                    audio: audioFilename,
+                    mask: maskFilename
+                });
+            }
+            
+            // 3. 保存原始未分割的音频文件（用于后续复用）
+            if (originalAudioFile) {
+                try {
+                    // 将原始音频文件转换为base64
+                    const originalAudioBase64 = await fileToBase64(originalAudioFile);
+                    // 根据原始文件名确定扩展名，如果没有扩展名则使用.wav
+                    const originalFilename = originalAudioFile.name || 'original_audio.wav';
+                    const fileExtension = originalFilename.toLowerCase().split('.').pop();
+                    const validExtensions = ['wav', 'mp3', 'mp4', 'aac', 'ogg', 'm4a'];
+                    const extension = validExtensions.includes(fileExtension) ? fileExtension : 'wav';
+                    const originalAudioFilename = `original_audio.${extension}`;
+                    directoryFiles[originalAudioFilename] = originalAudioBase64;
+                    console.log('已保存原始音频文件:', originalAudioFilename);
+                } catch (error) {
+                    console.warn('保存原始音频文件失败:', error);
+                    // 不阻止任务提交，只记录警告
+                }
+            }
+            
+            // 4. 生成config.json
+            const configJson = {
+                talk_objects: talkObjects
+            };
+            const configJsonString = JSON.stringify(configJson, null, 4);
+            const configBase64 = btoa(unescape(encodeURIComponent(configJsonString)));
+            directoryFiles['config.json'] = configBase64;
+            
+            return directoryFiles;
+        };
+
+        // 生成mask图：根据bbox坐标生成白色区域，其余为黑色
+        const generateMaskImage = async (bbox, imageWidth, imageHeight) => {
+            // bbox格式: [x1, y1, x2, y2]
+            const [x1, y1, x2, y2] = bbox;
+            
+            // 创建canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = imageWidth;
+            canvas.height = imageHeight;
+            const ctx = canvas.getContext('2d');
+            
+            // 填充黑色背景
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, imageWidth, imageHeight);
+            
+            // 在bbox区域填充白色
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(Math.round(x1), Math.round(y1), Math.round(x2 - x1), Math.round(y2 - y1));
+            
+            // 转换为base64
+            return canvas.toDataURL('image/png').split(',')[1];
         };
 
         const formatTime = (timestamp) => {
@@ -1955,8 +2583,11 @@ export const locale = i18n.global.locale
             }, 100);
         };
 
-        const getTaskFileUrlFromApi = async (taskId, fileKey) => {
+        const getTaskFileUrlFromApi = async (taskId, fileKey, filename = null) => {
             let apiUrl = `/api/v1/task/input_url?task_id=${taskId}&name=${fileKey}`;
+            if (filename) {
+                apiUrl += `&filename=${encodeURIComponent(filename)}`;
+            }
             if (fileKey.includes('output')) {
                 apiUrl = `/api/v1/task/result_url?task_id=${taskId}&name=${fileKey}`;
             }
@@ -1970,11 +2601,106 @@ export const locale = i18n.global.locale
                         assertUrl = `${assertUrl}&token=${encodeURIComponent(token)}`;
                     }
                 }
-                setTaskFileToCache(taskId, fileKey, {
+                const cacheKey = filename ? `${fileKey}_${filename}` : fileKey;
+                setTaskFileToCache(taskId, cacheKey, {
                     url: assertUrl,
                     timestamp: Date.now()
                 });
                 return assertUrl;
+            } else if (response && response.status === 400) {
+                // Handle directory input error (multi-person mode)
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error && errorData.error.includes('directory')) {
+                        console.warn(`Input ${fileKey} is a directory (multi-person mode), cannot get single file URL`);
+                        return null;
+                    }
+                } catch (e) {
+                    // Ignore JSON parse errors
+                }
+            }
+            return null;
+        };
+
+        // Podcast 音频 URL 缓存管理函数（模仿任务文件缓存）
+        const loadPodcastAudioFromCache = () => {
+            try {
+                const cached = localStorage.getItem(PODCAST_AUDIO_CACHE_KEY);
+                if (cached) {
+                    const data = JSON.parse(cached);
+                    // 检查是否过期
+                    if (Date.now() - data.timestamp < PODCAST_AUDIO_CACHE_EXPIRY) {
+                        // 将缓存数据加载到内存缓存中
+                        for (const [cacheKey, audioData] of Object.entries(data.audio_urls)) {
+                            podcastAudioCache.value.set(cacheKey, audioData);
+                        }
+                        podcastAudioCacheLoaded.value = true;
+                        return true;
+                    } else {
+                        // 缓存过期，清除
+                        localStorage.removeItem(PODCAST_AUDIO_CACHE_KEY);
+                    }
+                }
+            } catch (error) {
+                console.warn('加载播客音频缓存失败:', error);
+                localStorage.removeItem(PODCAST_AUDIO_CACHE_KEY);
+            }
+            podcastAudioCacheLoaded.value = true;
+            return false;
+        };
+
+        const savePodcastAudioToCache = () => {
+            try {
+                const audio_urls = {};
+                for (const [cacheKey, audioData] of podcastAudioCache.value.entries()) {
+                    audio_urls[cacheKey] = audioData;
+                }
+                const data = {
+                    audio_urls,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(PODCAST_AUDIO_CACHE_KEY, JSON.stringify(data));
+            } catch (error) {
+                console.warn('保存播客音频缓存失败:', error);
+            }
+        };
+
+        // 生成播客音频缓存键
+        const getPodcastAudioCacheKey = (sessionId) => {
+            return sessionId;
+        };
+
+        // 从缓存获取播客音频 URL
+        const getPodcastAudioFromCache = (sessionId) => {
+            const cacheKey = getPodcastAudioCacheKey(sessionId);
+            return podcastAudioCache.value.get(cacheKey) || null;
+        };
+
+        // 设置播客音频 URL 到缓存
+        const setPodcastAudioToCache = (sessionId, audioData) => {
+            const cacheKey = getPodcastAudioCacheKey(sessionId);
+            podcastAudioCache.value.set(cacheKey, audioData);
+            // 异步保存到localStorage
+            setTimeout(() => {
+                savePodcastAudioToCache();
+            }, 100);
+        };
+
+        // 从 API 获取播客音频 URL（CDN URL）
+        const getPodcastAudioUrlFromApi = async (sessionId) => {
+            try {
+                const response = await apiCall(`/api/v1/podcast/session/${sessionId}/audio_url`);
+                if (response && response.ok) {
+                    const data = await response.json();
+                    const audioUrl = data.audio_url;
+                    setPodcastAudioToCache(sessionId, {
+                        url: audioUrl,
+                        timestamp: Date.now()
+                    });
+                    return audioUrl;
+                }
+            } catch (error) {
+                console.warn(`Failed to get audio URL for session ${sessionId}:`, error);
             }
             return null;
         };
@@ -2801,67 +3527,124 @@ export const locale = i18n.global.locale
                         const imageUrl = await getTaskInputImage(task);
                         const audioUrl = await getTaskInputAudio(task);
 
-                        // 加载图片文件
-                        if (imageUrl) {
-                            try {
-                                const imageResponse = await fetch(imageUrl);
-                                if (imageResponse && imageResponse.ok) {
-                                    const blob = await imageResponse.blob();
-                                    const filename = task.inputs[Object.keys(task.inputs).find(key =>
-                                        key.includes('image') ||
-                                        task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
-                                    )] || 'image.jpg';
-                                    const file = new File([blob], filename, { type: blob.type });
-                                    currentForm.imageFile = file;
-                                    setCurrentImagePreview(URL.createObjectURL(file));
-                                }
-                            } catch (error) {
-                                console.warn('Failed to load image file:', error);
-                            }
-                        }
 
                         // 加载音频文件
                         if (audioUrl) {
                             try {
-                                currentForm.audioUrl = audioUrl;
-                                setCurrentAudioPreview(audioUrl);
-
                                 const audioResponse = await fetch(audioUrl);
                                 if (audioResponse && audioResponse.ok) {
-                                    const blob = await audioResponse.blob();
-                                    const filename = task.inputs[Object.keys(task.inputs).find(key =>
-                                        key.includes('audio') ||
-                                        task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
-                                    )] || 'audio.wav';
+                                    // Check if the response is an error (for directory inputs)
+                                    const contentType = audioResponse.headers.get('content-type');
+                                    if (contentType && contentType.includes('application/json')) {
+                                        const errorData = await audioResponse.json();
+                                            // Not a directory error, proceed with normal loading
+                                            currentForm.audioUrl = audioUrl;
+                                            setCurrentAudioPreview(audioUrl);
+                                            
+                                            const blob = await audioResponse.blob();
+                                            const filename = task.inputs[Object.keys(task.inputs).find(key =>
+                                                key.includes('audio') ||
+                                                task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
+                                            )] || 'audio.wav';
 
-                                    // 根据文件扩展名确定正确的MIME类型
-                                    let mimeType = blob.type;
-                                    if (!mimeType || mimeType === 'application/octet-stream') {
-                                        const ext = filename.toLowerCase().split('.').pop();
-                                        const mimeTypes = {
-                                            'mp3': 'audio/mpeg',
-                                            'wav': 'audio/wav',
-                                            'mp4': 'audio/mp4',
-                                            'aac': 'audio/aac',
-                                            'ogg': 'audio/ogg',
-                                            'm4a': 'audio/mp4'
-                                        };
-                                        mimeType = mimeTypes[ext] || 'audio/mpeg';
+                                            // 根据文件扩展名确定正确的MIME类型
+                                            let mimeType = blob.type;
+                                            if (!mimeType || mimeType === 'application/octet-stream') {
+                                                const ext = filename.toLowerCase().split('.').pop();
+                                                const mimeTypes = {
+                                                    'mp3': 'audio/mpeg',
+                                                    'wav': 'audio/wav',
+                                                    'mp4': 'audio/mp4',
+                                                    'aac': 'audio/aac',
+                                                    'ogg': 'audio/ogg',
+                                                    'm4a': 'audio/mp4'
+                                                };
+                                                mimeType = mimeTypes[ext] || 'audio/mpeg';
+                                            }
+
+                                            const file = new File([blob], filename, { type: mimeType });
+                                            currentForm.audioFile = file;
+                                            console.log('复用任务 - 从后端加载音频文件:', {
+                                                name: file.name,
+                                                type: file.type,
+                                                size: file.size,
+                                                originalBlobType: blob.type
+                                            });
+                                    } else {
+                                        // Normal audio file response
+                                        currentForm.audioUrl = audioUrl;
+                                        setCurrentAudioPreview(audioUrl);
+                                        
+                                        const blob = await audioResponse.blob();
+                                        const filename = task.inputs[Object.keys(task.inputs).find(key =>
+                                            key.includes('audio') ||
+                                            task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
+                                        )] || 'audio.wav';
+
+                                        // 根据文件扩展名确定正确的MIME类型
+                                        let mimeType = blob.type;
+                                        if (!mimeType || mimeType === 'application/octet-stream') {
+                                            const ext = filename.toLowerCase().split('.').pop();
+                                            const mimeTypes = {
+                                                'mp3': 'audio/mpeg',
+                                                'wav': 'audio/wav',
+                                                'mp4': 'audio/mp4',
+                                                'aac': 'audio/aac',
+                                                'ogg': 'audio/ogg',
+                                                'm4a': 'audio/mp4'
+                                            };
+                                            mimeType = mimeTypes[ext] || 'audio/mpeg';
+                                        }
+
+                                        const file = new File([blob], filename, { type: mimeType });
+                                        currentForm.audioFile = file;
+                                        console.log('复用任务 - 从后端加载音频文件:', {
+                                            name: file.name,
+                                            type: file.type,
+                                            size: file.size,
+                                            originalBlobType: blob.type
+                                        });
                                     }
-
-                                    const file = new File([blob], filename, { type: mimeType });
-                                    currentForm.audioFile = file;
-                                    console.log('复用任务 - 从后端加载音频文件:', {
-                                        name: file.name,
-                                        type: file.type,
-                                        size: file.size,
-                                        originalBlobType: blob.type
-                                    });
                                 }
                             } catch (error) {
                                 console.warn('Failed to load audio file:', error);
                             }
                         }
+
+                                                // 加载图片文件
+                                                if (imageUrl) {
+                                                    try {
+                                                        const imageResponse = await fetch(imageUrl);
+                                                        if (imageResponse && imageResponse.ok) {
+                                                            const blob = await imageResponse.blob();
+                                                            const filename = task.inputs[Object.keys(task.inputs).find(key =>
+                                                                key.includes('image') ||
+                                                                task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
+                                                            )] || 'image.jpg';
+                                                            const file = new File([blob], filename, { type: blob.type });
+                                                            currentForm.imageFile = file;
+                                                            const imagePreviewUrl = URL.createObjectURL(file);
+                                                            setCurrentImagePreview(imageUrl);
+                                                            
+                                                            // Reset detected faces
+                                                            if (selectedTaskId.value === 'i2v') {
+                                                                i2vForm.value.detectedFaces = [];
+                                                            } else if (selectedTaskId.value === 's2v') {
+                                                                s2vForm.value.detectedFaces = [];
+                                                            }
+                                                            
+                                                            // Auto detect faces after image is loaded
+                                                            try {
+                                                                await detectFacesInImage(imageUrl);
+                                                            } catch (error) {
+                                                                console.error('Face detection failed:', error);
+                                                                // Don't show error alert, just log it
+                                                            }
+                                                        }
+                                                    } catch (error) {
+                                                        console.warn('Failed to load image file:', error);
+                                                    }
+                                                }
                     } catch (error) {
                         console.warn('Failed to load task data from backend:', error);
                 }
@@ -3160,17 +3943,32 @@ export const locale = i18n.global.locale
 
         const getTaskInputAudio = async (task) => {
             if (!task || !task.inputs) return null;
-            const audioInputs = Object.keys(task.inputs).filter(key =>
-                key.includes('audio') ||
-                task.inputs[key].toString().toLowerCase().match(/\.(mp3|wav|mp4|aac|ogg|m4a)$/)
-            );
-
-            if (audioInputs.length > 0) {
-                const firstAudioKey = audioInputs[0];
-                return await getTaskInputUrl(task.task_id, firstAudioKey);
+            
+            // Directly use 'input_audio' key
+            const audioKey = 'input_audio';
+            if (!task.inputs[audioKey]) return null;
+            
+            // Always bypass cache and check API directly to detect directory type
+            // This ensures we get the correct URL even if cache has invalid data
+            let url = await getTaskFileUrlFromApi(task.task_id, audioKey);
+            
+            // If it's a directory (multi-person mode) or URL is null, try to get original_audio file
+            if (!url) {
+                console.log(`Audio input ${audioKey} is a directory (multi-person mode), trying to get original_audio file`);
+                // Try to get original_audio file from directory
+                // Try common extensions
+                const extensions = ['wav', 'mp3', 'mp4', 'aac', 'ogg', 'm4a'];
+                for (const ext of extensions) {
+                    const originalAudioFilename = `original_audio.${ext}`;
+                    url = await getTaskFileUrlFromApi(task.task_id, audioKey, originalAudioFilename);
+                    if (url) {
+                        console.log(`Found original audio file: ${originalAudioFilename}`);
+                        break;
+                    }
+                }
             }
-
-            return null;
+            
+            return url;
         };
 
         const handleThumbnailError = (event) => {
@@ -4209,8 +5007,20 @@ export const locale = i18n.global.locale
         // 选择图片历史记录 - 从URL获取
         const selectImageHistory = async (history) => {
             try {
+                // 确保 URL 有效，如果无效则重新获取
+                let imageUrl = history.url;
+                if (!imageUrl || imageUrl.trim() === '') {
+                    // 如果 URL 为空，尝试重新获取
+                    if (history.taskId) {
+                        imageUrl = await getTaskFileUrl(history.taskId, 'input_image');
+                    }
+                    if (!imageUrl || imageUrl.trim() === '') {
+                        throw new Error('图片 URL 无效');
+                    }
+                }
+
                 // 从URL获取图片文件
-                const response = await fetch(history.url);
+                const response = await fetch(imageUrl);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -4219,18 +5029,50 @@ export const locale = i18n.global.locale
                 const file = new File([blob], history.filename, { type: blob.type });
 
                 // 设置图片预览
-                setCurrentImagePreview(history.url);
+                setCurrentImagePreview(imageUrl);
                 updateUploadedContentStatus();
 
                 // 更新表单
                 const currentForm = getCurrentForm();
                 currentForm.imageFile = file;
+                
+                // Reset detected faces
+                if (selectedTaskId.value === 'i2v') {
+                    i2vForm.value.detectedFaces = [];
+                } else if (selectedTaskId.value === 's2v') {
+                    s2vForm.value.detectedFaces = [];
+                }
 
                 showImageTemplates.value = false;
                 showAlert('已应用历史图片', 'success');
+
+                // Auto detect faces after image is loaded
+                // 使用有效的 imageUrl，并且确保是 http/https URL 或 data URL
+                try {
+                    // 如果 URL 是 http/https，直接使用；否则转换为 data URL
+                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                        await detectFacesInImage(imageUrl);
+                    } else {
+                        // 如果不是 http/https URL，转换为 data URL
+                        const reader = new FileReader();
+                        reader.onload = async (e) => {
+                            try {
+                                await detectFacesInImage(e.target.result);
+                            } catch (error) {
+                                console.error('Face detection failed:', error);
+                                // Don't show error alert, just log it
+                            }
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                } catch (error) {
+                    console.error('Face detection failed:', error);
+                    // Don't show error alert, just log it
+                }
+                
             } catch (error) {
                 console.error('应用历史图片失败:', error);
-                showAlert('应用历史图片失败', 'danger');
+                showAlert('应用历史图片失败: ' + error.message, 'danger');
             }
         };
 
@@ -5217,6 +6059,12 @@ export const locale = i18n.global.locale
                 const currentForm = getCurrentForm();
                 if (currentForm) {
                     currentForm.imageUrl = imageUrl;
+                    // Reset detected faces
+                    if (selectedTaskId.value === 'i2v') {
+                        i2vForm.value.detectedFaces = [];
+                    } else if (selectedTaskId.value === 's2v') {
+                        s2vForm.value.detectedFaces = [];
+                    }
                 }
 
                 // 设置预览
@@ -5240,6 +6088,14 @@ export const locale = i18n.global.locale
                             currentForm.imageFile = file;
                         }
                         console.log('模板图片文件已加载');
+                        
+                        // Auto detect faces after image is loaded
+                        try {
+                            await detectFacesInImage(imageUrl);
+                        } catch (error) {
+                            console.error('Face detection failed:', error);
+                            // Don't show error alert, just log it
+                        }
                     } else {
                         console.warn('Failed to fetch image from URL:', imageUrl);
                         showAlert(t('applyImageFailed'), 'danger');
@@ -5742,6 +6598,13 @@ export const locale = i18n.global.locale
                             currentForm.imageUrl = imageUrl;
                             setCurrentImagePreview(imageUrl); // 设置正确的URL作为预览
                             console.log('模板输入图片URL:', imageUrl);
+                            
+                            // Reset detected faces
+                            if (selectedTaskId.value === 'i2v') {
+                                i2vForm.value.detectedFaces = [];
+                            } else if (selectedTaskId.value === 's2v') {
+                                s2vForm.value.detectedFaces = [];
+                            }
 
                             // 加载图片文件
                             const imageResponse = await fetch(imageUrl);
@@ -5751,6 +6614,14 @@ export const locale = i18n.global.locale
                                 const file = new File([blob], filename, { type: blob.type });
                                 currentForm.imageFile = file;
                                 console.log('模板图片文件已加载');
+                                
+                                // Auto detect faces after image is loaded
+                                try {
+                                    await detectFacesInImage(imageUrl);
+                                } catch (error) {
+                                    console.error('Face detection failed:', error);
+                                    // Don't show error alert, just log it
+                                }
                             } else {
                                 console.warn('Failed to fetch image from URL:', imageUrl);
                             }
@@ -6083,7 +6954,7 @@ export const locale = i18n.global.locale
         const featuredTemplatesLoading = ref(false);
 
         // 主题管理
-        const theme = ref('dark'); // 'light', 'dark', 'auto' - 默认深色模式
+        const theme = ref('dark'); // 'light', 'dark' - 默认深色模式
 
         // 初始化主题
         const initTheme = () => {
@@ -6092,58 +6963,72 @@ export const locale = i18n.global.locale
             applyTheme(savedTheme);
         };
 
-        // 应用主题
+        // 应用主题（优化版本，减少延迟）
         const applyTheme = (newTheme) => {
             const html = document.documentElement;
-
-            if (newTheme === 'dark') {
-                html.classList.add('dark');
-                html.style.colorScheme = 'dark';
-                console.log('已切换到深色模式');
-            } else if (newTheme === 'light') {
-                html.classList.remove('dark');
-                html.style.colorScheme = 'light';
-                console.log('已切换到浅色模式');
-            } else {
-                // auto - 跟随系统
-                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                if (prefersDark) {
+            
+            // 使用 requestAnimationFrame 优化 DOM 操作
+            requestAnimationFrame(() => {
+                // 临时禁用过渡动画以提高切换速度
+                html.classList.add('theme-transitioning');
+                
+                if (newTheme === 'dark') {
                     html.classList.add('dark');
+                    html.style.colorScheme = 'dark';
                 } else {
                     html.classList.remove('dark');
+                    html.style.colorScheme = 'light';
                 }
-                html.style.colorScheme = 'auto';
-                console.log('已切换到自动模式（跟随系统）');
-            }
+                
+                // 短暂延迟后移除过渡禁用类，恢复平滑过渡
+                setTimeout(() => {
+                    html.classList.remove('theme-transitioning');
+                }, 50);
+            });
         };
 
-        // 切换主题
+        // 切换主题（优化版本）
         const toggleTheme = () => {
-            const themes = ['auto', 'light', 'dark'];
+            const themes = ['light', 'dark'];
             const currentIndex = themes.indexOf(theme.value);
             const nextIndex = (currentIndex + 1) % themes.length;
             const nextTheme = themes[nextIndex];
 
+            // 立即更新状态
             theme.value = nextTheme;
-            localStorage.setItem('theme', nextTheme);
+            
+            // 异步保存到 localStorage，不阻塞 UI
+            if (window.requestIdleCallback) {
+                requestIdleCallback(() => {
+                    localStorage.setItem('theme', nextTheme);
+                }, { timeout: 100 });
+            } else {
+                // 回退方案：使用 setTimeout
+                setTimeout(() => {
+                    localStorage.setItem('theme', nextTheme);
+                }, 0);
+            }
+            
+            // 立即应用主题
             applyTheme(nextTheme);
 
+            // 延迟显示提示，避免阻塞主题切换
             const themeNames = {
-                'auto': '跟随系统',
                 'light': '浅色模式',
                 'dark': '深色模式'
             };
-            showAlert(`已切换到${themeNames[nextTheme]}`, 'info');
+            setTimeout(() => {
+                showAlert(`已切换到${themeNames[nextTheme]}`, 'info');
+            }, 100);
         };
 
         // 获取主题图标
         const getThemeIcon = () => {
             const iconMap = {
-                'auto': 'fas fa-adjust',
                 'light': 'fas fa-sun',
                 'dark': 'fas fa-moon'
             };
-            return iconMap[theme.value] || 'fas fa-adjust';
+            return iconMap[theme.value] || 'fas fa-moon';
         };
 
         // 不需要认证的API调用（用于获取模版数据）
@@ -6365,6 +7250,7 @@ export {
             showTaskDetailModal,
             modalTask,
             showVoiceTTSModal,
+            showPodcastModal,
             currentTask,
             t2vForm,
             i2vForm,
@@ -6428,6 +7314,13 @@ export {
             handleDownloadFile,
             viewFile,
             handleImageUpload,
+            detectFacesInImage,
+            faceDetecting,
+            audioSeparating,
+            cropFaceImage,
+            updateFaceRoleName,
+            toggleFaceEditing,
+            saveFaceRoleName,
             selectTask,
             selectModel,
             resetForm,
@@ -6436,6 +7329,11 @@ export {
             removeImage,
             removeAudio,
             handleAudioUpload,
+            separateAudioTracks,
+            updateSeparatedAudioRole,
+            updateSeparatedAudioName,
+            toggleSeparatedAudioEditing,
+            saveSeparatedAudioName,
             loadImageAudioTemplates,
             selectImageTemplate,
             selectAudioTemplate,
@@ -6481,6 +7379,14 @@ export {
             setTaskFileToCache,
             getTaskFileUrlFromApi,
             getTaskFileUrlSync,
+            // Podcast 音频缓存
+            podcastAudioCache,
+            podcastAudioCacheLoaded,
+            loadPodcastAudioFromCache,
+            savePodcastAudioToCache,
+            getPodcastAudioFromCache,
+            setPodcastAudioToCache,
+            getPodcastAudioUrlFromApi,
             getTemplateFileUrlFromApi,
             getTemplateFileUrl,
             getTemplateFileUrlAsync,

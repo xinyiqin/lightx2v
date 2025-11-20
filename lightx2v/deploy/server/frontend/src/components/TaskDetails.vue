@@ -25,6 +25,7 @@ import { showTaskDetailModal,
         getTaskFileUrlSync,
         getTaskFileFromCache,
         getTaskFileUrl,
+        getTaskInputAudio,
         downloadLoading,
         showAlert,
         apiRequest,
@@ -41,13 +42,13 @@ const router = useRouter()
 const showDetails = ref(false)
 const loadingTaskFiles = ref(false)
 
-// 音频播放器相关
-const audioElement = ref(null)
-const isPlaying = ref(false)
-const audioDuration = ref(0)
-const currentTime = ref(0)
-const isDragging = ref(false)
+// 音频播放器相关（支持多个音频）
+const audioElements = ref({}) // 使用对象存储多个音频元素，key 为 inputName
+const audioStates = ref({}) // 存储每个音频的状态，key 为 inputName
 const currentAudioUrl = ref('')
+
+// 音频素材 URL（响应式，支持异步加载）
+const audioMaterials = ref([])
 
 // 获取图片素材
 const getImageMaterials = () => {
@@ -55,10 +56,30 @@ const getImageMaterials = () => {
     return [['input_image', getTaskFileUrlSync(modalTask.value.task_id, 'input_image')]]
 }
 
-// 获取音频素材
+// 获取音频素材（使用响应式 ref）
 const getAudioMaterials = () => {
-    if (!modalTask.value?.inputs?.input_audio) return []
-    return [['input_audio', getTaskFileUrlSync(modalTask.value.task_id, 'input_audio')]]
+    return audioMaterials.value
+}
+
+// 异步加载音频素材 URL（支持目录模式）
+const loadAudioMaterials = async () => {
+    if (!modalTask.value?.inputs?.input_audio) {
+        audioMaterials.value = []
+        return
+    }
+    
+    try {
+        // 使用 getTaskInputAudio 来获取音频 URL，它会自动处理目录情况
+        const audioUrl = await getTaskInputAudio(modalTask.value)
+        if (audioUrl) {
+            audioMaterials.value = [['input_audio', audioUrl]]
+        } else {
+            audioMaterials.value = []
+        }
+    } catch (error) {
+        console.error('Failed to load audio materials:', error)
+        audioMaterials.value = []
+    }
 }
 
 // 路由关闭功能
@@ -161,11 +182,15 @@ const viewTaskDetail = async (task) => {
 
 // 监听modalTask的第一次变化，确保任务详情正确加载
 const hasLoadedTask = ref(false);
-watch(modalTask, (newTask) => {
+watch(modalTask, async (newTask) => {
     if (newTask && !hasLoadedTask.value) {
         console.log('modalTask第一次变化，加载任务详情:', newTask);
         viewTaskDetail(newTask);
         hasLoadedTask.value = true;
+    }
+    // 加载音频素材（支持目录模式）
+    if (newTask) {
+        await loadAudioMaterials();
     }
 }, { immediate: true });
 
@@ -177,11 +202,14 @@ onMounted(async () => {
 
 onUnmounted(() => {
     document.removeEventListener('keydown', handleKeydown)
-    // 清理音频资源
-    const audio = getCurrentAudioElement()
-    if (audio) {
-        audio.pause()
-    }
+    // 清理所有音频资源
+    Object.values(audioElements.value).forEach(audio => {
+        if (audio) {
+            audio.pause()
+        }
+    })
+    audioElements.value = {}
+    audioStates.value = {}
 })
 
 // 格式化音频时间
@@ -192,19 +220,57 @@ const formatAudioTime = (seconds) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// 获取当前音频元素（处理可能是数组的情况）
-const getCurrentAudioElement = () => {
-    return Array.isArray(audioElement.value) ? audioElement.value[0] : audioElement.value
+// 设置音频元素 ref（安全版本）
+const setAudioElement = (inputName, el) => {
+    if (!audioElements.value) {
+        audioElements.value = {}
+    }
+    if (el) {
+        audioElements.value[inputName] = el
+    } else if (audioElements.value[inputName]) {
+        // 元素被卸载时，清理 ref
+        delete audioElements.value[inputName]
+    }
+}
+
+// 获取音频元素
+const getAudioElement = (inputName) => {
+    if (!audioElements.value) {
+        audioElements.value = {}
+    }
+    return audioElements.value[inputName]
+}
+
+// 获取音频状态
+const getAudioState = (inputName) => {
+    if (!audioStates.value) {
+        audioStates.value = {}
+    }
+    if (!audioStates.value[inputName]) {
+        audioStates.value[inputName] = {
+            isPlaying: false,
+            duration: 0,
+            currentTime: 0,
+            isDragging: false
+        }
+    }
+    return audioStates.value[inputName]
 }
 
 // 切换播放/暂停
-const toggleAudioPlayback = () => {
-    const audio = getCurrentAudioElement()
-    if (!audio) return
+const toggleAudioPlayback = (inputName) => {
+    const audio = getAudioElement(inputName)
+    if (!audio) {
+        console.warn('Audio element not found for:', inputName)
+        return
+    }
 
+    const state = getAudioState(inputName)
+    
     if (audio.paused) {
         audio.play().catch(error => {
-            console.log('播放失败:', error)
+            console.error('播放失败:', error)
+            showAlert('音频播放失败: ' + error.message, 'error')
         })
     } else {
         audio.pause()
@@ -212,63 +278,88 @@ const toggleAudioPlayback = () => {
 }
 
 // 音频加载完成
-const onAudioLoaded = () => {
-    const audio = getCurrentAudioElement()
-    if (audio) {
-        audioDuration.value = audio.duration || 0
+const onAudioLoaded = (inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state) {
+        state.duration = audio.duration || 0
     }
 }
 
 // 时间更新
-const onTimeUpdate = () => {
-    const audio = getCurrentAudioElement()
-    if (audio && !isDragging.value) {
-        currentTime.value = audio.currentTime || 0
+const onTimeUpdate = (inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state && !state.isDragging) {
+        state.currentTime = audio.currentTime || 0
     }
 }
 
 // 进度条变化处理
-const onProgressChange = (event) => {
-    const audio = getCurrentAudioElement()
-    if (audioDuration.value > 0 && audio && event.target) {
+const onProgressChange = (event, inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (state && state.duration > 0 && audio && event.target) {
         const newTime = parseFloat(event.target.value)
-        currentTime.value = newTime
+        state.currentTime = newTime
         audio.currentTime = newTime
     }
 }
 
 // 进度条拖拽结束处理
-const onProgressEnd = (event) => {
-    const audio = getCurrentAudioElement()
-    if (audio && audioDuration.value > 0 && event.target) {
+const onProgressEnd = (event, inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state && state.duration > 0 && event.target) {
         const newTime = parseFloat(event.target.value)
         audio.currentTime = newTime
-        currentTime.value = newTime
+        state.currentTime = newTime
     }
-    isDragging.value = false
+    if (state) {
+        state.isDragging = false
+    }
 }
 
 // 播放结束
-const onAudioEnded = () => {
-    isPlaying.value = false
-    currentTime.value = 0
+const onAudioEnded = (inputName) => {
+    const state = getAudioState(inputName)
+    if (state) {
+        state.isPlaying = false
+        state.currentTime = 0
+    }
 }
 
 // 监听音频URL变化
-watch(() => getAudioMaterials(), (newMaterials) => {
+watch(audioMaterials, (newMaterials) => {
     if (newMaterials && newMaterials.length > 0) {
         currentAudioUrl.value = newMaterials[0][1]
-        nextTick(() => {
-            const audio = getCurrentAudioElement()
-            if (audio) {
-                audio.load()
+        // 确保 audioStates.value 存在
+        if (!audioStates.value) {
+            audioStates.value = {}
+        }
+        // 为每个音频初始化状态
+        newMaterials.forEach(([inputName, url]) => {
+            if (!audioStates.value[inputName]) {
+                audioStates.value[inputName] = {
+                    isPlaying: false,
+                    duration: 0,
+                    currentTime: 0,
+                    isDragging: false
+                }
             }
+        })
+        // 加载所有音频
+        nextTick(() => {
+            newMaterials.forEach(([inputName]) => {
+                const audio = getAudioElement(inputName)
+                if (audio) {
+                    audio.load()
+                }
+            })
         })
     } else {
         currentAudioUrl.value = ''
-        isPlaying.value = false
-        currentTime.value = 0
-        audioDuration.value = 0
+        audioStates.value = {}
     }
 }, { immediate: true })
 </script>
@@ -471,10 +562,10 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                     <div class="w-12 h-12 rounded-full bg-white/40 dark:bg-white/20 border border-white/30 dark:border-white/20 transition-all duration-200"></div>
                                                                     <!-- 播放/暂停按钮 -->
                                                                     <button
-                                                                        @click="toggleAudioPlayback"
+                                                                        @click="toggleAudioPlayback(inputName)"
                                                                         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]"
                                                                     >
-                                                                        <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
+                                                                        <i :class="getAudioState(inputName).isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
                                                                     </button>
                                                                 </div>
 
@@ -487,23 +578,23 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                                 <!-- 音频时长 -->
                                                                 <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
-                                                                    {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
+                                                                    {{ formatAudioTime(getAudioState(inputName).currentTime) }} / {{ formatAudioTime(getAudioState(inputName).duration) }}
                                                                 </div>
                                                             </div>
 
                                                             <!-- 进度条 -->
-                                                            <div class="flex items-center gap-2" v-if="audioDuration > 0">
+                                                            <div class="flex items-center gap-2" v-if="getAudioState(inputName).duration > 0">
                                                                 <input
                                                                     type="range"
                                                                     :min="0"
-                                                                    :max="audioDuration"
-                                                                    :value="currentTime"
-                                                                    @input="onProgressChange"
-                                                                    @change="onProgressChange"
-                                                                    @mousedown="isDragging = true"
-                                                                    @mouseup="onProgressEnd"
-                                                                    @touchstart="isDragging = true"
-                                                                    @touchend="onProgressEnd"
+                                                                    :max="getAudioState(inputName).duration"
+                                                                    :value="getAudioState(inputName).currentTime"
+                                                                    @input="(e) => onProgressChange(e, inputName)"
+                                                                    @change="(e) => onProgressChange(e, inputName)"
+                                                                    @mousedown="getAudioState(inputName).isDragging = true"
+                                                                    @mouseup="(e) => onProgressEnd(e, inputName)"
+                                                                    @touchstart="getAudioState(inputName).isDragging = true"
+                                                                    @touchend="(e) => onProgressEnd(e, inputName)"
                                                                     class="flex-1 h-1 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                                                                 />
                                                             </div>
@@ -511,13 +602,15 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                         <!-- 隐藏的音频元素 -->
                                                         <audio
-                                                            ref="audioElement"
+                                                            :ref="(el) => setAudioElement(inputName, el)"
                                                             :src="url"
-                                                            @loadedmetadata="onAudioLoaded"
-                                                            @timeupdate="onTimeUpdate"
-                                                            @ended="onAudioEnded"
-                                                            @play="isPlaying = true"
-                                                            @pause="isPlaying = false"
+                                                            @loadedmetadata="() => onAudioLoaded(inputName)"
+                                                            @timeupdate="() => onTimeUpdate(inputName)"
+                                                            @ended="() => onAudioEnded(inputName)"
+                                                            @play="() => getAudioState(inputName).isPlaying = true"
+                                                            @pause="() => getAudioState(inputName).isPlaying = false"
+                                                            @error="(e) => { console.error('Audio error:', e, url); showAlert('音频加载失败', 'error') }"
+                                                            preload="metadata"
                                                             class="hidden"
                                                         ></audio>
                                                     </div>
@@ -845,10 +938,10 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                 <div class="w-12 h-12 rounded-full bg-white/40 dark:bg-white/20 border border-white/30 dark:border-white/20 transition-all duration-200"></div>
                                                                 <!-- 播放/暂停按钮 -->
                                                                 <button
-                                                                    @click="toggleAudioPlayback"
+                                                                    @click="toggleAudioPlayback(inputName)"
                                                                     class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]"
                                                                 >
-                                                                    <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
+                                                                    <i :class="getAudioState(inputName).isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
                                                                 </button>
                                                             </div>
 
@@ -861,23 +954,23 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                             <!-- 音频时长 -->
                                                             <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
-                                                                {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
+                                                                {{ formatAudioTime(getAudioState(inputName).currentTime) }} / {{ formatAudioTime(getAudioState(inputName).duration) }}
                                                             </div>
                                                         </div>
 
                                                         <!-- 进度条 -->
-                                                        <div class="flex items-center gap-2" v-if="audioDuration > 0">
+                                                        <div class="flex items-center gap-2" v-if="getAudioState(inputName).duration > 0">
                                                             <input
                                                                 type="range"
                                                                 :min="0"
-                                                                :max="audioDuration"
-                                                                :value="currentTime"
-                                                                @input="onProgressChange"
-                                                                @change="onProgressChange"
-                                                                @mousedown="isDragging = true"
-                                                                @mouseup="onProgressEnd"
-                                                                @touchstart="isDragging = true"
-                                                                @touchend="onProgressEnd"
+                                                                :max="getAudioState(inputName).duration"
+                                                                :value="getAudioState(inputName).currentTime"
+                                                                @input="(e) => onProgressChange(e, inputName)"
+                                                                @change="(e) => onProgressChange(e, inputName)"
+                                                                @mousedown="getAudioState(inputName).isDragging = true"
+                                                                @mouseup="(e) => onProgressEnd(e, inputName)"
+                                                                @touchstart="getAudioState(inputName).isDragging = true"
+                                                                @touchend="(e) => onProgressEnd(e, inputName)"
                                                                 class="flex-1 h-1 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                                                             />
                                                         </div>
@@ -885,13 +978,15 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                     <!-- 隐藏的音频元素 -->
                                                     <audio
-                                                        ref="audioElement"
+                                                        :ref="(el) => setAudioElement(inputName, el)"
                                                         :src="url"
-                                                        @loadedmetadata="onAudioLoaded"
-                                                        @timeupdate="onTimeUpdate"
-                                                        @ended="onAudioEnded"
-                                                        @play="isPlaying = true"
-                                                        @pause="isPlaying = false"
+                                                        @loadedmetadata="() => onAudioLoaded(inputName)"
+                                                        @timeupdate="() => onTimeUpdate(inputName)"
+                                                        @ended="() => onAudioEnded(inputName)"
+                                                        @play="() => getAudioState(inputName).isPlaying = true"
+                                                        @pause="() => getAudioState(inputName).isPlaying = false"
+                                                        @error="(e) => { console.error('Audio error:', e, url); showAlert('音频加载失败', 'error') }"
+                                                        preload="metadata"
                                                         class="hidden"
                                                     ></audio>
                                                 </div>

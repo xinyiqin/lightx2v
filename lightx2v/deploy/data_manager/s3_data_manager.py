@@ -128,12 +128,31 @@ class S3DataManager(BaseDataManager):
 
     @class_try_catch_async
     async def list_files(self, base_dir=None):
-        prefix = base_dir if base_dir else self.base_path
+        # Use fmt_path to ensure base_dir includes base_path if needed
+        if base_dir:
+            # base_dir might already include base_path, or might be relative
+            # If it doesn't start with base_path, prepend it
+            if not base_dir.startswith(self.base_path):
+                prefix = self.fmt_path(self.base_path, base_dir)
+            else:
+                prefix = base_dir
+        else:
+            prefix = self.base_path
+        
+        # Ensure prefix ends with / for proper S3 listing
+        if not prefix.endswith("/"):
+            prefix = prefix + "/"
+        
         response = await self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
         files = []
         if "Contents" in response:
             for obj in response["Contents"]:
-                files.append(obj["Key"].replace(prefix + "/", ""))
+                # Remove the prefix from the key to get just the filename
+                key = obj["Key"]
+                if key.startswith(prefix):
+                    filename = key[len(prefix):]
+                    if filename:  # Skip empty filenames (the directory itself)
+                        files.append(filename)
         return files
 
     @class_try_catch_async

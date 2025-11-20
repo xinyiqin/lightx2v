@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+
 import router from './router'
 import { init, handleLoginCallback, handleClickOutside, validateToken } from './utils/other'
 import { initLanguage } from './utils/i18n'

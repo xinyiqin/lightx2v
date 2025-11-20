@@ -6,6 +6,7 @@ import Generate from '../components/Generate.vue'
 import Projects from '../components/Projects.vue'
 import Inspirations from '../components/Inspirations.vue'
 import Share from '../views/Share.vue'
+import PodcastGenerate from '../views/PodcastGenerate.vue'
 import { showAlert } from '../utils/other'
 
 const routes = [
@@ -21,6 +22,12 @@ const routes = [
   },
   {
     path: '/share/:shareId', name: 'Share', component: Share, meta: { requiresAuth: false }
+  },
+  {
+    path: '/podcast_generate', name: 'PodcastGenerate', component: PodcastGenerate, meta: { requiresAuth: true }
+  },
+  {
+    path: '/podcast_generate/:session_id', name: 'PodcastSession', component: PodcastGenerate, meta: { requiresAuth: true }
   },
   {
     path: '/home',

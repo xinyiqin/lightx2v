@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import topMenu from '../components/TopBar.vue'
 import Loading from '../components/Loading.vue'
+import Alert from '../components/Alert.vue'
+import Confirm from '../components/Confirm.vue'
 import {
     isLoading,
     selectedTaskId,
@@ -499,6 +501,8 @@ onMounted(async () => {
     <div v-show="isLoading" class="fixed inset-0 bg-[#f5f5f7] dark:bg-[#000000] flex items-center justify-center z-[9999]">
         <Loading />
     </div>
+    <Alert />
+    <Confirm />
 </template>
 
 <style scoped>
