@@ -5,9 +5,8 @@ Supports detecting faces in images, including human faces, animal faces, anime f
 """
 
 import io
-import os
 import traceback
-from typing import List, Dict, Union, Tuple
+from typing import Dict, List, Union
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -15,6 +14,7 @@ from loguru import logger
 
 try:
     from ultralytics import YOLO
+
     YOLO_AVAILABLE = True
 except ImportError:
     YOLO_AVAILABLE = False
@@ -183,9 +183,7 @@ class FaceDetector:
         """
         return self.detect_faces(image_bytes, **kwargs)
 
-    def extract_face_regions(
-        self, image: Union[str, Image.Image, bytes], expand_ratio: float = 0.1
-    ) -> List[Image.Image]:
+    def extract_face_regions(self, image: Union[str, Image.Image, bytes], expand_ratio: float = 0.1) -> List[Image.Image]:
         """
         Extract detected face regions
 
@@ -284,9 +282,8 @@ if __name__ == "__main__":
 
     print(f"Detected {len(result['faces'])} faces:")
     for i, face in enumerate(result["faces"]):
-        print(f"  Face {i+1}: {face}")
+        print(f"  Face {i + 1}: {face}")
 
     output_path = "detected_faces.png"
     result["image"].save(output_path)
     print(f"Annotated image saved to: {output_path}")
-

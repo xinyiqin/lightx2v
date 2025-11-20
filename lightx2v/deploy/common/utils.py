@@ -69,9 +69,9 @@ def class_try_catch_async(func):
 def data_name(x, task_id, is_directory=False):
     """
     Generate data filename for task.
-    
+
     Args:
-        x: Input/output name (e.g., "input_image", "input_audio")
+        x: Input/output name (e.g., "input_image", "input_audio", "input_video")
         task_id: Task ID
         is_directory: If True, don't add file extension (for directory inputs)
     """
@@ -80,6 +80,8 @@ def data_name(x, task_id, is_directory=False):
         return f"{task_id}-{x}"
     if x == "input_image":
         x = x + ".png"
+    elif x == "input_video":
+        x = x + ".mp4"
     elif x == "output_video":
         x = x + ".mp4"
     return f"{task_id}-{x}"
@@ -194,6 +196,11 @@ async def preload_data(inp, inp_type, typ, val):
         elif inp_type == "AUDIO":
             if typ != "stream" and typ != "directory":
                 data = await asyncio.to_thread(format_audio_data, data)
+        elif inp_type == "VIDEO":
+            # Video data doesn't need special formatting, just validate it's not empty
+            if len(data) == 0:
+                raise ValueError("Video file is empty")
+            logger.info(f"load video: {len(data)} bytes")
         else:
             raise Exception(f"cannot parse inp_type={inp_type} data")
         return data
@@ -207,7 +214,7 @@ async def load_inputs(params, raw_inputs, types):
     for inp in raw_inputs:
         item = params.pop(inp)
         bytes_data = await preload_data(inp, types[inp], item["type"], item["data"])
-        
+
         # Handle multi-person audio directory
         if bytes_data is not None and isinstance(bytes_data, dict) and bytes_data.get("type") == "directory":
             # Store directory structure for special handling

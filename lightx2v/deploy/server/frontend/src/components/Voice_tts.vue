@@ -108,7 +108,7 @@
                   </div>
                 </div>
                 <!-- 可点击的进度条 -->
-                <div 
+                <div
                   @click.stop="handleSegmentProgressClick(index, $event)"
                   class="w-full h-3 bg-black/6 dark:bg-white/15 rounded-full relative overflow-hidden cursor-pointer hover:h-3.5 transition-all duration-200 group"
                   :class="{ 'ring-2 ring-[color:var(--brand-primary)]/50 dark:ring-[color:var(--brand-primary-light)]/50 ring-offset-1': playingSegmentIndex === index && segmentAudioElements[index] && !segmentAudioElements[index].paused }"
@@ -318,7 +318,7 @@
               :key="item.segment.id"
               class="space-y-4"
             >
-              <div 
+              <div
                 class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-4 transition-all duration-200"
                 :class="{
                   'opacity-50 scale-95': draggingSegmentIndex === item.originalIndex,
@@ -334,7 +334,7 @@
               >
                 <div class="flex items-center gap-3 mb-3">
                   <!-- 拖拽手柄 -->
-                  <div 
+                  <div
                     v-if="audioSegments.length > 1"
                     class="cursor-move text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] transition-colors"
                     :title="t('dragToReorder')"
@@ -358,8 +358,8 @@
                     <i class="fas fa-trash text-xs"></i>
                   </button>
                   <div class="flex-1"></div>
-                  <div 
-                    class="relative voice-selector-container" 
+                  <div
+                    class="relative voice-selector-container"
                     :data-segment-index="item.originalIndex"
                     :ref="el => setSegmentVoiceSelectorRef(item.originalIndex, el)"
                   >
@@ -1414,12 +1414,12 @@ export default {
       }
 
       // 查找 Vivi 2.0 音色（尝试多种匹配方式）
-      let viviVoice = voices.value.find(v => 
+      let viviVoice = voices.value.find(v =>
         v.name && v.name.toLowerCase().includes('vivi') && v.version === '2.0'
       )
       // 如果没找到，尝试只匹配 vivi（不限制版本）
       if (!viviVoice) {
-        viviVoice = voices.value.find(v => 
+        viviVoice = voices.value.find(v =>
           v.name && v.name.toLowerCase().includes('vivi')
         )
       }
@@ -1428,20 +1428,20 @@ export default {
       } else {
         console.warn('未找到 Vivi 音色，将创建段落但不会自动合成')
       }
-      
+
       // 查找儒雅逸辰音色（尝试多种匹配方式）
-      let ruyayiVoice = voices.value.find(v => 
+      let ruyayiVoice = voices.value.find(v =>
         v.name && v.name.includes('儒雅逸辰')
       )
       // 如果没找到，尝试匹配逸辰
       if (!ruyayiVoice) {
-        ruyayiVoice = voices.value.find(v => 
+        ruyayiVoice = voices.value.find(v =>
           v.name && v.name.includes('逸辰')
         )
       }
       // 如果还没找到，尝试匹配包含"儒雅"的
       if (!ruyayiVoice) {
-        ruyayiVoice = voices.value.find(v => 
+        ruyayiVoice = voices.value.find(v =>
           v.name && v.name.includes('儒雅')
         )
       }
@@ -1483,7 +1483,7 @@ export default {
 
       // 等待 DOM 更新后自动合成
       await nextTick()
-      
+
       // 自动合成第一段（如果找到了音色）
       if (segment1.voice && segment1.text.trim()) {
         try {
@@ -1492,7 +1492,7 @@ export default {
           console.error('第一段合成失败:', error)
         }
       }
-      
+
       // 等待第一段合成完成后再合成第二段（如果找到了音色）
       if (segment2.voice && segment2.text.trim()) {
         try {
@@ -1521,7 +1521,7 @@ export default {
     const copySegment = (index, event) => {
       const segment = audioSegments.value[index]
       if (!segment) return
-      
+
       // 创建段落的深拷贝，包括所有属性
       const copiedSegment = {
         id: Date.now() + Math.random(), // 新的唯一 ID
@@ -1535,10 +1535,10 @@ export default {
         isGenerating: false, // 重置生成状态
         contextText: segment.contextText || '' // 复制语音指令
       }
-      
+
       // 将复制的段落添加到列表末尾
       audioSegments.value.push(copiedSegment)
-      
+
       // 添加视觉反馈：图标临时变为对勾
       if (event && event.target) {
         const button = event.target.closest('button')
@@ -1552,7 +1552,7 @@ export default {
           }
         }
       }
-      
+
       console.log(t('segmentCopied'))
     }
 
@@ -1626,7 +1626,7 @@ export default {
           if (!segmentVoiceSelectors || !segmentVoiceSelectors.value) {
             return
           }
-          
+
           const container = segmentVoiceSelectors.value[index]
           if (!container) {
             // 延迟重试，因为 ref 可能还没绑定
@@ -1648,7 +1648,7 @@ export default {
             }, 100)
             return
           }
-          
+
           const rect = container.getBoundingClientRect()
           dropdownStyle.value = {
             position: 'fixed',
@@ -1663,16 +1663,16 @@ export default {
         })
       })
     }
-    
+
     // 计算是否应该显示下拉菜单（已移除，直接在模板中使用条件判断）
-    
+
     // 监听窗口滚动和调整大小，更新下拉菜单位置
     const handleScrollOrResize = () => {
       if (showVoiceSelector.value && selectedSegmentIndex.value >= 0) {
         updateDropdownPosition(selectedSegmentIndex.value)
       }
     }
-    
+
     // 在打开下拉菜单时添加监听器
     watch([showVoiceSelector, selectedSegmentIndex], () => {
       if (showVoiceSelector.value && selectedSegmentIndex.value >= 0) {
@@ -1693,21 +1693,21 @@ export default {
       if (newUrl) {
         // 等待 DOM 更新
         await nextTick()
-        
+
         if (mergedAudioElement.value) {
           console.log('检测到合并音频 URL 变化，准备加载音频:', newUrl)
-          
+
           // 如果 URL 改变，先清理旧的
           if (oldUrl && oldUrl !== newUrl) {
             mergedAudioElement.value.src = ''
             mergedAudioElement.value.load()
             await new Promise(resolve => setTimeout(resolve, 50))
           }
-          
+
           // 设置新的 src
           mergedAudioElement.value.src = newUrl
           console.log('音频 src 已设置:', mergedAudioElement.value.src)
-          
+
           // 监听加载错误
           const handleError = (e) => {
             console.error('合并音频加载错误:', {
@@ -1721,7 +1721,7 @@ export default {
             alert(t('mergedAudioLoadFailed', { error: mergedAudioElement.value.error?.message || t('unknownError') }))
           }
           mergedAudioElement.value.addEventListener('error', handleError, { once: true })
-          
+
           // 监听加载成功
           const handleLoadedMetadata = () => {
             console.log('合并音频元数据加载成功:', {
@@ -1733,12 +1733,12 @@ export default {
             }
           }
           mergedAudioElement.value.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
-          
+
           const handleLoadedData = () => {
             console.log('合并音频数据加载成功，可以播放')
           }
           mergedAudioElement.value.addEventListener('loadeddata', handleLoadedData, { once: true })
-          
+
           // 加载音频
           mergedAudioElement.value.load()
           console.log('已调用 load()，readyState:', mergedAudioElement.value.readyState)
@@ -1764,12 +1764,12 @@ export default {
     // 点击外部关闭音色选择器
     const handleClickOutside = (event) => {
       if (!showVoiceSelector.value) return
-      
+
       // 检查是否点击在音色选择器容器内（包括下拉菜单）
-      const clickedInContainer = event.target.closest('.voice-selector-container') || 
+      const clickedInContainer = event.target.closest('.voice-selector-container') ||
                                   event.target.closest('.voice-selector-component') ||
                                   event.target.closest('.voice-selector-dropdown')
-      
+
       if (!clickedInContainer) {
         showVoiceSelector.value = false
         selectedSegmentIndex.value = -1
@@ -1859,7 +1859,7 @@ export default {
       const audioEl = segmentAudioElements.value[index]
       if (audioEl && audioSegments.value[index]) {
         audioSegments.value[index].currentTime = audioEl.currentTime || 0
-        
+
         // 如果是连续播放模式，更新累计时间
         if (isPlayingMerged.value && playingSegmentIndex.value === index) {
           let segmentIndexInSequence = 0
@@ -1868,7 +1868,7 @@ export default {
               segmentIndexInSequence++
             }
           }
-          
+
           if (segmentIndexInSequence < segmentStartTimes.value.length) {
             const segmentStartTime = segmentStartTimes.value[segmentIndexInSequence]
             mergedCurrentTime.value = segmentStartTime + (audioEl.currentTime || 0)
@@ -1968,7 +1968,7 @@ export default {
       // 只计算总时长和每段的开始时间，不实际合并文件
       let totalDuration = 0
       const startTimes = [0] // 第一段从 0 开始
-      
+
       for (let i = 0; i < segmentsWithAudio.length; i++) {
         const segment = segmentsWithAudio[i]
         if (i > 0) {
@@ -1976,10 +1976,10 @@ export default {
         }
         totalDuration += segment.duration || 0
       }
-      
+
       mergedAudioDuration.value = totalDuration
       segmentStartTimes.value = startTimes
-      
+
       console.log('计算总时长:', totalDuration, '秒，共', segmentsWithAudio.length, '段')
     }
 
@@ -1995,7 +1995,7 @@ export default {
       // RIFF chunk size = 文件总大小 - 8 (不包括 RIFF 和 size 字段本身)
       // 文件总大小 = 44 (文件头) + dataSize
       const riffChunkSize = 36 + dataSize // 36 = 44 - 8
-        
+
       const arrayBuffer = new ArrayBuffer(44 + dataSize)
       const view = new DataView(arrayBuffer)
 
@@ -2010,7 +2010,7 @@ export default {
       writeString(0, 'RIFF')
       view.setUint32(4, riffChunkSize, true) // RIFF chunk size (little-endian)
       writeString(8, 'WAVE')
-      
+
       // fmt chunk (24 bytes: 4 + 4 + 16)
       writeString(12, 'fmt ')
       view.setUint32(16, 16, true) // fmt chunk size (little-endian)
@@ -2020,7 +2020,7 @@ export default {
       view.setUint32(28, byteRate, true) // Byte rate (little-endian)
       view.setUint16(32, blockAlign, true) // Block align (little-endian)
       view.setUint16(34, 16, true) // Bits per sample (little-endian)
-      
+
       // data chunk header (8 bytes: 4 + 4)
       writeString(36, 'data')
       view.setUint32(40, dataSize, true) // Data size (little-endian)
@@ -2032,7 +2032,7 @@ export default {
           const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]))
           // 转换为 16-bit PCM (little-endian)
           // 范围: -32768 到 32767
-          const int16Sample = sample < 0 
+          const int16Sample = sample < 0
             ? Math.max(-0x8000, Math.floor(sample * 0x8000))
             : Math.min(0x7FFF, Math.floor(sample * 0x7FFF))
           view.setInt16(offset, int16Sample, true) // little-endian
@@ -2047,7 +2047,7 @@ export default {
     const playNextSegment = (currentIndex) => {
       const segmentsWithAudio = audioSegments.value.filter(s => s.audioUrl && s.duration > 0)
       const nextIndex = currentIndex + 1
-      
+
       if (nextIndex >= segmentsWithAudio.length) {
         // 所有段播放完成
         isPlayingMerged.value = false
@@ -2055,7 +2055,7 @@ export default {
         mergedCurrentTime.value = 0
         return
       }
-      
+
       // 找到下一段在 audioSegments 中的实际索引
       let actualIndex = -1
       let foundCount = 0
@@ -2068,7 +2068,7 @@ export default {
           foundCount++
         }
       }
-      
+
       if (actualIndex >= 0) {
         playingSegmentIndex.value = actualIndex
         const audioEl = segmentAudioElements.value[actualIndex]
@@ -2104,7 +2104,7 @@ export default {
         // 开始播放：从第一段开始，或从上次暂停的位置继续
         let startIndex = 0
         let foundCount = 0
-        
+
         // 如果之前有播放位置，找到对应的段
         if (mergedCurrentTime.value > 0 && segmentStartTimes.value.length > 0) {
           for (let i = segmentStartTimes.value.length - 1; i >= 0; i--) {
@@ -2114,7 +2114,7 @@ export default {
             }
           }
         }
-        
+
         // 找到实际索引
         let actualIndex = -1
         for (let i = 0; i < audioSegments.value.length; i++) {
@@ -2126,7 +2126,7 @@ export default {
             foundCount++
           }
         }
-        
+
         if (actualIndex >= 0) {
           playingSegmentIndex.value = actualIndex
           const audioEl = segmentAudioElements.value[actualIndex]
@@ -2139,7 +2139,7 @@ export default {
             } else {
               audioEl.currentTime = 0
             }
-            
+
             audioEl.play().catch(error => {
               console.error('播放失败:', error)
               alert(t('playbackFailed', { error: error.message || t('unknownError') }))
@@ -2162,12 +2162,12 @@ export default {
       if (mergedAudioDuration.value > 0 && event.target) {
         const newTime = parseFloat(event.target.value)
         mergedCurrentTime.value = newTime
-        
+
         // 找到对应的段和段内位置
         if (segmentStartTimes.value.length > 0) {
           let targetSegmentIndex = -1
           let segmentIndexInSequence = 0
-          
+
           // 找到目标段
           for (let i = segmentStartTimes.value.length - 1; i >= 0; i--) {
             if (newTime >= segmentStartTimes.value[i]) {
@@ -2175,7 +2175,7 @@ export default {
               break
             }
           }
-          
+
           // 找到实际索引
           let foundCount = 0
           for (let i = 0; i < audioSegments.value.length; i++) {
@@ -2187,15 +2187,15 @@ export default {
               foundCount++
             }
           }
-          
+
           if (targetSegmentIndex >= 0) {
             const segmentStartTime = segmentStartTimes.value[segmentIndexInSequence]
             const segmentOffset = newTime - segmentStartTime
             const audioEl = segmentAudioElements.value[targetSegmentIndex]
-            
+
             if (audioEl) {
               audioEl.currentTime = Math.max(0, Math.min(segmentOffset, audioSegments.value[targetSegmentIndex].duration))
-              
+
               // 如果正在播放，切换到目标段
               if (isPlayingMerged.value) {
                 // 停止当前播放的段
@@ -2205,7 +2205,7 @@ export default {
                     currentAudioEl.pause()
                   }
                 }
-                
+
                 playingSegmentIndex.value = targetSegmentIndex
                 audioEl.play().catch(error => {
                   console.error('跳转播放失败:', error)
@@ -2272,10 +2272,10 @@ export default {
         let offset = 0
         for (const buffer of audioBuffers) {
           const bufferLength = buffer.length
-          
+
           for (let channel = 0; channel < targetChannels; channel++) {
             const mergedChannelData = mergedBuffer.getChannelData(channel)
-            
+
             if (channel < buffer.numberOfChannels) {
               const sourceChannelData = buffer.getChannelData(channel)
               mergedChannelData.set(sourceChannelData, offset)
@@ -2284,14 +2284,14 @@ export default {
               mergedChannelData.set(sourceChannelData, offset)
             }
           }
-          
+
           offset += bufferLength
         }
 
         // 转换为 WAV
         const wav = audioBufferToWav(mergedBuffer)
         const blob = new Blob([wav], { type: 'audio/wav' })
-        
+
         emit('tts-complete', blob)
       } catch (error) {
         console.error('合并音频失败:', error)
@@ -2327,26 +2327,26 @@ export default {
     const handleDrop = (targetIndex, event) => {
       event.preventDefault()
       event.stopPropagation()
-      
+
       const draggedIndex = draggingSegmentIndex.value
       if (draggedIndex === -1 || draggedIndex === targetIndex) {
         draggingSegmentIndex.value = -1
         dragOverSegmentIndex.value = -1
         return
       }
-      
+
       // 重新排序段落
       const segments = [...audioSegments.value]
       const draggedSegment = segments[draggedIndex]
       segments.splice(draggedIndex, 1)
       segments.splice(targetIndex, 0, draggedSegment)
-      
+
       // 更新 audioSegments
       audioSegments.value = segments
-      
+
       // 重新计算合并音频的总时长
       mergeAllSegments()
-      
+
       draggingSegmentIndex.value = -1
       dragOverSegmentIndex.value = -1
     }

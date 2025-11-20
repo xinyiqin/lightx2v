@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
 
 import asyncio
+import io
 import json
 import os
-import sys
+import struct
 import time
 import uuid
-import io
-import struct
-import logging
-from enum import IntEnum
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Callable, List, Optional
 
 import websockets
 from loguru import logger
 
+
 # Protocol definitions (from podcasts_protocols)
 class MsgType(IntEnum):
     """Message type enumeration"""
+
     Invalid = 0
     FullClientRequest = 0b1
     AudioOnlyClient = 0b10
@@ -31,6 +31,7 @@ class MsgType(IntEnum):
 
 class MsgTypeFlagBits(IntEnum):
     """Message type flag bits"""
+
     NoSeq = 0
     PositiveSeq = 0b1
     LastNoSeq = 0b10
@@ -40,11 +41,13 @@ class MsgTypeFlagBits(IntEnum):
 
 class VersionBits(IntEnum):
     """Version bits"""
+
     Version1 = 1
 
 
 class HeaderSizeBits(IntEnum):
     """Header size bits"""
+
     HeaderSize4 = 1
     HeaderSize8 = 2
     HeaderSize12 = 3
@@ -53,6 +56,7 @@ class HeaderSizeBits(IntEnum):
 
 class SerializationBits(IntEnum):
     """Serialization method bits"""
+
     Raw = 0
     JSON = 0b1
     Thrift = 0b11
@@ -61,6 +65,7 @@ class SerializationBits(IntEnum):
 
 class CompressionBits(IntEnum):
     """Compression method bits"""
+
     None_ = 0
     Gzip = 0b1
     Custom = 0b1111
@@ -68,6 +73,7 @@ class CompressionBits(IntEnum):
 
 class EventType(IntEnum):
     """Event type enumeration"""
+
     None_ = 0
     StartConnection = 1
     StartTask = 1
@@ -105,6 +111,7 @@ class EventType(IntEnum):
 @dataclass
 class Message:
     """Message object"""
+
     version: VersionBits = VersionBits.Version1
     header_size: HeaderSizeBits = HeaderSizeBits.HeaderSize4
     type: MsgType = MsgType.Invalid
@@ -173,8 +180,7 @@ class Message:
         writers = []
         if self.flag == MsgTypeFlagBits.WithEvent:
             writers.extend([self._write_event, self._write_session_id])
-        if self.type in [MsgType.FullClientRequest, MsgType.FullServerResponse, MsgType.FrontEndResultServer,
-                         MsgType.AudioOnlyClient, MsgType.AudioOnlyServer]:
+        if self.type in [MsgType.FullClientRequest, MsgType.FullServerResponse, MsgType.FrontEndResultServer, MsgType.AudioOnlyClient, MsgType.AudioOnlyServer]:
             if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
                 writers.append(self._write_sequence)
         elif self.type == MsgType.Error:
@@ -187,8 +193,7 @@ class Message:
     def _get_readers(self) -> List[Callable[[io.BytesIO], None]]:
         """Get list of reader functions"""
         readers = []
-        if self.type in [MsgType.FullClientRequest, MsgType.FullServerResponse, MsgType.FrontEndResultServer,
-                         MsgType.AudioOnlyClient, MsgType.AudioOnlyServer]:
+        if self.type in [MsgType.FullClientRequest, MsgType.FullServerResponse, MsgType.FrontEndResultServer, MsgType.AudioOnlyClient, MsgType.AudioOnlyServer]:
             if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
                 readers.append(self._read_sequence)
         elif self.type == MsgType.Error:
@@ -202,8 +207,7 @@ class Message:
         buffer.write(struct.pack(">i", self.event))
 
     def _write_session_id(self, buffer: io.BytesIO) -> None:
-        if self.event in [EventType.StartConnection, EventType.FinishConnection, EventType.ConnectionStarted,
-                          EventType.ConnectionFailed]:
+        if self.event in [EventType.StartConnection, EventType.FinishConnection, EventType.ConnectionStarted, EventType.ConnectionFailed]:
             return
         session_id_bytes = self.session_id.encode("utf-8")
         size = len(session_id_bytes)
@@ -232,8 +236,7 @@ class Message:
             self.event = EventType(struct.unpack(">i", event_bytes)[0])
 
     def _read_session_id(self, buffer: io.BytesIO) -> None:
-        if self.event in [EventType.StartConnection, EventType.FinishConnection, EventType.ConnectionStarted,
-                          EventType.ConnectionFailed, EventType.ConnectionFinished]:
+        if self.event in [EventType.StartConnection, EventType.FinishConnection, EventType.ConnectionStarted, EventType.ConnectionFailed, EventType.ConnectionFinished]:
             return
         size_bytes = buffer.read(4)
         if size_bytes:
@@ -337,13 +340,13 @@ async def finish_session(websocket: websockets.WebSocketClientProtocol, session_
 class VolcEnginePodcastClient:
     """
     VolcEngine Podcast客户端
-    
+
     支持多种播客类型:
         - action=0: 文本转播客
         - action=3: NLP文本转播客
         - action=4: 提示词生成播客
     """
-    
+
     def __init__(self):
         self.endpoint = "wss://openspeech.bytedance.com/api/v3/sami/podcasttts"
         self.appid = os.getenv("VOLCENGINE_PODCAST_APPID")
@@ -374,7 +377,7 @@ class VolcEnginePodcastClient:
     ):
         """
         执行播客请求
-        
+
         Args:
             text: 输入文本 (action=0时使用)
             input_url: Web URL或文件URL (action=0时使用)
@@ -416,16 +419,13 @@ class VolcEnginePodcastClient:
         voice = ""
         current_round = 0
         podcast_texts = []
-        
+
         try:
             while retry_num > 0:
                 # 建立WebSocket连接
-                websocket = await websockets.connect(
-                    self.endpoint,
-                    additional_headers=headers
-                )
+                websocket = await websockets.connect(self.endpoint, additional_headers=headers)
                 logger.info(f"WebSocket connected: {websocket.response.headers}")
-                
+
                 # 构建请求参数
                 if input_url:
                     req_params = {
@@ -441,11 +441,7 @@ class VolcEnginePodcastClient:
                             "only_nlp_text": only_nlp_text,
                         },
                         "speaker_info": json.loads(speaker_info) if speaker_info else None,
-                        "audio_config": {
-                            "format": encoding,
-                            "sample_rate": 24000,
-                            "speech_rate": 0
-                        }
+                        "audio_config": {"format": encoding, "sample_rate": 24000, "speech_rate": 0},
                     }
                 else:
                     req_params = {
@@ -462,50 +458,43 @@ class VolcEnginePodcastClient:
                             "only_nlp_text": only_nlp_text,
                         },
                         "speaker_info": json.loads(speaker_info) if speaker_info else None,
-                        "audio_config": {
-                            "format": encoding,
-                            "sample_rate": 24000,
-                            "speech_rate": 0
-                        }
+                        "audio_config": {"format": encoding, "sample_rate": 24000, "speech_rate": 0},
                     }
-                
+
                 logger.info(f"Request params: {json.dumps(req_params, indent=2, ensure_ascii=False)}")
-                
+
                 if not is_podcast_round_end:
-                    req_params["retry_info"] = {
-                        "retry_task_id": task_id,
-                        "last_finished_round_id": last_round_id
-                    }
-                
+                    req_params["retry_info"] = {"retry_task_id": task_id, "last_finished_round_id": last_round_id}
+
                 # Start connection
                 await start_connection(websocket)
                 await wait_for_event(websocket, MsgType.FullServerResponse, EventType.ConnectionStarted)
-                
+
                 session_id = str(uuid.uuid4())
                 if not task_id:
                     task_id = session_id
-                
+
                 # Start session
                 await start_session(websocket, json.dumps(req_params).encode(), session_id)
                 await wait_for_event(websocket, MsgType.FullServerResponse, EventType.SessionStarted)
-                
+
                 # Finish session
                 await finish_session(websocket, session_id)
-                
+
                 while True:
                     msg = await receive_message(websocket)
-                    
+
                     # 音频数据块
                     if msg.type == MsgType.AudioOnlyServer and msg.event == EventType.PodcastRoundResponse:
                         if not audio_received and audio:
                             audio_received = True
                         audio.extend(msg.payload)
                         logger.debug(f"Audio received: {len(msg.payload)} bytes")
-                    
+
                     # 错误信息
                     elif msg.type == MsgType.Error:
                         raise RuntimeError(f"Server error: {msg.payload.decode()}")
-                    
+
                     elif msg.type == MsgType.FullServerResponse:
                         # 播客 round 开始
                         if msg.event == EventType.PodcastRoundStart:
@@ -521,7 +510,7 @@ class VolcEnginePodcastClient:
                                 voice = "tail_music"
                             is_podcast_round_end = False
                             logger.info(f"New round started: {data}")
-                        
+
                         # 播客 round 结束
                         if msg.event == EventType.PodcastRoundEnd:
                             data = json.loads(msg.payload.decode())
@@ -532,21 +521,22 @@ class VolcEnginePodcastClient:
                             last_round_id = current_round
                             if audio:
                                 import os
+
                                 os.makedirs(output_dir, exist_ok=True)
-                                filename = f'{output_dir}/{voice}_{current_round}.{encoding}'
-                                text_filename = f'{output_dir}/{voice}_{current_round}.txt'
-                                
+                                filename = f"{output_dir}/{voice}_{current_round}.{encoding}"
+                                text_filename = f"{output_dir}/{voice}_{current_round}.txt"
+
                                 # 保存音频文件
                                 if not skip_round_audio_save:
                                     with open(filename, "wb") as f:
                                         f.write(audio)
                                 podcast_audio.extend(audio)
-                                
+
                                 # 确保文件已保存
                                 time.sleep(0.1)
-                                
+
                                 logger.info(f"Saved partial audio: {filename}")
-                                
+
                                 # 保存当前轮次的文本信息
                                 if podcast_texts:
                                     last_text = podcast_texts[-1]
@@ -555,65 +545,68 @@ class VolcEnginePodcastClient:
                                         f.write(f"Speaker: {voice}\n")
                                         f.write(f"Text: {last_text.get('text', '')}\n")
                                     logger.info(f"Saved partial text: {text_filename}")
-                                
+
                                 # 调用轮次完成回调
                                 if on_round_complete:
                                     audio_filename = f"{voice}_{current_round}.{encoding}"
-                                    await on_round_complete({
-                                        "round": current_round,
-                                        "speaker": voice,
-                                        "url": f"/api/audio/{audio_filename}",
-                                        "text_file": f"/api/audio/{voice}_{current_round}.txt",
-                                        "text": last_text.get('text', '') if last_text else ''
-                                    })
-                                
+                                    await on_round_complete(
+                                        {
+                                            "round": current_round,
+                                            "speaker": voice,
+                                            "url": f"/api/audio/{audio_filename}",
+                                            "text_file": f"/api/audio/{voice}_{current_round}.txt",
+                                            "text": last_text.get("text", "") if last_text else "",
+                                        }
+                                    )
+
                                 audio.clear()
-                        
+
                         # 播客结束
                         if msg.event == EventType.PodcastEnd:
                             data = json.loads(msg.payload.decode())
                             logger.info(f"Podcast end: {data}")
-                    
+
                     # 会话结束
                     if msg.event == EventType.SessionFinished:
                         break
-                
+
                 if not audio_received and not only_nlp_text:
                     raise RuntimeError("No audio data received")
-                
+
                 # 保持连接
                 await finish_connection(websocket)
                 await wait_for_event(websocket, MsgType.FullServerResponse, EventType.ConnectionFinished)
-                
+
                 # 播客结束, 保存最终音频文件
                 if is_podcast_round_end:
                     import os
+
                     os.makedirs(output_dir, exist_ok=True)
                     timestamp = time.time()
-                    
+
                     if podcast_audio:
-                        filename = f'{output_dir}/podcast_final_{timestamp}.{encoding}'
+                        filename = f"{output_dir}/podcast_final_{timestamp}.{encoding}"
                         with open(filename, "wb") as f:
                             f.write(podcast_audio)
                         logger.info(f"Final audio saved: {filename}")
-                    
+
                     # 总是保存文本信息
                     if podcast_texts:
-                        json_filename = f'{output_dir}/podcast_texts_{timestamp}.json'
+                        json_filename = f"{output_dir}/podcast_texts_{timestamp}.json"
                         with open(json_filename, "w", encoding="utf-8") as f:
                             json.dump(podcast_texts, f, ensure_ascii=False, indent=4)
                         logger.info(f"Final text (JSON) saved: {json_filename}")
-                        
-                        txt_filename = f'{output_dir}/podcast_texts_{timestamp}.txt'
+
+                        txt_filename = f"{output_dir}/podcast_texts_{timestamp}.txt"
                         with open(txt_filename, "w", encoding="utf-8") as f:
                             for i, text_item in enumerate(podcast_texts):
-                                f.write(f"\n{'='*60}\n")
-                                f.write(f"Round {i+1}:\n")
+                                f.write(f"\n{'=' * 60}\n")
+                                f.write(f"Round {i + 1}:\n")
                                 f.write(f"Speaker: {text_item.get('speaker', 'Unknown')}\n")
                                 f.write(f"Text:\n{text_item.get('text', '')}\n")
-                            f.write(f"\n{'='*60}\n")
+                            f.write(f"\n{'=' * 60}\n")
                         logger.info(f"Final text (TXT) saved: {txt_filename}")
-                    
+
                     break
                 else:
                     logger.error(f"Current podcast not finished, resuming from round {last_round_id}")
@@ -621,23 +614,23 @@ class VolcEnginePodcastClient:
                     await asyncio.sleep(1)
                     if websocket:
                         await websocket.close()
-        
+
         finally:
             if websocket:
                 await websocket.close()
-        
+
         return podcast_texts, podcast_audio
 
 
 async def test(args):
     """
     Podcast测试函数
-    
+
     Args:
         args: dict, 包含所有podcast参数
     """
     client = VolcEnginePodcastClient()
-    
+
     # 设置默认参数
     params = {
         "text": "",
@@ -656,17 +649,17 @@ async def test(args):
         "skip_round_audio_save": False,
         "output_dir": "output",
     }
-    
+
     # 覆盖默认参数
     if args:
         params.update(args)
-    
+
     await client.podcast_request(**params)
 
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", default="", help="Input text Use when action in [0]")
     parser.add_argument("--input_url", default="", help="Web url or file url Use when action in [0]")
@@ -678,17 +671,14 @@ if __name__ == "__main__":
     parser.add_argument("--speaker_info", default='{"random_order":false}', help="Podcast Speaker Info")
     parser.add_argument("--use_head_music", default=False, action="store_true", help="Enable head music")
     parser.add_argument("--use_tail_music", default=False, action="store_true", help="Enable tail music")
-    parser.add_argument("--only_nlp_text", default=False, action="store_true",
-                        help="Enable only podcast text when action in [0, 4]")
-    parser.add_argument("--return_audio_url", default=False, action="store_true",
-                        help="Enable return audio url that can download")
+    parser.add_argument("--only_nlp_text", default=False, action="store_true", help="Enable only podcast text when action in [0, 4]")
+    parser.add_argument("--return_audio_url", default=False, action="store_true", help="Enable return audio url that can download")
     parser.add_argument("--action", default=0, type=int, choices=[0, 3, 4], help="different podcast type")
     parser.add_argument("--skip_round_audio_save", default=False, action="store_true", help="skip round audio save")
     parser.add_argument("--output_dir", default="output", help="Output directory")
-    
-    args = parser.parse_args()
-    
-    kwargs = {k: v for k, v in vars(args).items() if v is not None and not (isinstance(v, bool) and not v)}
-    
-    asyncio.run(test(kwargs))
 
+    args = parser.parse_args()
+
+    kwargs = {k: v for k, v in vars(args).items() if v is not None and not (isinstance(v, bool) and not v)}
+
+    asyncio.run(test(kwargs))

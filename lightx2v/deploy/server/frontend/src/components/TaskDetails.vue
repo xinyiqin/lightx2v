@@ -56,10 +56,60 @@ const getImageMaterials = () => {
     return [['input_image', getTaskFileUrlSync(modalTask.value.task_id, 'input_image')]]
 }
 
+// 获取视频素材
+const getVideoMaterials = () => {
+    if (!modalTask.value?.inputs?.input_video) return []
+    return [['input_video', getTaskFileUrlSync(modalTask.value.task_id, 'input_video')]]
+}
+
 // 获取音频素材（使用响应式 ref）
 const getAudioMaterials = () => {
     return audioMaterials.value
 }
+
+// 根据任务类型获取应该显示的内容类型
+const getVisibleMaterials = computed(() => {
+    if (!modalTask.value?.task_type) {
+        return { image: false, video: false, audio: false, prompt: false }
+    }
+
+    const taskType = modalTask.value.task_type
+
+    // 根据任务类型定义应该显示的内容
+    const visibilityMap = {
+        't2v': {
+            image: false,
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        'i2v': {
+            image: true,
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        's2v': {
+            image: true,
+            video: false,
+            audio: true,
+            prompt: true
+        },
+        'animate': {
+            image: true,
+            video: true,
+            audio: false,
+            prompt: false  // animate 任务不显示 prompt
+        }
+    }
+
+    return visibilityMap[taskType] || {
+        image: true,
+        video: false,
+        audio: true,
+        prompt: true
+    }
+})
 
 // 异步加载音频素材 URL（支持目录模式）
 const loadAudioMaterials = async () => {
@@ -67,7 +117,7 @@ const loadAudioMaterials = async () => {
         audioMaterials.value = []
         return
     }
-    
+
     try {
         // 使用 getTaskInputAudio 来获取音频 URL，它会自动处理目录情况
         const audioUrl = await getTaskInputAudio(modalTask.value)
@@ -266,7 +316,7 @@ const toggleAudioPlayback = (inputName) => {
     }
 
     const state = getAudioState(inputName)
-    
+
     if (audio.paused) {
         audio.play().catch(error => {
             console.error('播放失败:', error)
@@ -499,10 +549,10 @@ watch(audioMaterials, (newMaterials) => {
                                         <span>{{ t('inputMaterials') }}</span>
                                     </h2>
 
-                                    <!-- 三个并列的分块卡片 - Apple 风格 -->
+                                    <!-- 根据任务类型显示相应的素材卡片 - Apple 风格 -->
                                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                         <!-- 图片卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.image" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
@@ -532,8 +582,41 @@ watch(audioMaterials, (newMaterials) => {
                                             </div>
                                         </div>
 
+                                        <!-- 视频卡片 - Apple 风格 -->
+                                        <div v-if="getVisibleMaterials.video" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                            <!-- 卡片头部 -->
+                                            <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
+                                                <div class="flex items-center gap-3">
+                                                    <i class="fas fa-video text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                    <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('video') }}</h3>
+                                                </div>
+                                                <button v-if="getVideoMaterials().length > 0"
+                                                        @click="handleDownloadFile(modalTask.task_id, 'input_video', modalTask.inputs.input_video)"
+                                                        :disabled="downloadLoading"
+                                                        class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
+                                                        :class="downloadLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-110 active:scale-100'"
+                                                        :title="t('download')">
+                                                    <i class="fas fa-download text-xs"></i>
+                                                </button>
+                                            </div>
+                                            <!-- 卡片内容 -->
+                                            <div class="p-6 min-h-[200px]">
+                                                <div v-if="getVideoMaterials().length > 0">
+                                                    <div v-for="[inputName, url] in getVideoMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
+                                                        <video :src="url" :alt="inputName" class="w-full h-auto object-contain" controls preload="metadata">
+                                                            {{ t('browserNotSupported') }}
+                                                        </video>
+                                                    </div>
+                                                </div>
+                                                <div v-else class="flex flex-col items-center justify-center h-[150px]">
+                                                    <i class="fas fa-video text-3xl text-[#86868b]/30 dark:text-[#98989d]/30 mb-3"></i>
+                                                    <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('noVideo') }}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- 音频卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.audio" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
@@ -623,7 +706,7 @@ watch(audioMaterials, (newMaterials) => {
                                         </div>
 
                                         <!-- 提示词卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.prompt" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
@@ -875,10 +958,10 @@ watch(audioMaterials, (newMaterials) => {
                                     <span>{{ t('inputMaterials') }}</span>
                                 </h2>
 
-                                <!-- 三个并列的分块卡片 - Apple 风格 -->
+                                <!-- 根据任务类型显示相应的素材卡片 - Apple 风格 -->
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <!-- 图片卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.image" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">
@@ -908,8 +991,41 @@ watch(audioMaterials, (newMaterials) => {
                                         </div>
                                     </div>
 
+                                    <!-- 视频卡片 - Apple 风格 -->
+                                    <div v-if="getVisibleMaterials.video" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <!-- 卡片头部 -->
+                                        <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
+                                            <div class="flex items-center gap-3">
+                                                <i class="fas fa-video text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('video') }}</h3>
+                                            </div>
+                                            <button v-if="getVideoMaterials().length > 0"
+                                                    @click="handleDownloadFile(modalTask.task_id, 'input_video', modalTask.inputs.input_video)"
+                                                    :disabled="downloadLoading"
+                                                    class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
+                                                    :class="downloadLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-110 active:scale-100'"
+                                                    :title="t('download')">
+                                                <i class="fas fa-download text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <!-- 卡片内容 -->
+                                        <div class="p-6 min-h-[200px]">
+                                            <div v-if="getVideoMaterials().length > 0">
+                                                <div v-for="[inputName, url] in getVideoMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
+                                                    <video :src="url" :alt="inputName" class="w-full h-auto object-contain" controls preload="metadata">
+                                                        {{ t('browserNotSupported') }}
+                                                    </video>
+                                                </div>
+                                            </div>
+                                            <div v-else class="flex flex-col items-center justify-center h-[150px]">
+                                                <i class="fas fa-video text-3xl text-[#86868b]/30 dark:text-[#98989d]/30 mb-3"></i>
+                                                <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('noVideo') }}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <!-- 音频卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.audio" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">
@@ -999,7 +1115,7 @@ watch(audioMaterials, (newMaterials) => {
                                     </div>
 
                                     <!-- 提示词卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.prompt" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">

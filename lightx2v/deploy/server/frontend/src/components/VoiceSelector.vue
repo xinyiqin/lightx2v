@@ -76,7 +76,7 @@
             @click="mode === 'dropdown' && $emit('select-voice', voice)"
           >
             <!-- 选中指示器 - Apple 风格 -->
-            <div v-if="selectedVoice === voice.voice_type" 
+            <div v-if="selectedVoice === voice.voice_type"
               class="absolute w-5 h-5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full flex items-center justify-center z-10 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]"
               :class="'top-2 left-2'"
             >
@@ -129,7 +129,7 @@
                 {{ voice.name }}
               </div>
               <!-- 场景和语言标签 - 在 full 模式下或 dropdown 模式下未选中时显示 -->
-              <div 
+              <div
                 class="flex flex-wrap gap-1.5"
               >
                 <span v-if="voice.scene" class="inline-block px-2 py-0.5 bg-black/5 dark:bg-white/5 text-[#86868b] dark:text-[#98989d] rounded text-[11px] font-medium">
@@ -231,4 +231,3 @@ defineExpose({
 <style scoped>
 /* 所有样式已通过 Tailwind CSS 在 template 中定义 */
 </style>
-

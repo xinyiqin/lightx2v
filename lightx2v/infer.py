@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--negative_prompt", type=str, default="")
 
     parser.add_argument("--image_path", type=str, default="", help="The path to input image file for image-to-video (i2v) task")
+    parser.add_argument("--video_path", type=str, default="", help="The path to input video file for animate task")
     parser.add_argument("--last_frame_path", type=str, default="", help="The path to last frame file for first-last-frame-to-video (flf2v) task")
     parser.add_argument("--audio_path", type=str, default="", help="The path to input audio file or directory for audio-to-video (s2v) task")
 

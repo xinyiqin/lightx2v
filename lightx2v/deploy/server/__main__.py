@@ -12,21 +12,23 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
+from starlette.websockets import WebSocketState
 
 from lightx2v.deploy.common.audio_separator import AudioSeparator
 from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
+from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
 from lightx2v.deploy.common.utils import check_params, data_name, load_inputs
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
-from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
+from lightx2v.deploy.podcast_manager.local_podcast_manager import LocalPodcastManager
+from lightx2v.deploy.podcast_manager.sql_podcast_manager import SQLPodcastManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.server.auth import AuthManager
 from lightx2v.deploy.server.metrics import MetricMonitor
@@ -34,8 +36,6 @@ from lightx2v.deploy.server.monitor import ServerMonitor, WorkerStatus
 from lightx2v.deploy.server.redis_monitor import RedisServerMonitor
 from lightx2v.deploy.task_manager import FinishedStatus, LocalTaskManager, PostgresSQLTaskManager, TaskStatus
 from lightx2v.utils.service_utils import ProcessManager
-from lightx2v.deploy.podcast_manager.sql_podcast_manager import SQLPodcastManager
-from lightx2v.deploy.podcast_manager.local_podcast_manager import LocalPodcastManager
 
 # =========================
 # Pydantic Models
@@ -387,25 +387,19 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
         # process multimodal inputs data
         inputs_data = await load_inputs(params, inputs, types)
 
-        # Check for multi-person audio directory and track them
-        directory_inputs = {}  # Track which inputs are directories
-        for inp, data in inputs_data.items():
-            if isinstance(data, dict) and data.get("type") == "directory":
-                directory_inputs[inp] = True
-
-        # init task
+        # init task (we need task_id before preprocessing to save processed files)
         task_id = await task_manager.create_task(keys, workers, params, inputs, outputs, user["user_id"])
         logger.info(f"Submit task: {task_id} {params}")
 
         # save multimodal inputs data
         for inp, data in inputs_data.items():
-            # Check if this is a multi-person audio directory
-            if inp in directory_inputs:
+            if isinstance(data, dict) and data.get("type") == "directory":
+                # Check if this is a multi-person audio directory
                 # Save directory structure
                 # Note: data_name for input_audio doesn't add extension, so it's already correct
                 directory_base = data_name(inp, task_id)  # Returns "task_id-input_audio" (no extension)
                 directory_files = data["data"]  # dict: {filename: base64_data}
-                
+
                 # Decode and save files in parallel to avoid blocking
                 async def decode_and_save(filename, base64_content):
                     # Decode base64 in background thread to avoid blocking event loop
@@ -414,12 +408,9 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
                     file_path = f"{directory_base}/{filename}"
                     await data_manager.save_bytes(file_bytes, file_path)
                     logger.info(f"Saved directory file: {file_path}")
-                
+
                 # Save all files concurrently
-                await asyncio.gather(*[
-                    decode_and_save(filename, base64_content)
-                    for filename, base64_content in directory_files.items()
-                ])
+                await asyncio.gather(*[decode_and_save(filename, base64_content) for filename, base64_content in directory_files.items()])
             else:
                 # Single file mode
                 await data_manager.save_bytes(data, data_name(inp, task_id))
@@ -523,20 +514,20 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
         task_id = request.query_params["task_id"]
         # Optional parameter for directory files (e.g., "original_audio.wav")
         filename = request.query_params.get("filename", None)
-        
+
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         assert name not in task["params"], f"Input {name} is a stream"
 
         input_path = task["inputs"][name]
-        
+
         # Check if this is a directory (multi-person mode)
         # For directory inputs, the path is like "task_id-input_audio" (no extension)
         # We check if config.json exists in the directory to determine if it's a directory
         config_path = f"{input_path}/config.json"
         is_directory = await data_manager.file_exists(config_path)
-        
+
         if is_directory:
             # For directory inputs, check if filename is specified
             if filename:
@@ -545,7 +536,7 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
                 file_exists = await data_manager.file_exists(file_path)
                 if not file_exists:
                     return error_response(f"File {filename} not found in directory {name}", 404)
-                
+
                 url = await data_manager.presign_url(file_path)
                 if url is None:
                     url = f"./assets/task/input?task_id={task_id}&name={name}&filename={filename}"
@@ -553,7 +544,7 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
             else:
                 # No filename specified, return error
                 return error_response(f"Input {name} is a directory (multi-person mode), please specify filename parameter", 400)
-        
+
         # Single file mode
         url = await data_manager.presign_url(input_path)
         if url is None:
@@ -595,27 +586,27 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
         task_id = request.query_params["task_id"]
         # Optional parameter for directory files (e.g., "original_audio.wav")
         filename = request.query_params.get("filename", None)
-        
+
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         assert name not in task["params"], f"Input {name} is a stream"
-        
+
         input_path = task["inputs"][name]
-        
+
         # Check if this is a directory (multi-person mode)
         # For directory inputs, the path is like "task_id-input_audio" (no extension)
         # We check if config.json exists in the directory to determine if it's a directory
         config_path = f"{input_path}/config.json"
         is_directory = await data_manager.file_exists(config_path)
-        
+
         if is_directory:
             # For directory inputs, check if filename is specified
             if filename:
                 # Return specific file from directory (e.g., original_audio.wav)
                 file_path = f"{input_path}/{filename}"
                 data = await data_manager.load_bytes(file_path)
-                
+
                 # Set correct Content-Type based on filename
                 content_type = guess_file_type(filename, "application/octet-stream")
                 headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -624,7 +615,7 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
             else:
                 # No filename specified, return error
                 return error_response(f"Input {name} is a directory (multi-person mode), please specify filename parameter", 400)
-        
+
         # Single file mode
         data = await data_manager.load_bytes(input_path)
 
@@ -1161,7 +1152,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
     """WebSocket接口：实时生成播客"""
     await websocket.accept()
     should_stop = False
-    
+
     # 从查询参数或 headers 获取用户信息
     # 优化：只验证 JWT token，不查询数据库（避免握手超时）
     # 如果需要用户信息，可以在后续异步查询
@@ -1174,7 +1165,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header[7:]
-        
+
         if token:
             # 只验证 JWT token，不查询数据库（避免握手超时）
             # 如果需要验证用户存在，可以在后续异步查询
@@ -1202,7 +1193,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
     except Exception as e:
         logger.warning(f"Failed to authenticate WebSocket user: {e}")
         user_id = None
-    
+
     async def safe_send_json(payload):
         try:
             if websocket.application_state != WebSocketState.CONNECTED:
@@ -1210,7 +1201,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             await websocket.send_json(payload)
         except (WebSocketDisconnect, RuntimeError) as e:
             logger.info(f"WebSocket send skipped: {e}")
-    
+
     try:
         # 接收输入
         try:
@@ -1219,52 +1210,53 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             logger.error(f"Failed to receive WebSocket message: {receive_error}", exc_info=True)
             await safe_send_json({"type": "error", "error": "无法接收消息，请重试"})
             return
-        
+
         try:
             request_data = json.loads(data)
         except json.JSONDecodeError as json_error:
             logger.error(f"Failed to parse WebSocket message as JSON: {json_error}, data: {data[:200]}")
             await safe_send_json({"type": "error", "error": "消息格式错误，请重试"})
             return
-        
+
         # 检查是否是停止请求
         if request_data.get("type") == "stop":
             logger.info("Received stop signal from client")
             await safe_send_json({"type": "stopped"})
             return
-        
+
         input_text = request_data.get("input", "")
-        
+
         if not input_text:
             await safe_send_json({"error": "输入不能为空"})
             return
-        
+
         # 判断是URL还是文本
         is_url = input_text.startswith(("http://", "https://"))
-        
+
         # 使用 data_manager 保存到 podcast 文件夹（按用户组织）
         from pathlib import Path
+
         timestamp = int(time.time())
         session_id = f"session_{timestamp}"
-        
+
         # 确定用户ID（如果未认证，使用 "anonymous"）
         if not user_id:
             user_id = "anonymous"
-        
+
         # 保存用户输入到 data_manager（按用户文件夹组织）
         user_input_path = f"podcast/{user_id}/{session_id}/user_input.txt"
         await data_manager.save_bytes(input_text.encode("utf-8"), user_input_path)
         logger.info(f"Saved user input to data_manager: {user_input_path}")
-        
+
         # 创建临时目录用于播客生成（podcast_request 需要本地目录）
         temp_session_dir = Path(tempfile.gettempdir()) / f"podcast_temp_{timestamp}"
         temp_session_dir.mkdir(exist_ok=True)
         output_dir = str(temp_session_dir)
-        
+
         # 将临时目录路径存储到全局字典中，供前端实时访问
         active_podcast_sessions[session_id] = temp_session_dir
         logger.info(f"Stored active session: {session_id} -> {temp_session_dir}")
-        
+
         params = {
             "text": "" if is_url else input_text,
             "input_url": input_text if is_url else "",
@@ -1274,20 +1266,20 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             "use_tail_music": False,
             "skip_round_audio_save": False,
         }
-        
+
         logger.info(f"WebSocket generating podcast with params: {params}")
-        
+
         merged_audio_file = temp_session_dir / "merged_audio.mp3"
         # HLS playlist (audio-only with mp3 segments)
         hls_playlist_file = temp_session_dir / "playlist.m3u8"
         hls_target_duration = 10  # safe default seconds
         hls_seg_index = 0  # HLS 切片序号
-        
+
         # 记录字幕时间戳
         subtitle_timestamps = []
         current_audio_duration = 0.0
         merged_audio = None  # 用于存储合并的音频对象
-        
+
         # 内存缓存：存储所有需要保存到 data_manager 的数据
         memory_cache = {
             "merged_audio_bytes": None,  # 合并后的音频文件
@@ -1296,9 +1288,9 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             "round_audios": {},  # 轮次音频 {filename: bytes}
             "podcast_texts_content": None,  # 字幕文本内容
             "subtitle_timestamps_json": None,  # 字幕时间戳 JSON
-            "metadata_json": None  # 元数据 JSON（包含 user_id、user_input、rounds）
+            "metadata_json": None,  # 元数据 JSON（包含 user_id、user_input、rounds）
         }
-        
+
         # Create initial HLS playlist so前端第一次请求不会404
         hls_header = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:EVENT\n".format(hls_target_duration)
         try:
@@ -1308,17 +1300,17 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             memory_cache["hls_playlist_content"] = hls_header
         except Exception as e:
             logger.warning(f"Failed to create initial HLS playlist: {e}")
-        
+
         # 使用回调函数实时推送音频
         async def on_round_complete(round_data):
             """轮次完成回调 - 实时追加到完整音频，并通过 WebSocket 发送 PCM/WAV 块"""
             nonlocal current_audio_duration, merged_audio, hls_target_duration, hls_seg_index, should_stop
-            
+
             # 检查是否收到停止信号
             if should_stop:
                 logger.info("Stop signal detected in on_round_complete callback")
                 return
-            
+
             async def safe_send_bytes(data: bytes):
                 """安全发送二进制数据"""
                 try:
@@ -1327,86 +1319,84 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                     await websocket.send_bytes(data)
                 except (WebSocketDisconnect, RuntimeError) as e:
                     logger.info(f"WebSocket send_bytes skipped: {e}")
-            
+
             try:
-                from pydub import AudioSegment
-                import io
                 import struct
-                
-                round_filename = temp_session_dir / f'{round_data["speaker"]}_{round_data["round"]}.mp3'
+
+                from pydub import AudioSegment
+
+                round_filename = temp_session_dir / f"{round_data['speaker']}_{round_data['round']}.mp3"
                 if round_filename.exists():
                     try:
                         new_segment = AudioSegment.from_mp3(str(round_filename))
                         round_duration = len(new_segment) / 1000.0
-                        
+
                         # 转换为 PCM 16-bit LE，单声道，采样率 24000 Hz（兼容 iOS Safari）
                         pcm_segment = new_segment.set_frame_rate(24000).set_channels(1).set_sample_width(2)
-                        
+
                         # 获取 PCM 原始数据
                         pcm_data = pcm_segment.raw_data
-                        
+
                         # 创建 WAV header（44 bytes）
                         sample_rate = 24000
                         num_channels = 1
                         bits_per_sample = 16
                         data_size = len(pcm_data)
                         file_size = 36 + data_size
-                        
-                        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
-                            b'RIFF',                    # ChunkID
-                            file_size,                   # ChunkSize
-                            b'WAVE',                     # Format
-                            b'fmt ',                     # Subchunk1ID
-                            16,                          # Subchunk1Size (PCM)
-                            1,                           # AudioFormat (PCM)
-                            num_channels,                 # NumChannels
-                            sample_rate,                 # SampleRate
+
+                        wav_header = struct.pack(
+                            "<4sI4s4sIHHIIHH4sI",
+                            b"RIFF",  # ChunkID
+                            file_size,  # ChunkSize
+                            b"WAVE",  # Format
+                            b"fmt ",  # Subchunk1ID
+                            16,  # Subchunk1Size (PCM)
+                            1,  # AudioFormat (PCM)
+                            num_channels,  # NumChannels
+                            sample_rate,  # SampleRate
                             sample_rate * num_channels * bits_per_sample // 8,  # ByteRate
                             num_channels * bits_per_sample // 8,  # BlockAlign
-                            bits_per_sample,             # BitsPerSample
-                            b'data',                     # Subchunk2ID
-                            data_size                    # Subchunk2Size
+                            bits_per_sample,  # BitsPerSample
+                            b"data",  # Subchunk2ID
+                            data_size,  # Subchunk2Size
                         )
-                        
+
                         # 组合 WAV header + PCM data
                         wav_chunk = wav_header + pcm_data
-                        
+
                         # 通过 WebSocket 发送 WAV chunk（二进制）
                         await safe_send_bytes(wav_chunk)
                         logger.info(f"Sent WAV chunk: {len(wav_chunk)} bytes, duration: {round_duration:.2f}s")
-                        
+
                         if merged_audio is None:
                             merged_audio = new_segment
                         else:
                             merged_audio = merged_audio + new_segment
-                        
+
                         # 保存合并后的音频到临时文件（用于前端实时访问）
                         merged_audio.export(str(merged_audio_file), format="mp3")
-                        
+
                         # 等待文件写入完成
                         time.sleep(0.3)
-                        
+
                         # 读取合并后的音频
                         with open(merged_audio_file, "rb") as f:
                             merged_audio_bytes = f.read()
                         merged_file_size = len(merged_audio_bytes)
-                        
+
                         # 保存到内存缓存（最后统一保存）
                         memory_cache["merged_audio_bytes"] = merged_audio_bytes
-                        
+
                         # 不需要实时保存到 data_manager，前端直接从临时目录读取
-                        
+
                         # 记录字幕时间戳
-                        subtitle_timestamps.append({
-                            "start": current_audio_duration,
-                            "end": current_audio_duration + round_duration,
-                            "text": round_data.get("text", ""),
-                            "speaker": round_data.get("speaker")
-                        })
+                        subtitle_timestamps.append(
+                            {"start": current_audio_duration, "end": current_audio_duration + round_duration, "text": round_data.get("text", ""), "speaker": round_data.get("speaker")}
+                        )
                         current_audio_duration += round_duration
-                        
+
                         logger.info(f"Merged audio updated: {merged_file_size} bytes, duration: {current_audio_duration:.2f}s")
-                        
+
                         # 更新/写入 HLS playlist（如单段 >20s，进行 6s 切分）
                         try:
                             # Ensure header exists
@@ -1447,12 +1437,12 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                                     hls_seg_index += 1
                                     chunk_path = temp_session_dir / chunk_name
                                     chunk.export(str(chunk_path), format="mp3")
-                                    
+
                                     # 读取分片并保存到内存缓存（最后统一保存）
                                     with open(chunk_path, "rb") as f:
                                         chunk_bytes = f.read()
                                     memory_cache["audio_segments"][chunk_name] = chunk_bytes
-                                    
+
                                     append_entry(len(chunk) / 1000.0, chunk_path, is_segment=True)
                                     start = end
                             else:
@@ -1462,36 +1452,38 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                                     round_bytes = f.read()
                                 memory_cache["round_audios"][round_filename.name] = round_bytes
                                 append_entry(round_duration, round_filename, is_segment=False)
-                            
+
                             # HLS playlist 内容已经在 append_entry 中更新到内存缓存，这里不需要再次读取
                             # 但为了确保一致性，从临时文件读取最新内容
                             with open(hls_playlist_file, "r", encoding="utf-8") as pf:
                                 hls_content = pf.read()
                             memory_cache["hls_playlist_content"] = hls_content
-                            
+
                             # 不需要实时保存到 data_manager，前端直接从临时目录读取
                         except Exception as e:
                             logger.warning(f"Failed updating HLS playlist: {e}")
-                        
+
                         # 推送更新通知（使用新的路径结构，只传递文件名）
-                        await safe_send_json({
-                            "type": "audio_update",
-                            "data": {
-                                "url": f"/api/v1/podcast/audio?session_id={session_id}&filename=merged_audio.mp3",
-                                "size": merged_file_size,
-                                "duration": current_audio_duration,
-                                "round": round_data.get("round"),
-                                "text": round_data.get("text", ""),
-                                "speaker": round_data.get("speaker")
+                        await safe_send_json(
+                            {
+                                "type": "audio_update",
+                                "data": {
+                                    "url": f"/api/v1/podcast/audio?session_id={session_id}&filename=merged_audio.mp3",
+                                    "size": merged_file_size,
+                                    "duration": current_audio_duration,
+                                    "round": round_data.get("round"),
+                                    "text": round_data.get("text", ""),
+                                    "speaker": round_data.get("speaker"),
+                                },
                             }
-                        })
+                        )
                     except Exception as e:
                         logger.error(f"Error processing audio segment: {e}")
             except Exception as e:
                 logger.error(f"Error sending round data: {e}")
-        
+
         params["on_round_complete"] = on_round_complete
-        
+
         # 创建一个任务来处理停止信号
         async def listen_for_stop():
             nonlocal should_stop
@@ -1512,9 +1504,9 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                         break
             except Exception as e:
                 logger.info(f"Stop listener ended: {e}")
-        
+
         stop_listener_task = asyncio.create_task(listen_for_stop())
-        
+
         try:
             podcast_texts, podcast_audio = await volcengine_podcast_client.podcast_request(**params)
         except RuntimeError as e:
@@ -1526,23 +1518,21 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                 user_friendly_error = "无法从提供的链接提取内容，请检查链接是否有效或尝试使用其他链接"
             else:
                 user_friendly_error = f"播客生成失败: {error_msg}"
-            
+
             # 发送错误消息到前端
             try:
                 if websocket.application_state == WebSocketState.CONNECTED:
-                    await safe_send_json({
-                        "type": "error",
-                        "error": user_friendly_error
-                    })
+                    await safe_send_json({"type": "error", "error": user_friendly_error})
             except Exception as send_error:
                 logger.warning(f"Failed to send error message to client: {send_error}")
-            
+
             # 清理临时目录
-            if 'session_id' in locals() and session_id in active_podcast_sessions:
+            if "session_id" in locals() and session_id in active_podcast_sessions:
                 temp_dir = active_podcast_sessions[session_id]
                 del active_podcast_sessions[session_id]
                 try:
                     import shutil
+
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
@@ -1553,25 +1543,21 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                 await stop_listener_task
             except asyncio.CancelledError:
                 pass
-        
+
         if should_stop:
             logger.info("Generation stopped by user")
             await safe_send_json({"type": "stopped"})
             return
-        
+
         # 发送字幕数据
         subtitles = []
         if podcast_texts:
             for item in podcast_texts:
-                subtitles.append({
-                    "text": item.get("text", ""),
-                    "speaker": item.get("speaker", "Unknown")
-                })
-        
+                subtitles.append({"text": item.get("text", ""), "speaker": item.get("speaker", "Unknown")})
+
         # 保存字幕文本到内存缓存（podcast_texts_*.json）
         if podcast_texts:
             try:
-                import glob
                 # 查找临时目录中的 podcast_texts_*.json 文件
                 podcast_texts_files = list(temp_session_dir.glob("podcast_texts_*.json"))
                 if podcast_texts_files:
@@ -1581,14 +1567,14 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                     memory_cache["podcast_texts_content"] = podcast_texts_content
             except Exception as e:
                 logger.warning(f"Failed to read podcast texts: {e}")
-        
+
         # 保存字幕时间戳到内存缓存
         try:
             timestamp_json = json.dumps(subtitle_timestamps, ensure_ascii=False, indent=2)
             memory_cache["subtitle_timestamps_json"] = timestamp_json
         except Exception as e:
             logger.error(f"Error preparing subtitle timestamps: {e}")
-        
+
         # 创建统一的元数据文件（包含 user_id、user_input、所有轮次信息）
         # 注意：不保存 CDN URL，因为 CDN URL 可能有过期时间，应该在需要时动态生成
         metadata = {
@@ -1596,11 +1582,11 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             "user_id": user_id,  # 可能为 None（未认证用户）
             "user_input": input_text,
             "created_at": timestamp,
-            "rounds": []  # 将填充所有轮次信息
+            "rounds": [],  # 将填充所有轮次信息
             # 不保存 audio_url、hls_url 等，因为这些 URL 可能有过期时间
             # 在需要时通过 data_manager.presign_url() 动态生成 CDN URL
         }
-        
+
         # 从 subtitle_timestamps 和 podcast_texts 构建 rounds 数据
         if subtitle_timestamps and podcast_texts:
             # 合并时间戳和文本信息
@@ -1610,21 +1596,21 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                     "text": timestamp_item.get("text", ""),
                     "speaker": timestamp_item.get("speaker", ""),
                     "start": timestamp_item.get("start", 0.0),
-                    "end": timestamp_item.get("end", 0.0)
+                    "end": timestamp_item.get("end", 0.0),
                 }
                 # 如果 podcast_texts 中有对应项，使用其文本（可能更准确）
                 if i < len(podcast_texts):
                     round_info["text"] = podcast_texts[i].get("text", round_info["text"])
                     round_info["speaker"] = podcast_texts[i].get("speaker", round_info["speaker"])
                 metadata["rounds"].append(round_info)
-        
+
         # 保存元数据到内存缓存
         try:
             metadata_json = json.dumps(metadata, ensure_ascii=False, indent=2)
             memory_cache["metadata_json"] = metadata_json
         except Exception as e:
             logger.error(f"Error preparing metadata: {e}")
-        
+
         # Append ENDLIST to HLS playlist（临时文件和内存缓存）
         try:
             if hls_playlist_file.exists():
@@ -1634,12 +1620,12 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                 memory_cache["hls_playlist_content"] += "\n#EXT-X-ENDLIST\n"
         except Exception as e:
             logger.warning(f"Failed to finalize HLS playlist: {e}")
-        
+
         # 一次性保存所有数据到 data_manager（只保存音频文件，不按用户区分，类似任务系统）
         logger.info(f"开始批量保存播客数据到 data_manager (session: {session_id})")
         # 使用类似任务系统的命名方式：{session_id}-merged_audio.mp3（不按用户区分）
         merged_audio_path = f"{session_id}-merged_audio.mp3"
-        
+
         save_success = False
         try:
             # 只保存 merged_audio.mp3 到 S3（不保存metadata.json到S3）
@@ -1667,20 +1653,21 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                             await asyncio.sleep(1)  # 等待1秒后重试
                         else:
                             raise  # 最后一次重试失败，抛出异常
-                
+
                 if not save_success:
                     raise Exception(f"Failed to save merged audio after {max_retries} attempts")
-            
+
             # 保存元数据到数据库/本地文件（不保存到S3）
             if memory_cache.get("metadata_json"):
                 import json as json_module
+
                 metadata = json_module.loads(memory_cache["metadata_json"])
-                
+
                 # 在元数据中添加outputs字段（类似任务系统）
                 metadata["outputs"] = {
                     "merged_audio": merged_audio_path  # 存储音频文件路径/ID
                 }
-                
+
                 # 保存到数据库/本地文件
                 if podcast_manager and user_id:
                     try:
@@ -1692,19 +1679,19 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                             metadata_path="",  # 不再保存metadata.json到S3
                             rounds=metadata.get("rounds", []),
                             subtitles=subtitles,
-                            extra_info={"timestamp": timestamp, "outputs": metadata["outputs"]}
+                            extra_info={"timestamp": timestamp, "outputs": metadata["outputs"]},
                         )
                         logger.info(f"Saved podcast metadata to database: {session_id}")
                     except Exception as e:
                         logger.warning(f"Failed to save podcast to database: {e}")
-            
+
             logger.info(f"批量保存完成 (session: {session_id})")
         except Exception as e:
             logger.error(f"Error saving data to data_manager: {e}", exc_info=True)
             # 如果保存失败，不要从 active_podcast_sessions 中移除，让前端可以从内存中获取
             if not save_success and session_id in active_podcast_sessions:
                 logger.warning(f"Audio save failed, keeping session in active_podcast_sessions for memory access")
-        
+
         # 尝试获取 CDN URL（如果支持）- 使用新的路径结构（类似任务系统）
         # 如果保存失败，尝试从内存中提供音频
         if save_success:
@@ -1716,21 +1703,13 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             # 保存失败，使用内存中的音频（通过 active_podcast_sessions）
             logger.warning(f"Using memory audio URL due to save failure")
             audio_url = f"/api/v1/podcast/audio?session_id={session_id}&filename=merged_audio.mp3"
-        
+
         # timestamps 信息已包含在 metadata.json 中，不需要单独的文件
         timestamps_url = None
-        
+
         # 发送完成消息（优先使用 CDN URL）
-        await safe_send_json({
-            "type": "complete",
-            "data": {
-                "audio_url": audio_url,
-                "subtitles": subtitles,
-                "session_id": session_id,
-                "user_id": user_id
-            }
-        })
-        
+        await safe_send_json({"type": "complete", "data": {"audio_url": audio_url, "subtitles": subtitles, "session_id": session_id, "user_id": user_id}})
+
         # 只有在保存成功时才从全局字典中移除（生成完成后，前端应该从 data_manager 读取）
         # 如果保存失败，保留在 active_podcast_sessions 中，让前端可以从内存中获取
         if save_success and session_id in active_podcast_sessions:
@@ -1742,33 +1721,36 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                 logger.debug(f"Cleared podcast history cache for user {user_id}")
         elif not save_success:
             logger.warning(f"Keeping session in active_podcast_sessions due to save failure: {session_id}")
-        
+
         # 清理临时目录
         try:
             import shutil
+
             shutil.rmtree(temp_session_dir, ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup temp directory: {e}")
-        
+
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
         # 清理临时目录（如果存在）
-        if 'session_id' in locals() and session_id in active_podcast_sessions:
+        if "session_id" in locals() and session_id in active_podcast_sessions:
             temp_dir = active_podcast_sessions[session_id]
             del active_podcast_sessions[session_id]
             try:
                 import shutil
+
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as e:
                 logger.warning(f"Failed to cleanup temp directory on disconnect: {e}")
     except asyncio.TimeoutError as e:
         logger.error(f"WebSocket timeout error: {e}")
         # 清理临时目录（如果存在）
-        if 'session_id' in locals() and session_id in active_podcast_sessions:
+        if "session_id" in locals() and session_id in active_podcast_sessions:
             temp_dir = active_podcast_sessions[session_id]
             del active_podcast_sessions[session_id]
             try:
                 import shutil
+
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup temp directory on timeout: {cleanup_error}")
@@ -1781,17 +1763,18 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
     except Exception as e:
         # 修复日志格式化错误：使用 f-string 或 repr() 避免格式化冲突
         try:
-            error_str = repr(e) if isinstance(e, (dict, str)) and '{' in str(e) else str(e)
+            error_str = repr(e) if isinstance(e, (dict, str)) and "{" in str(e) else str(e)
             logger.error(f"Error in WebSocket: {error_str}", exc_info=True)
         except Exception as log_error:
             # 如果日志记录也失败，使用最基本的错误信息
             logger.error(f"Error in WebSocket (logging failed: {log_error}): {type(e).__name__}: {e}", exc_info=True)
         # 清理临时目录（如果存在）
-        if 'session_id' in locals() and session_id in active_podcast_sessions:
+        if "session_id" in locals() and session_id in active_podcast_sessions:
             temp_dir = active_podcast_sessions[session_id]
             del active_podcast_sessions[session_id]
             try:
                 import shutil
+
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as cleanup_error:
                 logger.warning("Failed to cleanup temp directory on error: %s", cleanup_error)
@@ -1818,11 +1801,8 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                         user_friendly_error = error_msg
                 else:
                     user_friendly_error = error_msg
-                
-                await safe_send_json({
-                    "type": "error",
-                    "error": user_friendly_error
-                })
+
+                await safe_send_json({"type": "error", "error": user_friendly_error})
         except Exception:
             pass  # 忽略发送错误
 
@@ -1833,17 +1813,17 @@ async def api_v1_podcast_generate(request: PodcastRequest, user=Depends(verify_u
     try:
         if not volcengine_podcast_client:
             return JSONResponse({"error": "Podcast client not initialized"}, status_code=500)
-        
+
         # 判断是URL还是文本
         is_url = request.input_url.startswith(("http://", "https://")) if request.input_url else False
-        
+
         if not request.text and not request.input_url:
             return JSONResponse({"error": "Text or input_url is required"}, status_code=400)
-        
+
         # 创建输出目录
         output_dir = os.path.join(tempfile.gettempdir(), f"podcast_{uuid.uuid4().hex}")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         params = {
             "text": "" if is_url else request.text,
             "input_url": request.input_url if is_url else "",
@@ -1861,39 +1841,32 @@ async def api_v1_podcast_generate(request: PodcastRequest, user=Depends(verify_u
             "skip_round_audio_save": request.skip_round_audio_save,
             "output_dir": output_dir,
         }
-        
+
         logger.info(f"Generating podcast with params: {params}")
-        
+
         podcast_texts, podcast_audio = await volcengine_podcast_client.podcast_request(**params)
-        
+
         if not podcast_audio:
             return JSONResponse({"error": "未生成音频数据"}, status_code=500)
-        
+
         # 保存音频文件
         timestamp = time.time()
         audio_filename = f"podcast_{timestamp}.{request.encoding}"
         audio_path = os.path.join(output_dir, audio_filename)
-        
+
         with open(audio_path, "wb") as f:
             f.write(bytes(podcast_audio))
-        
+
         logger.info(f"Audio saved to: {audio_path}")
-        
+
         # 构建响应
         subtitles = []
         if podcast_texts:
             for item in podcast_texts:
-                subtitles.append({
-                    "text": item.get("text", ""),
-                    "speaker": item.get("speaker", "Unknown")
-                })
-        
-        return {
-            "audio_url": f"/api/v1/podcast/audio?session_id={os.path.basename(output_dir)}&filename={audio_filename}",
-            "subtitles": subtitles,
-            "message": "播客生成成功"
-        }
-        
+                subtitles.append({"text": item.get("text", ""), "speaker": item.get("speaker", "Unknown")})
+
+        return {"audio_url": f"/api/v1/podcast/audio?session_id={os.path.basename(output_dir)}&filename={audio_filename}", "subtitles": subtitles, "message": "播客生成成功"}
+
     except Exception as e:
         logger.error(f"Error generating podcast: {e}")
         traceback.print_exc()
@@ -1908,17 +1881,17 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
         user_id = user.get("user_id")
         if not user_id:
             return JSONResponse({"error": "User authentication required"}, status_code=401)
-        
+
         session_id = request.query_params.get("session_id")
         filename = request.query_params.get("filename")
-        
+
         if not session_id or not filename:
             return JSONResponse({"error": "session_id and filename are required"}, status_code=400)
-        
+
         # 先移除 filename 中的查询参数（前端可能在 URL 中添加 ?t=timestamp 来避免缓存）
         if "?" in filename:
             filename = filename.split("?")[0]
-        
+
         # 优先从数据库/本地文件读取元数据，获取outputs中的音频路径
         file_path = None
         if podcast_manager:
@@ -1934,50 +1907,51 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                         file_path = podcast_data.get("audio_path")
             except Exception as e:
                 logger.warning(f"Failed to read podcast data for {session_id}: {e}")
-        
+
         # 如果数据库中没有，尝试新路径格式：{session_id}-merged_audio.mp3
         if not file_path:
             if filename == "merged_audio.mp3":
                 file_path = f"{session_id}-merged_audio.mp3"
             else:
                 file_path = f"{session_id}-{filename}"
-        
+
         # 兼容旧路径格式（如果新路径不存在）
         if not await data_manager.file_exists(file_path):
             old_file_path = f"podcast/{user_id}/{session_id}/{filename}"
             if await data_manager.file_exists(old_file_path):
                 file_path = old_file_path
-        
+
         # 实际文件名就是 filename（已经是文件名）
         actual_filename = filename
-        
+
         # 检查 Range 请求头
         range_header = request.headers.get("Range")
         start_byte = None
         end_byte = None
-        
+
         if range_header:
             # 解析 Range 头，格式：bytes=start-end 或 bytes=start-
             import re
+
             match = re.match(r"bytes=(\d+)-(\d*)", range_header)
             if match:
                 start_byte = int(match.group(1))
                 end_byte = int(match.group(2)) if match.group(2) else None
-        
+
         # 优先从临时目录读取（如果会话正在生成中）
         logger.debug(f"Checking active sessions: {list(active_podcast_sessions.keys())}, looking for: {session_id}")
         file_size = 0
         file_bytes = None
-        
+
         if session_id in active_podcast_sessions:
             temp_dir = active_podcast_sessions[session_id]
             temp_file = temp_dir / actual_filename
-            
+
             logger.debug(f"Session {session_id} is active, checking temp file: {temp_file}")
             if temp_file.exists():
                 logger.info(f"Serving audio file from temp directory: {temp_file}")
                 file_size = temp_file.stat().st_size
-                
+
                 # HEAD 请求不需要读取文件内容
                 if request.method != "HEAD":
                     if range_header:
@@ -1997,7 +1971,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                     logger.error(f"Audio file not found in temp or data_manager: {file_path}")
                     return JSONResponse({"error": f"Audio file not found: {filename}"}, status_code=404)
                 logger.debug(f"Serving audio file from data_manager: {file_path}")
-                
+
                 # 对于 data_manager，需要读取文件才能获取大小
                 # 但如果是 HEAD 请求且没有 Range，可以尝试只获取元数据
                 if request.method == "HEAD" and not range_header:
@@ -2011,7 +1985,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                     if range_header:
                         # Range 请求：只返回指定范围
                         if end_byte is not None:
-                            file_bytes = file_bytes[start_byte:end_byte + 1]
+                            file_bytes = file_bytes[start_byte : end_byte + 1]
                         else:
                             file_bytes = file_bytes[start_byte:]
         else:
@@ -2021,7 +1995,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                 logger.error(f"Audio file not found in data_manager: {file_path}")
                 return JSONResponse({"error": f"Audio file not found: {filename}"}, status_code=404)
             logger.info(f"Serving audio file from data_manager: {file_path}")
-            
+
             # HEAD 请求：只获取文件大小
             if request.method == "HEAD" and not range_header:
                 file_bytes_temp = await data_manager.load_bytes(file_path)
@@ -2032,12 +2006,13 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                 if range_header:
                     # Range 请求：只返回指定范围
                     if end_byte is not None:
-                        file_bytes = file_bytes[start_byte:end_byte + 1]
+                        file_bytes = file_bytes[start_byte : end_byte + 1]
                     else:
                         file_bytes = file_bytes[start_byte:]
-        
+
         # set content-type by extension
         from pathlib import Path
+
         ext = Path(actual_filename).suffix.lower()
         media_type = "application/octet-stream"
         if ext == ".mp3":
@@ -2048,7 +2023,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
             media_type = "application/vnd.apple.mpegurl"
         elif ext == ".json":
             media_type = "application/json"
-        
+
         # For HLS playlists that are frequently updated, read a snapshot to avoid
         # Content-Length mismatches when the file is appended during response.
         if ext == ".m3u8":
@@ -2061,7 +2036,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                     "Content-Length": str(file_size),
                 }
                 return Response(status_code=200, headers=headers)
-            
+
             # GET 请求：返回内容（需要读取文件）
             if file_bytes is None:
                 # 如果 HEAD 请求时没有读取文件，现在需要读取
@@ -2074,7 +2049,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                         file_bytes = await data_manager.load_bytes(file_path)
                 else:
                     file_bytes = await data_manager.load_bytes(file_path)
-            
+
             try:
                 content = file_bytes.decode("utf-8")
             except Exception as e:
@@ -2085,7 +2060,7 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                 "Pragma": "no-cache",
             }
             return Response(content=content, media_type=media_type, headers=headers)
-        
+
         # 处理 HEAD 请求（只返回头部信息，不返回内容）
         if request.method == "HEAD":
             headers = {
@@ -2096,14 +2071,14 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
             if range_header:
                 # HEAD 请求 + Range：返回 206 状态码和 Content-Range
                 actual_start = start_byte
-                actual_end = (end_byte if end_byte is not None else file_size - 1)
+                actual_end = end_byte if end_byte is not None else file_size - 1
                 content_length = actual_end - actual_start + 1 if end_byte is not None else file_size - actual_start
                 headers["Content-Range"] = f"bytes {actual_start}-{actual_start + content_length - 1}/{file_size}"
                 headers["Content-Length"] = str(content_length)
                 return Response(status_code=206, headers=headers)
             else:
                 return Response(status_code=200, headers=headers)
-        
+
         # GET 请求：确保文件内容已读取
         if file_bytes is None:
             # 如果之前是 HEAD 请求，现在需要读取文件内容
@@ -2124,51 +2099,42 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
                     file_bytes = await data_manager.load_bytes(file_path)
                     if range_header:
                         if end_byte is not None:
-                            file_bytes = file_bytes[start_byte:end_byte + 1]
+                            file_bytes = file_bytes[start_byte : end_byte + 1]
                         else:
                             file_bytes = file_bytes[start_byte:]
             else:
                 file_bytes = await data_manager.load_bytes(file_path)
                 if range_header:
                     if end_byte is not None:
-                        file_bytes = file_bytes[start_byte:end_byte + 1]
+                        file_bytes = file_bytes[start_byte : end_byte + 1]
                     else:
                         file_bytes = file_bytes[start_byte:]
-        
+
         # 处理 Range 请求（GET 方法）
         if range_header:
             # 计算实际返回的范围
             actual_start = start_byte
-            actual_end = (end_byte if end_byte is not None else file_size - 1)
+            actual_end = end_byte if end_byte is not None else file_size - 1
             content_length = len(file_bytes)
-            
+
             headers = {
                 "Content-Range": f"bytes {actual_start}-{actual_start + content_length - 1}/{file_size}",
                 "Content-Length": str(content_length),
                 "Accept-Ranges": "bytes",
                 "Content-Type": media_type,
-                "Content-Disposition": f'attachment; filename="{Path(file_path).name}"'
+                "Content-Disposition": f'attachment; filename="{Path(file_path).name}"',
             }
             return Response(
                 content=file_bytes,
                 media_type=media_type,
                 status_code=206,  # Partial Content
-                headers=headers
+                headers=headers,
             )
-        
+
         # 返回完整音频文件（GET 方法）
-        headers = {
-            "Content-Length": str(len(file_bytes)),
-            "Accept-Ranges": "bytes",
-            "Content-Type": media_type,
-            "Content-Disposition": f'attachment; filename="{Path(file_path).name}"'
-        }
-        return Response(
-            content=file_bytes,
-            media_type=media_type,
-            headers=headers
-        )
-        
+        headers = {"Content-Length": str(len(file_bytes)), "Accept-Ranges": "bytes", "Content-Type": media_type, "Content-Disposition": f'attachment; filename="{Path(file_path).name}"'}
+        return Response(content=file_bytes, media_type=media_type, headers=headers)
+
     except Exception as e:
         logger.error(f"Error serving audio: {e}")
         traceback.print_exc()
@@ -2182,30 +2148,25 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
         user_id = user.get("user_id")
         if not user_id:
             return {"sessions": []}
-        
+
         # 如果使用数据库，优先使用数据库查询（快速）
         if podcast_manager:
             try:
                 page = int(request.query_params.get("page", 1))
                 page_size = int(request.query_params.get("page_size", 10))
                 status = request.query_params.get("status", None)  # has_audio, no_audio
-                
-                result = await podcast_manager.list_podcasts(
-                    user_id=user_id,
-                    page=page,
-                    page_size=page_size,
-                    status=status
-                )
+
+                result = await podcast_manager.list_podcasts(user_id=user_id, page=page, page_size=page_size, status=status)
                 logger.debug(f"Query podcast history from database: {len(result['sessions'])} sessions")
                 return result
             except Exception as e:
                 logger.warning(f"Database query failed, falling back to file system: {e}")
                 # 如果数据库查询失败，回退到文件系统查询
-        
+
         # 文件系统模式：从S3查找音频文件（兼容旧数据）
         # 注意：新数据已不再保存metadata.json到S3，只保存音频文件
         # 这里主要用于兼容旧数据，新数据应该通过数据库查询
-        
+
         # 检查缓存（文件系统模式）
         current_time = time.time()
         if user_id in podcast_history_cache:
@@ -2213,12 +2174,12 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
             if current_time - cache_entry["timestamp"] < PODCAST_HISTORY_CACHE_TTL:
                 logger.debug(f"Returning cached podcast history for user {user_id}")
                 return {"sessions": cache_entry["data"]}
-        
+
         # 从S3查找所有音频文件（新格式：{session_id}-merged_audio.mp3）
         # 列出所有以"-merged_audio.mp3"结尾的文件
         all_files = await data_manager.list_files("")  # 列出根目录所有文件
         session_ids = set()
-        
+
         for item in all_files:
             # 新格式：{session_id}-merged_audio.mp3
             if item.endswith("-merged_audio.mp3"):
@@ -2230,30 +2191,30 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
                 parts = item.split("/")
                 if len(parts) >= 3 and parts[2].startswith("session_"):
                     session_ids.add(parts[2])
-        
+
         if not session_ids:
             result = {"sessions": []}
             podcast_history_cache[user_id] = {"data": [], "timestamp": current_time}
             return result
-        
+
         # 按时间倒序排序，只处理最新的 N 条记录
         sorted_session_ids = sorted(session_ids, reverse=True)[:PODCAST_HISTORY_MAX_RESULTS]
-        
+
         # 并行处理所有 session
         async def process_session(session_id):
             # 检查新格式音频文件是否存在
             new_audio_path = f"{session_id}-merged_audio.mp3"
             has_audio = await data_manager.file_exists(new_audio_path)
-            
+
             # 如果新格式不存在，检查旧格式（兼容）
             if not has_audio:
                 old_audio_path = f"podcast/{user_id}/{session_id}/merged_audio.mp3"
                 has_audio = await data_manager.file_exists(old_audio_path)
-            
+
             # 尝试从数据库/本地文件读取元数据
             user_input_preview = ""
             created_at = None
-            
+
             if podcast_manager:
                 try:
                     podcast_data = await podcast_manager.query_podcast(session_id, user_id)
@@ -2261,14 +2222,15 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
                         user_input_preview = (podcast_data.get("user_input", "") or "")[:100]
                         created_at = podcast_data.get("created_at")
                         # 处理datetime对象
-                        if hasattr(created_at, 'isoformat'):
+                        if hasattr(created_at, "isoformat"):
                             created_at = created_at.isoformat()
                         elif isinstance(created_at, (int, float)):
                             from datetime import datetime as dt
+
                             created_at = dt.fromtimestamp(created_at).isoformat()
                 except Exception as e:
                     logger.debug(f"Failed to read podcast data for {session_id}: {e}")
-            
+
             # 如果数据库中没有，尝试从S3读取旧metadata（兼容）
             if not user_input_preview:
                 old_metadata_path = f"podcast/{user_id}/{session_id}/metadata.json"
@@ -2277,12 +2239,13 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
                         metadata_bytes = await data_manager.load_bytes(old_metadata_path)
                         if metadata_bytes:
                             import json as json_module
+
                             metadata = json_module.loads(metadata_bytes.decode("utf-8"))
                             user_input_preview = (metadata.get("user_input", "") or "")[:100]
                             created_at = metadata.get("created_at")
                     except Exception as e:
                         logger.debug(f"Failed to read old metadata for {session_id}: {e}")
-            
+
             return {
                 "session_id": session_id,
                 "user_id": user_id,
@@ -2290,30 +2253,30 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
                 "has_audio": has_audio,
                 "created_at": created_at,
             }
-        
+
         # 并行处理所有 session（增加并发度到 50，提高性能）
         batch_size = 50
         sessions = []
-        
+
         for i in range(0, len(sorted_session_ids), batch_size):
-            batch = sorted_session_ids[i:i + batch_size]
+            batch = sorted_session_ids[i : i + batch_size]
             batch_results = await asyncio.gather(*[process_session(session_id) for session_id in batch], return_exceptions=True)
-            
+
             for result in batch_results:
                 if result and not isinstance(result, Exception):
                     sessions.append(result)
                 elif isinstance(result, Exception):
                     logger.warning(f"Error processing session: {result}")
-        
+
         # 按 created_at 排序（如果存在），确保最新的在前面
         if sessions and any(s.get("created_at") for s in sessions):
             sessions.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-        
+
         result = {"sessions": sessions}
-        
+
         # 更新缓存
         podcast_history_cache[user_id] = {"data": sessions, "timestamp": current_time}
-        
+
         return result
     except Exception as e:
         logger.error(f"Error getting podcast history: {e}")
@@ -2328,14 +2291,14 @@ async def api_v1_podcast_session_detail(session_id: str, user=Depends(verify_use
         user_id = user.get("user_id")
         if not user_id:
             return JSONResponse({"error": "User authentication required"}, status_code=401)
-        
+
         import json as json_module
-        
+
         # 优先从数据库/本地文件读取元数据
         metadata = None
         rounds = []
         outputs = {}
-        
+
         if podcast_manager:
             try:
                 podcast_data = await podcast_manager.query_podcast(session_id, user_id)
@@ -2348,18 +2311,18 @@ async def api_v1_podcast_session_detail(session_id: str, user=Depends(verify_use
                     if not outputs and podcast_data.get("audio_path"):
                         # 兼容旧数据：使用audio_path
                         outputs = {"merged_audio": podcast_data.get("audio_path")}
-                    
+
                     metadata = {
                         "session_id": session_id,
                         "user_id": user_id,
                         "user_input": podcast_data.get("user_input", ""),
                         "created_at": podcast_data.get("created_at"),
                         "rounds": rounds,
-                        "outputs": outputs
+                        "outputs": outputs,
                     }
             except Exception as e:
                 logger.warning(f"Failed to read metadata from database for {session_id}: {e}")
-        
+
         # 如果数据库中没有，尝试从S3读取（兼容旧数据）
         if not metadata:
             metadata_path = f"podcast/{user_id}/{session_id}/metadata.json"
@@ -2372,26 +2335,18 @@ async def api_v1_podcast_session_detail(session_id: str, user=Depends(verify_use
                         outputs = metadata.get("outputs", {})
                 except Exception as e:
                     logger.warning(f"Failed to read metadata from S3 for {session_id}: {e}")
-        
+
         if not metadata:
             return JSONResponse({"error": "Podcast session not found"}, status_code=404)
-        
+
         # 从 rounds 构建 subtitles 和 timestamps
         subtitles = []
         timestamps = []
         if rounds:
             for round_info in rounds:
-                subtitles.append({
-                    "text": round_info.get("text", ""),
-                    "speaker": round_info.get("speaker", "")
-                })
-                timestamps.append({
-                    "start": round_info.get("start", 0.0),
-                    "end": round_info.get("end", 0.0),
-                    "text": round_info.get("text", ""),
-                    "speaker": round_info.get("speaker", "")
-                })
-        
+                subtitles.append({"text": round_info.get("text", ""), "speaker": round_info.get("speaker", "")})
+                timestamps.append({"start": round_info.get("start", 0.0), "end": round_info.get("end", 0.0), "text": round_info.get("text", ""), "speaker": round_info.get("speaker", "")})
+
         return {
             "session_id": session_id,
             "user_id": user_id,
@@ -2399,7 +2354,7 @@ async def api_v1_podcast_session_detail(session_id: str, user=Depends(verify_use
             "subtitles": subtitles,
             "timestamps": timestamps,
             "outputs": outputs,  # 返回outputs，前端可以通过这个获取音频URL
-            "metadata": metadata
+            "metadata": metadata,
         }
     except Exception as e:
         logger.error(f"Error getting podcast session detail: {e}")
@@ -2414,7 +2369,7 @@ async def api_v1_podcast_session_audio_url(session_id: str, user=Depends(verify_
         user_id = user.get("user_id")
         if not user_id:
             return JSONResponse({"error": "User authentication required"}, status_code=401)
-        
+
         # 从数据库/本地文件读取元数据，获取outputs
         audio_path = None
         if podcast_manager:
@@ -2430,21 +2385,21 @@ async def api_v1_podcast_session_audio_url(session_id: str, user=Depends(verify_
                         audio_path = podcast_data.get("audio_path")
             except Exception as e:
                 logger.warning(f"Failed to read podcast data for {session_id}: {e}")
-        
+
         # 如果数据库中没有，尝试从S3读取（兼容旧数据）
         if not audio_path:
             old_audio_path = f"podcast/{user_id}/{session_id}/merged_audio.mp3"
             if await data_manager.file_exists(old_audio_path):
                 audio_path = old_audio_path
-        
+
         # 如果还是没有，使用新的路径格式
         if not audio_path:
             audio_path = f"{session_id}-merged_audio.mp3"
-        
+
         # 检查文件是否存在
         if not await data_manager.file_exists(audio_path):
             return JSONResponse({"error": "Audio file not found"}, status_code=404)
-        
+
         # 尝试获取 CDN URL
         audio_cdn_url = await data_manager.presign_url(audio_path)
         if audio_cdn_url:
@@ -2483,7 +2438,7 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
             return error_response("Image input is empty", 400)
 
         image_bytes = None
-        
+
         # Check if input is a URL (blob:, http:, https:, or data: URL)
         if request.image.startswith("data:image"):
             # Data URL format: "data:image/png;base64,..."
@@ -2500,6 +2455,7 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
             # HTTP/HTTPS URL format: fetch the image from URL
             try:
                 from lightx2v.deploy.common.utils import fetch_resource
+
                 timeout = int(os.getenv("REQUEST_TIMEOUT", "10"))
                 image_bytes = await fetch_resource(request.image, timeout=timeout)
                 logger.info(f"Fetched image from URL for face detection: {request.image[:100]}... (size: {len(image_bytes)} bytes)")
@@ -2516,11 +2472,12 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
 
         if image_bytes is None:
             return error_response("Failed to get image bytes", 400)
-        
+
         # Validate image format before passing to face detector
         # This will catch invalid image data early
         try:
             from lightx2v.deploy.common.utils import format_image_data
+
             image_bytes = await asyncio.to_thread(format_image_data, image_bytes)
         except Exception as e:
             logger.error(f"Invalid image data: {e}")
@@ -2528,17 +2485,19 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
 
         # Detect faces only (no cropping)
         result = face_detector.detect_faces(image_bytes, return_image=False)
-        
+
         faces_data = []
         for i, face in enumerate(result["faces"]):
-            faces_data.append({
-                "index": i,
-                "bbox": face["bbox"],  # [x1, y1, x2, y2] - absolute pixel coordinates in original image
-                "confidence": face["confidence"],
-                "class_id": face["class_id"],
-                "class_name": face["class_name"],
-                # Note: face_image is not included - frontend will crop it based on bbox
-            })
+            faces_data.append(
+                {
+                    "index": i,
+                    "bbox": face["bbox"],  # [x1, y1, x2, y2] - absolute pixel coordinates in original image
+                    "confidence": face["confidence"],
+                    "class_id": face["class_id"],
+                    "class_name": face["class_name"],
+                    # Note: face_image is not included - frontend will crop it based on bbox
+                }
+            )
 
         return {
             "faces": faces_data,
@@ -2566,27 +2525,22 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
             audio_bytes = base64.b64decode(request.audio)
 
         # Separate speakers
-        result = audio_separator.separate_speakers(
-            audio_bytes,
-            num_speakers=request.num_speakers
-        )
+        result = audio_separator.separate_speakers(audio_bytes, num_speakers=request.num_speakers)
 
         # Convert audio tensors to base64 strings (without saving to file)
         speakers_data = []
         for speaker in result["speakers"]:
             # Convert audio tensor directly to base64
-            audio_base64 = audio_separator.speaker_audio_to_base64(
-                speaker["audio"],
-                speaker["sample_rate"],
-                format="wav"
+            audio_base64 = audio_separator.speaker_audio_to_base64(speaker["audio"], speaker["sample_rate"], format="wav")
+
+            speakers_data.append(
+                {
+                    "speaker_id": speaker["speaker_id"],
+                    "audio": audio_base64,  # Base64 encoded audio
+                    "segments": speaker["segments"],
+                    "sample_rate": speaker["sample_rate"],
+                }
             )
-            
-            speakers_data.append({
-                "speaker_id": speaker["speaker_id"],
-                "audio": audio_base64,  # Base64 encoded audio
-                "segments": speaker["segments"],
-                "sample_rate": speaker["sample_rate"],
-            })
 
         return {
             "speakers": speakers_data,

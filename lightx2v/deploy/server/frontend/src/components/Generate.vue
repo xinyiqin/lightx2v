@@ -41,8 +41,10 @@ import {
             s2vAudioPreview,
             getCurrentImagePreview,
             getCurrentAudioPreview,
+            getCurrentVideoPreview,
             setCurrentImagePreview,
             setCurrentAudioPreview,
+            setCurrentVideoPreview,
             updateUploadedContentStatus,
             availableTaskTypes,
             availableModelClasses,
@@ -105,7 +107,9 @@ import {
             triggerAudioUpload,
             removeImage,
             removeAudio,
+            removeVideo,
             handleAudioUpload,
+            handleVideoUpload,
             separateAudioTracks,
             updateSeparatedAudioRole,
             updateSeparatedAudioName,
@@ -190,6 +194,7 @@ import {
             getUserAvatarUrl,
             getCurrentImagePreviewUrl,
             getCurrentAudioPreviewUrl,
+            getCurrentVideoPreviewUrl,
             handleThumbnailError,
             handleImageError,
             handleImageLoad,
@@ -436,23 +441,23 @@ watch(currentDetectedFaces, (faces) => {
 // 手动切换模式
 const toggleRoleMode = async () => {
     if (selectedTaskId.value !== 's2v') return
-    
+
     const form = getCurrentForm()
     if (!form) return
-    
+
     const newMode = !isMultiRoleMode.value
-    
+
     if (newMode) {
         // 切换到多角色模式
         isMultiRoleMode.value = true
-        
+
         // 如果当前只有1个角色，需要添加更多角色
         if (form.detectedFaces && form.detectedFaces.length === 1) {
             // 提示用户需要添加更多角色
             showAlert('多角色模式需要至少2个角色，请添加更多角色', 'info')
             return
         }
-        
+
         // 如果有音频，自动分离
         if (form.audioFile && getCurrentAudioPreview()) {
             const audioDataUrl = getCurrentAudioPreview()
@@ -468,10 +473,10 @@ const toggleRoleMode = async () => {
     } else {
         // 切换到单角色模式
         isMultiRoleMode.value = false
-        
+
         // 清空分离的音频（单角色模式不需要分离）
         form.separatedAudios = []
-        
+
         // 如果有多于1个角色，提示用户
         if (form.detectedFaces && form.detectedFaces.length > 1) {
             showAlert('单角色模式只会使用第一个角色', 'info')
@@ -497,18 +502,18 @@ const faceSaving = ref(false) // 是否正在保存角色（用于显示加载�
 const openFaceEditModal = async (faceIndex) => {
     const form = getCurrentForm()
     if (!form) return
-    
+
     originalImageUrl.value = getCurrentImagePreviewUrl()
-    
+
     // 如果是新增模式（faceIndex 为 -1）
     if (faceIndex === -1) {
         isAddingNewFace.value = true
         editingFaceIndex.value = -1
         showFaceEditModal.value = true
-        
+
         // 等待DOM更新
         await nextTick()
-        
+
         // 等待图片加载完成
         const img = imageContainerRef.value?.querySelector('img')
         if (img) {
@@ -534,27 +539,27 @@ const openFaceEditModal = async (faceIndex) => {
                     img.addEventListener('error', onError)
                 }
             })
-            
+
             // 再次等待，确保图片尺寸已正确设置
             await nextTick()
-            
+
             // 计算图片的原始尺寸
             const imgNaturalWidth = img.naturalWidth
             const imgNaturalHeight = img.naturalHeight
-            
+
             if (imgNaturalWidth > 0 && imgNaturalHeight > 0) {
                 // 默认居中，大小为图片的 30%
                 const bboxSize = Math.min(imgNaturalWidth, imgNaturalHeight) * 0.3
                 const centerX = imgNaturalWidth / 2
                 const centerY = imgNaturalHeight / 2
-                
+
                 editingFaceBbox.value = [
                     centerX - bboxSize / 2,
                     centerY - bboxSize / 2,
                     centerX + bboxSize / 2,
                     centerY + bboxSize / 2
                 ]
-                
+
                 // 再次等待DOM更新，确保边界框已渲染
                 await nextTick()
             } else {
@@ -575,7 +580,7 @@ const openFaceEditModal = async (faceIndex) => {
         editingFaceIndex.value = faceIndex
         editingFaceBbox.value = [...(face.bbox || [0, 0, 0, 0])]
         showFaceEditModal.value = true
-        
+
         // 等待DOM更新
         await nextTick()
     }
@@ -593,25 +598,25 @@ const closeFaceEditModal = () => {
 const saveFaceBbox = async () => {
     const form = getCurrentForm()
     if (!form) return
-    
+
     // 保存当前状态（在关闭模态框之前）
     const wasAddingNewFace = isAddingNewFace.value
-    
+
     // 立即关闭模态框
     closeFaceEditModal()
-    
+
     // 如果是新增模式，显示加载状态
     if (wasAddingNewFace) {
         faceSaving.value = true
     }
-    
+
     try {
         // 如果是新增模式
         if (wasAddingNewFace) {
             if (!form.detectedFaces) {
                 form.detectedFaces = []
             }
-            
+
             // 创建新角色
             const newFaceIndex = form.detectedFaces.length
             const newFace = {
@@ -621,7 +626,7 @@ const saveFaceBbox = async () => {
                 isEditing: false,
                 face_image: null
             }
-            
+
             // 根据新的 bbox 坐标，从原始图片裁剪出新的 face_image
             try {
                 let imageUrl = originalImageUrl.value
@@ -630,23 +635,23 @@ const saveFaceBbox = async () => {
                 } else if (!imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
                     imageUrl = originalImageUrl.value
                 }
-                
+
                 // 裁剪出新的 face_image
                 const croppedImage = await cropFaceImage(imageUrl, newFace.bbox)
-                
+
                 // 移除 data URL 前缀，只保留 base64 部分（与后端返回的格式一致）
                 const base64Data = croppedImage.split(',')[1] || croppedImage
                 newFace.face_image = base64Data
-                
+
             } catch (error) {
                 console.error('Failed to crop face image:', error)
             }
-            
+
             // 添加到角色列表
             form.detectedFaces.push(newFace)
             // 触发响应式更新
             form.detectedFaces = [...form.detectedFaces]
-            
+
             // 如果是在 s2v 模式下且有上传的音频，自动重新分割音频
             if (selectedTaskId.value === 's2v' && getCurrentAudioPreview()) {
                 try {
@@ -656,16 +661,16 @@ const saveFaceBbox = async () => {
                     console.error('Failed to re-separate audio after adding face:', error)
                 }
             }
-            
+
         } else {
             // 编辑现有角色
             if (!form.detectedFaces || editingFaceIndex.value < 0) return
-            
+
             const face = form.detectedFaces[editingFaceIndex.value]
-            
+
             // editingFaceBbox.value 存储的是原始图片坐标 [x1, y1, x2, y2]
             face.bbox = [...editingFaceBbox.value]
-            
+
             // 根据新的 bbox 坐标，从原始图片裁剪出新的 face_image
             try {
                 let imageUrl = originalImageUrl.value
@@ -674,14 +679,14 @@ const saveFaceBbox = async () => {
                 } else if (!imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
                     imageUrl = originalImageUrl.value
                 }
-                
+
                 // 裁剪出新的 face_image
                 const croppedImage = await cropFaceImage(imageUrl, face.bbox)
-                
+
                 // 移除 data URL 前缀，只保留 base64 部分（与后端返回的格式一致）
                 const base64Data = croppedImage.split(',')[1] || croppedImage
                 face.face_image = base64Data
-                
+
             } catch (error) {
                 console.error('Failed to crop face image:', error)
             }
@@ -696,12 +701,12 @@ const saveFaceBbox = async () => {
 const removeFace = async (faceIndex) => {
     const form = getCurrentForm()
     if (!form || !form.detectedFaces || faceIndex < 0 || faceIndex >= form.detectedFaces.length) return
-    
+
     // 从角色列表中删除
     form.detectedFaces.splice(faceIndex, 1)
     // 触发响应式更新
     form.detectedFaces = [...form.detectedFaces]
-    
+
     // 如果是在 s2v 模式下且有上传的音频，自动重新分割音频
     if (selectedTaskId.value === 's2v' && getCurrentAudioPreview() && form.detectedFaces.length > 0) {
         try {
@@ -720,14 +725,14 @@ const removeFace = async (faceIndex) => {
 const getImageScale = () => {
     const container = imageContainerRef.value
     if (!container) return { scaleX: 1, scaleY: 1, imgWidth: 0, imgHeight: 0 }
-    
+
     const img = container.querySelector('img')
     if (!img || !img.complete) return { scaleX: 1, scaleY: 1, imgWidth: 0, imgHeight: 0 }
-    
+
     const imgRect = img.getBoundingClientRect()
     const scaleX = img.naturalWidth > 0 ? imgRect.width / img.naturalWidth : 1
     const scaleY = img.naturalHeight > 0 ? imgRect.height / img.naturalHeight : 1
-    
+
     return { scaleX, scaleY, imgWidth: imgRect.width, imgHeight: imgRect.height }
 }
 
@@ -735,13 +740,13 @@ const getImageScale = () => {
 const getImageOffset = () => {
     const container = imageContainerRef.value
     if (!container) return { offsetX: 0, offsetY: 0 }
-    
+
     const img = container.querySelector('img')
     if (!img) return { offsetX: 0, offsetY: 0 }
-    
+
     const containerRect = container.getBoundingClientRect()
     const imgRect = img.getBoundingClientRect()
-    
+
     return {
         offsetX: imgRect.left - containerRect.left,
         offsetY: imgRect.top - containerRect.top
@@ -752,13 +757,13 @@ const getImageOffset = () => {
 const startDragBbox = (event, type = 'move') => {
     event.preventDefault()
     event.stopPropagation()
-    
+
     const container = imageContainerRef.value
     if (!container) return
-    
+
     const img = container.querySelector('img')
     if (!img) return
-    
+
     // 获取图片的实际显示尺寸和原始尺寸
     const imgRect = img.getBoundingClientRect()
     const containerRect = container.getBoundingClientRect()
@@ -766,14 +771,14 @@ const startDragBbox = (event, type = 'move') => {
     const displayHeight = imgRect.height
     const naturalWidth = img.naturalWidth
     const naturalHeight = img.naturalHeight
-    
+
     // 检查图片是否已加载（通过尺寸判断，而不是 complete 属性）
     // 因为 complete 可能在图片尺寸设置之前就为 true
     if (naturalWidth === 0 || naturalHeight === 0 || displayWidth === 0 || displayHeight === 0) {
         console.warn('Image not ready for dragging:', { naturalWidth, naturalHeight, displayWidth, displayHeight, complete: img.complete })
         return
     }
-    
+
     // 检查 #app 是否有 transform: scale
     const appElement = document.getElementById('app')
     let appScale = 1
@@ -793,18 +798,18 @@ const startDragBbox = (event, type = 'move') => {
             }
         }
     }
-    
+
     // 计算缩放比例（补偿 #app 的缩放）
     const scaleX = displayWidth / (naturalWidth * appScale)
     const scaleY = displayHeight / (naturalHeight * appScale)
-    
+
     // 图片在容器中的偏移
     const offsetX = imgRect.left - containerRect.left
     const offsetY = imgRect.top - containerRect.top
-    
+
     // 边界框坐标
     const [x1, y1, x2, y2] = editingFaceBbox.value
-    
+
     // 计算边界框在容器中的显示位置
     const bboxRect = {
         left: offsetX + x1 * scaleX,
@@ -812,11 +817,11 @@ const startDragBbox = (event, type = 'move') => {
         right: offsetX + x2 * scaleX,
         bottom: offsetY + y2 * scaleY
     }
-    
+
     // 点击位置相对于容器
     const clickX = event.clientX - containerRect.left
     const clickY = event.clientY - containerRect.top
-    
+
     // 如果是拖拽手柄（type 不是 'move'），直接开始拖拽
     if (type !== 'move') {
         isDraggingBbox.value = true
@@ -825,13 +830,13 @@ const startDragBbox = (event, type = 'move') => {
         dragStartBbox.value = [...editingFaceBbox.value]
         return
     }
-    
+
     // 检查点击是否在边界框内（移动模式）
-    if (clickX < bboxRect.left || clickX > bboxRect.right || 
+    if (clickX < bboxRect.left || clickX > bboxRect.right ||
         clickY < bboxRect.top || clickY > bboxRect.bottom) {
         return
     }
-    
+
     isDraggingBbox.value = true
     dragType.value = 'move'
     dragStartPos.value = { x: clickX, y: clickY }
@@ -841,13 +846,13 @@ const startDragBbox = (event, type = 'move') => {
 // 拖拽边界框
 const dragBbox = (event) => {
     if (!isDraggingBbox.value) return
-    
+
     const container = imageContainerRef.value
     if (!container) return
-    
+
     const img = container.querySelector('img')
     if (!img || !img.complete) return
-    
+
     // 获取图片的实际显示尺寸和原始尺寸
     const imgRect = img.getBoundingClientRect()
     const containerRect = container.getBoundingClientRect()
@@ -855,9 +860,9 @@ const dragBbox = (event) => {
     const displayHeight = imgRect.height
     const naturalWidth = img.naturalWidth
     const naturalHeight = img.naturalHeight
-    
+
     if (naturalWidth === 0 || naturalHeight === 0) return
-    
+
     // 检查 #app 是否有 transform: scale
     const appElement = document.getElementById('app')
     let appScale = 1
@@ -877,40 +882,40 @@ const dragBbox = (event) => {
             }
         }
     }
-    
+
     // 计算缩放比例（补偿 #app 的缩放）
     // displayWidth 已经是经过 appScale 缩放后的尺寸，所以需要除以 appScale 来得到相对于原始图片的缩放比例
     const scaleX = displayWidth / (naturalWidth * appScale)
     const scaleY = displayHeight / (naturalHeight * appScale)
-    
+
     // 图片在容器中的偏移
     const offsetX = imgRect.left - containerRect.left
     const offsetY = imgRect.top - containerRect.top
-    
+
     // 鼠标当前位置相对于容器
     const containerRect2 = container.getBoundingClientRect()
     const currentX = event.clientX - containerRect2.left
     const currentY = event.clientY - containerRect2.top
-    
+
     // 将坐标转换为相对于图片的位置（考虑图片在容器中的偏移）
     const imgCurrentX = currentX - offsetX
     const imgCurrentY = currentY - offsetY
     const imgStartX = dragStartPos.value.x - offsetX
     const imgStartY = dragStartPos.value.y - offsetY
-    
+
     const deltaX = (imgCurrentX - imgStartX) / scaleX
     const deltaY = (imgCurrentY - imgStartY) / scaleY
-    
+
     // 获取拖拽开始时的bbox
     const [startX1, startY1, startX2, startY2] = dragStartBbox.value
     const startWidth = startX2 - startX1
     const startHeight = startY2 - startY1
-    
+
     let newX1 = startX1
     let newY1 = startY1
     let newX2 = startX2
     let newY2 = startY2
-    
+
     // 根据拖拽类型调整bbox
     const type = dragType.value
     if (type === 'move') {
@@ -968,10 +973,10 @@ const dragBbox = (event) => {
         newX1 = startX1
         newY1 = startY1
     }
-    
+
     // 边界限制：确保bbox在图片范围内
     const minSize = 10 // 最小尺寸
-    
+
     // X方向边界限制
     if (newX1 < 0) {
         newX1 = 0
@@ -987,7 +992,7 @@ const dragBbox = (event) => {
             newX1 = Math.min(newX1, naturalWidth - minSize)
         }
     }
-    
+
     // Y方向边界限制
     if (newY1 < 0) {
         newY1 = 0
@@ -1003,7 +1008,7 @@ const dragBbox = (event) => {
             newY1 = Math.min(newY1, naturalHeight - minSize)
         }
     }
-    
+
     // 确保最小尺寸
     if (newX2 - newX1 < minSize) {
         if (type.includes('w') || type === 'resize-nw' || type === 'resize-sw') {
@@ -1019,7 +1024,7 @@ const dragBbox = (event) => {
             newY2 = newY1 + minSize
         }
     }
-    
+
     // 更新边界框坐标
     editingFaceBbox.value = [newX1, newY1, newX2, newY2]
 }
@@ -1035,31 +1040,31 @@ const getBboxStyle = computed(() => {
     if (!imageContainerRef.value || editingFaceBbox.value.length !== 4) {
         return {}
     }
-    
+
     const container = imageContainerRef.value
     const img = container.querySelector('img')
     if (!img || !img.complete) {
         return {}
     }
-    
+
     // 获取图片的实际显示尺寸
     // getBoundingClientRect() 返回的是相对于 viewport 的坐标
     // 如果 #app 有 transform: scale(0.8)，那么所有元素都会被缩放 0.8
     const imgRect = img.getBoundingClientRect()
     const containerRect = container.getBoundingClientRect()
-    
+
     // 图片的实际显示尺寸（已考虑所有CSS样式和可能的缩放，包括 #app 的 0.8 缩放）
     const displayWidth = imgRect.width
     const displayHeight = imgRect.height
-    
+
     // 图片的原始尺寸（naturalWidth/naturalHeight 是图片文件的真实尺寸）
     const naturalWidth = img.naturalWidth
     const naturalHeight = img.naturalHeight
-    
+
     if (naturalWidth === 0 || naturalHeight === 0) {
         return {}
     }
-    
+
     // 检查 #app 是否有 transform: scale
     // 如果模态框在 #app 内部，会受到 #app 的 transform 影响
     const appElement = document.getElementById('app')
@@ -1082,7 +1087,7 @@ const getBboxStyle = computed(() => {
             }
         }
     }
-    
+
     // 计算缩放比例
     // displayWidth 已经是经过 appScale 缩放后的尺寸
     // 所以相对于原始图片的实际缩放比例是 displayWidth / naturalWidth
@@ -1090,24 +1095,24 @@ const getBboxStyle = computed(() => {
     // 如果 appScale = 0.8，那么边界框的尺寸应该是 displayWidth / appScale / naturalWidth = displayWidth / (naturalWidth * appScale)
     const scaleX = displayWidth / (naturalWidth * appScale)
     const scaleY = displayHeight / (naturalHeight * appScale)
-    
+
     // 图片在容器中的偏移（相对于容器）
     // 如果容器是 inline-block，图片和容器可能在同一位置
     // 我们需要检查容器是否包裹了图片，或者图片就是容器的唯一内容
     let offsetX = imgRect.left - containerRect.left
     let offsetY = imgRect.top - containerRect.top
-    
+
     // 如果计算出的偏移很小（可能是浮点数误差），或者容器和图片尺寸相同，说明图片填充了整个容器
     // 在这种情况下，offset 应该为 0
     if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) {
         offsetX = 0
         offsetY = 0
     }
-    
+
     // 边界框坐标（原始图片坐标 [x1, y1, x2, y2]）
     // 这些坐标是基于原始图片尺寸的绝对像素坐标
     const [x1, y1, x2, y2] = editingFaceBbox.value
-    
+
     // 转换为显示坐标
     // bbox坐标是基于原始图片尺寸的，需要乘以缩放比例得到显示尺寸
     // 注意：这里计算的是边界框在容器中的位置和尺寸
@@ -1115,13 +1120,13 @@ const getBboxStyle = computed(() => {
     const top = offsetY + y1 * scaleY
     const width = (x2 - x1) * scaleX
     const height = (y2 - y1) * scaleY
-    
+
     const indicatorSize = 12
-    
+
     // 确保边界框的尺寸计算正确（考虑 border 的影响）
     // border-2 = 2px，左右各2px，所以总宽度需要包含 border
     // 但由于使用了 box-sizing: border-box，所以不需要额外调整
-    
+
     return {
         left: `${left}px`,
         top: `${top}px`,
@@ -1138,11 +1143,11 @@ const getRoleNameLabelStyle = computed(() => {
     if (!bboxStyle.left || !bboxStyle.top) {
         return {}
     }
-    
+
     // 获取当前编辑的人脸信息
     const form = getCurrentForm()
     let roleName
-    
+
     // 如果是新增模式
     if (isAddingNewFace.value) {
         // 计算新角色的序号：当前角色数量 + 1
@@ -1153,15 +1158,15 @@ const getRoleNameLabelStyle = computed(() => {
         const face = form?.detectedFaces?.[editingFaceIndex.value]
         roleName = face?.roleName || `角色${editingFaceIndex.value + 1}`
     }
-    
+
     // 计算标签位置：在边界框上方居中
     const left = parseFloat(bboxStyle.left) || 0
     const top = parseFloat(bboxStyle.top) || 0
     const width = parseFloat(bboxStyle.width) || 0
-    
+
     // 标签在边界框上方，水平居中
     const labelLeft = left + width / 2
-    
+
     return {
         left: `${labelLeft}px`,
         top: `${top - 28}px`,  // 在边界框上方 28px
@@ -1427,62 +1432,204 @@ const updateScreenSize = () => {
 let resizeHandler = null
 
 // 路由监听和URL同步
-watch(() => route.query, (newQuery) => {
-    // 同步URL参数到组件状态
-    if (newQuery.taskType) {
-        // 根据URL参数设置任务类型
-        const taskType = newQuery.taskType
-        if (availableTaskTypes.value.some(type => type.value === taskType)) {
-            selectTask(taskType)
-        }
+// 标记是否正在更新 URL，避免循环更新
+let isUpdatingUrl = false
+// 标记是否正在从路由恢复状态
+let isRestoringFromRoute = false
+
+// 存储待处理的路由参数（当 availableTaskTypes 还未加载完成时）
+let pendingRouteRestore = null
+
+// 处理路由参数恢复的函数
+const restoreFromRoute = (newQuery, oldQuery) => {
+    // 如果正在更新 URL，跳过处理，避免循环更新
+    if (isUpdatingUrl) {
+        return
     }
-    if (newQuery.model) {
-        // 根据URL参数设置模型
+
+    // 如果 availableTaskTypes 还没有加载完成，保存参数等待处理
+    if (availableTaskTypes.value.length === 0) {
+        pendingRouteRestore = { newQuery, oldQuery }
+        return
+    }
+
+    // 标记正在从路由恢复状态
+    isRestoringFromRoute = true
+
+    // 同步URL参数到组件状态
+    // 首次加载时（oldQuery 为 undefined），或者参数真正变化时才更新
+    const isInitialLoad = !oldQuery
+
+    // 处理任务类型
+    if (newQuery.taskType) {
+        const taskType = newQuery.taskType
+        const shouldUpdate = isInitialLoad || (newQuery.taskType !== oldQuery?.taskType)
+        // availableTaskTypes 是字符串数组，不是对象数组
+        if (shouldUpdate && availableTaskTypes.value.includes(taskType)) {
+            // 如果当前任务类型不匹配，执行 selectTask
+            // 在首次加载时，即使值已经匹配，也执行 selectTask 以确保所有相关状态正确设置
+            if (selectedTaskId.value !== taskType || isInitialLoad) {
+                selectTask(taskType)
+
+                // 等待 selectTask 完成后再处理 model（因为 selectTask 可能会改变 availableModelClasses）
+                // 使用 nextTick 确保 selectTask 的副作用已完成
+                nextTick(() => {
+                    // 再次等待，确保 availableModelClasses 已更新
+                    setTimeout(() => {
+                        // 处理模型（在任务类型设置后）
+                        if (newQuery.model) {
+                            const model = newQuery.model
+                            const shouldUpdateModel = isInitialLoad || (newQuery.model !== oldQuery?.model)
+                            // availableModelClasses 是字符串数组，不是对象数组
+                            // 在首次加载时，即使值已经匹配，也执行 selectModel 以确保所有相关状态正确设置
+                            if (shouldUpdateModel && availableModelClasses.value.includes(model) && (selectedModel.value !== model || isInitialLoad)) {
+                                selectModel(model)
+                            }
+                        }
+                    }, 100)
+                })
+            }
+        } else if (!shouldUpdate && newQuery.model) {
+            // 如果任务类型没有变化，但需要更新模型
+            const model = newQuery.model
+            const shouldUpdateModel = isInitialLoad || (newQuery.model !== oldQuery?.model)
+            // availableModelClasses 是字符串数组，不是对象数组
+            // 在首次加载时，即使值已经匹配，也执行 selectModel 以确保所有相关状态正确设置
+            if (shouldUpdateModel && availableModelClasses.value.includes(model) && (selectedModel.value !== model || isInitialLoad)) {
+                selectModel(model)
+            }
+        }
+    } else if (newQuery.model && selectedTaskId.value) {
+        // 如果没有任务类型参数，但任务类型已经设置，直接处理模型
         const model = newQuery.model
-        if (availableModelClasses.value.some(m => m.value === model)) {
+        const shouldUpdate = isInitialLoad || (newQuery.model !== oldQuery?.model)
+        // availableModelClasses 是字符串数组，不是对象数组
+        // 在首次加载时，即使值已经匹配，也执行 selectModel 以确保所有相关状态正确设置
+        if (shouldUpdate && availableModelClasses.value.includes(model) && (selectedModel.value !== model || isInitialLoad)) {
             selectModel(model)
         }
     }
-    if (newQuery.expanded === 'true') {
+
+    // 处理 expanded 状态
+    const shouldBeExpanded = newQuery.expanded === 'true'
+    if (shouldBeExpanded && !isCreationAreaExpanded.value) {
         // 展开创建区域
         expandCreationArea()
+    } else if (!shouldBeExpanded && isCreationAreaExpanded.value && (isInitialLoad || oldQuery?.expanded === 'true')) {
+        // 如果 URL 中 expanded 从 'true' 变为其他值，收缩创建区域
+        contractCreationArea()
     }
 
+    // 恢复状态完成，使用 setTimeout 确保所有状态更新完成后再重置标志
+    setTimeout(() => {
+        isRestoringFromRoute = false
+    }, 200)
+}
+
+// 监听 availableTaskTypes，当它加载完成后处理待处理的路由恢复
+watch(availableTaskTypes, (newVal) => {
+    if (newVal && newVal.length > 0 && pendingRouteRestore) {
+        // availableTaskTypes 加载完成，处理待处理的路由恢复
+        const { newQuery, oldQuery } = pendingRouteRestore
+        pendingRouteRestore = null
+        restoreFromRoute(newQuery, oldQuery)
+    }
+}, { immediate: true })
+
+watch(() => route.query, (newQuery, oldQuery) => {
+    restoreFromRoute(newQuery, oldQuery)
     // 注意：分享数据导入功能已移至 Share.vue 中的 createSimilar 函数
     // 这里不再需要处理分享数据导入
 }, { immediate: true })
 
 // 监听组件状态变化，同步到URL
-watch([selectedTaskId, isCreationAreaExpanded, selectedModel], () => {
-    const query = {}
-    if (selectedTaskId.value) {
-        query.taskType = selectedTaskId.value
-    }
-    if (isCreationAreaExpanded.value) {
-        query.expanded = 'true'
-    }
-    if (selectedModel.value) {
-        query.model = selectedModel.value
+watch([selectedTaskId, isCreationAreaExpanded, selectedModel], (newVals, oldVals) => {
+    // 如果正在更新 URL 或正在从路由恢复状态，跳过处理，避免循环更新
+    if (isUpdatingUrl || isRestoringFromRoute) {
+        return
     }
 
-    // 更新URL但不触发路由监听
-    router.replace({ query })
-})
+    // 检查任务类型是否变化
+    const taskTypeChanged = oldVals && oldVals[0] !== newVals[0]
+
+    // 如果任务类型变化，检查当前模型是否属于新任务类型
+    if (taskTypeChanged && selectedTaskId.value && selectedModel.value) {
+        const isModelValid = availableModelClasses.value.includes(selectedModel.value)
+        // 如果模型不属于新任务类型，延迟更新路由，等待模型更新完成
+        if (!isModelValid) {
+            setTimeout(() => {
+                // 再次检查，确保模型已经更新
+                if (!isUpdatingUrl && !isRestoringFromRoute) {
+                    updateRouteFromState()
+                }
+            }, 150)
+            return
+        }
+    }
+
+    updateRouteFromState()
+}, { deep: true })
+
+// 更新路由的函数
+const updateRouteFromState = () => {
+    // 如果正在更新 URL 或正在从路由恢复状态，跳过处理，避免循环更新
+    if (isUpdatingUrl || isRestoringFromRoute) {
+        return
+    }
+
+    // 获取当前查询参数，保留其他参数（如分享相关的参数）
+    const currentQuery = { ...route.query }
+    const query = {}
+
+    // 只更新我们关心的参数
+    if (selectedTaskId.value) {
+        query.taskType = selectedTaskId.value
+    } else {
+        // 如果任务类型被清除，也从 URL 中移除
+        delete currentQuery.taskType
+    }
+
+    if (isCreationAreaExpanded.value) {
+        query.expanded = 'true'
+    } else {
+        // 如果创作区域收缩，从 URL 中移除 expanded 参数
+        delete currentQuery.expanded
+    }
+
+    if (selectedModel.value) {
+        query.model = selectedModel.value
+    } else {
+        // 如果模型被清除，也从 URL 中移除
+        delete currentQuery.model
+    }
+
+    // 合并查询参数，保留其他参数
+    const finalQuery = { ...currentQuery, ...query }
+
+    // 检查是否需要更新 URL（避免不必要的更新）
+    const needsUpdate =
+        finalQuery.taskType !== route.query.taskType ||
+        finalQuery.expanded !== route.query.expanded ||
+        finalQuery.model !== route.query.model
+
+    if (needsUpdate) {
+        isUpdatingUrl = true
+        // 更新URL但不触发路由监听（使用 replace 而不是 push，避免历史记录堆积）
+        router.replace({ query: finalQuery }).finally(() => {
+            // 使用 nextTick 确保路由更新完成后再重置标志
+            nextTick(() => {
+                isUpdatingUrl = false
+            })
+        })
+    }
+}
 
 
 // 组件挂载时初始化
 onMounted(async () => {
-    // 确保URL参数正确同步
-    const query = route.query
-    if (query.taskType) {
-        selectTask(query.taskType)
-    }
-    if (query.model) {
-        selectModel(query.model)
-    }
-    if (query.expanded === 'true') {
-        expandCreationArea()
-    }
+    // 注意：watch route.query 已经使用 immediate: true 处理了 URL 参数的恢复
+    // 这里不需要再次处理，避免重复执行
+    // 如果需要额外的初始化逻辑，可以在这里添加
 
     // 初始化屏幕尺寸
     updateScreenSize()
@@ -1584,6 +1731,48 @@ const handleAudioDrop = (e) => {
     }
 }
 
+// 触发视频上传
+const triggerVideoUpload = () => {
+    // 使用 nextTick 确保 DOM 已更新
+    nextTick(() => {
+        const videoInput = document.querySelector('input[type="file"][data-role="video-input"]')
+        if (videoInput) {
+            videoInput.click()
+        } else {
+            console.warn('视频输入框未找到，请确保已选择 animate 任务类型')
+        }
+    })
+}
+
+// 处理视频拖拽上传
+const handleVideoDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isDragOver.value = false
+
+    const files = Array.from(e.dataTransfer.files)
+    const videoFile = files.find(file => file.type.startsWith('video/'))
+
+    if (videoFile) {
+        // 创建FileList对象来模拟input[type="file"]的change事件
+        const dataTransfer = new DataTransfer()
+        dataTransfer.items.add(videoFile)
+        const fileList = dataTransfer.files
+
+        // 创建模拟的change事件
+        const event = {
+            target: {
+                files: fileList
+            }
+        }
+
+        handleVideoUpload(event)
+        showAlert('视频拖拽上传成功', 'success')
+    } else {
+        showAlert('请拖拽视频文件', 'warning')
+    }
+}
+
 // 格式化音频预览时间
 const formatAudioPreviewTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '0:00'
@@ -1670,12 +1859,12 @@ watch(() => s2vForm.value.separatedAudios, (newAudios, oldAudios) => {
     // 如果音频列表发生变化（重新分割），清理旧的音频元素和状态
     if (newAudios && newAudios.length > 0 && oldAudios && oldAudios.length > 0) {
         // 检查是否是重新分割（音频数量或内容发生变化）
-        const isReseparation = newAudios.length !== oldAudios.length || 
+        const isReseparation = newAudios.length !== oldAudios.length ||
             newAudios.some((audio, index) => {
                 const oldAudio = oldAudios[index]
                 return !oldAudio || audio.audioDataUrl !== oldAudio.audioDataUrl
             })
-        
+
         if (isReseparation) {
             // 停止所有正在播放的音频
             separatedAudioElements.value.forEach((audioElement, index) => {
@@ -1684,14 +1873,14 @@ watch(() => s2vForm.value.separatedAudios, (newAudios, oldAudios) => {
                     separatedAudioElements.value[index] = null
                 }
             })
-            
+
             // 清理所有状态
             separatedAudioElements.value = []
             separatedAudioPlaying.value = {}
             separatedAudioDuration.value = {}
             separatedAudioCurrentTime.value = {}
             separatedAudioIsDragging.value = {}
-            
+
             // 等待 DOM 更新后重新加载音频
             nextTick(() => {
                 // 音频元素会在模板中自动重新创建和加载
@@ -1786,7 +1975,7 @@ const onRoleDragStart = (event, index) => {
     draggedRoleIndex.value = index
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/html', event.target.outerHTML)
-    
+
     // 创建拖拽预览
     const target = event.currentTarget
     const rect = target.getBoundingClientRect()
@@ -1794,7 +1983,7 @@ const onRoleDragStart = (event, index) => {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
     }
-    
+
     // 创建拖拽预览图片
     const dragImage = target.cloneNode(true)
     // 设置固定尺寸，确保预览正确显示
@@ -1809,20 +1998,20 @@ const onRoleDragStart = (event, index) => {
     dragImage.style.zIndex = '10000'
     dragImage.style.boxShadow = '0 8px 24px rgba(0,0,0,0.3)'
     dragImage.style.backgroundColor = 'transparent'
-    
+
     // 立即添加到 DOM
     document.body.appendChild(dragImage)
-    
+
     // 强制重排，确保元素已渲染
     void dragImage.offsetHeight
-    
+
     // 同步设置拖拽图片（必须在 dragstart 事件中同步调用）
     try {
         event.dataTransfer.setDragImage(dragImage, dragOffset.value.x, dragOffset.value.y)
     } catch (e) {
         console.warn('Failed to set drag image:', e)
     }
-    
+
     // 延迟移除预览元素
     setTimeout(() => {
         if (dragImage.parentNode) {
@@ -1850,20 +2039,20 @@ const onRoleDrop = (event, targetIndex) => {
         dragOverRoleIndex.value = -1
         return
     }
-    
+
     const form = getCurrentForm()
     if (!form || !form.detectedFaces) return
-    
+
     // 保存原始状态
     const originalFaces = [...form.detectedFaces]
-    
+
     // 重新排序角色（只改变角色顺序，不影响音频顺序）
     const faces = [...form.detectedFaces]
     const draggedFace = faces[draggedRoleIndex.value]
     faces.splice(draggedRoleIndex.value, 1)
     faces.splice(targetIndex, 0, draggedFace)
     form.detectedFaces = faces
-    
+
     // 更新音频的 roleIndex 和 roleName，以匹配新的角色位置
     // 但不改变音频的显示顺序
     if (s2vForm.value.separatedAudios && s2vForm.value.separatedAudios.length > 0) {
@@ -1883,7 +2072,7 @@ const onRoleDrop = (event, targetIndex) => {
         // 触发响应式更新
         s2vForm.value.separatedAudios = [...s2vForm.value.separatedAudios]
     }
-    
+
     draggedRoleIndex.value = -1
     dragOverRoleIndex.value = -1
 }
@@ -1893,7 +2082,7 @@ const onAudioDragStart = (event, index) => {
     draggedAudioIndex.value = index
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/html', event.target.outerHTML)
-    
+
     // 创建拖拽预览
     const target = event.currentTarget
     const rect = target.getBoundingClientRect()
@@ -1901,7 +2090,7 @@ const onAudioDragStart = (event, index) => {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
     }
-    
+
     // 创建拖拽预览图片
     const dragImage = target.cloneNode(true)
     // 设置固定尺寸，确保预览正确显示
@@ -1916,20 +2105,20 @@ const onAudioDragStart = (event, index) => {
     dragImage.style.zIndex = '10000'
     dragImage.style.boxShadow = '0 8px 24px rgba(0,0,0,0.3)'
     dragImage.style.backgroundColor = 'transparent'
-    
+
     // 立即添加到 DOM
     document.body.appendChild(dragImage)
-    
+
     // 强制重排，确保元素已渲染
     void dragImage.offsetHeight
-    
+
     // 同步设置拖拽图片（必须在 dragstart 事件中同步调用）
     try {
         event.dataTransfer.setDragImage(dragImage, dragOffset.value.x, dragOffset.value.y)
     } catch (e) {
         console.warn('Failed to set drag image:', e)
     }
-    
+
     // 延迟移除预览元素
     setTimeout(() => {
         if (dragImage.parentNode) {
@@ -1957,20 +2146,20 @@ const onAudioDrop = (event, targetIndex) => {
         dragOverAudioIndex.value = -1
         return
     }
-    
+
     if (!s2vForm.value.separatedAudios) return
-    
+
     // 重新排序音频（只改变音频顺序，不影响角色顺序）
     const audios = [...s2vForm.value.separatedAudios]
     const draggedAudio = audios[draggedAudioIndex.value]
     audios.splice(draggedAudioIndex.value, 1)
     audios.splice(targetIndex, 0, draggedAudio)
-    
+
     // 音频的 roleIndex 和 roleName 保持不变，因为它们仍然对应原来的角色
     // 不需要更新 roleIndex，因为角色顺序没有改变
-    
+
     s2vForm.value.separatedAudios = audios
-    
+
     draggedAudioIndex.value = -1
     dragOverAudioIndex.value = -1
 }
@@ -2130,9 +2319,9 @@ onUnmounted(() => {
                                         </button>
                                     </div>
 
-                                    <div v-if="selectedTaskId === 'i2v' || selectedTaskId === 's2v'" class="upload-section">
+                                    <div v-if="selectedTaskId === 'i2v' || selectedTaskId === 's2v' || selectedTaskId === 'animate'" class="upload-section">
                                     <!-- 上传图片 - Apple 风格 -->
-                                    <div v-if="selectedTaskId === 'i2v' || selectedTaskId === 's2v'">
+                                    <div v-if="selectedTaskId === 'i2v' || selectedTaskId === 's2v' || selectedTaskId === 'animate'">
                                         <!-- 图片标签 -->
                                         <div class="flex justify-between items-center mb-3">
                                                 <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">
@@ -2198,7 +2387,7 @@ onUnmounted(() => {
                                                 <input type="file" ref="imageInput" @change="handleImageUpload" accept="image/*"
                                                 style="display: none;">
                                             </div>
-                                            
+
                                             <!-- 角色检测加载提示 -->
                                             <div v-if="faceDetecting" class="mt-3 flex items-center justify-center gap-2 text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">
                                                 <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
@@ -2352,11 +2541,76 @@ onUnmounted(() => {
                                             <input type="file" ref="audioInput" @change="handleAudioUpload" accept="audio/*,video/*" data-role="audio-input"
                                             style="display: none;">
                                         </div>
-                                        
+
                                         <!-- 音频分割加载提示 -->
                                         <div v-if="audioSeparating" class="mt-3 flex items-center justify-center gap-2 text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">
                                             <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
                                             <span>多角色模式，自动分割音频中···</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- 上传视频 - Apple 风格（用于 animate 任务类型） -->
+                                    <div v-if="selectedTaskId === 'animate'">
+                                        <!-- 视频标签 -->
+                                        <div class="flex justify-between items-center mb-3">
+                                            <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">
+                                                {{ t('video') || '视频' }}
+                                            </label>
+                                        </div>
+                                        <!-- 上传视频区域 - Apple 风格 -->
+                                        <div class="relative bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl p-2 min-h-[220px] transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_16px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_16px_rgba(0,0,0,0.3)]"
+                                            @drop="handleVideoDrop"
+                                            @dragover="handleDragOver"
+                                            @dragenter="handleDragEnter"
+                                            @dragleave="handleDragLeave"
+                                            :class="{
+                                                'border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10': isDragOver,
+                                                'p-8': !getCurrentVideoPreview()
+                                            }"
+                                            >
+                                            <!-- 默认上传界面 - Apple 风格 -->
+                                            <div v-if="!getCurrentVideoPreview()" class="flex flex-col items-center justify-center h-full">
+                                                <p class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] mb-2 tracking-tight">{{ t('uploadVideo')}}</p>
+                                                <p class="text-xs text-[#86868b] dark:text-[#98989d] mb-6 tracking-tight">{{ t('supportedVideoFormats') }}</p>
+                                                <div class="flex items-center justify-center gap-4">
+                                                    <div class="flex flex-col items-center gap-2">
+                                                        <button
+                                                            class="w-12 h-12 flex items-center justify-center bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white rounded-full transition-all duration-200 hover:scale-110 hover:shadow-[0_4px_12px_rgba(var(--brand-primary-rgb),0.3)] dark:hover:shadow-[0_4px_12px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100"
+                                                            @click="triggerVideoUpload"
+                                                            :title="t('uploadVideo') || '上传视频'">
+                                                            <i class="fas fa-upload text-base"></i>
+                                                        </button>
+                                                        <span class="text-xs text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('upload') }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 视频预览区域 -->
+                                            <div v-if="getCurrentVideoPreview()" class="relative w-full min-h-[220px] flex items-center justify-center">
+                                                <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)] w-full p-4">
+                                                    <div class="relative flex items-center mb-3">
+                                                        <!-- 视频预览 -->
+                                                        <div class="flex-1 min-w-0">
+                                                            <video
+                                                                :src="getCurrentVideoPreviewUrl()"
+                                                                class="w-full max-h-[180px] rounded-lg object-contain"
+                                                                controls
+                                                                preload="metadata"
+                                                            ></video>
+                                                        </div>
+
+                                                        <!-- 删除按钮 -->
+                                                        <button @click.stop="removeVideo"
+                                                            class="ml-3 w-9 h-9 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-red-500 dark:text-red-400 rounded-full transition-all duration-200 hover:scale-110 hover:shadow-[0_4px_12px_rgba(239,68,68,0.2)] dark:hover:shadow-[0_4px_12px_rgba(248,113,113,0.3)] active:scale-100 flex-shrink-0"
+                                                            :title="t('deleteVideo') || '删除视频'">
+                                                            <i class="fas fa-trash text-sm"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <input type="file" ref="videoInput" @change="handleVideoUpload" accept="video/*" data-role="video-input"
+                                                style="display: none;">
                                         </div>
                                     </div>
                                 </div>
@@ -2366,7 +2620,7 @@ onUnmounted(() => {
                                     <!-- 模式切换开关 -->
                                     <div class="flex justify-center items-center mb-4">
                                         <div class="flex items-center gap-3">
-                                            
+
                                             <!-- 开关按钮 -->
                                             <button
                                                 @click="toggleRoleMode"
@@ -2382,21 +2636,21 @@ onUnmounted(() => {
                                                     <i :class="isMultiRoleMode ? 'fas fa-users text-[8px] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]' : 'fas fa-user text-[8px] text-[#86868b] dark:text-[#98989d]'"></i>
                                                 </span>
                                             </button>
-                                            
+
                                             <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight" :class="{ 'text-[#86868b] dark:text-[#98989d]': isMultiRoleMode }">{{ isMultiRoleMode ? '多角色模式' : '单角色模式' }}</span>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- 保存角色加载提示 -->
                                     <div v-if="faceSaving" class="flex items-center justify-center gap-2 text-sm text-[#86868b] dark:text-[#98989d] tracking-tight mb-4">
                                         <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
                                         <span>正在保存角色并更新音频...</span>
                                     </div>
-                                    
+
                                     <!-- 角色和音频配对区域 - 每行一个配对（仅在多角色模式显示） -->
                                     <div v-if="isMultiRoleMode" class="flex flex-col items-center space-y-3">
-                                        <div 
-                                            v-for="(face, index) in currentDetectedFaces" 
+                                        <div
+                                            v-for="(face, index) in currentDetectedFaces"
                                             :key="index"
                                             class="flex items-stretch gap-4"
                                             :class="{
@@ -2404,7 +2658,7 @@ onUnmounted(() => {
                                             }"
                                         >
                                             <!-- 左侧：角色卡片 -->
-                                            <div 
+                                            <div
                                                 class="w-85 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-3 transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                                                 :class="{
                                                     'border-[color:var(--brand-primary)]/50 dark:border-[color:var(--brand-primary-light)]/50 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10': dragOverRoleIndex === index,
@@ -2416,7 +2670,7 @@ onUnmounted(() => {
                                                 @drop="onRoleDrop($event, index)"
                                             >
                                                 <!-- 角色区域 - 可拖拽 -->
-                                                <div 
+                                                <div
                                                     class="flex items-center justify-between gap-2 h-full w-full transition-all duration-200"
                                                     :class="{
                                                         'opacity-50 scale-95': draggedRoleIndex === index,
@@ -2432,11 +2686,11 @@ onUnmounted(() => {
                                                         <div class="cursor-move text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors">
                                                             <i class="fas fa-grip-vertical text-sm"></i>
                                                         </div>
-                                                        
+
                                                         <!-- 角色名显示/编辑 -->
                                                         <div class="flex items-center">
                                                             <!-- 编辑模式 -->
-                                                            <input 
+                                                            <input
                                                                 v-if="face.isEditing"
                                                                 type="text"
                                                                 :value="face.roleName"
@@ -2449,8 +2703,8 @@ onUnmounted(() => {
                                                                 :placeholder="`角色${index + 1}`"
                                                                 @click.stop>
                                                             <!-- 显示模式 - 可点击编辑 -->
-                                                            <span 
-                                                                v-else 
+                                                            <span
+                                                                v-else
                                                                 @click.stop="toggleFaceEditing(index)"
                                                                 class="w-24 px-2 py-1.5 text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] truncate tracking-tight cursor-text hover:bg-[color:var(--brand-primary)]/10 dark:hover:bg-[color:var(--brand-primary-light)]/15 hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] rounded transition-colors duration-200"
                                                             >
@@ -2458,18 +2712,18 @@ onUnmounted(() => {
                                                             </span>
                                                         </div>
                                                     </div>
-                                                    
+
                                                     <!-- 右侧：头像、编辑按钮和删除按钮 -->
                                                     <div class="flex items-center gap-2 flex-shrink-0">
                                                         <!-- 角色头像容器 - 相对定位，用于放置编辑按钮 -->
                                                         <div class="relative flex-shrink-0">
                                                             <!-- 角色头像 - 可点击 -->
-                                                            <div 
+                                                            <div
                                                                 @click.stop="openFaceEditModal(index)"
                                                                 class="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-black/8 dark:border-white/8 bg-black/5 dark:bg-white/5 cursor-pointer hover:border-[color:var(--brand-primary)]/50 dark:hover:border-[color:var(--brand-primary-light)]/50 transition-all duration-200 hover:scale-105"
                                                             >
-                                                                <img v-if="face.face_image" 
-                                                                    :src="'data:image/png;base64,' + face.face_image" 
+                                                                <img v-if="face.face_image"
+                                                                    :src="'data:image/png;base64,' + face.face_image"
                                                                     alt="Face"
                                                                     class="w-full h-full object-cover"
                                                                     @error="(e) => { console.error('Face image load error:', index, e); e.target.style.display = 'none'; }">
@@ -2477,9 +2731,9 @@ onUnmounted(() => {
                                                                     <i class="fas fa-image"></i>
                                                                 </div>
                                                             </div>
-                                                            
+
                                                             <!-- 编辑按钮 - 放在头像右上角 -->
-                                                            <button 
+                                                            <button
                                                                 v-if="!face.isEditing"
                                                                 @click.stop="openFaceEditModal(index)"
                                                                 class="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[10px] border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] rounded-full transition-all duration-200 hover:scale-110 shadow-sm"
@@ -2487,7 +2741,7 @@ onUnmounted(() => {
                                                                 <i class="fas fa-edit text-xs"></i>
                                                             </button>
                                                             <!-- 保存按钮 -->
-                                                            <button 
+                                                            <button
                                                                 v-else
                                                                 @click.stop="saveFaceRoleName(index, face.roleName)"
                                                                 class="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 text-white rounded-full transition-all duration-200 hover:scale-110 shadow-sm"
@@ -2495,9 +2749,9 @@ onUnmounted(() => {
                                                                 <i class="fas fa-check text-xs"></i>
                                                             </button>
                                                         </div>
-                                                        
+
                                                         <!-- 删除按钮 -->
-                                                        <button 
+                                                        <button
                                                             @click.stop="removeFace(index)"
                                                             class="flex-shrink-0 w-6 h-6 flex items-center justify-center text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all duration-200"
                                                             :title="t('delete') || '删除'">
@@ -2506,16 +2760,16 @@ onUnmounted(() => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            
+
                                             <!-- 中间：链接符号 -->
                                             <div class="flex items-center justify-center flex-shrink-0">
                                                 <div class="w-8 h-8 flex items-center justify-center text-[#86868b] dark:text-[#98989d]">
                                                     <i class="fas fa-link text-lg"></i>
                                                 </div>
                                             </div>
-                                            
+
                                             <!-- 右侧：音频卡片 -->
-                                            <div 
+                                            <div
                                                 v-if="currentSeparatedAudios && currentSeparatedAudios.length > index"
                                                 class="w-85 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-3 transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                                                 :class="{
@@ -2528,7 +2782,7 @@ onUnmounted(() => {
                                                 @drop="onAudioDrop($event, index)"
                                             >
                                                 <!-- 音频区域 - 可拖拽 -->
-                                                <div 
+                                                <div
                                                     class="flex items-center gap-2 h-full transition-all duration-200"
                                                     :class="{
                                                         'opacity-50 scale-95': draggedAudioIndex === index,
@@ -2542,11 +2796,11 @@ onUnmounted(() => {
                                                     <div class="cursor-move text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors">
                                                         <i class="fas fa-grip-vertical text-sm"></i>
                                                     </div>
-                                                    
+
                                                     <!-- 音色名显示/编辑 -->
                                                     <div class="flex items-center">
                                                         <!-- 编辑模式 -->
-                                                        <input 
+                                                        <input
                                                             v-if="currentSeparatedAudios[index].isEditing"
                                                             type="text"
                                                             :value="currentSeparatedAudios[index].audioName"
@@ -2559,15 +2813,15 @@ onUnmounted(() => {
                                                             :placeholder="`音色${index + 1}`"
                                                             @click.stop>
                                                         <!-- 显示模式 - 可点击编辑 -->
-                                                        <span 
-                                                            v-else 
+                                                        <span
+                                                            v-else
                                                             @click.stop="toggleSeparatedAudioEditing(index)"
                                                             class="w-24 px-2 py-1 text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight truncate cursor-text hover:bg-[color:var(--brand-primary)]/10 dark:hover:bg-[color:var(--brand-primary-light)]/15 hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] rounded transition-colors duration-200"
                                                         >
                                                             {{ currentSeparatedAudios[index].audioName || `音色${index + 1}` }}
                                                         </span>
                                                     </div>
-                                                    
+
                                                     <!-- 音频播放器 -->
                                                     <div class="flex items-center gap-2 justify-center flex-shrink-0">
                                                         <!-- 播放/暂停按钮 -->
@@ -2577,14 +2831,14 @@ onUnmounted(() => {
                                                         >
                                                             <i :class="getSeparatedAudioPlaying(index) ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
                                                         </button>
-                                                        
+
                                                         <!-- 右侧：时长和进度条 -->
                                                         <div class="flex flex-col justify-center" style="gap: 2px;">
                                                             <!-- 音频时长 - 显示在进度条上方 -->
                                                             <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight text-center" style="width: 128px;">
                                                                 {{ formatAudioPreviewTime(getSeparatedAudioCurrentTime(index)) }} / {{ formatAudioPreviewTime(getSeparatedAudioDuration(index)) }}
                                                             </div>
-                                                            
+
                                                             <!-- 进度条 -->
                                                             <div class="w-32" v-if="getSeparatedAudioDuration(index) > 0">
                                                                 <input
@@ -2600,7 +2854,7 @@ onUnmounted(() => {
                                                                 />
                                                             </div>
                                                         </div>
-                                                        
+
                                                         <!-- 隐藏的音频元素 -->
                                                         <audio
                                                             :ref="el => { if (el) separatedAudioElements[index] = el }"
@@ -2616,9 +2870,9 @@ onUnmounted(() => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            
+
                                             <!-- 音频占位符（如果没有对应的分离音频） -->
-                                            <div 
+                                            <div
                                                 v-else
                                                 class="w-85 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl p-3 flex items-center justify-center text-sm text-[#86868b] dark:text-[#98989d] tracking-tight"
                                             >
@@ -2626,7 +2880,7 @@ onUnmounted(() => {
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- 新增角色按钮 -->
                                     <div v-if="selectedTaskId === 's2v' && getCurrentImagePreview() && isMultiRoleMode" class="flex justify-center mt-4">
                                         <button
@@ -2639,36 +2893,38 @@ onUnmounted(() => {
                                     </div>
                                 </div>
 
-                                        <!-- 提示词输入区域 - Apple 风格 -->
-                                        <div class="mt-8 space-y-3 flex justify-between items-center mb-3">
-                                            <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center tracking-tight">
-                                                    {{ t('prompt') }}
-                                                    <button @click="showPromptModal = true; promptModalTab = 'templates'"
-                                                        class="ml-2 text-xs text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors"
-                                                        :title="t('promptTemplates')">
-                                                    <i class="fas fa-lightbulb text-lg"></i>
-                                                </button>
-                                            </label>
-                                            <div class="text-xs text-[#86868b] dark:text-[#98989d] tracking-tight">
-                                                {{ getCurrentForm().prompt?.length || 0 }} / 1000
+                                        <!-- 提示词输入区域 - Apple 风格（animate 任务类型不显示） -->
+                                        <div v-if="selectedTaskId !== 'animate'">
+                                            <div class="mt-8 space-y-3 flex justify-between items-center mb-3">
+                                                <label class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] flex items-center tracking-tight">
+                                                        {{ t('prompt') }}
+                                                        <button @click="showPromptModal = true; promptModalTab = 'templates'"
+                                                            class="ml-2 text-xs text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors"
+                                                            :title="t('promptTemplates')">
+                                                        <i class="fas fa-lightbulb text-lg"></i>
+                                                    </button>
+                                                </label>
+                                                <div class="text-xs text-[#86868b] dark:text-[#98989d] tracking-tight">
+                                                    {{ getCurrentForm().prompt?.length || 0 }} / 1000
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div class="relative">
-                                            <textarea v-model="getCurrentForm().prompt"
-                                                class="relative w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] transition-all duration-200 resize-none main-scrollbar placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)]"
-                                                :placeholder="getPromptPlaceholder()"
-                                                rows="2"
-                                                maxlength="1000"
-                                                required></textarea>
-                                        </div>
+                                            <div class="relative">
+                                                <textarea v-model="getCurrentForm().prompt"
+                                                    class="relative w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl px-5 py-4 text-[15px] text-[#1d1d1f] dark:text-[#f5f5f7] transition-all duration-200 resize-none main-scrollbar placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 focus:shadow-[0_4px_16px_rgba(var(--brand-primary-rgb),0.12)] dark:focus:shadow-[0_4px_16px_rgba(var(--brand-primary-light-rgb),0.2)]"
+                                                    :placeholder="getPromptPlaceholder()"
+                                                    rows="2"
+                                                    maxlength="1000"
+                                                    required></textarea>
+                                            </div>
 
-                                        <div class="flex justify-between items-center mt-3">
-                                            <button @click="clearPrompt"
-                                                class="flex items-center text-sm rounded-lg px-3 py-1.5 transition-all duration-200 text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] hover:bg-black/4 dark:hover:bg-white/6 group tracking-tight">
-                                                <i class="fas fa-sync-alt text-sm mr-2 group-hover:rotate-180 transition-transform duration-300"></i>
-                                                {{ t('clear') }}
-                                            </button>
+                                            <div class="flex justify-between items-center mt-3">
+                                                <button @click="clearPrompt"
+                                                    class="flex items-center text-sm rounded-lg px-3 py-1.5 transition-all duration-200 text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] hover:bg-black/4 dark:hover:bg-white/6 group tracking-tight">
+                                                    <i class="fas fa-sync-alt text-sm mr-2 group-hover:rotate-180 transition-transform duration-300"></i>
+                                                    {{ t('clear') }}
+                                                </button>
 
+                                            </div>
                                         </div>
                                 <!-- 提交按钮 - Apple 极简风格 -->
                                 <div class="flex justify-center mt-8">
@@ -2816,14 +3072,14 @@ onUnmounted(() => {
             </div>
 
             <!-- 脸部编辑模态框 - 显示放大图片和可拖拽的边界框 -->
-            <div v-if="showFaceEditModal" 
+            <div v-if="showFaceEditModal"
                 class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-sm"
                 @click="closeFaceEditModal">
-                <div 
+                <div
                     @click.stop
                     class="relative bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] rounded-2xl p-6 max-w-4xl max-h-[90vh] overflow-auto shadow-[0_12px_32px_rgba(0,0,0,0.6)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.8)]">
                     <!-- 关闭按钮 -->
-                    <button 
+                    <button
                         @click="closeFaceEditModal"
                         class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 z-10"
                         :title="t('close') || '关闭'">
@@ -2836,20 +3092,20 @@ onUnmounted(() => {
                     </h3>
 
                     <!-- 图片容器 -->
-                    <div 
+                    <div
                         ref="imageContainerRef"
                         class="relative inline-block max-w-full">
-                        <img 
+                        <img
                             :src="originalImageUrl"
                             alt="Face Edit"
                             class="max-w-full max-h-[70vh] h-auto object-contain rounded-xl"
                             @load="() => { nextTick(); }">
-                        
+
                         <!-- 遮罩层 - 框外区域变暗 -->
-                        <svg 
+                        <svg
                             v-if="editingFaceBbox.length === 4 && getBboxStyle.left"
                             class="absolute inset-0 pointer-events-none z-[5]"
-                            :style="{ 
+                            :style="{
                                 left: 0,
                                 top: 0,
                                 width: '100%',
@@ -2858,7 +3114,7 @@ onUnmounted(() => {
                             <defs>
                                 <mask id="bbox-mask">
                                     <rect width="100%" height="100%" fill="white"/>
-                                    <rect 
+                                    <rect
                                         :x="getBboxStyle.left"
                                         :y="getBboxStyle.top"
                                         :width="getBboxStyle.width"
@@ -2866,15 +3122,15 @@ onUnmounted(() => {
                                         fill="black"/>
                                 </mask>
                             </defs>
-                            <rect 
-                                width="100%" 
-                                height="100%" 
-                                fill="rgba(0,0,0,0.5)" 
+                            <rect
+                                width="100%"
+                                height="100%"
+                                fill="rgba(0,0,0,0.5)"
                                 mask="url(#bbox-mask)"/>
                         </svg>
-                        
+
                         <!-- 角色名字标签 - 显示在边界框上方 -->
-                        <div 
+                        <div
                             v-if="editingFaceBbox.length === 4 && getBboxStyle.left && getRoleNameLabelStyle.roleName"
                             :style="{
                                 left: getRoleNameLabelStyle.left,
@@ -2884,85 +3140,85 @@ onUnmounted(() => {
                             class="absolute px-2 py-1 text-xs font-medium text-white bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-md shadow-lg whitespace-nowrap pointer-events-none z-10">
                             {{ getRoleNameLabelStyle.roleName }}
                         </div>
-                        
+
                         <!-- 边界框 -->
-                        <div 
+                        <div
                             v-if="editingFaceBbox.length === 4 && getBboxStyle.left"
                             :style="getBboxStyle"
                             @mousedown="(e) => startDragBbox(e, 'move')"
                             class="absolute border-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] cursor-move bg-transparent hover:bg-[color:var(--brand-primary)]/5 dark:hover:bg-[color:var(--brand-primary-light)]/5 transition-colors duration-200"
                             :class="{ 'ring-2 ring-[color:var(--brand-primary)]/50 dark:ring-[color:var(--brand-primary-light)]/50 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/10': isDraggingBbox }"
                             style="box-sizing: border-box;">
-                            
+
                             <!-- 四个角的拖拽手柄 -->
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-nw')"
-                                :style="{ 
-                                    width: `${getBboxStyle.indicatorSize || 16}px`, 
+                                :style="{
+                                    width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     left: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     top: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full border-2 border-white dark:border-[#2c2c2e] shadow-lg cursor-nw-resize hover:scale-110 transition-transform z-20"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-ne')"
-                                :style="{ 
-                                    width: `${getBboxStyle.indicatorSize || 16}px`, 
+                                :style="{
+                                    width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     right: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     top: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full border-2 border-white dark:border-[#2c2c2e] shadow-lg cursor-ne-resize hover:scale-110 transition-transform z-20"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-sw')"
-                                :style="{ 
-                                    width: `${getBboxStyle.indicatorSize || 16}px`, 
+                                :style="{
+                                    width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     left: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     bottom: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full border-2 border-white dark:border-[#2c2c2e] shadow-lg cursor-sw-resize hover:scale-110 transition-transform z-20"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-se')"
-                                :style="{ 
-                                    width: `${getBboxStyle.indicatorSize || 16}px`, 
+                                :style="{
+                                    width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     right: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     bottom: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full border-2 border-white dark:border-[#2c2c2e] shadow-lg cursor-se-resize hover:scale-110 transition-transform z-20"></div>
-                            
+
                             <!-- 四个边的拖拽手柄 -->
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-n')"
-                                :style="{ 
+                                :style="{
                                     width: 'calc(100% + 16px)',
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     left: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     top: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute cursor-n-resize hover:bg-[color:var(--brand-primary)]/20 dark:hover:bg-[color:var(--brand-primary-light)]/20 transition-colors rounded-t z-10"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-s')"
-                                :style="{ 
+                                :style="{
                                     width: 'calc(100% + 16px)',
                                     height: `${getBboxStyle.indicatorSize || 16}px`,
                                     left: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     bottom: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute cursor-s-resize hover:bg-[color:var(--brand-primary)]/20 dark:hover:bg-[color:var(--brand-primary-light)]/20 transition-colors rounded-b z-10"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-w')"
-                                :style="{ 
+                                :style="{
                                     width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: 'calc(100% + 16px)',
                                     left: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
                                     top: `${-(getBboxStyle.indicatorSize || 16) / 2}px`
                                 }"
                                 class="absolute cursor-w-resize hover:bg-[color:var(--brand-primary)]/20 dark:hover:bg-[color:var(--brand-primary-light)]/20 transition-colors rounded-l z-10"></div>
-                            <div 
+                            <div
                                 @mousedown.stop="(e) => startDragBbox(e, 'resize-e')"
-                                :style="{ 
+                                :style="{
                                     width: `${getBboxStyle.indicatorSize || 16}px`,
                                     height: 'calc(100% + 16px)',
                                     right: `${-(getBboxStyle.indicatorSize || 16) / 2}px`,
@@ -2974,12 +3230,12 @@ onUnmounted(() => {
 
                     <!-- 操作按钮 -->
                     <div class="flex items-center justify-end gap-3 mt-6">
-                        <button 
+                        <button
                             @click="closeFaceEditModal"
                             class="px-4 py-2 text-sm font-medium text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-black/4 dark:hover:bg-white/6 rounded-lg transition-all duration-200 tracking-tight">
                             {{ t('cancel') || '取消' }}
                         </button>
-                        <button 
+                        <button
                             @click="saveFaceBbox"
                             class="px-4 py-2 text-sm font-medium text-white bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] hover:opacity-90 rounded-lg transition-all duration-200 tracking-tight">
                             {{ t('save') || '保存' }}

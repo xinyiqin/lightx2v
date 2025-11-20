@@ -138,11 +138,11 @@ class S3DataManager(BaseDataManager):
                 prefix = base_dir
         else:
             prefix = self.base_path
-        
+
         # Ensure prefix ends with / for proper S3 listing
         if not prefix.endswith("/"):
             prefix = prefix + "/"
-        
+
         response = await self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
         files = []
         if "Contents" in response:
@@ -150,7 +150,7 @@ class S3DataManager(BaseDataManager):
                 # Remove the prefix from the key to get just the filename
                 key = obj["Key"]
                 if key.startswith(prefix):
-                    filename = key[len(prefix):]
+                    filename = key[len(prefix) :]
                     if filename:  # Skip empty filenames (the directory itself)
                         files.append(filename)
         return files

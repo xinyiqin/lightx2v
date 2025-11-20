@@ -4,13 +4,13 @@ Audio Source Separation Module
 Separates different voice tracks in audio, supports multi-person audio separation
 """
 
+import base64
+import io
 import os
-from collections import defaultdict
 import tempfile
 import traceback
-import io
-import base64
-from typing import Dict, Union, Optional
+from collections import defaultdict
+from typing import Dict, Optional, Union
 
 import torch
 import torchaudio
@@ -18,8 +18,8 @@ from loguru import logger
 
 try:
     # Import pyannote.audio for speaker diarization
-    from pyannote.audio import Pipeline, Audio
-    from pyannote.core import Segment
+    from pyannote.audio import Audio, Pipeline
+
     PYANNOTE_AVAILABLE = True
 except ImportError:
     PYANNOTE_AVAILABLE = False
@@ -58,7 +58,7 @@ class AudioSeparator:
         try:
             huggingface_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
             model_name = model_path or "pyannote/speaker-diarization-community-1"
-            
+
             try:
                 # Try loading with token if available
                 if huggingface_token:
@@ -74,10 +74,10 @@ class AudioSeparator:
             # Move pipeline to specified device
             if self.device:
                 self.pipeline.to(torch.device(self.device))
-            
+
             # Initialize Audio helper for waveform loading
             self.pyannote_audio = Audio()
-            
+
             logger.info("Initialized pyannote.audio speaker diarization pipeline")
         except Exception as e:
             logger.error(f"Failed to initialize pyannote: {e}")
@@ -112,10 +112,10 @@ class AudioSeparator:
             if isinstance(audio_path, bytes):
                 # 尝试从字节数据推断音频格式
                 # 检查是否是 WAV 格式（RIFF 头）
-                is_wav = audio_path[:4] == b'RIFF' and audio_path[8:12] == b'WAVE'
+                is_wav = audio_path[:4] == b"RIFF" and audio_path[8:12] == b"WAVE"
                 # 检查是否是 MP3 格式（ID3 或 MPEG 头）
-                is_mp3 = audio_path[:3] == b'ID3' or audio_path[:2] == b'\xff\xfb' or audio_path[:2] == b'\xff\xf3'
-                
+                is_mp3 = audio_path[:3] == b"ID3" or audio_path[:2] == b"\xff\xfb" or audio_path[:2] == b"\xff\xf3"
+
                 # 根据格式选择后缀
                 if is_wav:
                     suffix = ".wav"
@@ -124,14 +124,12 @@ class AudioSeparator:
                 else:
                     # 默认尝试 WAV，如果失败会抛出错误
                     suffix = ".wav"
-                
+
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
                     tmp_file.write(audio_path)
                     tmp_audio_path = tmp_file.name
                 try:
-                    result = self._separate_speakers_internal(
-                        tmp_audio_path, num_speakers, min_speakers, max_speakers
-                    )
+                    result = self._separate_speakers_internal(tmp_audio_path, num_speakers, min_speakers, max_speakers)
                 finally:
                     # 确保临时文件被删除
                     try:
@@ -168,7 +166,7 @@ class AudioSeparator:
         # Ensure waveform is float32 and normalized (pyannote expects this format)
         if waveform.dtype != torch.float32:
             waveform = waveform.float()
-        
+
         # Ensure waveform is in range [-1, 1] (normalize if needed)
         if waveform.abs().max() > 1.0:
             waveform = waveform / waveform.abs().max()
@@ -195,7 +193,7 @@ class AudioSeparator:
                 "waveform": waveform,
                 "sample_rate": self.sample_rate,
             }
-            
+
             # Run speaker diarization
             output = self.pipeline(
                 audio_input,
@@ -278,17 +276,17 @@ class AudioSeparator:
             Base64 encoded audio string
         """
         sr = sample_rate if sample_rate else self.sample_rate
-        
+
         # Use BytesIO to save audio to memory
         buffer = io.BytesIO()
         torchaudio.save(buffer, speaker_audio, sr, format=format)
-        
+
         # Get the audio bytes
         audio_bytes = buffer.getvalue()
-        
+
         # Encode to base64
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-        
+
         logger.debug(f"Converted speaker audio to base64, size: {len(audio_bytes)} bytes")
         return audio_base64
 
@@ -375,4 +373,3 @@ if __name__ == "__main__":
         print(f"  Speaker {speaker['speaker_id']}: {len(speaker['segments'])} segments")
         if "output_path" in speaker:
             print(f"    Saved to: {speaker['output_path']}")
-

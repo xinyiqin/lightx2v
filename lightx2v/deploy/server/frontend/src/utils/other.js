@@ -170,7 +170,8 @@ export const locale = i18n.global.locale
         const nameMap = computed(() => ({
             't2v': t('textToVideo'),
             'i2v': t('imageToVideo'),
-            's2v': t('speechToVideo')
+            's2v': t('speechToVideo'),
+            'animate': t('animate')
         }));
 
         // 任务类型提示信息
@@ -192,7 +193,11 @@ export const locale = i18n.global.locale
                 t('s2vHint2'),
                 t('s2vHint3'),
                 t('s2vHint4')
-            ]
+            ],
+            'animate': [
+                t('animateHint1') || '上传目标角色图片和参考视频',
+                t('animateHint2') || '将视频中的角色替换为目标角色',
+                ]
         }));
 
         // 当前任务类型的提示信息
@@ -253,6 +258,17 @@ export const locale = i18n.global.locale
             separatedAudios: []  // List of separated audio tracks: [{ speaker_id, audio (base64), roleName, ... }]
         });
 
+        const animateForm = ref({
+            task: 'animate',
+            model_cls: '',
+            stage: 'single_stage',
+            imageFile: null,
+            videoFile: null,
+            prompt: '视频中的人在做动作',
+            seed: 42,
+            detectedFaces: []  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+        });
+
         // 根据当前选择的任务类型获取对应的表单
         const getCurrentForm = () => {
             switch (selectedTaskId.value) {
@@ -262,6 +278,8 @@ export const locale = i18n.global.locale
                     return i2vForm.value;
                 case 's2v':
                     return s2vForm.value;
+                case 'animate':
+                    return animateForm.value;
                 default:
                     return t2vForm.value;
             }
@@ -310,14 +328,16 @@ export const locale = i18n.global.locale
         const i2vImagePreview = ref(null);
         const s2vImagePreview = ref(null);
         const s2vAudioPreview = ref(null);
+        const animateImagePreview = ref(null);
+        const animateVideoPreview = ref(null);
 
         // 监听上传内容变化
         const updateUploadedContentStatus = () => {
-            hasUploadedContent.value = !!(getCurrentImagePreview() || getCurrentAudioPreview() || getCurrentForm().prompt?.trim());
+            hasUploadedContent.value = !!(getCurrentImagePreview() || getCurrentAudioPreview() || getCurrentVideoPreview() || getCurrentForm().prompt?.trim());
         };
 
         // 监听表单变化
-        watch([i2vImagePreview, s2vImagePreview, s2vAudioPreview, () => getCurrentForm().prompt], () => {
+        watch([i2vImagePreview, s2vImagePreview, s2vAudioPreview, animateImagePreview, animateVideoPreview, () => getCurrentForm().prompt], () => {
             updateUploadedContentStatus();
         }, { deep: true });
 
@@ -337,6 +357,8 @@ export const locale = i18n.global.locale
                     return i2vImagePreview.value;
                 case 's2v':
                     return s2vImagePreview.value;
+                case 'animate':
+                    return animateImagePreview.value;
                 default:
                     return null;
             }
@@ -365,6 +387,9 @@ export const locale = i18n.global.locale
                 case 's2v':
                     s2vImagePreview.value = value;
                     break;
+                case 'animate':
+                    animateImagePreview.value = value;
+                    break;
             }
             // 清除图片预览缓存，确保新图片能正确显示
             urlCache.value.delete('current_image_preview');
@@ -382,6 +407,27 @@ export const locale = i18n.global.locale
             }
             // 清除音频预览缓存，确保新音频能正确显示
             urlCache.value.delete('current_audio_preview');
+        };
+
+        // 获取当前任务类型的视频预览
+        const getCurrentVideoPreview = () => {
+            switch (selectedTaskId.value) {
+                case 'animate':
+                    return animateVideoPreview.value;
+                default:
+                    return null;
+            }
+        };
+
+        // 设置当前任务类型的视频预览
+        const setCurrentVideoPreview = (value) => {
+            switch (selectedTaskId.value) {
+                case 'animate':
+                    animateVideoPreview.value = value;
+                    break;
+            }
+            // 清除视频预览缓存，确保新视频能正确显示
+            urlCache.value.delete('current_video_preview');
         };
 
         // 提示词模板相关
@@ -544,6 +590,12 @@ export const locale = i18n.global.locale
             const preview = getCurrentAudioPreview();
             if (!preview) return '';
             return getCachedUrl(`current_audio_preview`, () => preview);
+        };
+
+        const getCurrentVideoPreviewUrl = () => {
+            const preview = getCurrentVideoPreview();
+            if (!preview) return '';
+            return getCachedUrl(`current_video_preview`, () => preview);
         };
 
         // Alert定时器，用于清除之前的定时器
@@ -1066,6 +1118,9 @@ export const locale = i18n.global.locale
                 } else if (selectedTaskId.value === 's2v') {
                     s2vForm.value.imageFile = file;
                     s2vForm.value.detectedFaces = [];  // Reset detected faces
+                } else if (selectedTaskId.value === 'animate') {
+                    animateForm.value.imageFile = file;
+                    animateForm.value.detectedFaces = [];  // Reset detected faces
                 }
 
                 // 获取图片的 http/https URL（用于人脸识别和预览）
@@ -1088,7 +1143,7 @@ export const locale = i18n.global.locale
                     // 如果有 http/https URL，使用它作为预览；否则使用 data URL
                     setCurrentImagePreview(imageUrl || imageDataUrl);
                     updateUploadedContentStatus();
-                    
+
                     reader.readAsDataURL(file);
                     showImageTemplates.value = false;
                     showAlert('图片素材已选择', 'success');
@@ -1110,7 +1165,7 @@ export const locale = i18n.global.locale
                         }
                     }
                 };
-                
+
             } catch (error) {
                 showAlert(`加载图片素材失败: ${error.message}`, 'danger');
             }
@@ -1195,13 +1250,16 @@ export const locale = i18n.global.locale
                 } else if (selectedTaskId.value === 's2v') {
                     s2vForm.value.imageFile = file;
                     s2vForm.value.detectedFaces = [];  // Reset detected faces
+                } else if (selectedTaskId.value === 'animate') {
+                    animateForm.value.imageFile = file;
+                    animateForm.value.detectedFaces = [];  // Reset detected faces
                 }
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const imageDataUrl = e.target.result;
                     setCurrentImagePreview(imageDataUrl);
                     updateUploadedContentStatus();
-                    
+
                     // Auto detect faces after image is loaded
                     try {
                         await detectFacesInImage(imageDataUrl);
@@ -1225,18 +1283,18 @@ export const locale = i18n.global.locale
                     reject(new Error('Invalid bbox coordinates'))
                     return
                 }
-                
+
                 const [x1, y1, x2, y2] = bbox
                 const width = x2 - x1
                 const height = y2 - y1
-                
+
                 if (width <= 0 || height <= 0) {
                     reject(new Error(`Invalid bbox dimensions: ${width}x${height}`))
                     return
                 }
-                
+
                 const img = new Image()
-                
+
                 // For data URLs, crossOrigin is not needed
                 if (imageUrl.startsWith('data:')) {
                     img.onload = () => {
@@ -1246,14 +1304,14 @@ export const locale = i18n.global.locale
                             canvas.width = width
                             canvas.height = height
                             const ctx = canvas.getContext('2d')
-                            
+
                             // Draw the cropped region to Canvas
                             ctx.drawImage(
                                 img,
                                 x1, y1, width, height,  // Source image crop region
                                 0, 0, width, height     // Canvas drawing position
                             )
-                            
+
                             // Convert to base64
                             const base64 = canvas.toDataURL('image/png')
                             resolve(base64)
@@ -1275,14 +1333,14 @@ export const locale = i18n.global.locale
                             canvas.width = width
                             canvas.height = height
                             const ctx = canvas.getContext('2d')
-                            
+
                             // Draw the cropped region to Canvas
                             ctx.drawImage(
                                 img,
                                 x1, y1, width, height,  // Source image crop region
                                 0, 0, width, height     // Canvas drawing position
                             )
-                            
+
                             // Convert to base64
                             const base64 = canvas.toDataURL('image/png')
                             resolve(base64)
@@ -1306,9 +1364,9 @@ export const locale = i18n.global.locale
                     console.error('detectFacesInImage: imageDataUrl is empty');
                     return;
                 }
-                
+
                 faceDetecting.value = true;
-                
+
                 // Convert blob URL to data URL (backend can't access blob URLs)
                 // For http/https URLs, send directly to backend
                 let imageInput = imageDataUrl;
@@ -1332,13 +1390,13 @@ export const locale = i18n.global.locale
                     }
                 }
                 // For data URLs and http/https URLs, send directly to backend
-                
+
                 // 再次验证 imageInput
                 if (!imageInput || imageInput.trim() === '') {
                     console.error('detectFacesInImage: imageInput is empty after processing');
                     return;
                 }
-                
+
                 const response = await apiCall('/api/v1/face/detect', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -1362,19 +1420,19 @@ export const locale = i18n.global.locale
                             try {
                                 // Crop face image from original image based on bbox
                                 const croppedImage = await cropFaceImage(imageDataUrl, face.bbox)
-                                
+
                                 // Remove data URL prefix, keep only base64 part (consistent with backend format)
                                 // croppedImage is in format: "data:image/png;base64,xxxxx"
                                 let base64Data = croppedImage
                                 if (croppedImage.includes(',')) {
                                     base64Data = croppedImage.split(',')[1]
                                 }
-                                
+
                                 if (!base64Data) {
                                     console.error(`Failed to extract base64 from cropped image for face ${index}`)
                                     base64Data = null
                                 }
-                                
+
                                 return {
                                     ...face,
                                     face_image: base64Data,  // Base64 encoded face region image (without data URL prefix)
@@ -1398,7 +1456,7 @@ export const locale = i18n.global.locale
                     if (currentForm) {
                         currentForm.detectedFaces = facesWithImages;
                         console.log('Updated detectedFaces:', currentForm.detectedFaces.length, 'faces with images');
-                        
+
                         // 如果检测到多个人脸，且已经有音频文件（仅在 s2v 模式下），自动进行音频分离
                         if (facesWithImages.length > 1 && selectedTaskId.value === 's2v' && currentForm.audioFile) {
                             console.log('Multiple faces detected and audio file exists, auto-separating audio...');
@@ -1459,7 +1517,7 @@ export const locale = i18n.global.locale
         const saveFaceRoleName = (faceIndex, roleName) => {
             updateFaceRoleName(faceIndex, roleName);
             toggleFaceEditing(faceIndex);
-            
+
             // 同步更新所有关联的音频播放器角色名
             // 只有当任务类型是 s2v 且有分离的音频时才需要更新
             if (selectedTaskId.value === 's2v' && s2vForm.value.separatedAudios) {
@@ -1506,16 +1564,52 @@ export const locale = i18n.global.locale
                     };
                     reader.readAsDataURL(s2vForm.value.audioFile);
                 }
+            } else if (taskType === 'animate') {
+                // 恢复角色替换任务的图片和视频预览
+                if (animateForm.value.imageFile) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setCurrentImagePreview(e.target.result);
+                    };
+                    reader.readAsDataURL(animateForm.value.imageFile);
+                }
+                if (animateForm.value.videoFile) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setCurrentVideoPreview(e.target.result);
+                    };
+                    reader.readAsDataURL(animateForm.value.videoFile);
+                }
+                // 确保 animate 任务类型有默认 prompt
+                if (!animateForm.value.prompt || animateForm.value.prompt.trim() === '') {
+                    animateForm.value.prompt = '视频中的人在做动作';
+                }
             }
 
-            // 如果当前表单没有选择模型，自动选择第一个可用的模型
+            // 自动选择该任务类型下的第一个模型
             const currentForm = getCurrentForm();
-            if (!currentForm.model_cls) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasModelInUrl = urlParams.has('model');
+
+            // 获取新任务类型下的可用模型
             const availableModels = models.value.filter(m => m.task === taskType);
+
             if (availableModels.length > 0) {
-                const firstModel = availableModels[0];
+                // 检查当前选择的模型是否属于新任务类型
+                const currentModel = currentForm.model_cls || selectedModel.value;
+                const isCurrentModelValid = currentModel && availableModels.some(m => m.model_cls === currentModel);
+
+                // 如果当前模型有效且 URL 中有 model 参数，说明可能是从路由恢复，不自动选择（让路由处理）
+                // 否则（当前模型无效、没有选择模型，或者 URL 中没有 model 参数），自动选择第一个模型
+                if (!isCurrentModelValid || !hasModelInUrl) {
+                    const firstModel = availableModels[0];
                     currentForm.model_cls = firstModel.model_cls;
                     currentForm.stage = firstModel.stage;
+                    // 使用 setTimeout 确保模型更新在任务类型的路由更新完成之后
+                    // 这样路由 watch 会分别触发两次，分别更新 taskType 和 model 参数
+                    setTimeout(() => {
+                        selectedModel.value = firstModel.model_cls;
+                    }, 100)
                 }
             }
         };
@@ -1546,6 +1640,9 @@ export const locale = i18n.global.locale
             } else if (selectedTaskId.value === 's2v') {
                 s2vForm.value.imageFile = null;
                 s2vForm.value.detectedFaces = [];
+            } else if (selectedTaskId.value === 'animate') {
+                animateForm.value.imageFile = null;
+                animateForm.value.detectedFaces = [];
             }
             updateUploadedContentStatus();
             // 重置文件输入框，确保可以重新选择相同文件
@@ -1568,12 +1665,25 @@ export const locale = i18n.global.locale
             }
         };
 
+        // 删除视频（用于 animate 任务类型）
+        const removeVideo = () => {
+            setCurrentVideoPreview(null);
+            animateForm.value.videoFile = null;
+            updateUploadedContentStatus();
+            console.log('视频已移除');
+            // 重置视频文件输入框，确保可以重新选择相同文件
+            const videoInput = document.querySelector('input[type="file"][data-role="video-input"]');
+            if (videoInput) {
+                videoInput.value = '';
+            }
+        };
+
         // Update role assignment for separated audio
         const updateSeparatedAudioRole = (speakerIndex, roleIndex) => {
             if (s2vForm.value.separatedAudios && s2vForm.value.separatedAudios[speakerIndex]) {
                 const currentForm = getCurrentForm();
                 const detectedFaces = currentForm?.detectedFaces || [];
-                
+
                 if (roleIndex >= 0 && roleIndex < detectedFaces.length) {
                     s2vForm.value.separatedAudios[speakerIndex].roleName = detectedFaces[roleIndex].roleName || `角色${roleIndex + 1}`;
                     s2vForm.value.separatedAudios[speakerIndex].roleIndex = roleIndex;
@@ -1615,7 +1725,7 @@ export const locale = i18n.global.locale
                 // 优先使用 audioFile（如果存在），因为它包含完整的文件信息，避免 data URL 格式问题
                 const currentForm = getCurrentForm();
                 let audioData = audioDataUrl;
-                
+
                 if (currentForm?.audioFile && currentForm.audioFile instanceof File) {
                     // 使用 File 对象，读取为 base64，确保格式正确
                     try {
@@ -1632,7 +1742,7 @@ export const locale = i18n.global.locale
                         // 如果读取失败，继续使用 audioDataUrl
                     }
                 }
-                
+
                 const response = await apiCall('/api/v1/audio/separate', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -1649,11 +1759,11 @@ export const locale = i18n.global.locale
 
                 const data = await response.json();
                 console.log('Audio separation response:', data);
-                
+
                 if (data && data.speakers && data.speakers.length > 0) {
                     const currentForm = getCurrentForm();
                     const detectedFaces = currentForm?.detectedFaces || [];
-                    
+
                     // Map separated speakers to detected faces
                     // Initialize with first role if available
                     const separatedAudios = data.speakers.map((speaker, index) => {
@@ -1670,7 +1780,7 @@ export const locale = i18n.global.locale
                             segments: speaker.segments
                         };
                     });
-                    
+
                     // Update separatedAudios and trigger reactivity
                     s2vForm.value.separatedAudios = [...separatedAudios];  // Use spread to ensure reactivity
                     console.log('Updated separatedAudios:', s2vForm.value.separatedAudios.length, 'speakers', s2vForm.value.separatedAudios);
@@ -1699,18 +1809,18 @@ export const locale = i18n.global.locale
                     return;
                 }
                 s2vForm.value.audioFile = file;
-                
+
                 // Read file as data URL for preview
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const audioDataUrl = e.target.result;
                     setCurrentAudioPreview(audioDataUrl);
                     updateUploadedContentStatus();
-                    
+
                     // Check if we have multiple detected faces (roles)
                     const currentForm = getCurrentForm();
                     const detectedFaces = currentForm?.detectedFaces || [];
-                    
+
                     // If we have more than 1 role, automatically separate audio
                     if (detectedFaces.length > 1) {
                         try {
@@ -1732,6 +1842,39 @@ export const locale = i18n.global.locale
                 updateUploadedContentStatus();
                 if (file) {
                     showAlert(t('unsupportedAudioOrVideo'), 'warning');
+                }
+            }
+        };
+
+        // 处理视频上传（用于 animate 任务类型）
+        const handleVideoUpload = async (event) => {
+            const file = event.target.files[0];
+
+            if (file && file.type?.startsWith('video/')) {
+                const allowedVideoTypes = ['video/mp4', 'video/x-m4v', 'video/mpeg', 'video/webm', 'video/quicktime'];
+                if (!allowedVideoTypes.includes(file.type)) {
+                    showAlert(t('unsupportedVideoFormat') || '不支持的视频格式', 'warning');
+                    setCurrentVideoPreview(null);
+                    animateForm.value.videoFile = null;
+                    updateUploadedContentStatus();
+                    return;
+                }
+                animateForm.value.videoFile = file;
+
+                // Read file as data URL for preview
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const videoDataUrl = e.target.result;
+                    setCurrentVideoPreview(videoDataUrl);
+                    updateUploadedContentStatus();
+                };
+                reader.readAsDataURL(file);
+            } else {
+                setCurrentVideoPreview(null);
+                animateForm.value.videoFile = null;
+                updateUploadedContentStatus();
+                if (file) {
+                    showAlert(t('unsupportedVideoFormat') || '不支持的视频格式', 'warning');
                 }
             }
         };
@@ -1918,18 +2061,21 @@ export const locale = i18n.global.locale
                     return;
                 }
 
-                if (!currentForm.prompt || currentForm.prompt.trim().length === 0) {
-                    if (selectedTaskId.value === 's2v') {
-                        currentForm.prompt = 'Make the character speak in a natural way according to the audio.';
-                    } else {
-                        showAlert('请输入提示词', 'warning');
+                // animate 任务类型不需要 prompt，其他任务类型需要
+                if (selectedTaskId.value !== 'animate') {
+                    if (!currentForm.prompt || currentForm.prompt.trim().length === 0) {
+                        if (selectedTaskId.value === 's2v') {
+                            currentForm.prompt = '让角色根据音频内容自然说话';
+                        } else {
+                            showAlert('请输入提示词', 'warning');
+                            return;
+                        }
+                    }
+
+                    if (currentForm.prompt.length > 1000) {
+                        showAlert('提示词长度不能超过1000个字符', 'warning');
                         return;
                     }
-                }
-
-                if (currentForm.prompt.length > 1000) {
-                    showAlert('提示词长度不能超过1000个字符', 'warning');
-                    return;
                 }
 
                 if (selectedTaskId.value === 'i2v' && !currentForm.imageFile) {
@@ -1938,12 +2084,22 @@ export const locale = i18n.global.locale
                 }
 
                 if (selectedTaskId.value === 's2v' && !currentForm.imageFile) {
-                    showAlert('数字人任务需要上传参考图片', 'warning');
+                    showAlert('数字人任务需要上传角色图片', 'warning');
                     return;
                 }
 
                 if (selectedTaskId.value === 's2v' && !currentForm.audioFile) {
                     showAlert('数字人任务需要上传音频文件', 'warning');
+                    return;
+                }
+
+                if (selectedTaskId.value === 'animate' && !currentForm.imageFile) {
+                    showAlert('角色替换任务需要上传角色图片', 'warning');
+                    return;
+                }
+
+                if (selectedTaskId.value === 'animate' && !currentForm.videoFile) {
+                    showAlert('角色替换任务需要上传参考视频', 'warning');
                     return;
                 }
                 submitting.value = true;
@@ -1955,9 +2111,18 @@ export const locale = i18n.global.locale
                     task: actualTaskType,
                     model_cls: currentForm.model_cls,
                     stage: currentForm.stage,
-                    prompt: currentForm.prompt.trim(),
                     seed: currentForm.seed || Math.floor(Math.random() * 1000000)
                 };
+
+                // animate 任务类型使用默认 prompt，其他任务类型需要用户输入
+                if (selectedTaskId.value === 'animate') {
+                    // animate 任务类型使用默认 prompt
+                    formData.prompt = currentForm.prompt && currentForm.prompt.trim().length > 0
+                        ? currentForm.prompt.trim()
+                        : '视频中的人在做动作';
+                } else {
+                    formData.prompt = currentForm.prompt ? currentForm.prompt.trim() : '';
+                }
 
                 if (currentForm.model_cls.startsWith('wan2.1')) {
                     formData.negative_prompt = "镜头晃动，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
@@ -1971,6 +2136,22 @@ export const locale = i18n.global.locale
                     };
                 }
 
+                if (selectedTaskId.value === 'animate' && currentForm.imageFile) {
+                    const base64 = await fileToBase64(currentForm.imageFile);
+                    formData.input_image = {
+                        type: 'base64',
+                        data: base64
+                    };
+                }
+
+                if (selectedTaskId.value === 'animate' && currentForm.videoFile) {
+                    const base64 = await fileToBase64(currentForm.videoFile);
+                    formData.input_video = {
+                        type: 'base64',
+                        data: base64
+                    };
+                }
+
                 if (selectedTaskId.value === 's2v') {
                     if (currentForm.imageFile) {
                         const base64 = await fileToBase64(currentForm.imageFile);
@@ -1979,13 +2160,13 @@ export const locale = i18n.global.locale
                             data: base64
                         };
                     }
-                    
+
                     // 检测是否为多人模式：有多个分离的音频和多个角色
-                    const isMultiPersonMode = s2vForm.value.separatedAudios && 
+                    const isMultiPersonMode = s2vForm.value.separatedAudios &&
                                             s2vForm.value.separatedAudios.length > 1 &&
-                                            currentForm.detectedFaces && 
+                                            currentForm.detectedFaces &&
                                             currentForm.detectedFaces.length > 1;
-                    
+
                     if (isMultiPersonMode) {
                         // 多人模式：生成mask图、保存音频文件、生成config.json
                         try {
@@ -1995,7 +2176,7 @@ export const locale = i18n.global.locale
                                 currentForm.imageFile,
                                 currentForm.audioFile  // 传递原始音频文件
                             );
-                            
+
                             formData.input_audio = {
                                 type: 'directory',
                                 data: multiPersonData
@@ -2033,7 +2214,7 @@ export const locale = i18n.global.locale
                         submitting.value = false;
                         return null;
                     }
-                    
+
                     showAlert(t('taskSubmitSuccessAlert'), 'success');
 
                     // 开始轮询新提交的任务状态（不等待，异步执行）
@@ -2043,7 +2224,7 @@ export const locale = i18n.global.locale
                         console.error('Failed to start polling task:', error);
                         // 不阻止流程继续
                     }
-                    
+
                     // 保存完整的任务历史（包括提示词、图片和音频）- 异步执行，不阻塞
                     // 注意：addTaskToHistory 是同步函数，但为了统一处理，使用 Promise.resolve 包装
                     Promise.resolve().then(() => {
@@ -2055,7 +2236,7 @@ export const locale = i18n.global.locale
                     }).catch(error => {
                         console.error('Failed to add task to history:', error);
                     });
-                    
+
                     // 重置表单（异步执行，不阻塞）- 使用 Promise.race 添加超时保护
                     try {
                         await Promise.race([
@@ -2066,7 +2247,7 @@ export const locale = i18n.global.locale
                         console.error('Failed to reset form:', error);
                         // 不阻止流程继续，只记录错误
                     }
-                    
+
                     // 重置当前任务类型的表单（保留模型选择，清空图片、音频和提示词）
                     try {
                         selectedTaskId.value = selectedTaskId.value;
@@ -2114,7 +2295,7 @@ export const locale = i18n.global.locale
             // 1. 读取原始图片，获取尺寸
             const imageBase64 = await fileToBase64(imageFile);
             const imageDataUrl = `data:image/png;base64,${imageBase64}`;
-            
+
             // 创建图片对象以获取尺寸
             const img = new Image();
             await new Promise((resolve, reject) => {
@@ -2124,39 +2305,39 @@ export const locale = i18n.global.locale
             });
             const imageWidth = img.naturalWidth;
             const imageHeight = img.naturalHeight;
-            
+
             // 2. 为每个角色生成mask图和音频文件
             const directoryFiles = {};
             const talkObjects = [];
-            
+
             for (let i = 0; i < detectedFaces.length; i++) {
                 const face = detectedFaces[i];
                 const audioIndex = i < separatedAudios.length ? i : 0;
                 const audio = separatedAudios[audioIndex];
-                
+
                 // 生成mask图（box部分为白色，其余部分为黑色）
                 const maskBase64 = await generateMaskImage(
                     face.bbox,
                     imageWidth,
                     imageHeight
                 );
-                
+
                 // 保存mask图
                 const maskFilename = `p${i + 1}_mask.png`;
                 directoryFiles[maskFilename] = maskBase64;
-                
+
                 // 保存音频文件
                 // 注意：separatedAudios中的audio已经是base64编码的wav格式
                 const audioFilename = `p${i + 1}.wav`;
                 directoryFiles[audioFilename] = audio.audio; // audio.audio是base64编码的wav数据
-                
+
                 // 添加到talk_objects
                 talkObjects.push({
                     audio: audioFilename,
                     mask: maskFilename
                 });
             }
-            
+
             // 3. 保存原始未分割的音频文件（用于后续复用）
             if (originalAudioFile) {
                 try {
@@ -2175,7 +2356,7 @@ export const locale = i18n.global.locale
                     // 不阻止任务提交，只记录警告
                 }
             }
-            
+
             // 4. 生成config.json
             const configJson = {
                 talk_objects: talkObjects
@@ -2183,7 +2364,7 @@ export const locale = i18n.global.locale
             const configJsonString = JSON.stringify(configJson, null, 4);
             const configBase64 = btoa(unescape(encodeURIComponent(configJsonString)));
             directoryFiles['config.json'] = configBase64;
-            
+
             return directoryFiles;
         };
 
@@ -2191,21 +2372,21 @@ export const locale = i18n.global.locale
         const generateMaskImage = async (bbox, imageWidth, imageHeight) => {
             // bbox格式: [x1, y1, x2, y2]
             const [x1, y1, x2, y2] = bbox;
-            
+
             // 创建canvas
             const canvas = document.createElement('canvas');
             canvas.width = imageWidth;
             canvas.height = imageHeight;
             const ctx = canvas.getContext('2d');
-            
+
             // 填充黑色背景
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, imageWidth, imageHeight);
-            
+
             // 在bbox区域填充白色
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(Math.round(x1), Math.round(y1), Math.round(x2 - x1), Math.round(y2 - y1));
-            
+
             // 转换为base64
             return canvas.toDataURL('image/png').split(',')[1];
         };
@@ -3540,7 +3721,7 @@ export const locale = i18n.global.locale
                                             // Not a directory error, proceed with normal loading
                                             currentForm.audioUrl = audioUrl;
                                             setCurrentAudioPreview(audioUrl);
-                                            
+
                                             const blob = await audioResponse.blob();
                                             const filename = task.inputs[Object.keys(task.inputs).find(key =>
                                                 key.includes('audio') ||
@@ -3574,7 +3755,7 @@ export const locale = i18n.global.locale
                                         // Normal audio file response
                                         currentForm.audioUrl = audioUrl;
                                         setCurrentAudioPreview(audioUrl);
-                                        
+
                                         const blob = await audioResponse.blob();
                                         const filename = task.inputs[Object.keys(task.inputs).find(key =>
                                             key.includes('audio') ||
@@ -3625,14 +3806,14 @@ export const locale = i18n.global.locale
                                                             currentForm.imageFile = file;
                                                             const imagePreviewUrl = URL.createObjectURL(file);
                                                             setCurrentImagePreview(imageUrl);
-                                                            
+
                                                             // Reset detected faces
                                                             if (selectedTaskId.value === 'i2v') {
                                                                 i2vForm.value.detectedFaces = [];
                                                             } else if (selectedTaskId.value === 's2v') {
                                                                 s2vForm.value.detectedFaces = [];
                                                             }
-                                                            
+
                                                             // Auto detect faces after image is loaded
                                                             try {
                                                                 await detectFacesInImage(imageUrl);
@@ -3850,7 +4031,8 @@ export const locale = i18n.global.locale
             const iconMap = {
                 't2v': 'fas fa-font',  // 文字A形图标
                 'i2v': 'fas fa-image',     // 图像图标
-                's2v': 'fas fa-user' // 人物图标
+                's2v': 'fas fa-user', // 人物图标
+                'animate': 'fi fi-br-running text-lg' // 角色替换图标
             };
             return iconMap[taskType] || 'fas fa-video';
         };
@@ -3882,6 +4064,8 @@ export const locale = i18n.global.locale
                 return t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheContentActionRequirementsBasedOnTheImage');
             } else if (selectedTaskId.value === 's2v') {
                 return t('optional') + ' '+ t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheDigitalHumanImageBackgroundStyleActionRequirements');
+            } else if (selectedTaskId.value === 'animate') {
+                return t('optional') + ' '+ t('pleaseEnterThePromptForVideoGeneration') + '，'+ t('describeTheContentActionRequirementsBasedOnTheImage');
             }
             return t('pleaseEnterThePromptForVideoGeneration') + '...';
         };
@@ -3943,15 +4127,15 @@ export const locale = i18n.global.locale
 
         const getTaskInputAudio = async (task) => {
             if (!task || !task.inputs) return null;
-            
+
             // Directly use 'input_audio' key
             const audioKey = 'input_audio';
             if (!task.inputs[audioKey]) return null;
-            
+
             // Always bypass cache and check API directly to detect directory type
             // This ensures we get the correct URL even if cache has invalid data
             let url = await getTaskFileUrlFromApi(task.task_id, audioKey);
-            
+
             // If it's a directory (multi-person mode) or URL is null, try to get original_audio file
             if (!url) {
                 console.log(`Audio input ${audioKey} is a directory (multi-person mode), trying to get original_audio file`);
@@ -3967,7 +4151,7 @@ export const locale = i18n.global.locale
                     }
                 }
             }
-            
+
             return url;
         };
 
@@ -4087,20 +4271,30 @@ export const locale = i18n.global.locale
                 await loadModels();
 
                 // 3. 选择任务类型（优先选择数字人任务）
+                // 但如果路由中有 taskType 参数，不设置默认值（让路由处理）
+                const routeQuery = router.currentRoute.value?.query || {};
+                const hasTaskTypeInRoute = routeQuery.taskType;
+
                 let selectedTaskType = null;
-                if (availableTaskTypes.value.includes('s2v')) {
-                    selectedTaskType = 's2v';
-                } else if (availableTaskTypes.value.length > 0) {
-                    selectedTaskType = availableTaskTypes.value[0];
-                }
+                if (!hasTaskTypeInRoute) {
+                    // 只有在路由中没有 taskType 参数时，才设置默认值
+                    if (availableTaskTypes.value.includes('s2v')) {
+                        selectedTaskType = 's2v';
+                    } else if (availableTaskTypes.value.length > 0) {
+                        selectedTaskType = availableTaskTypes.value[0];
+                    }
 
-                if (selectedTaskType) {
-                    selectTask(selectedTaskType);
+                    if (selectedTaskType) {
+                        selectTask(selectedTaskType);
 
-                    // 4. 为选中的任务类型选择第一个模型
-                    const currentForm = getCurrentForm();
-                    if (!currentForm.model_cls && availableModelClasses.value.length > 0) {
-                        selectModel(availableModelClasses.value[0]);
+                        // 4. 为选中的任务类型选择第一个模型（如果路由中也没有 model 参数）
+                        const hasModelInRoute = routeQuery.model;
+                        if (!hasModelInRoute) {
+                            const currentForm = getCurrentForm();
+                            if (!currentForm.model_cls && availableModelClasses.value.length > 0) {
+                                selectModel(availableModelClasses.value[0]);
+                            }
+                        }
                     }
                 }
 
@@ -4178,6 +4372,30 @@ export const locale = i18n.global.locale
                         prompt: 'Make the character speak in a natural way according to the audio.',
                         seed: Math.floor(Math.random() * 1000000)
                     };
+                    break;
+                case 'animate':
+                    animateForm.value = {
+                        task: 'animate',
+                        model_cls: currentModel || '',
+                        stage: currentStage || 'single_stage',
+                        imageFile: null,
+                        videoFile: null,
+                        prompt: '视频中的人在做动作',
+                        seed: Math.floor(Math.random() * 1000000),
+                        detectedFaces: []
+                    };
+                    // 直接清空animate图片和视频预览
+                    animateImagePreview.value = null;
+                    animateVideoPreview.value = null;
+                    // 清理图片和视频文件输入框
+                    const animateImageInput = document.querySelector('input[type="file"][accept="image/*"]');
+                    if (animateImageInput) {
+                        animateImageInput.value = '';
+                    }
+                    const animateVideoInput = document.querySelector('input[type="file"][data-role="video-input"]');
+                    if (animateVideoInput) {
+                        animateVideoInput.value = '';
+                    }
                     break;
             }
 
@@ -5035,7 +5253,7 @@ export const locale = i18n.global.locale
                 // 更新表单
                 const currentForm = getCurrentForm();
                 currentForm.imageFile = file;
-                
+
                 // Reset detected faces
                 if (selectedTaskId.value === 'i2v') {
                     i2vForm.value.detectedFaces = [];
@@ -5069,7 +5287,7 @@ export const locale = i18n.global.locale
                     console.error('Face detection failed:', error);
                     // Don't show error alert, just log it
                 }
-                
+
             } catch (error) {
                 console.error('应用历史图片失败:', error);
                 showAlert('应用历史图片失败: ' + error.message, 'danger');
@@ -6088,7 +6306,7 @@ export const locale = i18n.global.locale
                             currentForm.imageFile = file;
                         }
                         console.log('模板图片文件已加载');
-                        
+
                         // Auto detect faces after image is loaded
                         try {
                             await detectFacesInImage(imageUrl);
@@ -6598,7 +6816,7 @@ export const locale = i18n.global.locale
                             currentForm.imageUrl = imageUrl;
                             setCurrentImagePreview(imageUrl); // 设置正确的URL作为预览
                             console.log('模板输入图片URL:', imageUrl);
-                            
+
                             // Reset detected faces
                             if (selectedTaskId.value === 'i2v') {
                                 i2vForm.value.detectedFaces = [];
@@ -6614,7 +6832,7 @@ export const locale = i18n.global.locale
                                 const file = new File([blob], filename, { type: blob.type });
                                 currentForm.imageFile = file;
                                 console.log('模板图片文件已加载');
-                                
+
                                 // Auto detect faces after image is loaded
                                 try {
                                     await detectFacesInImage(imageUrl);
@@ -6966,12 +7184,12 @@ export const locale = i18n.global.locale
         // 应用主题（优化版本，减少延迟）
         const applyTheme = (newTheme) => {
             const html = document.documentElement;
-            
+
             // 使用 requestAnimationFrame 优化 DOM 操作
             requestAnimationFrame(() => {
                 // 临时禁用过渡动画以提高切换速度
                 html.classList.add('theme-transitioning');
-                
+
                 if (newTheme === 'dark') {
                     html.classList.add('dark');
                     html.style.colorScheme = 'dark';
@@ -6979,7 +7197,7 @@ export const locale = i18n.global.locale
                     html.classList.remove('dark');
                     html.style.colorScheme = 'light';
                 }
-                
+
                 // 短暂延迟后移除过渡禁用类，恢复平滑过渡
                 setTimeout(() => {
                     html.classList.remove('theme-transitioning');
@@ -6996,7 +7214,7 @@ export const locale = i18n.global.locale
 
             // 立即更新状态
             theme.value = nextTheme;
-            
+
             // 异步保存到 localStorage，不阻塞 UI
             if (window.requestIdleCallback) {
                 requestIdleCallback(() => {
@@ -7008,7 +7226,7 @@ export const locale = i18n.global.locale
                     localStorage.setItem('theme', nextTheme);
                 }, 0);
             }
-            
+
             // 立即应用主题
             applyTheme(nextTheme);
 
@@ -7261,8 +7479,10 @@ export {
             s2vAudioPreview,
             getCurrentImagePreview,
             getCurrentAudioPreview,
+            getCurrentVideoPreview,
             setCurrentImagePreview,
             setCurrentAudioPreview,
+            setCurrentVideoPreview,
             updateUploadedContentStatus,
             availableTaskTypes,
             availableModelClasses,
@@ -7328,7 +7548,9 @@ export {
             triggerAudioUpload,
             removeImage,
             removeAudio,
+            removeVideo,
             handleAudioUpload,
+            handleVideoUpload,
             separateAudioTracks,
             updateSeparatedAudioRole,
             updateSeparatedAudioName,
@@ -7425,6 +7647,7 @@ export {
             getUserAvatarUrl,
             getCurrentImagePreviewUrl,
             getCurrentAudioPreviewUrl,
+            getCurrentVideoPreviewUrl,
             handleThumbnailError,
             handleImageError,
             handleImageLoad,
