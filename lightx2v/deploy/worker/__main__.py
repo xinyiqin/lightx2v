@@ -304,6 +304,10 @@ def align_args(args):
     args.last_frame_path = ""
     args.audio_path = ""
     args.video_path = ""
+    args.src_pose_path = None
+    args.src_face_path = None
+    args.src_bg_path = None
+    args.src_mask_path = None
     args.src_ref_images = None
     args.src_video = None
     args.src_mask = None

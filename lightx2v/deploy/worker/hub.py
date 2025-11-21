@@ -18,6 +18,7 @@ from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.utils.utils import seed_all
+from tools.preprocess.preprocess_data import process_input_video, get_preprocess_parser
 
 
 class BaseWorker:
@@ -49,7 +50,9 @@ class BaseWorker:
         self.input_info.save_result_path = params.get("save_result_path", "")
         self.input_info.seed = params.get("seed", self.input_info.seed)
         self.input_info.audio_path = params.get("audio_path", "")
-        self.input_info.video_path = params.get("video_path", "")
+        for k, v in params.get("processed_video_paths", {}).items():
+            logger.info(f"set {k} to {v}")
+            setattr(self.input_info, k, v)
 
     async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
         input_image_path = inputs.get("input_image", "")
@@ -64,212 +67,50 @@ class BaseWorker:
             params["image_path"] = tmp_image_path
 
     async def prepare_input_video(self, params, inputs, tmp_dir, data_manager):
-        input_video_path = inputs.get("input_video", "")
-        if not input_video_path:
+        if not self.is_animate_model():
             return
 
-        # Check if this is an animate task
-        is_animate_task = self.runner.config.get("task") == "animate"
+        result_paths = {}
+        if self.rank == 0:
+            tmp_image_path = params.get("image_path", "")
+            assert os.path.exists(tmp_image_path), f"input_image should be save by prepare_input_image but not valid: {tmp_image_path}"
 
-        if is_animate_task and "video_path" in self.input_info.__dataclass_fields__:
-            # For animate task, run preprocessing
-            logger.info(f"Preprocessing animate task video: {input_video_path}")
-
-            # Get model path and preprocessing checkpoint path
-            model_path = self.runner.config.get("model_path", "")
-            if not model_path:
-                logger.error("model_path not found in config, cannot run preprocessing")
-                raise ValueError("model_path not found in config for animate task preprocessing")
-
-            preprocess_ckpt_path = os.path.join(model_path, "process_checkpoint")
-            if not os.path.exists(preprocess_ckpt_path):
-                logger.error(f"Preprocess checkpoint path not found: {preprocess_ckpt_path}")
-                raise ValueError(f"Preprocess checkpoint path not found: {preprocess_ckpt_path}")
-
-            # Get lightx2v path (for preprocessing script)
-            lightx2v_path = os.getenv("LIGHTX2V_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
-            preprocess_script = os.path.join(lightx2v_path, "tools/preprocess/preprocess_data.py")
-            if not os.path.exists(preprocess_script):
-                logger.error(f"Preprocess script not found: {preprocess_script}")
-                raise ValueError(f"Preprocess script not found: {preprocess_script}")
-
-            # Load original video and image from data_manager
-            input_image_path = inputs.get("input_image", "")
-            if not input_image_path:
-                logger.error("input_image not found for animate task")
-                raise ValueError("input_image is required for animate task")
-
-            video_data = await data_manager.load_bytes(input_video_path)
-            image_data = await data_manager.load_bytes(input_image_path)
-
-            # Create temporary files for preprocessing
-            refer_path = os.path.join(tmp_dir, "input_image.png")
-            video_path = os.path.join(tmp_dir, "input_video.mp4")
-            processed_video_path = os.path.join(tmp_dir, "processed")
-            os.makedirs(processed_video_path, exist_ok=True)
-
-            # Write video and image to temporary files
-            with open(video_path, "wb") as f:
-                f.write(video_data)
-            logger.info(f"Saved video to temporary file: {video_path}")
-
-            with open(refer_path, "wb") as f:
-                f.write(image_data)
-            logger.info(f"Saved image to temporary file: {refer_path}")
-
-            # Determine if replace_flag should be used (check config)
-            replace_flag = self.runner.config.get("replace_flag", False)
-
-            # Run preprocessing script
-            cmd = [
-                "python",
-                preprocess_script,
-                "--ckpt_path",
-                preprocess_ckpt_path,
-                "--video_path",
-                video_path,
-                "--refer_path",
-                refer_path,
-                "--save_path",
-                processed_video_path,
-                "--resolution_area",
-                "1280",
-                "720",
-                "--iterations",
-                "3",
-                "--k",
-                "7",
-                "--w_len",
-                "1",
-                "--h_len",
-                "1",
-            ]
-
-            if replace_flag:
-                cmd.append("--replace_flag")
-            else:
-                cmd.append("--retarget_flag")
-
-            logger.info(f"Running preprocessing command: {' '.join(cmd)}")
-
-            # Run preprocessing synchronously (in thread pool to avoid blocking)
-            process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
-                logger.error(f"Preprocessing failed: {error_msg}")
-                raise Exception(f"Preprocessing failed: {error_msg}")
-
-            logger.info(f"Preprocessing completed successfully")
-
-            # Create output directory structure in tmp_dir
-            # task_id-input_video/ contains: input_video.mp4 (original) + processed components
-            video_dir_name = os.path.splitext(input_video_path)[0]  # Remove .mp4 extension
-            tmp_video_dir_path = os.path.join(tmp_dir, video_dir_name)
-            os.makedirs(tmp_video_dir_path, exist_ok=True)
-
-            # Save original video to task_id-input_video/input_video.mp4
-            original_video_path = os.path.join(tmp_video_dir_path, "input_video.mp4")
-            with open(original_video_path, "wb") as f:
-                f.write(video_data)
-            logger.info(f"Saved original video: {original_video_path}")
-
-            # Copy processed video components to task_id-input_video/
-            processed_video_files = {
-                "src_face.mp4": "src_face.mp4",
-                "src_pose.mp4": "src_pose.mp4",
-            }
-
-            if replace_flag:
-                processed_video_files["src_bg.mp4"] = "src_bg.mp4"
-                processed_video_files["src_mask.mp4"] = "src_mask.mp4"
-
-            for component_name, filename in processed_video_files.items():
-                component_path = os.path.join(processed_video_path, filename)
-                if os.path.exists(component_path):
-                    # Copy to output directory
-                    output_component_path = os.path.join(tmp_video_dir_path, component_name)
-                    with open(component_path, "rb") as fin:
-                        with open(output_component_path, "wb") as fout:
-                            fout.write(fin.read())
-                    logger.info(f"Copied processed component: {output_component_path}")
-                else:
-                    logger.warning(f"Processed component not found: {component_path}")
-
-            # Read processed reference image and save to tmp_dir
-            src_ref_path = os.path.join(processed_video_path, "src_ref.png")
-            if os.path.exists(src_ref_path):
-                with open(src_ref_path, "rb") as f:
-                    processed_image_data = f.read()
-                # Update image_path to point to processed image
-                processed_image_path = os.path.join(tmp_dir, input_image_path)
-                with open(processed_image_path, "wb") as f:
-                    f.write(processed_image_data)
-                logger.info(f"Saved processed input_image: {processed_image_path}")
-                params["image_path"] = processed_image_path
-            else:
-                logger.warning(f"Processed reference image not found: {src_ref_path}, using original")
-                # Use original image
-                processed_image_path = os.path.join(tmp_dir, input_image_path)
-                with open(processed_image_path, "wb") as f:
-                    f.write(image_data)
-                params["image_path"] = processed_image_path
-
-            # Set video_path to the directory path (contains processed components)
-            params["video_path"] = tmp_video_dir_path
-            logger.info(f"Set video_path to directory: {tmp_video_dir_path}")
-        else:
-            # For non-animate tasks, use original logic
-            # Remove file extension to get directory name (e.g., "task_id-input_video.mp4" -> "task_id-input_video")
-            video_dir_path = input_video_path
-            if video_dir_path.endswith((".mp4", ".avi", ".mov", ".mkv")):
-                # Remove extension to get directory name
-                video_dir_path = os.path.splitext(video_dir_path)[0]
-
+            # prepare tmp input video
+            input_video_path = inputs.get("input_video", "")
             tmp_video_path = os.path.join(tmp_dir, input_video_path)
-            tmp_video_dir_path = os.path.join(tmp_dir, video_dir_path)
+            processed_video_path = os.path.join(tmp_dir, "processe_results")
+            video_data = await data_manager.load_bytes(input_video_path)
+            with open(tmp_video_path, "wb") as fout:
+                fout.write(video_data)
 
-            # Check if video_dir_path is a directory (contains processed video components)
-            # We check if input_video.mp4 exists in the directory to determine if it's a directory
-            video_file_in_dir = f"{video_dir_path}/input_video.mp4"
-            is_directory = await data_manager.file_exists(video_file_in_dir)
+            # prepare preprocess args
+            pre_args = get_preprocess_parser().parse_args([])
+            pre_args.ckpt_path = self.runner.config["model_path"] + "/process_checkpoint"
+            pre_args.video_path = tmp_video_path
+            pre_args.refer_path = tmp_image_path
+            pre_args.save_path = processed_video_path
+            pre_args.replace_flag = self.runner.config.get("replace_flag", False)
+            pre_config = self.runner.config.get("preprocess_config", {})
+            pre_keys = ["resolution_area", "fps", "replace_flag", "retarget_flag", "use_flux", "iterations", "k", "w_len", "h_len"]
+            for k in pre_keys:
+                if k in pre_config:
+                    setattr(pre_args, k, pre_config[k])
 
-            if "video_path" in self.input_info.__dataclass_fields__:
-                if is_directory:
-                    # Directory mode: copy entire directory to tmp_dir (for animate task with processed components)
-                    os.makedirs(tmp_video_dir_path, exist_ok=True)
+            process_input_video(pre_args)
+            result_paths = {
+                "src_pose_path": os.path.join(processed_video_path, "src_pose.mp4"),
+                "src_face_path": os.path.join(processed_video_path, "src_face.mp4"),
+                "src_ref_images": os.path.join(processed_video_path, "src_ref.png"),
+            }
+            if pre_args.replace_flag:
+                result_paths["src_bg_path"] = os.path.join(processed_video_path, "src_bg.mp4")
+                result_paths["src_mask_path"] = os.path.join(processed_video_path, "src_mask.mp4")
 
-                    # List all files in the directory
-                    files = await data_manager.list_files(base_dir=video_dir_path)
-                    logger.info(f"Found {len(files)} files in video directory {video_dir_path}: {files}")
-
-                    # Copy each file from data_manager to tmp_dir
-                    for filename in files:
-                        if not filename:  # Skip empty filenames
-                            continue
-                        try:
-                            # Construct the full path relative to data_manager's base
-                            file_path = f"{video_dir_path}/{filename}"
-                            file_data = await data_manager.load_bytes(file_path)
-                            tmp_file_path = os.path.join(tmp_video_dir_path, filename)
-                            with open(tmp_file_path, "wb") as fout:
-                                fout.write(file_data)
-                            logger.info(f"Copied video file {filename} to {tmp_file_path} ({len(file_data)} bytes)")
-                        except Exception as e:
-                            logger.error(f"Failed to copy video file {filename} from {file_path}: {e}")
-                            # Continue with other files even if one fails
-
-                    logger.info(f"Copied video directory from {video_dir_path} to {tmp_video_dir_path}")
-                    # Set video_path to the directory path (worker will use files from this directory)
-                    params["video_path"] = tmp_video_dir_path
-                else:
-                    # Single file mode: load and save as before
-                    video_data = await data_manager.load_bytes(input_video_path)
-                    with open(tmp_video_path, "wb") as fout:
-                        fout.write(video_data)
-                    logger.info(f"Prepared input video: {tmp_video_path} ({len(video_data)} bytes)")
-                    params["video_path"] = tmp_video_path
+        # for dist, broadcast the video processed result to all ranks
+        result_paths = await self.broadcast_data(result_paths, 0)
+        for p in result_paths.values():
+            assert os.path.exists(p), f"Input video processed result not found: {p}!"
+        params["processed_video_paths"] = result_paths
 
     async def prepare_input_audio(self, params, inputs, tmp_dir, data_manager):
         input_audio_path = inputs.get("input_audio", "")
@@ -390,6 +231,32 @@ class BaseWorker:
 
     def is_audio_model(self):
         return "audio" in self.runner.config["model_cls"] or "seko_talk" in self.runner.config["model_cls"]
+
+    def is_animate_model(self):
+        return self.runner.config.get("task") == "animate"
+
+    async def broadcast_data(self, data, src_rank=0):
+        if self.world_size <= 1:
+            return data
+
+        if self.rank == src_rank:
+            val = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            T = torch.frombuffer(bytearray(val), dtype=torch.uint8).to(device="cuda")
+            S = torch.tensor([T.shape[0]], dtype=torch.int32).to(device="cuda")
+            logger.info(f"hub rank {self.rank} send data: {data}")
+        else:
+            S = torch.zeros(1, dtype=torch.int32, device="cuda")
+
+        dist.broadcast(S, src=src_rank)
+        if self.rank != src_rank:
+            T = torch.zeros(S.item(), dtype=torch.uint8, device="cuda")
+        dist.broadcast(T, src=src_rank)
+
+        if self.rank != src_rank:
+            val = T.cpu().numpy().tobytes()
+            data = json.loads(val.decode("utf-8"))
+            logger.info(f"hub rank {self.rank} recv data: {data}")
+        return data
 
 
 class RunnerThread(threading.Thread):
