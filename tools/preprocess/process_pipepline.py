@@ -16,17 +16,16 @@ except:  # noqa
 
 import sam2.modeling.sam.transformer as transformer
 from decord import VideoReader
-
-from tools.preprocess.human_visualization import draw_aapose_by_meta_new
-from tools.preprocess.pose2d import Pose2d
-from tools.preprocess.pose2d_utils import AAPoseMeta
-from tools.preprocess.retarget_pose import get_retarget_pose
-from tools.preprocess.utils import get_aug_mask, get_face_bboxes, get_frame_indices, get_mask_body_img, padding_resize, resize_by_area
+from human_visualization import draw_aapose_by_meta_new
+from pose2d import Pose2d
+from pose2d_utils import AAPoseMeta
+from retarget_pose import get_retarget_pose
+from utils import get_aug_mask, get_face_bboxes, get_frame_indices, get_mask_body_img, padding_resize, resize_by_area
 
 transformer.USE_FLASH_ATTN = False
 transformer.MATH_KERNEL_ON = True
 transformer.OLD_GPU = True
-from tools.preprocess.sam_utils import build_sam2_video_predictor  # noqa
+from sam_utils import build_sam2_video_predictor  # noqa
 
 
 class ProcessPipeline:

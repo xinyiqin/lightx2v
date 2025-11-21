@@ -1,5 +1,4 @@
 import gc
-import os
 from copy import deepcopy
 
 import cv2
@@ -239,38 +238,9 @@ class WanAnimateRunner(WanRunner):
         return y, pose_latents
 
     def prepare_input(self):
-        # Get video directory path from input_info (set by worker's prepare_input_video)
-        # For animate task, video_path is a directory containing processed components
-        video_dir_path = getattr(self.input_info, "video_path", None) if hasattr(self.input_info, "video_path") else None
-
-        # Get image path from input_info (processed image: task_id-input_image.png)
-        src_ref_path = getattr(self.input_info, "image_path", None) if hasattr(self.input_info, "image_path") else None
-
-        # If video_dir_path is a directory, get component files from it
-        if video_dir_path and os.path.isdir(video_dir_path):
-            logger.info(f"Loading video components from directory: {video_dir_path}")
-            # Get component files from video directory
-            src_pose_path = os.path.join(video_dir_path, "src_pose.mp4")
-            src_face_path = os.path.join(video_dir_path, "src_face.mp4")
-
-            # Check if files exist, fallback to config if not found
-            if not os.path.exists(src_pose_path):
-                logger.warning(f"src_pose.mp4 not found in {video_dir_path}, falling back to config")
-                src_pose_path = self.config.get("src_pose_path")
-            if not os.path.exists(src_face_path):
-                logger.warning(f"src_face.mp4 not found in {video_dir_path}, falling back to config")
-                src_face_path = self.config.get("src_face_path")
-        else:
-            # Fallback to config if video_path is not a directory or not set
-            logger.info("video_path is not a directory, using config paths")
-            src_pose_path = self.config.get("src_pose_path")
-            src_face_path = self.config.get("src_face_path")
-
-        # Fallback to config for src_ref_path if not set from image_path
-        if not src_ref_path or not os.path.exists(src_ref_path):
-            logger.info("image_path not set or not found, falling back to config")
-            src_ref_path = self.config.get("src_ref_images")
-
+        src_pose_path = self.config["src_pose_path"] if "src_pose_path" in self.config else None
+        src_face_path = self.config["src_face_path"] if "src_face_path" in self.config else None
+        src_ref_path = self.config["src_ref_images"] if "src_ref_images" in self.config else None
         self.cond_images, self.face_images, self.refer_images = self.prepare_source(src_pose_path, src_face_path, src_ref_path)
         self.refer_pixel_values = torch.tensor(self.refer_images / 127.5 - 1, dtype=GET_DTYPE(), device="cuda").permute(2, 0, 1)  # chw
         self.latent_t = self.config["target_video_length"] // self.config["vae_stride"][0] + 1
@@ -287,32 +257,12 @@ class WanAnimateRunner(WanRunner):
         self.cond_images = self.inputs_padding(self.cond_images, target_len)
         self.face_images = self.inputs_padding(self.face_images, target_len)
 
-        if self.config.get("replace_flag", False):
-            # Get bg and mask paths from video directory if available
-            if video_dir_path and os.path.isdir(video_dir_path):
-                logger.info(f"Loading replace components from directory: {video_dir_path}")
-                src_bg_path = os.path.join(video_dir_path, "src_bg.mp4")
-                src_mask_path = os.path.join(video_dir_path, "src_mask.mp4")
-
-                # Check if files exist, fallback to config if not found
-                if not os.path.exists(src_bg_path):
-                    logger.warning(f"src_bg.mp4 not found in {video_dir_path}, falling back to config")
-                    src_bg_path = self.config.get("src_bg_path")
-                if not os.path.exists(src_mask_path):
-                    logger.warning(f"src_mask.mp4 not found in {video_dir_path}, falling back to config")
-                    src_mask_path = self.config.get("src_mask_path")
-            else:
-                # Fallback to config if video_path is not a directory
-                logger.info("video_path is not a directory, using config paths for replace components")
-                src_bg_path = self.config.get("src_bg_path")
-                src_mask_path = self.config.get("src_mask_path")
-
-            if src_bg_path and src_mask_path:
-                self.bg_images, self.mask_images = self.prepare_source_for_replace(src_bg_path, src_mask_path)
-                self.bg_images = self.inputs_padding(self.bg_images, target_len)
-                self.mask_images = self.inputs_padding(self.mask_images, target_len)
-            else:
-                logger.warning("replace_flag is True but src_bg_path or src_mask_path not found, skipping replace mode")
+        if self.config["replace_flag"] if "replace_flag" in self.config else False:
+            src_bg_path = self.config["src_bg_path"]
+            src_mask_path = self.config["src_mask_path"]
+            self.bg_images, self.mask_images = self.prepare_source_for_replace(src_bg_path, src_mask_path)
+            self.bg_images = self.inputs_padding(self.bg_images, target_len)
+            self.mask_images = self.inputs_padding(self.mask_images, target_len)
 
     def get_video_segment_num(self):
         total_frames = len(self.cond_images)
