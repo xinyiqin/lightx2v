@@ -39,11 +39,11 @@ class LocalPodcastManager:
             if k in data and isinstance(data[k], str):
                 try:
                     data[k] = str2time(data[k])
-                except:
+                except Exception:
                     # 如果是ISO格式，尝试解析
                     try:
                         data[k] = datetime.fromisoformat(data[k].replace("Z", "+00:00")).timestamp()
-                    except:
+                    except Exception:
                         pass
 
     def save(self, podcast_data: Dict, with_fmt: bool = True):
@@ -205,7 +205,7 @@ class LocalPodcastManager:
                 try:
                     # 尝试解析时间戳字符串
                     created_at = datetime.fromtimestamp(str2time(created_at)).isoformat()
-                except:
+                except Exception:
                     pass  # 保持原样
 
             # 解析rounds和subtitles数据

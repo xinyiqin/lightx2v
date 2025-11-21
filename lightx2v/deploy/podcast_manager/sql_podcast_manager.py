@@ -69,7 +69,7 @@ class SQLPodcastManager:
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_podcasts_user_id ON {self.table_podcasts}(user_id)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_podcasts_created_at ON {self.table_podcasts}(created_at)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_podcasts_user_created ON {self.table_podcasts}(user_id, created_at)")
-            except:
+            except Exception:
                 pass  # 索引可能已存在
             logger.info(f"Podcast table {self.table_podcasts} created or already exists")
         except Exception as e:

@@ -1795,7 +1795,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
                                 user_friendly_error = error_json["error"]
                             else:
                                 user_friendly_error = error_msg
-                        except:
+                        except Exception:
                             user_friendly_error = error_msg
                     else:
                         user_friendly_error = error_msg
