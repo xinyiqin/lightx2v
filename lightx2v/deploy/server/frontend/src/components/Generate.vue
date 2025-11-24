@@ -315,7 +315,7 @@ const props = defineProps({
   }
 })
 
-const { t, locale } = useI18n()
+const { t, tm, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
@@ -400,40 +400,94 @@ const currentSeparatedAudios = computed(() => {
     return audios
 })
 
-// 角色模式：单角色/多角色
-const isMultiRoleMode = ref(false) // false = 单角色模式, true = 多角色模式
+// 计算属性：当前音频预览
+const currentAudioPreview = computed(() => {
+    return getCurrentAudioPreview()
+})
 
-// 根据检测到的人脸数量自动设置模式
-watch(currentDetectedFaces, (faces) => {
-    if (selectedTaskId.value === 's2v') {
-        // 自动匹配：1个脸=单角色，多个脸=多角色
-        const autoMode = faces.length > 1
-        // 如果当前模式与自动匹配的模式不同，且用户没有手动切换过，则自动更新
-        // 这里简化处理：直接根据人脸数量自动更新（用户可以通过开关手动切换）
-        if (faces.length === 0) {
-            // 没有检测到人脸，保持当前模式或设为单角色
-            isMultiRoleMode.value = false
-        } else if (faces.length === 1) {
-            // 1个人脸，自动设为单角色模式
-            isMultiRoleMode.value = false
-            // 清空分离的音频（单角色模式不需要分离）
+// 记录上次分离的角色个数，避免重复分离
+const lastSeparatedFaceCount = ref(0)
+const lastSeparatedAudioUrl = ref('')
+
+// 角色模式：单角色/多角色
+const isMultiRoleMode = ref(false) // false = 单角色模式, true = 多角色模式（默认关闭，单人模式）
+
+// 监听任务类型变化，切换任务时重置为单人模式
+watch(selectedTaskId, (newTaskId, oldTaskId) => {
+    if (newTaskId !== oldTaskId) {
+        // 切换任务类型时，重置为单人模式
+        isMultiRoleMode.value = false
+        // 重置分离记录
+        lastSeparatedFaceCount.value = 0
+        lastSeparatedAudioUrl.value = ''
+    }
+})
+
+// 统一监听 detectedFaces 和音频预览，当两者都存在且角色个数 > 1 时，自动分离音频
+// 这样可以覆盖所有场景：上传音频、应用历史音频、使用音频模板、复用任务等
+watch([currentDetectedFaces, currentAudioPreview, selectedTaskId], ([newFaces, audioUrl, taskType], [oldFaces, oldAudioUrl, oldTaskType]) => {
+    // 只在 s2v 任务下处理
+    if (taskType !== 's2v') {
+        // 如果不是 s2v 任务，清空分离记录
+        if (oldTaskType === 's2v') {
+            lastSeparatedFaceCount.value = 0
+            lastSeparatedAudioUrl.value = ''
+        }
+        return
+    }
+
+    const faceCount = newFaces?.length || 0
+    const oldFaceCount = oldFaces?.length || 0
+
+    // 如果角色个数 <= 1，清空分离的音频
+    if (faceCount <= 1) {
+        if (oldFaceCount > 1) {
             const form = getCurrentForm()
             if (form) {
                 form.separatedAudios = []
             }
+            lastSeparatedFaceCount.value = 0
+            lastSeparatedAudioUrl.value = ''
+        }
+        return
+    }
+
+    // 如果角色个数 > 1 且有音频预览
+    if (faceCount > 1 && audioUrl) {
+        // 检查是否需要分离（避免重复分离）
+        const needsSeparation = 
+            faceCount !== lastSeparatedFaceCount.value || 
+            audioUrl !== lastSeparatedAudioUrl.value
+
+        if (needsSeparation) {
+            console.log(`[自动音频分离] 检测到 ${faceCount} 个角色且有音频，开始分离...`, {
+                faceCount,
+                audioUrl: audioUrl.substring(0, 50) + '...',
+                lastSeparatedFaceCount: lastSeparatedFaceCount.value,
+                lastSeparatedAudioUrl: lastSeparatedAudioUrl.value?.substring(0, 50) + '...'
+            })
+
+            separateAudioTracks(audioUrl, faceCount)
+                .then(() => {
+                    // 分离成功，更新记录
+                    lastSeparatedFaceCount.value = faceCount
+                    lastSeparatedAudioUrl.value = audioUrl
+                    console.log(`[自动音频分离] 分离成功，角色个数: ${faceCount}`)
+                })
+                .catch(error => {
+                    console.error('[自动音频分离] 分离失败:', error)
+                    // 分离失败，不清空记录，允许重试
+                })
         } else {
-            // 多个人脸，自动设为多角色模式
-            isMultiRoleMode.value = true
-            // 如果有音频，自动分离
-            const form = getCurrentForm()
-            if (form && form.audioFile && getCurrentAudioPreview()) {
-                const audioDataUrl = getCurrentAudioPreview()
-                if (audioDataUrl) {
-                    separateAudioTracks(audioDataUrl, faces.length).catch(error => {
-                        console.error('Auto audio separation failed:', error)
-                    })
-                }
-            }
+            console.log(`[自动音频分离] 跳过重复分离，角色个数: ${faceCount}，音频未变化`)
+        }
+    } else if (faceCount > 1 && !audioUrl) {
+        // 有多个角色但没有音频，清空分离的音频
+        const form = getCurrentForm()
+        if (form && form.separatedAudios && form.separatedAudios.length > 0) {
+            form.separatedAudios = []
+            lastSeparatedFaceCount.value = 0
+            lastSeparatedAudioUrl.value = ''
         }
     }
 }, { immediate: true })
@@ -451,10 +505,29 @@ const toggleRoleMode = async () => {
         // 切换到多角色模式
         isMultiRoleMode.value = true
 
-        // 如果当前只有1个角色，需要添加更多角色
-        if (form.detectedFaces && form.detectedFaces.length === 1) {
-            // 提示用户需要添加更多角色
-            showAlert('多角色模式需要至少2个角色，请添加更多角色', 'info')
+        // 如果还没有检测到角色，调用角色识别功能
+        if (!form.detectedFaces || form.detectedFaces.length === 0) {
+            const imageUrl = getCurrentImagePreviewUrl()
+            if (imageUrl) {
+                try {
+                    faceDetecting.value = true
+                    await detectFacesInImage(imageUrl)
+                } catch (error) {
+                    console.error('Face detection failed:', error)
+                    showAlert(t('faceDetectionFailed') + ': ' + (error.message || t('unknownError')), 'error')
+                } finally {
+                    faceDetecting.value = false
+                }
+            } else {
+                showAlert(t('pleaseUploadImage'), 'warning')
+                isMultiRoleMode.value = false
+                return
+            }
+        }
+
+        // 如果检测后仍然只有0个或1个角色，提示用户
+        if (!form.detectedFaces || form.detectedFaces.length <= 1) {
+            showAlert(t('multiRoleModeRequires'), 'info')
             return
         }
 
@@ -466,7 +539,7 @@ const toggleRoleMode = async () => {
                     await separateAudioTracks(audioDataUrl, form.detectedFaces.length)
                 } catch (error) {
                     console.error('Audio separation failed:', error)
-                    showAlert('音频分离失败: ' + error.message, 'error')
+                    showAlert(t('audioSeparationFailed') + ': ' + error.message, 'error')
                 }
             }
         }
@@ -477,9 +550,22 @@ const toggleRoleMode = async () => {
         // 清空分离的音频（单角色模式不需要分离）
         form.separatedAudios = []
 
-        // 如果有多于1个角色，提示用户
+        // 如果有多于1个角色的情况下切回单模式，提示用户
         if (form.detectedFaces && form.detectedFaces.length > 1) {
-            showAlert('单角色模式只会使用第一个角色', 'info')
+            showAlert(t('singleRoleModeInfo'), 'info')
+        }
+    }
+}
+
+// 处理删除图片，同时重置多角色模式
+const handleRemoveImage = () => {
+    removeImage()
+    // 删除图片后，自动切回单角色模式
+    if (selectedTaskId.value === 's2v' && isMultiRoleMode.value) {
+        isMultiRoleMode.value = false
+        const form = getCurrentForm()
+        if (form) {
+            form.separatedAudios = []
         }
     }
 }
@@ -490,6 +576,8 @@ const editingFaceIndex = ref(-1)
 const editingFaceBbox = ref([0, 0, 0, 0]) // [x1, y1, x2, y2]
 const originalImageUrl = ref('')
 const imageContainerRef = ref(null)
+const imageLoaded = ref(false) // 图片是否已加载完成
+const imageNaturalSize = ref({ width: 0, height: 0 }) // 图片原始尺寸
 const isDraggingBbox = ref(false)
 const dragType = ref('move') // 'move', 'resize-n', 'resize-s', 'resize-w', 'resize-e', 'resize-nw', 'resize-ne', 'resize-sw', 'resize-se'
 const dragStartPos = ref({ x: 0, y: 0 })
@@ -497,6 +585,7 @@ const dragStartBbox = ref([0, 0, 0, 0]) // 拖拽开始时的bbox坐标
 const bboxOffset = ref({ x: 0, y: 0 })
 const isAddingNewFace = ref(false) // 是否在新增角色模式
 const faceSaving = ref(false) // 是否正在保存角色（用于显示加载状态）
+const showRoleModeInfo = ref(false) // 是否显示角色模式说明
 
 // 打开脸部编辑模态框
 const openFaceEditModal = async (faceIndex) => {
@@ -504,6 +593,8 @@ const openFaceEditModal = async (faceIndex) => {
     if (!form) return
 
     originalImageUrl.value = getCurrentImagePreviewUrl()
+    imageLoaded.value = false // 重置图片加载状态
+    imageNaturalSize.value = { width: 0, height: 0 } // 重置图片尺寸
 
     // 如果是新增模式（faceIndex 为 -1）
     if (faceIndex === -1) {
@@ -511,34 +602,46 @@ const openFaceEditModal = async (faceIndex) => {
         editingFaceIndex.value = -1
         showFaceEditModal.value = true
 
-        // 等待DOM更新
+        // 等待DOM更新，确保图片元素已渲染
         await nextTick()
+        await nextTick() // 多等待一次，确保图片元素完全渲染
 
         // 等待图片加载完成
         const img = imageContainerRef.value?.querySelector('img')
         if (img) {
-            // 确保图片完全加载
-            await new Promise((resolve) => {
-                if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
-                    resolve()
-                } else {
-                    const onLoad = () => {
-                        // 确保图片尺寸已正确设置
-                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+            // 如果图片已经加载完成（从缓存），立即设置状态
+            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                imageLoaded.value = true
+            } else {
+                // 确保图片完全加载
+                await new Promise((resolve) => {
+                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                        imageLoaded.value = true
+                        resolve()
+                    } else {
+                        const onLoad = () => {
+                            // 确保图片尺寸已正确设置
+                            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                                imageLoaded.value = true
+                                img.removeEventListener('load', onLoad)
+                                img.removeEventListener('error', onError)
+                                resolve()
+                            }
+                        }
+                        const onError = () => {
+                            imageLoaded.value = true
                             img.removeEventListener('load', onLoad)
                             img.removeEventListener('error', onError)
-                            resolve()
+                            resolve() // 即使加载失败也继续
                         }
+                        img.addEventListener('load', onLoad)
+                        img.addEventListener('error', onError)
                     }
-                    const onError = () => {
-                        img.removeEventListener('load', onLoad)
-                        img.removeEventListener('error', onError)
-                        resolve() // 即使加载失败也继续
-                    }
-                    img.addEventListener('load', onLoad)
-                    img.addEventListener('error', onError)
-                }
-            })
+                })
+            }
 
             // 再次等待，确保图片尺寸已正确设置
             await nextTick()
@@ -548,6 +651,7 @@ const openFaceEditModal = async (faceIndex) => {
             const imgNaturalHeight = img.naturalHeight
 
             if (imgNaturalWidth > 0 && imgNaturalHeight > 0) {
+                imageNaturalSize.value = { width: imgNaturalWidth, height: imgNaturalHeight }
                 // 默认居中，大小为图片的 30%
                 const bboxSize = Math.min(imgNaturalWidth, imgNaturalHeight) * 0.3
                 const centerX = imgNaturalWidth / 2
@@ -560,16 +664,20 @@ const openFaceEditModal = async (faceIndex) => {
                     centerY + bboxSize / 2
                 ]
 
+                // 标记图片已加载
+                imageLoaded.value = true
                 // 再次等待DOM更新，确保边界框已渲染
                 await nextTick()
             } else {
                 // 如果图片尺寸无效，使用默认值
                 editingFaceBbox.value = [0, 0, 100, 100]
+                imageLoaded.value = true
                 await nextTick()
             }
         } else {
             // 如果图片还没加载，使用默认值
             editingFaceBbox.value = [0, 0, 100, 100]
+            imageLoaded.value = true
             await nextTick()
         }
     } else {
@@ -581,9 +689,68 @@ const openFaceEditModal = async (faceIndex) => {
         editingFaceBbox.value = [...(face.bbox || [0, 0, 0, 0])]
         showFaceEditModal.value = true
 
-        // 等待DOM更新
+        // 等待DOM更新，确保图片元素已渲染
         await nextTick()
+        await nextTick() // 多等待一次，确保图片元素完全渲染
+
+        // 等待图片加载完成，确保边界框能正确显示
+        const img = imageContainerRef.value?.querySelector('img')
+        if (img) {
+            // 如果图片已经加载完成（从缓存），立即设置状态
+            if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                imageLoaded.value = true
+            } else {
+                // 确保图片完全加载
+                await new Promise((resolve) => {
+                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                        imageLoaded.value = true
+                        resolve()
+                    } else {
+                        const onLoad = () => {
+                            // 确保图片尺寸已正确设置
+                            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                                imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+                                imageLoaded.value = true
+                                img.removeEventListener('load', onLoad)
+                                img.removeEventListener('error', onError)
+                                resolve()
+                            }
+                        }
+                        const onError = () => {
+                            imageLoaded.value = true
+                            img.removeEventListener('load', onLoad)
+                            img.removeEventListener('error', onError)
+                            resolve() // 即使加载失败也继续
+                        }
+                        img.addEventListener('load', onLoad)
+                        img.addEventListener('error', onError)
+                    }
+                })
+            }
+
+            // 再次等待，确保图片尺寸已正确设置
+            await nextTick()
+        } else {
+            imageLoaded.value = true
+        }
     }
+}
+
+// 处理脸部编辑模态框中的图片加载
+const handleFaceEditImageLoad = () => {
+    const img = imageContainerRef.value?.querySelector('img')
+    if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        imageNaturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+        imageLoaded.value = true
+        nextTick()
+    }
+}
+
+// 处理脸部编辑模态框中的图片加载错误
+const handleFaceEditImageError = () => {
+    imageLoaded.value = true // 即使加载失败也显示，避免一直显示加载中
 }
 
 // 关闭脸部编辑模态框
@@ -592,6 +759,8 @@ const closeFaceEditModal = () => {
     editingFaceIndex.value = -1
     isDraggingBbox.value = false
     isAddingNewFace.value = false
+    imageLoaded.value = false
+    imageNaturalSize.value = { width: 0, height: 0 }
 }
 
 // 保存边界框更改
@@ -601,6 +770,9 @@ const saveFaceBbox = async () => {
 
     // 保存当前状态（在关闭模态框之前）
     const wasAddingNewFace = isAddingNewFace.value
+    const currentEditingIndex = editingFaceIndex.value // 保存编辑索引
+    const currentBbox = [...editingFaceBbox.value] // 保存边界框
+    const currentImageUrl = originalImageUrl.value // 保存图片URL
 
     // 立即关闭模态框
     closeFaceEditModal()
@@ -620,7 +792,7 @@ const saveFaceBbox = async () => {
             // 创建新角色
             const newFaceIndex = form.detectedFaces.length
             const newFace = {
-                bbox: [...editingFaceBbox.value],
+                bbox: [...currentBbox],
                 roleName: `角色${newFaceIndex + 1}`,
                 roleIndex: newFaceIndex,
                 isEditing: false,
@@ -629,11 +801,11 @@ const saveFaceBbox = async () => {
 
             // 根据新的 bbox 坐标，从原始图片裁剪出新的 face_image
             try {
-                let imageUrl = originalImageUrl.value
+                let imageUrl = currentImageUrl
                 if (imageUrl.startsWith('data:image')) {
                     // 保持 data URL 格式，可以直接使用
                 } else if (!imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
-                    imageUrl = originalImageUrl.value
+                    imageUrl = currentImageUrl
                 }
 
                 // 裁剪出新的 face_image
@@ -664,20 +836,23 @@ const saveFaceBbox = async () => {
 
         } else {
             // 编辑现有角色
-            if (!form.detectedFaces || editingFaceIndex.value < 0) return
+            if (!form.detectedFaces || currentEditingIndex < 0 || !form.detectedFaces[currentEditingIndex]) {
+                console.error('Invalid editing index or face not found:', currentEditingIndex)
+                return
+            }
 
-            const face = form.detectedFaces[editingFaceIndex.value]
+            const face = form.detectedFaces[currentEditingIndex]
 
             // editingFaceBbox.value 存储的是原始图片坐标 [x1, y1, x2, y2]
-            face.bbox = [...editingFaceBbox.value]
+            face.bbox = [...currentBbox]
 
             // 根据新的 bbox 坐标，从原始图片裁剪出新的 face_image
             try {
-                let imageUrl = originalImageUrl.value
+                let imageUrl = currentImageUrl
                 if (imageUrl.startsWith('data:image')) {
                     // 保持 data URL 格式，可以直接使用
                 } else if (!imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
-                    imageUrl = originalImageUrl.value
+                    imageUrl = currentImageUrl
                 }
 
                 // 裁剪出新的 face_image
@@ -690,6 +865,9 @@ const saveFaceBbox = async () => {
             } catch (error) {
                 console.error('Failed to crop face image:', error)
             }
+
+            // 触发响应式更新
+            form.detectedFaces = [...form.detectedFaces]
         }
     } finally {
         // 隐藏加载状态
@@ -1037,13 +1215,13 @@ const endDragBbox = () => {
 
 // 计算边界框的样式（用于在放大图片上显示）
 const getBboxStyle = computed(() => {
-    if (!imageContainerRef.value || editingFaceBbox.value.length !== 4) {
+    if (!imageContainerRef.value || editingFaceBbox.value.length !== 4 || !imageLoaded.value) {
         return {}
     }
 
     const container = imageContainerRef.value
     const img = container.querySelector('img')
-    if (!img || !img.complete) {
+    if (!img || !img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
         return {}
     }
 
@@ -1287,7 +1465,7 @@ const handleTTSComplete = (audioBlob) => {
     showVoiceTTSModal.value = false
 
     // 显示成功提示
-    showAlert('语音合成完成，已自动添加到音频素材', 'success')
+    showAlert(t('ttsCompleted'), 'success')
 }
 
 // 跳转到项目页面
@@ -1697,9 +1875,9 @@ const handleImageDrop = (e) => {
         }
 
         handleImageUpload(event)
-        showAlert('图片拖拽上传成功', 'success')
+        showAlert(t('imageDragSuccess'), 'success')
     } else {
-        showAlert('请拖拽图片文件', 'warning')
+        showAlert(t('pleaseDragImage'), 'warning')
     }
 }
 
@@ -1725,9 +1903,9 @@ const handleAudioDrop = (e) => {
         }
 
         handleAudioUpload(event)
-        showAlert('音频/视频拖拽上传成功', 'success')
+        showAlert(t('audioDragSuccess'), 'success')
     } else {
-        showAlert('请拖拽音频或视频文件', 'warning')
+        showAlert(t('pleaseDragAudio'), 'warning')
     }
 }
 
@@ -1767,9 +1945,9 @@ const handleVideoDrop = (e) => {
         }
 
         handleVideoUpload(event)
-        showAlert('视频拖拽上传成功', 'success')
+        showAlert(t('videoDragSuccess'), 'success')
     } else {
-        showAlert('请拖拽视频文件', 'warning')
+        showAlert(t('pleaseDragVideo'), 'warning')
     }
 }
 
@@ -2375,7 +2553,7 @@ onUnmounted(() => {
                                                     <!-- 删除按钮 - Apple 风格 -->
                                                     <div
                                                         class="absolute inset-x-0 bottom-4 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
-                                                        <button @click.stop="removeImage"
+                                                        <button @click.stop="handleRemoveImage"
                                                             class="w-11 h-11 flex items-center justify-center bg-white/95 dark:bg-[#2c2c2e]/95 backdrop-blur-[20px] border border-black/8 dark:border-white/8 text-red-500 dark:text-red-400 rounded-full transition-all duration-200 hover:scale-110 hover:shadow-[0_4px_12px_rgba(239,68,68,0.2)] dark:hover:shadow-[0_4px_12px_rgba(248,113,113,0.3)] active:scale-100"
                                                             :title="t('deleteImage')">
                                                             <i class="fas fa-trash text-base"></i>
@@ -2538,14 +2716,14 @@ onUnmounted(() => {
                                                 ></audio>
                                             </div>
 
-                                            <input type="file" ref="audioInput" @change="handleAudioUpload" accept="audio/*,video/*" data-role="audio-input"
+                                            <input type="file" ref="audioInput" @change="handleAudioUpload" accept="audio/*,audio/mp4,audio/x-m4a,video/*" data-role="audio-input"
                                             style="display: none;">
                                         </div>
 
                                         <!-- 音频分割加载提示 -->
                                         <div v-if="audioSeparating" class="mt-3 flex items-center justify-center gap-2 text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">
                                             <i class="fas fa-spinner fa-spin text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-                                            <span>多角色模式，自动分割音频中···</span>
+                                            <span>{{t('splitingAudio')}}</span>
                                         </div>
                                     </div>
 
@@ -2616,8 +2794,8 @@ onUnmounted(() => {
                                 </div>
 
                                 <!-- 角色和音频配对区域 -->
-                                <div v-if="selectedTaskId === 's2v' && currentDetectedFaces && currentDetectedFaces.length > 0" class="mt-8">
-                                    <!-- 模式切换开关 -->
+                                <div v-if="selectedTaskId === 's2v'" class="mt-8">
+                                    <!-- 模式切换开关 - 始终显示 -->
                                     <div class="flex justify-center items-center mb-4">
                                         <div class="flex items-center gap-3">
 
@@ -2638,6 +2816,68 @@ onUnmounted(() => {
                                             </button>
 
                                             <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight" :class="{ 'text-[#86868b] dark:text-[#98989d]': isMultiRoleMode }">{{ isMultiRoleMode ? '多角色模式' : '单角色模式' }}</span>
+                                            
+                                            <!-- Info 图标按钮 -->
+                                            <button
+                                                @click="showRoleModeInfo = true"
+                                                class="w-5 h-5 flex items-center justify-center text-[#86868b] dark:text-[#98989d] hover:text-[color:var(--brand-primary)] dark:hover:text-[color:var(--brand-primary-light)] transition-colors duration-200 rounded-full hover:bg-[#86868b]/10 dark:hover:bg-[#98989d]/10"
+                                                :title="t('roleModeInfo.title')"
+                                            >
+                                                <i class="fas fa-info-circle text-xs"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- 角色模式说明弹窗 - Apple 风格 -->
+                                    <div v-if="showRoleModeInfo" 
+                                        class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
+                                        @click="showRoleModeInfo = false">
+                                        <div class="w-full max-w-md bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden"
+                                            @click.stop>
+                                            <!-- 弹窗头部 -->
+                                            <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8 bg-white/50 dark:bg-[#1e1e1e]/50 backdrop-blur-[20px]">
+                                                <h3 class="text-lg font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">
+                                                    {{ t('roleModeInfo.title') }}
+                                                </h3>
+                                                <button @click="showRoleModeInfo = false"
+                                                    class="w-8 h-8 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-red-500 dark:hover:text-red-400 hover:bg-white dark:hover:bg-[#3a3a3c] rounded-full transition-all duration-200 hover:scale-110 active:scale-100"
+                                                    :title="t('close')">
+                                                    <i class="fas fa-times text-sm"></i>
+                                                </button>
+                                            </div>
+
+                                            <!-- 弹窗内容 -->
+                                            <div class="p-6 space-y-6">
+                                                <!-- 单角色模式说明 -->
+                                                <div class="space-y-3">
+                                                    <h4 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight flex items-center gap-2">
+                                                        <i class="fas fa-user text-sm text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                        {{ t('roleModeInfo.singleMode.title') }}
+                                                    </h4>
+                                                    <ul class="space-y-2 pl-6">
+                                                        <li v-for="(point, index) in tm('roleModeInfo.singleMode.points')" :key="index"
+                                                            class="text-sm text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight leading-relaxed flex items-start gap-2">
+                                                            <span class="text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] mt-1.5 flex-shrink-0">•</span>
+                                                            <span>{{ point }}</span>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+
+                                                <!-- 多角色模式说明 -->
+                                                <div class="space-y-3">
+                                                    <h4 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight flex items-center gap-2">
+                                                        <i class="fas fa-users text-sm text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                        {{ t('roleModeInfo.multiMode.title') }}
+                                                    </h4>
+                                                    <ul class="space-y-2 pl-6">
+                                                        <li v-for="(point, index) in tm('roleModeInfo.multiMode.points')" :key="index"
+                                                            class="text-sm text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight leading-relaxed flex items-center gap-2">
+                                                            <span class="text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] flex-shrink-0">•</span>
+                                                            <span>{{ point }}</span>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -2647,8 +2887,8 @@ onUnmounted(() => {
                                         <span>正在保存角色并更新音频...</span>
                                     </div>
 
-                                    <!-- 角色和音频配对区域 - 每行一个配对（仅在多角色模式显示） -->
-                                    <div v-if="isMultiRoleMode" class="flex flex-col items-center space-y-3">
+                                    <!-- 角色和音频配对区域 - 每行一个配对（仅在多角色模式且有角色时显示） -->
+                                    <div v-if="isMultiRoleMode && currentDetectedFaces && currentDetectedFaces.length > 0" class="flex flex-col items-center space-y-3">
                                         <div
                                             v-for="(face, index) in currentDetectedFaces"
                                             :key="index"
@@ -2694,6 +2934,7 @@ onUnmounted(() => {
                                                                 v-if="face.isEditing"
                                                                 type="text"
                                                                 :value="face.roleName"
+                                                                :data-face-index="index"
                                                                 @input="updateFaceRoleName(index, $event.target.value)"
                                                                 @blur="saveFaceRoleName(index, $event.target.value)"
                                                                 @keyup.enter="saveFaceRoleName(index, $event.target.value)"
@@ -2743,7 +2984,11 @@ onUnmounted(() => {
                                                             <!-- 保存按钮 -->
                                                             <button
                                                                 v-else
-                                                                @click.stop="saveFaceRoleName(index, face.roleName)"
+                                                                @click.stop="() => {
+                                                                    const inputEl = document.querySelector(`input[data-face-index='${index}']`);
+                                                                    const newRoleName = inputEl?.value || face.roleName;
+                                                                    saveFaceRoleName(index, newRoleName);
+                                                                }"
                                                                 class="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 text-white rounded-full transition-all duration-200 hover:scale-110 shadow-sm"
                                                                 :title="t('save') || '保存'">
                                                                 <i class="fas fa-check text-xs"></i>
@@ -3022,7 +3267,7 @@ onUnmounted(() => {
                                         <!-- 视频预览 -->
                                         <video v-if="item?.outputs?.output_video"
                                             :src="getTemplateFileUrl(item.outputs.output_video,'videos')"
-                                            :poster="getTemplateFileUrl(item.inputs.input_image,'images')"
+                                            :poster="item?.inputs?.input_image ? getTemplateFileUrl(item.inputs.input_image,'images') : undefined"
                                             class="w-full h-auto object-contain group-hover:scale-[1.02] transition-transform duration-200"
                                             preload="auto" playsinline webkit-playsinline
                                             @mouseenter="playVideo($event)" @mouseleave="pauseVideo($event)"
@@ -3030,12 +3275,16 @@ onUnmounted(() => {
                                             @ended="handleMasonryVideoEnded($event)"
                                             @error="handleMasonryVideoError($event)"></video>
                                     <!-- 图片缩略图 -->
-                                        <img v-else
+                                        <img v-else-if="item?.inputs?.input_image"
                                         :src="getTemplateFileUrl(item.inputs.input_image,'images')"
                                         :alt="item.params?.prompt || '模板图片'"
                                         class="w-full h-auto object-contain group-hover:scale-[1.02] transition-transform duration-200"
                                         @load="handleMasonryImageLoaded"
                                         @error="handleMasonryImageError" />
+                                        <!-- 如果没有图片，显示占位符 -->
+                                        <div v-else class="w-full h-[200px] flex items-center justify-center bg-[#f5f5f7] dark:bg-[#1c1c1e]">
+                                            <i class="fas fa-image text-3xl text-[#86868b]/30 dark:text-[#98989d]/30"></i>
+                                        </div>
                                         <!-- 移动端播放按钮 - Apple 风格 -->
                                         <button v-if="item?.outputs?.output_video"
                                             @click.stop="toggleVideoPlay($event)"
@@ -3094,12 +3343,29 @@ onUnmounted(() => {
                     <!-- 图片容器 -->
                     <div
                         ref="imageContainerRef"
-                        class="relative inline-block max-w-full">
+                        class="relative inline-block max-w-full"
+                        :style="imageNaturalSize.width > 0 && imageNaturalSize.height > 0 && !imageLoaded ? {
+                            width: `${Math.min(imageNaturalSize.width, 800)}px`,
+                            height: `${Math.min(imageNaturalSize.height, 600)}px`,
+                            aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`
+                        } : {}">
+                        <!-- 占位符 - 图片加载前显示 -->
+                        <div
+                            v-show="!imageLoaded"
+                            class="absolute inset-0 w-full h-full min-w-[400px] min-h-[300px] bg-[#f5f5f7] dark:bg-[#1e1e1e] rounded-xl flex items-center justify-center z-10">
+                            <div class="flex flex-col items-center gap-3">
+                                <i class="fas fa-spinner fa-spin text-2xl text-[#86868b] dark:text-[#98989d]"></i>
+                                <span class="text-sm text-[#86868b] dark:text-[#98989d]">{{ t('loading') || '加载中...' }}</span>
+                            </div>
+                        </div>
+                        <!-- 实际图片 - 始终渲染，但加载完成后才显示 -->
                         <img
                             :src="originalImageUrl"
                             alt="Face Edit"
                             class="max-w-full max-h-[70vh] h-auto object-contain rounded-xl"
-                            @load="() => { nextTick(); }">
+                            :class="{ 'opacity-0': !imageLoaded }"
+                            @load="handleFaceEditImageLoad"
+                            @error="handleFaceEditImageError">
 
                         <!-- 遮罩层 - 框外区域变暗 -->
                         <svg

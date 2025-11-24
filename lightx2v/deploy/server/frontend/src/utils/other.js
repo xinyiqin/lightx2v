@@ -135,6 +135,7 @@ export const locale = i18n.global.locale
 
         const imageTemplates = ref([]);
         const audioTemplates = ref([]);
+        const mergedTemplates = ref([]);  // 合并后的模板列表
         const showImageTemplates = ref(false);
         const showAudioTemplates = ref(false);
         const mediaModalTab = ref('history');
@@ -231,7 +232,7 @@ export const locale = i18n.global.locale
         const t2vForm = ref({
             task: 't2v',
             model_cls: '',
-            stage: 'single_stage',
+            stage: '',
             prompt: '',
             seed: 42
         });
@@ -239,7 +240,7 @@ export const locale = i18n.global.locale
         const i2vForm = ref({
             task: 'i2v',
             model_cls: '',
-            stage: 'multi_stage',
+            stage: '',
             imageFile: null,
             prompt: '',
             seed: 42,
@@ -249,7 +250,7 @@ export const locale = i18n.global.locale
         const s2vForm = ref({
             task: 's2v',
             model_cls: '',
-            stage: 'single_stage',
+            stage: '',
             imageFile: null,
             audioFile: null,
             prompt: '',
@@ -261,7 +262,7 @@ export const locale = i18n.global.locale
         const animateForm = ref({
             task: 'animate',
             model_cls: '',
-            stage: 'single_stage',
+            stage: '',
             imageFile: null,
             videoFile: null,
             prompt: '视频中的人在做动作',
@@ -400,6 +401,8 @@ export const locale = i18n.global.locale
                 case 't2v':
                     break;
                 case 'i2v':
+                    break;
+                case 'animate':
                     break;
                 case 's2v':
                     s2vAudioPreview.value = value;
@@ -703,11 +706,11 @@ export const locale = i18n.global.locale
 
             if (response.status === 401) {
                 logout(false);
-                showAlert('认证失败，请重新登录', 'warning', {
+                showAlert(t('authFailedPleaseRelogin'), 'warning', {
                     label: t('login'),
                     onClick: login
                 });
-                throw new Error('认证失败，请重新登录');
+                throw new Error(t('authFailedPleaseRelogin'));
             }
             if (response.status === 400) {
                 const error = await response.json();
@@ -733,7 +736,7 @@ export const locale = i18n.global.locale
                 window.location.href = data.auth_url;
             } catch (error) {
                 console.log('GitHub login error:', error);
-                showAlert('获取GitHub认证URL失败', 'danger');
+                showAlert(t('getGitHubAuthUrlFailed'), 'danger');
             }
         };
 
@@ -749,21 +752,21 @@ export const locale = i18n.global.locale
                 window.location.href = data.auth_url;
             } catch (error) {
                 console.error('Google login error:', error);
-                showAlert('获取Google认证URL失败', 'danger');
+                showAlert(t('getGoogleAuthUrlFailed'), 'danger');
             }
         };
 
         // 发送短信验证码
         const sendSmsCode = async () => {
             if (!phoneNumber.value) {
-                showAlert('手机号', 'warning');
+                showAlert(t('pleaseEnterPhoneNumber'), 'warning');
                 return;
             }
 
             // 简单的手机号格式验证
             const phoneRegex = /^1[3-9]\d{9}$/;
             if (!phoneRegex.test(phoneNumber.value)) {
-                showAlert('请输入正确的手机号格式', 'warning');
+                showAlert(t('pleaseEnterValidPhoneNumber'), 'warning');
                 return;
             }
 
@@ -772,21 +775,21 @@ export const locale = i18n.global.locale
                 const data = await response.json();
 
                 if (response.ok) {
-                    showAlert('验证码已发送，请查收短信', 'success');
+                    showAlert(t('verificationCodeSent'), 'success');
                     // 开始倒计时
                     startSmsCountdown();
                 } else {
-                    showAlert(data.message || '发送验证码失败', 'danger');
+                    showAlert(data.message || t('sendVerificationCodeFailed'), 'danger');
                 }
             } catch (error) {
-                showAlert('发送验证码失败，请重试', 'danger');
+                showAlert(t('sendVerificationCodeFailedRetry'), 'danger');
             }
         };
 
         // 短信验证码登录
         const loginWithSms = async () => {
             if (!phoneNumber.value || !verifyCode.value) {
-                showAlert('请输入手机号和验证码', 'warning');
+                showAlert(t('pleaseEnterPhoneAndCode'), 'warning');
                 return;
             }
 
@@ -809,12 +812,12 @@ export const locale = i18n.global.locale
                     console.log('login with sms success');
                     isLoggedIn.value = true;
 
-                    showAlert('登录成功', 'success');
+                    showAlert(t('loginSuccess'), 'success');
                 } else {
-                    showAlert(data.message || '验证码错误或已过期', 'danger');
+                    showAlert(data.message || t('verificationCodeErrorOrExpired'), 'danger');
                 }
             } catch (error) {
-                showAlert('登录失败，请重试', 'danger');
+                showAlert(t('loginFailedRetry'), 'danger');
             }
         };
 
@@ -930,10 +933,10 @@ export const locale = i18n.global.locale
                     window.history.replaceState({}, document.title, window.location.pathname);
                 } else {
                     const error = await response.json();
-                    showAlert(`登录失败: ${error.detail}`, 'danger');
+                    showAlert(`${t('loginFailedRetry')}: ${error.detail}`, 'danger');
                 }
             } catch (error) {
-                showAlert('登录过程中发生错误', 'danger');
+                showAlert(t('loginError'), 'danger');
                 console.error(error);
             }
         };
@@ -953,7 +956,7 @@ export const locale = i18n.global.locale
             models.value = [];
             tasks.value = [];
             if (showMessage) {
-                showAlert('已退出登录', 'info');
+                showAlert(t('loggedOut'), 'info');
             }
         };
 
@@ -987,12 +990,12 @@ export const locale = i18n.global.locale
                     console.log('模型列表已缓存');
                 } else if (response) {
                     console.error('模型列表API响应失败:', response);
-                    showAlert('加载模型列表失败', 'danger');
+                    showAlert(t('loadModelListFailed'), 'danger');
                 }
                 // 如果response为null，说明是认证错误，apiRequest已经处理了
             } catch (error) {
                 console.error('加载模型失败:', error);
-                showAlert(`加载模型失败: ${error.message}`, 'danger');
+                showAlert(`${t('loadModelFailed')}: ${error.message}`, 'danger');
             }
         };
 
@@ -1015,14 +1018,33 @@ export const locale = i18n.global.locale
         const loadImageAudioTemplates = async (forceRefresh = false) => {
             try {
                 // 如果不是强制刷新，先尝试从缓存加载
-                const cacheKey = `${TEMPLATES_CACHE_KEY}_IMAGE_AUDIO_${templateCurrentPage.value}_${templatePageSize.value}`;
+                const cacheKey = `${TEMPLATES_CACHE_KEY}_IMAGE_AUDIO_MERGED_${templateCurrentPage.value}_${templatePageSize.value}`;
                 if (!forceRefresh) {
                 // 构建缓存键，包含分页和过滤条件
                 const cachedTemplates = loadFromCache(cacheKey, TEMPLATES_CACHE_EXPIRY);
                     if (cachedTemplates && cachedTemplates.templates) {
                     console.log('成功从缓存加载模板列表');
-                        imageTemplates.value = cachedTemplates.templates.images || [];
-                        audioTemplates.value = cachedTemplates.templates.audios || [];
+                        // 优先使用合并后的模板列表
+                        if (cachedTemplates.templates.merged) {
+                            mergedTemplates.value = cachedTemplates.templates.merged || [];
+                            // 从合并列表中提取图片和音频
+                            const images = [];
+                            const audios = [];
+                            mergedTemplates.value.forEach(template => {
+                                if (template.image) {
+                                    images.push(template.image);
+                                }
+                                if (template.audio) {
+                                    audios.push(template.audio);
+                                }
+                            });
+                            imageTemplates.value = images;
+                            audioTemplates.value = audios;
+                        } else {
+                            // 向后兼容：如果没有合并列表，使用旧的格式
+                            imageTemplates.value = cachedTemplates.templates.images || [];
+                            audioTemplates.value = cachedTemplates.templates.audios || [];
+                        }
                         templatePagination.value = cachedTemplates.pagination || null;
                     return;
                     }
@@ -1034,14 +1056,31 @@ export const locale = i18n.global.locale
                     const data = await response.json();
                     console.log('图片音乐素材库数据:', data);
 
-                    refreshTemplateFileUrl(data.templates);
+                    // 使用合并后的模板列表
+                    const merged = data.templates?.merged || [];
+                    mergedTemplates.value = merged;
+                    
+                    // 为了保持向后兼容，从合并列表中提取图片和音频
+                    const images = [];
+                    const audios = [];
+                    merged.forEach(template => {
+                        if (template.image) {
+                            images.push(template.image);
+                        }
+                        if (template.audio) {
+                            audios.push(template.audio);
+                        }
+                    });
+                    
+                    refreshTemplateFileUrl({ images, audios, videos: data.templates?.videos || [] });
                     const templatesData = {
-                        images: data.templates.images || [],
-                        audios: data.templates.audios || []
+                        images: images,
+                        audios: audios,
+                        merged: merged
                     };
 
-                    imageTemplates.value = templatesData.images;
-                    audioTemplates.value = templatesData.audios;
+                    imageTemplates.value = images;
+                    audioTemplates.value = audios;
                     templatePagination.value = data.pagination || null;
 
                     // 保存到缓存
@@ -1136,38 +1175,21 @@ export const locale = i18n.global.locale
                     imageUrl = await getTemplateFileUrlAsync(template.filename, 'images');
                 }
 
-                // 创建预览（使用 data URL 作为预览，但使用 http/https URL 进行人脸识别）
+                // 创建预览（使用 data URL 作为预览）
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const imageDataUrl = e.target.result;
                     // 如果有 http/https URL，使用它作为预览；否则使用 data URL
                     setCurrentImagePreview(imageUrl || imageDataUrl);
                     updateUploadedContentStatus();
-
-                    reader.readAsDataURL(file);
                     showImageTemplates.value = false;
-                    showAlert('图片素材已选择', 'success');
-                    // Auto detect faces after image is loaded (使用 http/https URL)
-                    if (imageUrl) {
-                        try {
-                            await detectFacesInImage(imageUrl);
-                        } catch (error) {
-                            console.error('Face detection failed:', error);
-                            // Don't show error alert, just log it
-                        }
-                    } else {
-                        // 如果没有 http/https URL，回退到使用 data URL
-                        try {
-                            await detectFacesInImage(imageDataUrl);
-                        } catch (error) {
-                            console.error('Face detection failed:', error);
-                            // Don't show error alert, just log it
-                        }
-                    }
+                    showAlert(t('imageTemplateSelected'), 'success');
+                    // 不再自动检测人脸，等待用户手动打开多角色模式开关
                 };
+                reader.readAsDataURL(file);
 
             } catch (error) {
-                showAlert(`加载图片素材失败: ${error.message}`, 'danger');
+                showAlert(`${t('loadImageTemplateFailed')}: ${error.message}`, 'danger');
             }
         };
 
@@ -1187,9 +1209,9 @@ export const locale = i18n.global.locale
                 reader.readAsDataURL(file);
 
                 showAudioTemplates.value = false;
-                showAlert('音频素材已选择', 'success');
+                showAlert(t('audioTemplateSelected'), 'success');
             } catch (error) {
-                showAlert(`加载音频素材失败: ${error.message}`, 'danger');
+                showAlert(`${t('loadAudioTemplateFailed')}: ${error.message}`, 'danger');
             }
         };
 
@@ -1199,7 +1221,7 @@ export const locale = i18n.global.locale
             const audioUrl = getTemplateFileUrl(template.filename, 'audios');
             console.log('音频URL:', audioUrl);
             if (!audioUrl) {
-                showAlert('音频文件URL获取失败', 'danger');
+                showAlert(t('audioFileUrlFailed'), 'danger');
                 return;
             }
 
@@ -1225,7 +1247,7 @@ export const locale = i18n.global.locale
 
             audio.addEventListener('error', () => {
                 console.error('音频播放失败:', audio.error);
-                showAlert('音频播放失败', 'danger');
+                showAlert(t('audioPlaybackFailed'), 'danger');
                 currentPlayingAudio = null;
                 // 调用停止回调
                 if (audioStopCallback) {
@@ -1236,7 +1258,7 @@ export const locale = i18n.global.locale
 
             audio.play().catch(error => {
                 console.error('音频播放失败:', error);
-                showAlert('音频播放失败', 'danger');
+                showAlert(t('audioPlaybackFailed'), 'danger');
                 currentPlayingAudio = null;
             });
         };
@@ -1260,13 +1282,7 @@ export const locale = i18n.global.locale
                     setCurrentImagePreview(imageDataUrl);
                     updateUploadedContentStatus();
 
-                    // Auto detect faces after image is loaded
-                    try {
-                        await detectFacesInImage(imageDataUrl);
-                    } catch (error) {
-                        console.error('Face detection failed:', error);
-                        // Don't show error alert, just log it
-                    }
+                    // 不再自动检测人脸，等待用户手动打开多角色模式开关
                 };
                 reader.readAsDataURL(file);
             } else {
@@ -1456,37 +1472,7 @@ export const locale = i18n.global.locale
                     if (currentForm) {
                         currentForm.detectedFaces = facesWithImages;
                         console.log('Updated detectedFaces:', currentForm.detectedFaces.length, 'faces with images');
-
-                        // 如果检测到多个人脸，且已经有音频文件（仅在 s2v 模式下），自动进行音频分离
-                        if (facesWithImages.length > 1 && selectedTaskId.value === 's2v' && currentForm.audioFile) {
-                            console.log('Multiple faces detected and audio file exists, auto-separating audio...');
-                            try {
-                                // 优先使用 audioFile（File 对象），因为它包含完整的文件信息
-                                // separateAudioTracks 函数内部会优先使用 audioFile
-                                const audioDataUrl = getCurrentAudioPreview();
-                                if (audioDataUrl) {
-                                    // 自动进行音频分离（separateAudioTracks 会优先使用 audioFile）
-                                    await separateAudioTracks(audioDataUrl, facesWithImages.length);
-                                    console.log('Auto-separated audio for', facesWithImages.length, 'speakers');
-                                } else if (currentForm.audioFile instanceof File) {
-                                    // 如果没有预览 URL，从 audioFile 读取
-                                    const reader = new FileReader();
-                                    reader.onload = async (e) => {
-                                        try {
-                                            // 传递 data URL，但 separateAudioTracks 会优先使用 audioFile
-                                            await separateAudioTracks(e.target.result, facesWithImages.length);
-                                            console.log('Auto-separated audio for', facesWithImages.length, 'speakers');
-                                        } catch (error) {
-                                            console.error('Auto audio separation failed:', error);
-                                        }
-                                    };
-                                    reader.readAsDataURL(currentForm.audioFile);
-                                }
-                            } catch (error) {
-                                console.error('Auto audio separation failed:', error);
-                                // 不显示错误提示，只记录日志
-                            }
-                        }
+                        // 音频分离由统一的 watch 监听器处理，不需要在这里手动调用
                     }
                 }
             } catch (error) {
@@ -1501,7 +1487,13 @@ export const locale = i18n.global.locale
         const updateFaceRoleName = (faceIndex, roleName) => {
             const currentForm = getCurrentForm();
             if (currentForm && currentForm.detectedFaces && currentForm.detectedFaces[faceIndex]) {
-                currentForm.detectedFaces[faceIndex].roleName = roleName;
+                // 使用展开运算符创建新对象，确保响应式更新
+                currentForm.detectedFaces[faceIndex] = {
+                    ...currentForm.detectedFaces[faceIndex],
+                    roleName: roleName
+                };
+                // 触发响应式更新
+                currentForm.detectedFaces = [...currentForm.detectedFaces];
             }
         };
 
@@ -1509,15 +1501,29 @@ export const locale = i18n.global.locale
         const toggleFaceEditing = (faceIndex) => {
             const currentForm = getCurrentForm();
             if (currentForm && currentForm.detectedFaces && currentForm.detectedFaces[faceIndex]) {
-                currentForm.detectedFaces[faceIndex].isEditing = !currentForm.detectedFaces[faceIndex].isEditing;
+                // 使用展开运算符创建新对象，确保响应式更新
+                currentForm.detectedFaces[faceIndex] = {
+                    ...currentForm.detectedFaces[faceIndex],
+                    isEditing: !currentForm.detectedFaces[faceIndex].isEditing
+                };
+                // 触发响应式更新
+                currentForm.detectedFaces = [...currentForm.detectedFaces];
             }
         };
 
         // Save face role name and exit editing
         const saveFaceRoleName = (faceIndex, roleName) => {
-            updateFaceRoleName(faceIndex, roleName);
-            toggleFaceEditing(faceIndex);
-
+            const currentForm = getCurrentForm();
+            if (currentForm && currentForm.detectedFaces && currentForm.detectedFaces[faceIndex]) {
+                // 同时更新 roleName 和 isEditing，确保响应式更新
+                currentForm.detectedFaces[faceIndex] = {
+                    ...currentForm.detectedFaces[faceIndex],
+                    roleName: roleName || currentForm.detectedFaces[faceIndex].roleName,
+                    isEditing: false
+                };
+                // 触发响应式更新
+                currentForm.detectedFaces = [...currentForm.detectedFaces];
+            }
             // 同步更新所有关联的音频播放器角色名
             // 只有当任务类型是 s2v 且有分离的音频时才需要更新
             if (selectedTaskId.value === 's2v' && s2vForm.value.separatedAudios) {
@@ -1533,12 +1539,25 @@ export const locale = i18n.global.locale
         };
 
         const selectTask = (taskType) => {
+            console.log('[selectTask] 开始切换任务类型:', {
+                taskType,
+                currentSelectedTaskId: selectedTaskId.value,
+                currentSelectedModel: selectedModel.value,
+                currentFormModel: getCurrentForm().model_cls,
+                currentFormStage: getCurrentForm().stage
+            });
+
             for (const t of models.value.map(m => m.task)) {
                 if (getTaskTypeName(t) === taskType) {
                     taskType = t;
                 }
             }
             selectedTaskId.value = taskType;
+            
+            console.log('[selectTask] 任务类型已更新:', {
+                newTaskType: selectedTaskId.value,
+                availableModels: models.value.filter(m => m.task === taskType)
+            });
 
             // 根据任务类型恢复对应的预览
             if (taskType === 'i2v' && i2vForm.value.imageFile) {
@@ -1586,7 +1605,7 @@ export const locale = i18n.global.locale
                 }
             }
 
-            // 自动选择该任务类型下的第一个模型
+            // 自动选择该任务类型下的第一个模型（仅在当前模型无效且 URL 中没有 model 参数时）
             const currentForm = getCurrentForm();
             const urlParams = new URLSearchParams(window.location.search);
             const hasModelInUrl = urlParams.has('model');
@@ -1595,28 +1614,65 @@ export const locale = i18n.global.locale
             const availableModels = models.value.filter(m => m.task === taskType);
 
             if (availableModels.length > 0) {
-                // 检查当前选择的模型是否属于新任务类型
+                // 检查当前选择的模型和stage是否属于新任务类型
                 const currentModel = currentForm.model_cls || selectedModel.value;
-                const isCurrentModelValid = currentModel && availableModels.some(m => m.model_cls === currentModel);
+                const currentStage = currentForm.stage;
+                const isCurrentModelValid = currentModel && availableModels.some(m => 
+                    m.model_cls === currentModel && m.stage === currentStage
+                );
 
-                // 如果当前模型有效且 URL 中有 model 参数，说明可能是从路由恢复，不自动选择（让路由处理）
-                // 否则（当前模型无效、没有选择模型，或者 URL 中没有 model 参数），自动选择第一个模型
+                // 如果当前模型无效且 URL 中没有 model 参数，自动选择第一个模型
                 if (!isCurrentModelValid || !hasModelInUrl) {
                     const firstModel = availableModels[0];
-                    currentForm.model_cls = firstModel.model_cls;
-                    currentForm.stage = firstModel.stage;
-                    // 使用 setTimeout 确保模型更新在任务类型的路由更新完成之后
-                    // 这样路由 watch 会分别触发两次，分别更新 taskType 和 model 参数
-                    setTimeout(() => {
-                        selectedModel.value = firstModel.model_cls;
-                    }, 100)
+                    console.log('[selectTask] 自动选择第一个模型:', {
+                        firstModel: firstModel.model_cls,
+                        firstStage: firstModel.stage,
+                        reason: !isCurrentModelValid ? '当前模型或stage无效' : 'URL中没有model参数',
+                        currentModel,
+                        currentStage
+                    });
+                    // 直接调用 selectModel 来确保路由也会更新
+                    selectModel(firstModel.model_cls);
+                } else {
+                    console.log('[selectTask] 不自动选择模型:', {
+                        isCurrentModelValid,
+                        hasModelInUrl,
+                        currentModel,
+                        currentStage
+                    });
                 }
             }
         };
 
         const selectModel = (model) => {
+            console.log('[selectModel] 开始切换模型:', {
+                model,
+                currentSelectedModel: selectedModel.value,
+                currentTaskType: selectedTaskId.value,
+                currentFormModel: getCurrentForm().model_cls,
+                currentFormStage: getCurrentForm().stage
+            });
+
             selectedModel.value = model;
-            getCurrentForm().model_cls = model;
+            const currentForm = getCurrentForm();
+            currentForm.model_cls = model;
+            // 自动设置 stage 为模型对应的第一个 stage
+            const availableStages = models.value
+                .filter(m => m.task === selectedTaskId.value && m.model_cls === model)
+                .map(m => m.stage);
+            if (availableStages.length > 0) {
+                currentForm.stage = availableStages[0];
+                console.log('[selectModel] 自动设置 stage:', {
+                    stage: currentForm.stage,
+                    availableStages
+                });
+            }
+
+            console.log('[selectModel] 模型切换完成:', {
+                selectedModel: selectedModel.value,
+                formModel: currentForm.model_cls,
+                formStage: currentForm.stage
+            });
         };
 
         const triggerImageUpload = () => {
@@ -1743,10 +1799,38 @@ export const locale = i18n.global.locale
                     }
                 }
 
+                // Clean and validate base64 string before sending
+                let cleanedAudioData = audioData;
+                if (audioData.includes(',')) {
+                    // If it's a data URL, extract the base64 part
+                    const parts = audioData.split(',');
+                    if (parts.length > 1) {
+                        cleanedAudioData = parts.slice(1).join(','); // Join in case there are multiple commas
+                    }
+                }
+                
+                // Remove any whitespace and newlines
+                cleanedAudioData = cleanedAudioData.trim().replace(/\s/g, '');
+                
+                // Check if it's a valid base64 string length (must be multiple of 4)
+                const missingPadding = cleanedAudioData.length % 4;
+                if (missingPadding !== 0) {
+                    console.warn(`[separateAudioTracks] Base64 string length (${cleanedAudioData.length}) is not a multiple of 4, adding padding`);
+                    cleanedAudioData += '='.repeat(4 - missingPadding);
+                }
+                
+                // Reconstruct data URL if it was originally a data URL
+                if (audioData.startsWith('data:')) {
+                    const header = audioData.split(',')[0];
+                    cleanedAudioData = `${header},${cleanedAudioData}`;
+                }
+                
+                console.log(`[separateAudioTracks] Sending audio for separation, length: ${cleanedAudioData.length}, num_speakers: ${numSpeakers}`);
+
                 const response = await apiCall('/api/v1/audio/separate', {
                     method: 'POST',
                     body: JSON.stringify({
-                        audio: audioData,
+                        audio: cleanedAudioData,
                         num_speakers: numSpeakers
                     })
                 });
@@ -1816,24 +1900,8 @@ export const locale = i18n.global.locale
                     const audioDataUrl = e.target.result;
                     setCurrentAudioPreview(audioDataUrl);
                     updateUploadedContentStatus();
-
-                    // Check if we have multiple detected faces (roles)
-                    const currentForm = getCurrentForm();
-                    const detectedFaces = currentForm?.detectedFaces || [];
-
-                    // If we have more than 1 role, automatically separate audio
-                    if (detectedFaces.length > 1) {
-                        try {
-                            await separateAudioTracks(audioDataUrl, detectedFaces.length);
-                        } catch (error) {
-                            console.error('Audio separation failed:', error);
-                            // Continue with single audio preview if separation fails
-                            s2vForm.value.separatedAudios = [];
-                        }
-                    } else {
-                        // Reset separated audios if only one role
-                        s2vForm.value.separatedAudios = [];
-                    }
+                    // 音频分离由统一的 watch 监听器处理，不需要在这里手动调用
+                    console.log('[handleAudioUpload] 音频上传完成，音频分离将由统一的监听器自动处理');
                 };
                 reader.readAsDataURL(file);
             } else {
@@ -1977,17 +2045,17 @@ export const locale = i18n.global.locale
                 let errorMessage = t('recordingFailed');
 
                 if (error.name === 'NotAllowedError') {
-                    errorMessage = '麦克风权限被拒绝。请点击Chrome地址栏左侧的🔒或🎤图标，选择"允许"麦克风访问，然后刷新页面重试';
+                    errorMessage = t('microphonePermissionDenied');
                 } else if (error.name === 'NotFoundError') {
-                    errorMessage = '未找到麦克风设备，请检查设备连接或使用其他设备';
+                    errorMessage = t('microphoneNotFound');
                 } else if (error.name === 'NotSupportedError') {
-                    errorMessage = '移动端浏览器不支持录音功能，可以拍摄视频来代替录音';
+                    errorMessage = t('recordingNotSupportedOnMobile');
                 } else if (error.name === 'NotReadableError') {
-                    errorMessage = '麦克风被其他应用占用，请关闭其他使用麦克风的程序后重试';
+                    errorMessage = t('microphoneInUse');
                 } else if (error.name === 'OverconstrainedError') {
-                    errorMessage = '麦克风设备不支持所需的录音参数，请使用其他麦克风设备';
+                    errorMessage = t('microphoneNotCompatible');
                 } else if (error.name === 'SecurityError') {
-                    errorMessage = '安全限制：请确保使用HTTPS协议访问网站';
+                    errorMessage = t('securityErrorUseHttps');
                 } else if (error.message) {
                     errorMessage = error.message;
                 }
@@ -2044,7 +2112,7 @@ export const locale = i18n.global.locale
             try {
                 // 检查是否正在加载模板
                 if (templateLoading.value) {
-                    showAlert('模板正在加载中，请稍后再试', 'warning');
+                    showAlert(t('templateLoadingPleaseWait'), 'warning');
                     return;
                 }
 
@@ -2052,12 +2120,12 @@ export const locale = i18n.global.locale
 
                 // 表单验证
                 if (!selectedTaskId.value) {
-                    showAlert('请选择任务类型', 'warning');
+                    showAlert(t('pleaseSelectTaskType'), 'warning');
                     return;
                 }
 
                 if (!currentForm.model_cls) {
-                    showAlert('请选择模型', 'warning');
+                    showAlert(t('pleaseSelectModel'), 'warning');
                     return;
                 }
 
@@ -2067,39 +2135,39 @@ export const locale = i18n.global.locale
                         if (selectedTaskId.value === 's2v') {
                             currentForm.prompt = '让角色根据音频内容自然说话';
                         } else {
-                            showAlert('请输入提示词', 'warning');
+                            showAlert(t('pleaseEnterPrompt'), 'warning');
                             return;
                         }
                     }
 
                     if (currentForm.prompt.length > 1000) {
-                        showAlert('提示词长度不能超过1000个字符', 'warning');
+                        showAlert(t('promptTooLong'), 'warning');
                         return;
                     }
                 }
 
                 if (selectedTaskId.value === 'i2v' && !currentForm.imageFile) {
-                    showAlert('图生视频任务需要上传参考图片', 'warning');
+                    showAlert(t('i2vTaskRequiresImage'), 'warning');
                     return;
                 }
 
                 if (selectedTaskId.value === 's2v' && !currentForm.imageFile) {
-                    showAlert('数字人任务需要上传角色图片', 'warning');
+                    showAlert(t('s2vTaskRequiresImage'), 'warning');
                     return;
                 }
 
                 if (selectedTaskId.value === 's2v' && !currentForm.audioFile) {
-                    showAlert('数字人任务需要上传音频文件', 'warning');
+                    showAlert(t('s2vTaskRequiresAudio'), 'warning');
                     return;
                 }
 
                 if (selectedTaskId.value === 'animate' && !currentForm.imageFile) {
-                    showAlert('角色替换任务需要上传角色图片', 'warning');
+                    showAlert(t('animateTaskRequiresImage'), 'warning');
                     return;
                 }
 
                 if (selectedTaskId.value === 'animate' && !currentForm.videoFile) {
-                    showAlert('角色替换任务需要上传参考视频', 'warning');
+                    showAlert(t('animateTaskRequiresVideo'), 'warning');
                     return;
                 }
                 submitting.value = true;
@@ -2184,7 +2252,7 @@ export const locale = i18n.global.locale
                             formData.negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
                         } catch (error) {
                             console.error('Failed to prepare multi-person audio:', error);
-                            showAlert('准备多人音频失败: ' + error.message, 'danger');
+                            showAlert(t('prepareMultiPersonAudioFailed') + ': ' + error.message, 'danger');
                             submitting.value = false;
                             return;
                         }
@@ -2210,7 +2278,7 @@ export const locale = i18n.global.locale
                         result = await response.json();
                     } catch (error) {
                         console.error('Failed to parse response JSON:', error);
-                        showAlert('任务提交成功，但解析响应失败', 'warning');
+                        showAlert(t('taskSubmittedButParseFailed'), 'warning');
                         submitting.value = false;
                         return null;
                     }
@@ -2553,9 +2621,8 @@ export const locale = i18n.global.locale
 
         // 获取模板文件URL（优先从缓存，缓存没有则生成URL）- 同步版本
         const getTemplateFileUrl = (fileKey, fileType) => {
-            // 检查参数有效性
+            // 检查参数有效性（静默处理，不打印警告，因为模板可能确实没有某些输入）
             if (!fileKey) {
-                console.warn('getTemplateFileUrl: fileKey为空', { fileKey, fileType });
                 return null;
             }
 
@@ -2577,9 +2644,8 @@ export const locale = i18n.global.locale
         const createTemplateFileUrlRef = (fileKey, fileType) => {
             const urlRef = ref(null);
 
-            // 检查参数有效性
+            // 检查参数有效性（静默处理，不打印警告）
             if (!fileKey) {
-                console.warn('createTemplateFileUrlRef: fileKey为空', { fileKey, fileType });
                 return urlRef;
             }
 
@@ -2650,9 +2716,8 @@ export const locale = i18n.global.locale
 
         // 获取模板文件URL（异步版本，用于预加载等场景）
         const getTemplateFileUrlAsync = async (fileKey, fileType) => {
-            // 检查参数有效性
+            // 检查参数有效性（静默处理，不打印警告，因为模板可能确实没有某些输入）
             if (!fileKey) {
-                console.warn('getTemplateFileUrlAsync: fileKey为空', { fileKey, fileType });
                 return null;
             }
 
@@ -3060,7 +3125,7 @@ export const locale = i18n.global.locale
                     // 使用新的任务文件预加载逻辑
                     await preloadTaskFilesUrl(tasks.value);
                 } else if (response) {
-                    showAlert('刷新任务列表失败', 'danger');
+                    showAlert(t('refreshTaskListFailed'), 'danger');
                 }
                 // 如果response为null，说明是认证错误，apiRequest已经处理了
             } catch (error) {
@@ -3294,7 +3359,7 @@ export const locale = i18n.global.locale
                         const url = window.URL.createObjectURL(videoBlob);
                         window.open(url, '_blank');
                     } else {
-                        showAlert('获取结果失败', 'danger');
+                        showAlert(t('getResultFailed'), 'danger');
                     }
                 } else {
                     showAlert(t('getTaskResultFailedAlert'), 'danger');
@@ -3814,13 +3879,7 @@ export const locale = i18n.global.locale
                                                                 s2vForm.value.detectedFaces = [];
                                                             }
 
-                                                            // Auto detect faces after image is loaded
-                                                            try {
-                                                                await detectFacesInImage(imageUrl);
-                                                            } catch (error) {
-                                                                console.error('Face detection failed:', error);
-                                                                // Don't show error alert, just log it
-                                                            }
+                                                            // 不再自动检测人脸，等待用户手动打开多角色模式开关
                                                         }
                                                     } catch (error) {
                                                         console.warn('Failed to load image file:', error);
@@ -4270,39 +4329,50 @@ export const locale = i18n.global.locale
                 // 1. 加载模型和任务数据
                 await loadModels();
 
-                // 3. 选择任务类型（优先选择数字人任务）
-                // 但如果路由中有 taskType 参数，不设置默认值（让路由处理）
+                // 2. 从路由恢复或设置默认值
                 const routeQuery = router.currentRoute.value?.query || {};
-                const hasTaskTypeInRoute = routeQuery.taskType;
+                const routeTaskType = routeQuery.taskType;
+                const routeModel = routeQuery.model;
+                const routeExpanded = routeQuery.expanded;
 
-                let selectedTaskType = null;
-                if (!hasTaskTypeInRoute) {
-                    // 只有在路由中没有 taskType 参数时，才设置默认值
-                    if (availableTaskTypes.value.includes('s2v')) {
-                        selectedTaskType = 's2v';
-                    } else if (availableTaskTypes.value.length > 0) {
-                        selectedTaskType = availableTaskTypes.value[0];
+                if (routeTaskType && availableTaskTypes.value.includes(routeTaskType)) {
+                    // 路由中有 taskType，恢复它
+                    selectTask(routeTaskType);
+                    
+                    if (routeModel && availableModelClasses.value.includes(routeModel)) {
+                        // 路由中有 model，恢复它（会自动设置 stage）
+                        selectModel(routeModel);
+                    } else {
+                        // 路由中没有 model 或 model 无效，选择第一个模型
+                        const firstModel = availableModelClasses.value[0];
+                        if (firstModel) {
+                            selectModel(firstModel);
+                        }
                     }
-
-                    if (selectedTaskType) {
-                        selectTask(selectedTaskType);
-
-                        // 4. 为选中的任务类型选择第一个模型（如果路由中也没有 model 参数）
-                        const hasModelInRoute = routeQuery.model;
-                        if (!hasModelInRoute) {
-                            const currentForm = getCurrentForm();
-                            if (!currentForm.model_cls && availableModelClasses.value.length > 0) {
-                                selectModel(availableModelClasses.value[0]);
-                            }
+                } else {
+                    // 路由中没有 taskType，设置默认值：s2v
+                    const defaultTaskType = availableTaskTypes.value.includes('s2v') ? 's2v' : availableTaskTypes.value[0];
+                    if (defaultTaskType) {
+                        selectTask(defaultTaskType);
+                        
+                        // 选择该任务下的第一个模型
+                        const firstModel = availableModelClasses.value[0];
+                        if (firstModel) {
+                            selectModel(firstModel);
                         }
                     }
                 }
 
-                // 2. 加载历史记录和素材库（异步，不阻塞首屏）
+                // 3. 恢复 expanded 状态（如果路由中有）
+                if (routeExpanded === 'true') {
+                    expandCreationArea();
+                }
+
+                // 4. 加载历史记录和素材库（异步，不阻塞首屏）
                 refreshTasks(true);
                 loadInspirationData(true);
 
-                // 3. 加载历史记录和素材库文件（异步，不阻塞首屏）
+                // 5. 加载历史记录和素材库文件（异步，不阻塞首屏）
                 getPromptHistory();
                 loadTaskFilesFromCache();
                 loadTemplateFilesFromCache();
@@ -4318,13 +4388,17 @@ export const locale = i18n.global.locale
                     availableModels: models.value,
                     tasks: tasks.value,
                     inspirationItems: inspirationItems.value,
-                    selectedTaskType: selectedTaskType,
-                    selectedModel: selectedModel.value
+                    selectedTaskId: selectedTaskId.value,
+                    selectedModel: selectedModel.value,
+                    currentForm: {
+                        model_cls: getCurrentForm().model_cls,
+                        stage: getCurrentForm().stage
+                    }
                 });
 
             } catch (error) {
                 console.error('初始化失败:', error);
-                showAlert('初始化失败，请刷新页面重试', 'danger');
+                showAlert(t('initFailedPleaseRefresh'), 'danger');
             }
         };
 
@@ -4339,8 +4413,8 @@ export const locale = i18n.global.locale
                 case 't2v':
                     t2vForm.value = {
                         task: 't2v',
-                        model_cls: currentModel || '',
-                        stage: currentStage || 'single_stage',
+                        model_cls: currentModel,
+                        stage: currentStage,
                         prompt: '',
                         seed: Math.floor(Math.random() * 1000000)
                     };
@@ -4348,8 +4422,8 @@ export const locale = i18n.global.locale
                 case 'i2v':
                     i2vForm.value = {
                         task: 'i2v',
-                        model_cls: currentModel || '',
-                        stage: currentStage || 'multi_stage',
+                        model_cls: currentModel,
+                        stage: currentStage,
                         imageFile: null,
                         prompt: '',
                         seed: Math.floor(Math.random() * 1000000)
@@ -4365,8 +4439,8 @@ export const locale = i18n.global.locale
                 case 's2v':
                     s2vForm.value = {
                         task: 's2v',
-                        model_cls: currentModel || '',
-                        stage: currentStage || 'single_stage',
+                        model_cls: currentModel,
+                        stage: currentStage,
                         imageFile: null,
                         audioFile: null,
                         prompt: 'Make the character speak in a natural way according to the audio.',
@@ -4376,8 +4450,8 @@ export const locale = i18n.global.locale
                 case 'animate':
                     animateForm.value = {
                         task: 'animate',
-                        model_cls: currentModel || '',
-                        stage: currentStage || 'single_stage',
+                        model_cls: currentModel,
+                        stage: currentStage,
                         imageFile: null,
                         videoFile: null,
                         prompt: '视频中的人在做动作',
@@ -5079,7 +5153,7 @@ export const locale = i18n.global.locale
                                 try {
                                     localStorage.setItem('taskHistory', JSON.stringify([historyItem]));
                                     console.log('任务历史已保存（完全清理后）');
-                                    showAlert('历史记录空间已清理', 'info');
+                                    showAlert(t('historyCleared'), 'info');
                                 } catch (thirdError) {
                                     console.error('即使完全清理后仍无法保存:', thirdError);
                                     // 不再显示警告，因为历史记录不是必需的功能
@@ -5193,7 +5267,13 @@ export const locale = i18n.global.locale
                 for (const task of tasks.value) {
                     if (task.inputs && task.inputs.input_audio && !seenAudios.has(task.inputs.input_audio)) {
                         // 获取音频URL
-                        const audioUrl = await getTaskFileUrl(task.task_id, 'input_audio');
+                        let audioUrl = await getTaskFileUrl(task.task_id, 'input_audio');
+                        
+                        // 如果返回null，可能是目录类型（多人模式），尝试获取original_audio.wav
+                        if (!audioUrl) {
+                            audioUrl = await getTaskFileUrlFromApi(task.task_id, 'input_audio', 'original_audio.wav');
+                        }
+                        
                         const imageUrl = task.inputs.input_image ? await getTaskFileUrl(task.task_id, 'input_image') : null;
                         if (audioUrl) {
                             uniqueAudios.push({
@@ -5262,24 +5342,17 @@ export const locale = i18n.global.locale
                 }
 
                 showImageTemplates.value = false;
-                showAlert('已应用历史图片', 'success');
+                showAlert(t('historyImageApplied'), 'success');
 
                 // Auto detect faces after image is loaded
-                // 使用有效的 imageUrl，并且确保是 http/https URL 或 data URL
+                // 不再自动检测人脸，等待用户手动打开多角色模式开关
                 try {
                     // 如果 URL 是 http/https，直接使用；否则转换为 data URL
-                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-                        await detectFacesInImage(imageUrl);
-                    } else {
+                    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
                         // 如果不是 http/https URL，转换为 data URL
                         const reader = new FileReader();
                         reader.onload = async (e) => {
-                            try {
-                                await detectFacesInImage(e.target.result);
-                            } catch (error) {
-                                console.error('Face detection failed:', error);
-                                // Don't show error alert, just log it
-                            }
+                            // 不再自动检测人脸
                         };
                         reader.readAsDataURL(file);
                     }
@@ -5290,7 +5363,7 @@ export const locale = i18n.global.locale
 
             } catch (error) {
                 console.error('应用历史图片失败:', error);
-                showAlert('应用历史图片失败: ' + error.message, 'danger');
+                showAlert(t('applyHistoryImageFailed') + ': ' + error.message, 'danger');
             }
         };
 
@@ -5315,10 +5388,10 @@ export const locale = i18n.global.locale
                 currentForm.audioFile = file;
 
                 showAudioTemplates.value = false;
-                showAlert('已应用历史音频', 'success');
+                showAlert(t('historyAudioApplied'), 'success');
             } catch (error) {
                 console.error('应用历史音频失败:', error);
-                showAlert('应用历史音频失败', 'danger');
+                showAlert(t('applyHistoryAudioFailed'), 'danger');
             }
         };
 
@@ -5352,7 +5425,7 @@ export const locale = i18n.global.locale
             const audioUrl = history.url;
             console.log('音频历史URL:', audioUrl);
             if (!audioUrl) {
-                showAlert('音频历史URL获取失败', 'danger');
+                showAlert(t('audioHistoryUrlFailed'), 'danger');
                 return;
             }
 
@@ -5378,7 +5451,7 @@ export const locale = i18n.global.locale
 
             audio.addEventListener('error', () => {
                 console.error('音频播放失败:', audio.error);
-                showAlert('音频播放失败', 'danger');
+                showAlert(t('audioPlaybackFailed'), 'danger');
                 currentPlayingAudio = null;
                 // 调用停止回调
                 if (audioStopCallback) {
@@ -5389,7 +5462,7 @@ export const locale = i18n.global.locale
 
             audio.play().catch(error => {
                 console.error('音频播放失败:', error);
-                showAlert('音频播放失败', 'danger');
+                showAlert(t('audioPlaybackFailed'), 'danger');
                 currentPlayingAudio = null;
             });
         };
@@ -5397,13 +5470,13 @@ export const locale = i18n.global.locale
         // 清空图片历史记录
         const clearImageHistory = () => {
             imageHistory.value = [];
-            showAlert('图片历史已清空', 'info');
+            showAlert(t('imageHistoryCleared'), 'info');
         };
 
         // 清空音频历史记录
         const clearAudioHistory = () => {
             audioHistory.value = [];
-            showAlert('音频历史已清空', 'info');
+            showAlert(t('audioHistoryCleared'), 'info');
         };
 
         // 清理localStorage存储空间
@@ -5431,11 +5504,11 @@ export const locale = i18n.global.locale
                 audioHistory.value = [];
                 promptHistory.value = [];
 
-                showAlert('存储空间已清理', 'success');
+                showAlert(t('storageCleared'), 'success');
                 console.log('localStorage已清理，释放了存储空间');
             } catch (error) {
                 console.error('清理localStorage失败:', error);
-                showAlert('清理存储空间失败', 'danger');
+                showAlert(t('clearStorageFailed'), 'danger');
             }
         };
 
@@ -5510,7 +5583,7 @@ export const locale = i18n.global.locale
                 } catch (error) {
                     console.error('Refresh token failed:', error);
                     logout(false);
-                    showAlert('登录已过期，请重新登录', 'warning', {
+                    showAlert(t('loginExpiredPleaseRelogin'), 'warning', {
                         label: t('login'),
                         onClick: login
                     });
@@ -5548,7 +5621,7 @@ export const locale = i18n.global.locale
                 return response;
             } catch (error) {
                 console.error('API request failed:', error);
-                showAlert('网络请求失败', 'danger');
+                showAlert(t('networkRequestFailed'), 'danger');
                 return null;
             }
         };
@@ -6050,7 +6123,7 @@ export const locale = i18n.global.locale
                             console.warn('视频加载超时（移动端）');
                             icon.className = 'fas fa-play text-sm';
                             currentLoadingVideo = null;
-                            showAlert('视频加载超时，请重试', 'warning');
+                            showAlert(t('videoLoadTimeout'), 'warning');
                         }
                     }, 10000);
 
@@ -6307,13 +6380,7 @@ export const locale = i18n.global.locale
                         }
                         console.log('模板图片文件已加载');
 
-                        // Auto detect faces after image is loaded
-                        try {
-                            await detectFacesInImage(imageUrl);
-                        } catch (error) {
-                            console.error('Face detection failed:', error);
-                            // Don't show error alert, just log it
-                        }
+                        // 不再自动检测人脸，等待用户手动打开多角色模式开关
                     } else {
                         console.warn('Failed to fetch image from URL:', imageUrl);
                         showAlert(t('applyImageFailed'), 'danger');
@@ -6768,7 +6835,7 @@ export const locale = i18n.global.locale
         // 使用模板
         const useTemplate = async (item) => {
             if (!item) {
-                showAlert('模板数据不完整', 'danger');
+                showAlert(t('templateDataIncomplete'), 'danger');
                 return;
             }
             console.log('使用模板:', item);
@@ -6789,7 +6856,7 @@ export const locale = i18n.global.locale
                 currentForm.negative_prompt = item.params?.negative_prompt || '';
                 currentForm.seed = item.params?.seed || 42;
                 currentForm.model_cls = item.model_cls || '';
-                currentForm.stage = item.stage || 'single_stage';
+                currentForm.stage = item.stage || '';
 
                 // 立即关闭模板详情并切换到创建视图，后续资源异步加载
                 showTemplateDetailModal.value = false;
@@ -6833,13 +6900,7 @@ export const locale = i18n.global.locale
                                 currentForm.imageFile = file;
                                 console.log('模板图片文件已加载');
 
-                                // Auto detect faces after image is loaded
-                                try {
-                                    await detectFacesInImage(imageUrl);
-                                } catch (error) {
-                                    console.error('Face detection failed:', error);
-                                    // Don't show error alert, just log it
-                                }
+                                // 不再自动检测人脸，等待用户手动打开多角色模式开关
                             } else {
                                 console.warn('Failed to fetch image from URL:', imageUrl);
                             }
@@ -6928,7 +6989,7 @@ export const locale = i18n.global.locale
 
         // 加载更多灵感
         const loadMoreInspiration = () => {
-            showAlert('加载更多灵感功能开发中...', 'info');
+            showAlert(t('loadMoreInspirationComingSoon'), 'info');
         };
 
         // 新增：任务详情弹窗方法
@@ -7357,69 +7418,69 @@ export const locale = i18n.global.locale
             saveTtsHistory(currentHistory);
         };
 
-    const loadTtsHistory = () => {
-        try {
-            const stored = localStorage.getItem('ttsHistory');
-            if (!stored) return [];
-            const parsed = JSON.parse(stored);
-            ttsHistory.value = Array.isArray(parsed) ? parsed : [];
-            return ttsHistory.value;
-        } catch (error) {
-            console.error('加载TTS历史失败:', error);
+        const loadTtsHistory = () => {
+            try {
+                const stored = localStorage.getItem('ttsHistory');
+                if (!stored) return [];
+                const parsed = JSON.parse(stored);
+                ttsHistory.value = Array.isArray(parsed) ? parsed : [];
+                return ttsHistory.value;
+            } catch (error) {
+                console.error('加载TTS历史失败:', error);
+                ttsHistory.value = [];
+                return [];
+            }
+        };
+
+        const saveTtsHistory = (historyList) => {
+            try {
+                localStorage.setItem('ttsHistory', JSON.stringify(historyList));
+                ttsHistory.value = historyList;
+            } catch (error) {
+                console.error('保存TTS历史失败:', error);
+            }
+        };
+
+        const addTtsHistoryEntry = (text = '', instruction = '') => {
+            const trimmedText = (text || '').trim();
+            const trimmedInstruction = (instruction || '').trim();
+
+            if (!trimmedText && !trimmedInstruction) {
+                return;
+            }
+
+            const currentHistory = loadTtsHistory();
+
+            const existingIndex = currentHistory.findIndex(entry =>
+                entry.text === trimmedText && entry.instruction === trimmedInstruction
+            );
+
+            const timestamp = new Date().toISOString();
+
+            if (existingIndex !== -1) {
+                const existingEntry = currentHistory.splice(existingIndex, 1)[0];
+                existingEntry.timestamp = timestamp;
+                currentHistory.unshift(existingEntry);
+            } else {
+                currentHistory.unshift({
+                    id: Date.now(),
+                    text: trimmedText,
+                    instruction: trimmedInstruction,
+                    timestamp
+                });
+            }
+
+            if (currentHistory.length > 20) {
+                currentHistory.length = 20;
+            }
+
+            saveTtsHistory(currentHistory);
+        };
+
+        const clearTtsHistory = () => {
             ttsHistory.value = [];
-            return [];
-        }
-    };
-
-    const saveTtsHistory = (historyList) => {
-        try {
-            localStorage.setItem('ttsHistory', JSON.stringify(historyList));
-            ttsHistory.value = historyList;
-        } catch (error) {
-            console.error('保存TTS历史失败:', error);
-        }
-    };
-
-    const addTtsHistoryEntry = (text = '', instruction = '') => {
-        const trimmedText = (text || '').trim();
-        const trimmedInstruction = (instruction || '').trim();
-
-        if (!trimmedText && !trimmedInstruction) {
-            return;
-        }
-
-        const currentHistory = loadTtsHistory();
-
-        const existingIndex = currentHistory.findIndex(entry =>
-            entry.text === trimmedText && entry.instruction === trimmedInstruction
-        );
-
-        const timestamp = new Date().toISOString();
-
-        if (existingIndex !== -1) {
-            const existingEntry = currentHistory.splice(existingIndex, 1)[0];
-            existingEntry.timestamp = timestamp;
-            currentHistory.unshift(existingEntry);
-        } else {
-            currentHistory.unshift({
-                id: Date.now(),
-                text: trimmedText,
-                instruction: trimmedInstruction,
-                timestamp
-            });
-        }
-
-        if (currentHistory.length > 20) {
-            currentHistory.length = 20;
-        }
-
-        saveTtsHistory(currentHistory);
-    };
-
-    const clearTtsHistory = () => {
-        ttsHistory.value = [];
-        localStorage.removeItem('ttsHistory');
-    };
+            localStorage.removeItem('ttsHistory');
+        };
 
 export {
             // 任务类型下拉菜单
@@ -7565,6 +7626,7 @@ export {
             getTemplateFile,
             imageTemplates,
             audioTemplates,
+            mergedTemplates,
             showImageTemplates,
             showAudioTemplates,
             mediaModalTab,

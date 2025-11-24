@@ -320,7 +320,7 @@ const toggleAudioPlayback = (inputName) => {
     if (audio.paused) {
         audio.play().catch(error => {
             console.error('播放失败:', error)
-            showAlert('音频播放失败: ' + error.message, 'error')
+            showAlert(t('audioPlaybackFailed') + ': ' + error.message, 'error')
         })
     } else {
         audio.pause()
@@ -692,7 +692,7 @@ watch(audioMaterials, (newMaterials) => {
                                                             @ended="() => onAudioEnded(inputName)"
                                                             @play="() => getAudioState(inputName).isPlaying = true"
                                                             @pause="() => getAudioState(inputName).isPlaying = false"
-                                                            @error="(e) => { console.error('Audio error:', e, url); showAlert('音频加载失败', 'error') }"
+                                                            @error="(e) => { console.error('Audio error:', e, url); showAlert(t('audioLoadFailed'), 'error') }"
                                                             preload="metadata"
                                                             class="hidden"
                                                         ></audio>
@@ -1101,7 +1101,7 @@ watch(audioMaterials, (newMaterials) => {
                                                         @ended="() => onAudioEnded(inputName)"
                                                         @play="() => getAudioState(inputName).isPlaying = true"
                                                         @pause="() => getAudioState(inputName).isPlaying = false"
-                                                        @error="(e) => { console.error('Audio error:', e, url); showAlert('音频加载失败', 'error') }"
+                                                        @error="(e) => { console.error('Audio error:', e, url); showAlert(t('audioLoadFailed'), 'error') }"
                                                         preload="metadata"
                                                         class="hidden"
                                                     ></audio>

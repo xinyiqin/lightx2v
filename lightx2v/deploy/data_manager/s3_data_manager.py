@@ -131,11 +131,10 @@ class S3DataManager(BaseDataManager):
         # Use fmt_path to ensure base_dir includes base_path if needed
         if base_dir:
             # base_dir might already include base_path, or might be relative
-            # If it doesn't start with base_path, prepend it
-            if not base_dir.startswith(self.base_path):
-                prefix = self.fmt_path(self.base_path, base_dir)
-            else:
-                prefix = base_dir
+            # Use fmt_path with abs_path parameter to ensure consistent path handling
+            prefix = self.fmt_path(self.base_path, None, abs_path=base_dir)
+            # If base_dir already starts with base_path, fmt_path will return it as-is
+            # Otherwise, it will prepend base_path
         else:
             prefix = self.base_path
 
@@ -143,16 +142,46 @@ class S3DataManager(BaseDataManager):
         if not prefix.endswith("/"):
             prefix = prefix + "/"
 
-        response = await self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
+        logger.info(f"[S3DataManager.list_files] Listing files with prefix: {prefix}, base_dir: {base_dir}, base_path: {self.base_path}")
+        
+        # Handle pagination for S3 list_objects_v2
         files = []
-        if "Contents" in response:
-            for obj in response["Contents"]:
-                # Remove the prefix from the key to get just the filename
-                key = obj["Key"]
-                if key.startswith(prefix):
-                    filename = key[len(prefix) :]
-                    if filename:  # Skip empty filenames (the directory itself)
-                        files.append(filename)
+        continuation_token = None
+        page = 1
+        
+        while True:
+            list_kwargs = {
+                "Bucket": self.bucket_name,
+                "Prefix": prefix,
+                "MaxKeys": 1000
+            }
+            if continuation_token:
+                list_kwargs["ContinuationToken"] = continuation_token
+            
+            response = await self.s3_client.list_objects_v2(**list_kwargs)
+            
+            if "Contents" in response:
+                page_files = []
+                for obj in response["Contents"]:
+                    # Remove the prefix from the key to get just the filename
+                    key = obj["Key"]
+                    if key.startswith(prefix):
+                        filename = key[len(prefix) :]
+                        if filename:  # Skip empty filenames (the directory itself)
+                            page_files.append(filename)
+                files.extend(page_files)
+                logger.info(f"[S3DataManager.list_files] Page {page}: Found {len(page_files)} files, more pages available. Total so far: {len(files)}")
+            else:
+                logger.info(f"[S3DataManager.list_files] Page {page}: No files found in this page.")
+            
+            # Check if there are more pages
+            if response.get("IsTruncated", False):
+                continuation_token = response.get("NextContinuationToken")
+                page += 1
+            else:
+                logger.info(f"[S3DataManager.list_files] Last page. Total files: {len(files)}")
+                break
+        
         return files
 
     @class_try_catch_async

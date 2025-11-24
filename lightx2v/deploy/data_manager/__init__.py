@@ -4,6 +4,7 @@ import os
 
 import torch
 from PIL import Image
+from loguru import logger
 
 from lightx2v.deploy.common.utils import class_try_catch_async
 
@@ -23,9 +24,18 @@ class BaseDataManager:
 
     def fmt_path(self, base, filename, abs_path=None):
         if abs_path:
+            # If abs_path doesn't start with base_path, prepend it
+            # This ensures consistency between save and list operations
+            if base and not abs_path.startswith(base):
+                result = os.path.join(base, abs_path)
+                logger.debug(f"[BaseDataManager.fmt_path] abs_path={abs_path}, base={base}, result={result}")
+                return result
+            logger.debug(f"[BaseDataManager.fmt_path] abs_path={abs_path}, base={base}, result={abs_path} (already contains base)")
             return abs_path
         else:
-            return os.path.join(base, filename)
+            result = os.path.join(base, filename)
+            logger.debug(f"[BaseDataManager.fmt_path] filename={filename}, base={base}, result={result}")
+            return result
 
     def to_device(self, data, device):
         if isinstance(data, dict):
@@ -160,7 +170,10 @@ class BaseDataManager:
         template_dir = self.get_template_dir(template_type)
         if template_dir is None:
             return []
-        return await self.list_files(base_dir=template_dir)
+        logger.info(f"[BaseDataManager.list_template_files] Listing template files: type={template_type}, template_dir={template_dir}")
+        files = await self.list_files(base_dir=template_dir)
+        logger.info(f"[BaseDataManager.list_template_files] Found {len(files)} files for type {template_type}")
+        return files
 
     @class_try_catch_async
     async def load_template_file(self, template_type, filename):
@@ -188,7 +201,11 @@ class BaseDataManager:
         template_dir = self.get_template_dir(template_type)
         if template_dir is None:
             return None
-        return await self.save_bytes(bytes_data, None, abs_path=os.path.join(template_dir, filename))
+        abs_path = os.path.join(template_dir, filename)
+        logger.info(f"[BaseDataManager.save_template_file] Saving template file: type={template_type}, filename={filename}, template_dir={template_dir}, abs_path={abs_path}")
+        result = await self.save_bytes(bytes_data, None, abs_path=abs_path)
+        logger.info(f"[BaseDataManager.save_template_file] Save result: {result}")
+        return result
 
     @class_try_catch_async
     async def presign_template_url(self, template_type, filename):

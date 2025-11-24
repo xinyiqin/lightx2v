@@ -148,7 +148,7 @@ const createSimilar = async () => {
     }
 
     if (!shareData.value) {
-        showAlert('分享数据不完整', 'danger')
+        showAlert(t('shareDataIncomplete'), 'danger')
         return
     }
 
@@ -171,7 +171,7 @@ const createSimilar = async () => {
         // 如果有输入图片，先设置URL，延迟加载文件
         if (shareData.value.inputs && shareData.value.inputs.input_image) {
             let imageUrl
-            if (shareData.value.share_type === 'template') {
+            if (shareData.value.share_type === 'template' && shareData.value.inputs?.input_image) {
                 // 对于模板，使用模板文件URL
                 imageUrl = getTemplateFileUrl(shareData.value.inputs.input_image, 'images')
             } else {
@@ -205,7 +205,7 @@ const createSimilar = async () => {
         // 如果有输入音频，先设置URL，延迟加载文件
         if (shareData.value.inputs && shareData.value.inputs.input_audio) {
             let audioUrl
-            if (shareData.value.share_type === 'template') {
+            if (shareData.value.share_type === 'template' && shareData.value.inputs?.input_audio) {
                 // 对于模板，使用模板文件URL
                 audioUrl = getTemplateFileUrl(shareData.value.inputs.input_audio, 'audios')
             } else {
