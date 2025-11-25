@@ -66,18 +66,7 @@ def class_try_catch_async(func):
     return wrapper
 
 
-def data_name(x, task_id, is_directory=False):
-    """
-    Generate data filename for task.
-
-    Args:
-        x: Input/output name (e.g., "input_image", "input_audio", "input_video")
-        task_id: Task ID
-        is_directory: If True, don't add file extension (for directory inputs)
-    """
-    if is_directory:
-        # For directory inputs, don't add file extension
-        return f"{task_id}-{x}"
+def data_name(x, task_id):
     if x == "input_image":
         x = x + ".png"
     elif x == "input_video":
@@ -180,10 +169,12 @@ async def preload_data(inp, inp_type, typ, val):
         elif typ == "base64":
             # Decode base64 in background thread to avoid blocking event loop
             data = await asyncio.to_thread(base64.b64decode, val)
+        # For multi-person audio directory, val should be a dict with file structure
         elif typ == "directory":
-            # For multi-person audio directory, val should be a dict with file structure
-            # Return the dict as-is for special handling in load_inputs
-            return {"type": "directory", "data": val}
+            data = {}
+            for fname, b64_data in val.items():
+                data[fname] = await asyncio.to_thread(base64.b64decode, b64_data)
+            return {"type": "directory", "data": data}
         elif typ == "stream":
             # no bytes data need to be saved by data_manager
             data = None
@@ -217,8 +208,11 @@ async def load_inputs(params, raw_inputs, types):
 
         # Handle multi-person audio directory
         if bytes_data is not None and isinstance(bytes_data, dict) and bytes_data.get("type") == "directory":
-            # Store directory structure for special handling
-            inputs_data[inp] = {"type": "directory", "data": bytes_data["data"]}
+            for fname, fdata in bytes_data["data"].items():
+                inputs_data[f"{inp}/{fname}"] = fdata
+            keys = list(bytes_data.keys())
+            raw_inputs.extend(keys)
+            params["extra_inputs"] = {inp: keys}
         elif bytes_data is not None:
             inputs_data[inp] = bytes_data
         else:

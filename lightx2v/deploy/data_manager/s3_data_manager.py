@@ -128,27 +128,17 @@ class S3DataManager(BaseDataManager):
 
     @class_try_catch_async
     async def list_files(self, base_dir=None):
-        # Use fmt_path to ensure base_dir includes base_path if needed
         if base_dir:
-            # base_dir might already include base_path, or might be relative
-            # Use fmt_path with abs_path parameter to ensure consistent path handling
             prefix = self.fmt_path(self.base_path, None, abs_path=base_dir)
-            # If base_dir already starts with base_path, fmt_path will return it as-is
-            # Otherwise, it will prepend base_path
         else:
             prefix = self.base_path
-
-        # Ensure prefix ends with / for proper S3 listing
-        if not prefix.endswith("/"):
-            prefix = prefix + "/"
-
-        logger.info(f"[S3DataManager.list_files] Listing files with prefix: {prefix}, base_dir: {base_dir}, base_path: {self.base_path}")
+        prefix = prefix + "/" if not prefix.endswith("/") else prefix
         
         # Handle pagination for S3 list_objects_v2
         files = []
         continuation_token = None
         page = 1
-        
+
         while True:
             list_kwargs = {
                 "Bucket": self.bucket_name,
@@ -157,9 +147,8 @@ class S3DataManager(BaseDataManager):
             }
             if continuation_token:
                 list_kwargs["ContinuationToken"] = continuation_token
-            
             response = await self.s3_client.list_objects_v2(**list_kwargs)
-            
+
             if "Contents" in response:
                 page_files = []
                 for obj in response["Contents"]:
@@ -170,18 +159,15 @@ class S3DataManager(BaseDataManager):
                         if filename:  # Skip empty filenames (the directory itself)
                             page_files.append(filename)
                 files.extend(page_files)
-                logger.info(f"[S3DataManager.list_files] Page {page}: Found {len(page_files)} files, more pages available. Total so far: {len(files)}")
             else:
-                logger.info(f"[S3DataManager.list_files] Page {page}: No files found in this page.")
-            
+                logger.warning(f"[S3DataManager.list_files] Page {page}: No files found in this page.")
+
             # Check if there are more pages
             if response.get("IsTruncated", False):
                 continuation_token = response.get("NextContinuationToken")
                 page += 1
             else:
-                logger.info(f"[S3DataManager.list_files] Last page. Total files: {len(files)}")
                 break
-        
         return files
 
     @class_try_catch_async

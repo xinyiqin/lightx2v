@@ -11,14 +11,7 @@ from typing import Dict, List, Union
 import numpy as np
 from PIL import Image, ImageDraw
 from loguru import logger
-
-try:
-    from ultralytics import YOLO
-
-    YOLO_AVAILABLE = True
-except ImportError:
-    YOLO_AVAILABLE = False
-    logger.warning("ultralytics not available, face detection will be disabled")
+from ultralytics import YOLO
 
 
 class FaceDetector:
@@ -36,8 +29,6 @@ class FaceDetector:
             conf_threshold: Confidence threshold, default 0.25
             device: Device ('cpu', 'cuda', '0', '1', etc.), None for auto selection
         """
-        if not YOLO_AVAILABLE:
-            raise ImportError("ultralytics is required for face detection. Install it with: pip install ultralytics")
 
         self.conf_threshold = conf_threshold
         self.device = device
@@ -50,10 +41,7 @@ class FaceDetector:
                 self.model = YOLO("yolo11n.pt")  # Lightweight model
             except Exception as e:
                 logger.warning(f"Failed to load default model, trying yolov8n: {e}")
-                try:
-                    self.model = YOLO("yolov8n.pt")
-                except Exception as e2:
-                    raise RuntimeError(f"Failed to load YOLO model: {e2}")
+                self.model = YOLO("yolov8n.pt")
         else:
             logger.info(f"Loading YOLO model from {model_path}")
             self.model = YOLO(model_path)

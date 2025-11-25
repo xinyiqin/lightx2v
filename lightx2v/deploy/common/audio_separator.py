@@ -16,14 +16,8 @@ import torch
 import torchaudio
 from loguru import logger
 
-try:
-    # Import pyannote.audio for speaker diarization
-    from pyannote.audio import Audio, Pipeline
-
-    PYANNOTE_AVAILABLE = True
-except ImportError:
-    PYANNOTE_AVAILABLE = False
-    logger.error("pyannote.audio is required for audio separation. Install it with: pip install pyannote.audio")
+# Import pyannote.audio for speaker diarization
+from pyannote.audio import Audio, Pipeline
 
 
 class AudioSeparator:
@@ -46,9 +40,6 @@ class AudioSeparator:
             device: Device ('cpu', 'cuda', etc.), None for auto selection
             sample_rate: Target sample rate, default 16000
         """
-        if not PYANNOTE_AVAILABLE:
-            raise ImportError("pyannote.audio is required for audio separation. Install it with: pip install pyannote.audio")
-
         self.sample_rate = sample_rate
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         self._init_pyannote(model_path)

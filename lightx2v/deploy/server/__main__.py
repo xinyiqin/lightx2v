@@ -393,27 +393,7 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
 
         # save multimodal inputs data
         for inp, data in inputs_data.items():
-            if isinstance(data, dict) and data.get("type") == "directory":
-                # Check if this is a multi-person audio directory
-                # Save directory structure
-                # Note: data_name for input_audio doesn't add extension, so it's already correct
-                directory_base = data_name(inp, task_id)  # Returns "task_id-input_audio" (no extension)
-                directory_files = data["data"]  # dict: {filename: base64_data}
-
-                # Decode and save files in parallel to avoid blocking
-                async def decode_and_save(filename, base64_content):
-                    # Decode base64 in background thread to avoid blocking event loop
-                    file_bytes = await asyncio.to_thread(base64.b64decode, base64_content)
-                    # Save with directory prefix: task_id-input_audio/filename
-                    file_path = f"{directory_base}/{filename}"
-                    await data_manager.save_bytes(file_bytes, file_path)
-                    logger.info(f"Saved directory file: {file_path}")
-
-                # Save all files concurrently
-                await asyncio.gather(*[decode_and_save(filename, base64_content) for filename, base64_content in directory_files.items()])
-            else:
-                # Single file mode
-                await data_manager.save_bytes(data, data_name(inp, task_id))
+            await data_manager.save_bytes(data, data_name(inp, task_id))
 
         await prepare_subtasks(task_id)
         return {"task_id": task_id, "workers": workers, "params": params, "wait_time": wait_time}
@@ -512,7 +492,6 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
-        # Optional parameter for directory files (e.g., "original_audio.wav")
         filename = request.query_params.get("filename", None)
 
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
@@ -520,35 +499,18 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         assert name not in task["params"], f"Input {name} is a stream"
 
-        input_path = task["inputs"][name]
+        # eg, multi person audio directory input
+        if filename is not None:
+            extra_inputs = task["params"]["extra_inputs"][name]
+            name = f"{name}/{filename}"
+            assert name in task["inputs"], f"Extra input {name} not found in task {task_id}"
+            assert name in extra_inputs, f"Filename {filename} not found in extra inputs"
 
-        # Check if this is a directory (multi-person mode)
-        # For directory inputs, the path is like "task_id-input_audio" (no extension)
-        # We check if config.json exists in the directory to determine if it's a directory
-        config_path = f"{input_path}/config.json"
-        is_directory = await data_manager.file_exists(config_path)
-
-        if is_directory:
-            # For directory inputs, check if filename is specified
-            if filename:
-                # Return URL for specific file in directory (e.g., original_audio.wav)
-                file_path = f"{input_path}/{filename}"
-                file_exists = await data_manager.file_exists(file_path)
-                if not file_exists:
-                    return error_response(f"File {filename} not found in directory {name}", 404)
-
-                url = await data_manager.presign_url(file_path)
-                if url is None:
-                    url = f"./assets/task/input?task_id={task_id}&name={name}&filename={filename}"
-                return {"url": url}
-            else:
-                # No filename specified, return error
-                return error_response(f"Input {name} is a directory (multi-person mode), please specify filename parameter", 400)
-
-        # Single file mode
-        url = await data_manager.presign_url(input_path)
+        url = await data_manager.presign_url(task["inputs"][name])
         if url is None:
             url = f"./assets/task/input?task_id={task_id}&name={name}"
+            if filename is not None:
+                url += f"&filename={filename}"
         return {"url": url}
 
     except Exception as e:
@@ -584,7 +546,6 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
     try:
         name = request.query_params["name"]
         task_id = request.query_params["task_id"]
-        # Optional parameter for directory files (e.g., "original_audio.wav")
         filename = request.query_params.get("filename", None)
 
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
@@ -592,32 +553,13 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         assert name not in task["params"], f"Input {name} is a stream"
 
-        input_path = task["inputs"][name]
-
-        # Check if this is a directory (multi-person mode)
-        # For directory inputs, the path is like "task_id-input_audio" (no extension)
-        # We check if config.json exists in the directory to determine if it's a directory
-        config_path = f"{input_path}/config.json"
-        is_directory = await data_manager.file_exists(config_path)
-
-        if is_directory:
-            # For directory inputs, check if filename is specified
-            if filename:
-                # Return specific file from directory (e.g., original_audio.wav)
-                file_path = f"{input_path}/{filename}"
-                data = await data_manager.load_bytes(file_path)
-
-                # Set correct Content-Type based on filename
-                content_type = guess_file_type(filename, "application/octet-stream")
-                headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-                headers["Cache-Control"] = "public, max-age=3600"
-                return Response(content=data, media_type=content_type, headers=headers)
-            else:
-                # No filename specified, return error
-                return error_response(f"Input {name} is a directory (multi-person mode), please specify filename parameter", 400)
-
-        # Single file mode
-        data = await data_manager.load_bytes(input_path)
+        # eg, multi person audio directory input
+        if filename is not None:
+            extra_inputs = task["params"]["extra_inputs"][name]
+            name = f"{name}/{filename}"
+            assert name in task["inputs"], f"Extra input {name} not found in task {task_id}"
+            assert name in extra_inputs, f"Filename {filename} not found in extra inputs"
+        data = await data_manager.load_bytes(task["inputs"][name])
 
         #  set correct Content-Type
         content_type = guess_file_type(name, "application/octet-stream")
@@ -2636,6 +2578,7 @@ if __name__ == "__main__":
     parser.add_argument("--volcengine_tts_list_json", type=str, default=dft_volcengine_tts_list_json)
     parser.add_argument("--ip", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--audio_separator_model_path", type=str, default="")
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
@@ -2643,12 +2586,7 @@ if __name__ == "__main__":
     volcengine_tts_client = VolcEngineTTSClient(args.volcengine_tts_list_json)
     volcengine_podcast_client = VolcEnginePodcastClient()
     face_detector = FaceDetector()
-    try:
-        audio_separator = AudioSeparator()
-        logger.info("Audio separator initialized successfully")
-    except Exception as e:
-        logger.warning(f"Audio separator initialization failed: {e}. Audio separation feature will be disabled.")
-        audio_separator = None
+    audio_separator = AudioSeparator(model_path=args.audio_separator_model_path)
     auth_manager = AuthManager()
     if args.task_url.startswith("/"):
         task_manager = LocalTaskManager(args.task_url, metrics_monitor)
