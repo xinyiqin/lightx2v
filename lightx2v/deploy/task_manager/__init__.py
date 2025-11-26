@@ -82,6 +82,14 @@ class BaseTaskManager:
             if k in data:
                 data[k] = TaskStatus[data[k]]
 
+    def align_extra_inputs(self, task, subtask):
+        if "extra_inputs" in task.get("params", {}):
+            for inp, fs in task["params"]["extra_inputs"].items():
+                if inp in subtask["inputs"]:
+                    for f in fs:
+                        subtask["inputs"][f] = task["inputs"][f]
+                        logger.info(f"Align extra input: {f} for subtask {subtask['task_id']} {subtask['worker_name']}")
+
     async def create_share(self, task_id, user_id, share_type, valid_days, auth_type, auth_value):
         assert share_type in ["task", "template"], f"do not support {share_type} share type!"
         assert auth_type in ["public", "login", "user_id"], f"do not support {auth_type} auth type!"
@@ -129,6 +137,9 @@ class BaseTaskManager:
         task_type, model_cls, stage = worker_keys
         cur_t = current_time()
         task_id = str(uuid.uuid4())
+        extra_inputs = []
+        for fs in params.get("extra_inputs", {}).values():
+            extra_inputs.extend(fs)
         task = {
             "task_id": task_id,
             "task_type": task_type,
@@ -140,7 +151,7 @@ class BaseTaskManager:
             "status": TaskStatus.CREATED,
             "extra_info": "",
             "tag": "",
-            "inputs": {x: data_name(x, task_id) for x in inputs},
+            "inputs": {x: data_name(x, task_id) for x in inputs + extra_inputs},
             "outputs": {x: data_name(x, task_id) for x in outputs},
             "user_id": user_id,
         }

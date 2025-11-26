@@ -208,11 +208,11 @@ async def load_inputs(params, raw_inputs, types):
 
         # Handle multi-person audio directory
         if bytes_data is not None and isinstance(bytes_data, dict) and bytes_data.get("type") == "directory":
+            fs = []
             for fname, fdata in bytes_data["data"].items():
                 inputs_data[f"{inp}/{fname}"] = fdata
-            keys = list(bytes_data.keys())
-            raw_inputs.extend(keys)
-            params["extra_inputs"] = {inp: keys}
+                fs.append(f"{inp}/{fname}")
+            params["extra_inputs"] = {inp: fs}
         elif bytes_data is not None:
             inputs_data[inp] = bytes_data
         else:

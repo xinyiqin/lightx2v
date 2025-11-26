@@ -18,7 +18,16 @@ from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.utils.utils import seed_all
-from tools.preprocess.preprocess_data import process_input_video, get_preprocess_parser
+
+def init_tools():
+    import sys
+    import lightx2v
+    preprocess_path = os.path.abspath(os.path.join(lightx2v.__path__[0], "..", "tools","preprocess"))
+    assert os.path.exists(preprocess_path), f"lightx2v tools preprocess path not found: {preprocess_path}"
+    sys.path.append(preprocess_path)
+
+init_tools()
+from preprocess_data import process_input_video, get_preprocess_parser
 
 
 class BaseWorker:
@@ -127,9 +136,8 @@ class BaseWorker:
             if len(extra_audio_inputs) > 0:
                 os.makedirs(tmp_audio_path, exist_ok=True)
                 for inp in extra_audio_inputs:
-                    inp_path = inputs[inp]
-                    tmp_path = os.path.join(tmp_audio_path, inp_path)
-                    inp_data = await data_manager.load_bytes(inp_path)
+                    tmp_path = os.path.join(tmp_dir, inputs[inp])
+                    inp_data = await data_manager.load_bytes(inputs[inp])
                     with open(tmp_path, "wb") as fout:
                         fout.write(inp_data)
             else:

@@ -142,6 +142,7 @@ class LocalTaskManager(BaseTaskManager):
                     sub["params"] = task["params"]
                     sub["status"] = TaskStatus.PENDING
                     sub["update_t"] = current_time()
+                    self.align_extra_inputs(task, sub)
                     nexts.append(sub)
         if len(nexts) > 0:
             task["status"] = TaskStatus.PENDING

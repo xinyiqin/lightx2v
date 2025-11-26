@@ -533,6 +533,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                                 extra_info=sub["extra_info"],
                                 src_status=sub["status"],
                             )
+                            self.align_extra_inputs(task, sub)
                             nexts.append(sub)
                 if len(nexts) > 0:
                     await self.update_task(conn, task_id, status=TaskStatus.PENDING)

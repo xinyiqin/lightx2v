@@ -4,7 +4,6 @@ import os
 
 import torch
 from PIL import Image
-from loguru import logger
 
 from lightx2v.deploy.common.utils import class_try_catch_async
 
