@@ -1059,7 +1059,7 @@ export const locale = i18n.global.locale
                     // 使用合并后的模板列表
                     const merged = data.templates?.merged || [];
                     mergedTemplates.value = merged;
-                    
+
                     // 为了保持向后兼容，从合并列表中提取图片和音频
                     const images = [];
                     const audios = [];
@@ -1071,7 +1071,7 @@ export const locale = i18n.global.locale
                             audios.push(template.audio);
                         }
                     });
-                    
+
                     refreshTemplateFileUrl({ images, audios, videos: data.templates?.videos || [] });
                     const templatesData = {
                         images: images,
@@ -1553,7 +1553,7 @@ export const locale = i18n.global.locale
                 }
             }
             selectedTaskId.value = taskType;
-            
+
             console.log('[selectTask] 任务类型已更新:', {
                 newTaskType: selectedTaskId.value,
                 availableModels: models.value.filter(m => m.task === taskType)
@@ -1617,7 +1617,7 @@ export const locale = i18n.global.locale
                 // 检查当前选择的模型和stage是否属于新任务类型
                 const currentModel = currentForm.model_cls || selectedModel.value;
                 const currentStage = currentForm.stage;
-                const isCurrentModelValid = currentModel && availableModels.some(m => 
+                const isCurrentModelValid = currentModel && availableModels.some(m =>
                     m.model_cls === currentModel && m.stage === currentStage
                 );
 
@@ -1808,23 +1808,23 @@ export const locale = i18n.global.locale
                         cleanedAudioData = parts.slice(1).join(','); // Join in case there are multiple commas
                     }
                 }
-                
+
                 // Remove any whitespace and newlines
                 cleanedAudioData = cleanedAudioData.trim().replace(/\s/g, '');
-                
+
                 // Check if it's a valid base64 string length (must be multiple of 4)
                 const missingPadding = cleanedAudioData.length % 4;
                 if (missingPadding !== 0) {
                     console.warn(`[separateAudioTracks] Base64 string length (${cleanedAudioData.length}) is not a multiple of 4, adding padding`);
                     cleanedAudioData += '='.repeat(4 - missingPadding);
                 }
-                
+
                 // Reconstruct data URL if it was originally a data URL
                 if (audioData.startsWith('data:')) {
                     const header = audioData.split(',')[0];
                     cleanedAudioData = `${header},${cleanedAudioData}`;
                 }
-                
+
                 console.log(`[separateAudioTracks] Sending audio for separation, length: ${cleanedAudioData.length}, num_speakers: ${numSpeakers}`);
 
                 const response = await apiCall('/api/v1/audio/separate', {
@@ -4338,7 +4338,7 @@ export const locale = i18n.global.locale
                 if (routeTaskType && availableTaskTypes.value.includes(routeTaskType)) {
                     // 路由中有 taskType，恢复它
                     selectTask(routeTaskType);
-                    
+
                     if (routeModel && availableModelClasses.value.includes(routeModel)) {
                         // 路由中有 model，恢复它（会自动设置 stage）
                         selectModel(routeModel);
@@ -4354,7 +4354,7 @@ export const locale = i18n.global.locale
                     const defaultTaskType = availableTaskTypes.value.includes('s2v') ? 's2v' : availableTaskTypes.value[0];
                     if (defaultTaskType) {
                         selectTask(defaultTaskType);
-                        
+
                         // 选择该任务下的第一个模型
                         const firstModel = availableModelClasses.value[0];
                         if (firstModel) {
@@ -5268,12 +5268,12 @@ export const locale = i18n.global.locale
                     if (task.inputs && task.inputs.input_audio && !seenAudios.has(task.inputs.input_audio)) {
                         // 获取音频URL
                         let audioUrl = await getTaskFileUrl(task.task_id, 'input_audio');
-                        
+
                         // 如果返回null，可能是目录类型（多人模式），尝试获取original_audio.wav
                         if (!audioUrl) {
                             audioUrl = await getTaskFileUrlFromApi(task.task_id, 'input_audio', 'original_audio.wav');
                         }
-                        
+
                         const imageUrl = task.inputs.input_image ? await getTaskFileUrl(task.task_id, 'input_image') : null;
                         if (audioUrl) {
                             uniqueAudios.push({

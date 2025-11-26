@@ -455,8 +455,8 @@ watch([currentDetectedFaces, currentAudioPreview, selectedTaskId], ([newFaces, a
     // 如果角色个数 > 1 且有音频预览
     if (faceCount > 1 && audioUrl) {
         // 检查是否需要分离（避免重复分离）
-        const needsSeparation = 
-            faceCount !== lastSeparatedFaceCount.value || 
+        const needsSeparation =
+            faceCount !== lastSeparatedFaceCount.value ||
             audioUrl !== lastSeparatedAudioUrl.value
 
         if (needsSeparation) {
@@ -2816,7 +2816,7 @@ onUnmounted(() => {
                                             </button>
 
                                             <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight" :class="{ 'text-[#86868b] dark:text-[#98989d]': isMultiRoleMode }">{{ isMultiRoleMode ? '多角色模式' : '单角色模式' }}</span>
-                                            
+
                                             <!-- Info 图标按钮 -->
                                             <button
                                                 @click="showRoleModeInfo = true"
@@ -2829,7 +2829,7 @@ onUnmounted(() => {
                                     </div>
 
                                     <!-- 角色模式说明弹窗 - Apple 风格 -->
-                                    <div v-if="showRoleModeInfo" 
+                                    <div v-if="showRoleModeInfo"
                                         class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4"
                                         @click="showRoleModeInfo = false">
                                         <div class="w-full max-w-md bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] backdrop-saturate-[180%] border border-black/10 dark:border-white/10 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden"

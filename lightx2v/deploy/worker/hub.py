@@ -3,6 +3,7 @@ import ctypes
 import gc
 import json
 import os
+import sys
 import tempfile
 import threading
 import traceback
@@ -11,6 +12,7 @@ import torch
 import torch.distributed as dist
 from loguru import logger
 
+import lightx2v
 from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.infer import init_runner  # noqa
 from lightx2v.utils.input_info import set_input_info
@@ -19,15 +21,11 @@ from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import set_config, set_parallel_config
 from lightx2v.utils.utils import seed_all
 
-def init_tools():
-    import sys
-    import lightx2v
-    preprocess_path = os.path.abspath(os.path.join(lightx2v.__path__[0], "..", "tools","preprocess"))
+
+def init_tools_preprocess():
+    preprocess_path = os.path.abspath(os.path.join(lightx2v.__path__[0], "..", "tools", "preprocess"))
     assert os.path.exists(preprocess_path), f"lightx2v tools preprocess path not found: {preprocess_path}"
     sys.path.append(preprocess_path)
-
-init_tools()
-from preprocess_data import process_input_video, get_preprocess_parser
 
 
 class BaseWorker:
@@ -77,6 +75,8 @@ class BaseWorker:
     async def prepare_input_video(self, params, inputs, tmp_dir, data_manager):
         if not self.is_animate_model():
             return
+        init_tools_preprocess()
+        from preprocess_data import get_preprocess_parser, process_input_video
 
         result_paths = {}
         if self.rank == 0:
@@ -475,7 +475,7 @@ class SegmentDiTWorker(BaseWorker):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
-            logger.info(f"run params: {safe_log_dict(params)}, inputs: {safe_log_dict(inputs)}, outputs: {safe_log_dict(outputs)}")
+            logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.set_inputs(params)
 
             await self.prepare_dit_inputs(inputs, data_manager)

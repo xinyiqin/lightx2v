@@ -133,18 +133,14 @@ class S3DataManager(BaseDataManager):
         else:
             prefix = self.base_path
         prefix = prefix + "/" if not prefix.endswith("/") else prefix
-        
+
         # Handle pagination for S3 list_objects_v2
         files = []
         continuation_token = None
         page = 1
 
         while True:
-            list_kwargs = {
-                "Bucket": self.bucket_name,
-                "Prefix": prefix,
-                "MaxKeys": 1000
-            }
+            list_kwargs = {"Bucket": self.bucket_name, "Prefix": prefix, "MaxKeys": 1000}
             if continuation_token:
                 list_kwargs["ContinuationToken"] = continuation_token
             response = await self.s3_client.list_objects_v2(**list_kwargs)

@@ -497,7 +497,8 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
-        assert name not in task["params"], f"Input {name} is a stream"
+        if name in task["params"]:
+            return error_response(f"Input {name} is a stream", 400)
 
         # eg, multi person audio directory input
         if filename is not None:
@@ -551,7 +552,8 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
-        assert name not in task["params"], f"Input {name} is a stream"
+        if name in task["params"]:
+            return error_response(f"Input {name} is a stream", 400)
 
         # eg, multi person audio directory input
         if filename is not None:
@@ -836,47 +838,47 @@ async def api_v1_template_list(request: Request):
         all_images_sorted = sorted(all_images)
         image_map = {}  # 文件名（不含扩展名） -> {"filename": 完整文件名, "url": URL}
         for img_name in all_images_sorted:
-            img_name_without_ext = img_name.rsplit('.', 1)[0] if '.' in img_name else img_name
+            img_name_without_ext = img_name.rsplit(".", 1)[0] if "." in img_name else img_name
             url = await data_manager.presign_template_url("images", img_name)
             if url is None:
                 url = f"./assets/template/images/{img_name}"
             image_map[img_name_without_ext] = {"filename": img_name, "url": url}
-        
+
         # 创建音频文件名（不含扩展名）到音频信息的映射
         all_audios_sorted = sorted(all_audios)
         audio_map = {}  # 文件名（不含扩展名） -> {"filename": 完整文件名, "url": URL}
         for audio_name in all_audios_sorted:
-            audio_name_without_ext = audio_name.rsplit('.', 1)[0] if '.' in audio_name else audio_name
+            audio_name_without_ext = audio_name.rsplit(".", 1)[0] if "." in audio_name else audio_name
             url = await data_manager.presign_template_url("audios", audio_name)
             if url is None:
                 url = f"./assets/template/audios/{audio_name}"
             audio_map[audio_name_without_ext] = {"filename": audio_name, "url": url}
-        
+
         # 合并音频和图片模板，基于文件名前缀匹配
         # 获取所有唯一的基础文件名（不含扩展名）
         all_base_names = set(list(image_map.keys()) + list(audio_map.keys()))
         all_base_names_sorted = sorted(all_base_names)
-        
+
         # 构建合并后的模板列表
         merged_templates = []
         for base_name in all_base_names_sorted:
             template_item = {
                 "id": base_name,  # 使用基础文件名作为ID
                 "image": image_map.get(base_name),
-                "audio": audio_map.get(base_name)
+                "audio": audio_map.get(base_name),
             }
             merged_templates.append(template_item)
-        
+
         # 分页处理
         total = len(merged_templates)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-        
+
         paginated_templates = []
         if page <= total_pages:
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
             paginated_templates = merged_templates[start_idx:end_idx]
-        
+
         # 为了保持向后兼容，仍然返回images和audios字段（但可能为空）
         # 同时添加新的merged字段
         return {
@@ -884,7 +886,7 @@ async def api_v1_template_list(request: Request):
                 "images": [],  # 保持向后兼容，但设为空
                 "audios": [],  # 保持向后兼容，但设为空
                 "videos": [],  # 保持向后兼容
-                "merged": paginated_templates  # 新的合并列表
+                "merged": paginated_templates,  # 新的合并列表
             },
             "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages},
         }
@@ -2493,21 +2495,21 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
             else:
                 encoded = request.audio
                 logger.debug(f"Audio base64 string length: {len(encoded)}")
-            
+
             # Clean the base64 string: remove whitespace and ensure proper padding
-            encoded = encoded.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+            encoded = encoded.strip().replace("\n", "").replace("\r", "").replace(" ", "")
             original_length = len(encoded)
-            
+
             # Add padding if needed (base64 strings must be multiples of 4)
             missing_padding = len(encoded) % 4
             if missing_padding:
                 logger.warning(f"Base64 string length ({original_length}) is not a multiple of 4, adding {4 - missing_padding} padding characters")
-                encoded += '=' * (4 - missing_padding)
-            
+                encoded += "=" * (4 - missing_padding)
+
             # Validate base64 string before decoding
             if len(encoded) % 4 != 0:
                 raise ValueError(f"Base64 string length ({len(encoded)}) is still not a multiple of 4 after padding")
-            
+
             audio_bytes = base64.b64decode(encoded, validate=True)
             logger.debug(f"Successfully decoded base64 audio, size: {len(audio_bytes)} bytes")
         except Exception as e:
