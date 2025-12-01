@@ -4,10 +4,10 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import tempfile
 import traceback
 import uuid
-import re
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -18,7 +18,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
-from starlette.websockets import WebSocketState
 
 from lightx2v.deploy.common.audio_separator import AudioSeparator
 from lightx2v.deploy.common.face_detector import FaceDetector
@@ -1155,6 +1154,7 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
         # 使用回调函数实时推送音频
         async def on_round_complete(round_info):
             await safe_send_json({"type": "audio_update", "data": round_info})
+
         params["on_round_complete"] = on_round_complete
 
         # 创建一个任务来处理停止信号
@@ -1195,15 +1195,17 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
             audio_url = f"/api/v1/podcast/audio?session_id={session_id}&filename={audio_path}"
         logger.info(f"completed podcast generation (session: {session_id})")
 
-        await safe_send_json({
-            "type": "complete",
-            "data": {
-                "audio_url": audio_url,
-                "subtitles": podcast_info["subtitles"],
-                "session_id": session_id,
-                "user_id": user_id,
-            },
-        })
+        await safe_send_json(
+            {
+                "type": "complete",
+                "data": {
+                    "audio_url": audio_url,
+                    "subtitles": podcast_info["subtitles"],
+                    "session_id": session_id,
+                    "user_id": user_id,
+                },
+            }
+        )
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
@@ -1247,20 +1249,15 @@ async def api_v1_podcast_audio(request: Request, user=Depends(verify_user_access
         logger.debug(f"Serving audio file from {func.__name__} with args: {func_args}, start_byte: {start_byte}, end_byte: {end_byte}")
         file_bytes = await func(*func_args)
         file_size = len(file_bytes)
-        file_bytes = file_bytes[start_byte: end_byte]
+        file_bytes = file_bytes[start_byte:end_byte]
 
         content_length = len(file_bytes)
         media_type = "audio/mpeg"
         status_code = 200
-        headers = {
-            "Content-Length": str(content_length),
-            "Accept-Ranges": "bytes",
-            "Content-Type": media_type,
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers = {"Content-Length": str(content_length), "Accept-Ranges": "bytes", "Content-Type": media_type, "Content-Disposition": f'attachment; filename="{filename}"'}
 
         if start_byte is not None and start_byte > 0:
-            status_code = 206   # Partial Content
+            status_code = 206  # Partial Content
             headers["Content-Range"] = f"bytes {start_byte}-{start_byte + content_length - 1}/{file_size}"
         return Response(content=file_bytes, media_type=media_type, status_code=status_code, headers=headers)
 
@@ -1277,7 +1274,7 @@ async def api_v1_podcast_history(request: Request, user=Depends(verify_user_acce
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         assert page > 0 and page_size > 0, "page and page_size must be greater than 0"
-        status = request.query_params.get("status", None) # has_audio, no_audio
+        status = request.query_params.get("status", None)  # has_audio, no_audio
 
         query_params = {"user_id": user_id}
         if status == "has_audio":

@@ -5,16 +5,14 @@ import io
 import json
 import os
 import struct
-import time
 import uuid
-
-from pydub import AudioSegment
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Callable, List, Optional
 
 import websockets
 from loguru import logger
+from pydub import AudioSegment
 
 
 # Protocol definitions (from podcasts_protocols)
@@ -346,8 +344,8 @@ class PodcastRoundPostProcessor:
 
         self.temp_merged_audio_name = "merged_audio.mp3"
         self.output_merged_audio_name = f"{session_id}-merged_audio.mp3"
-        self.subtitle_timestamps = [] # 记录字幕时间戳
-        self.current_audio_duration = 0.0 # 当前音频时长
+        self.subtitle_timestamps = []  # 记录字幕时间戳
+        self.current_audio_duration = 0.0  # 当前音频时长
         self.merged_audio = None  # 用于存储合并的音频对象
         self.merged_audio_bytes = None
 
@@ -374,18 +372,18 @@ class PodcastRoundPostProcessor:
         self.merged_audio.export(merged_io, format="mp3")
         self.merged_audio_bytes = merged_io.getvalue()
         if self.data_manager:
-            await self.data_manager.save_podcast_temp_session_file(
-                self.session_id, self.temp_merged_audio_name, self.merged_audio_bytes
-            )
+            await self.data_manager.save_podcast_temp_session_file(self.session_id, self.temp_merged_audio_name, self.merged_audio_bytes)
         merged_file_size = len(self.merged_audio_bytes)
 
         # 记录字幕时间戳
-        self.subtitle_timestamps.append({
-            "start": self.current_audio_duration,
-            "end": self.current_audio_duration + round_duration,
-            "text": text,
-            "speaker": voice,
-        })
+        self.subtitle_timestamps.append(
+            {
+                "start": self.current_audio_duration,
+                "end": self.current_audio_duration + round_duration,
+                "text": text,
+                "speaker": voice,
+            }
+        )
         self.current_audio_duration += round_duration
         logger.debug(f"Merged audio updated: {merged_file_size} bytes, duration: {self.current_audio_duration:.2f}s")
 
@@ -400,9 +398,7 @@ class PodcastRoundPostProcessor:
 
     async def postprocess_final(self):
         if self.data_manager:
-            await self.data_manager.save_podcast_output_file(
-                self.output_merged_audio_name, self.merged_audio_bytes
-            )
+            await self.data_manager.save_podcast_output_file(self.output_merged_audio_name, self.merged_audio_bytes)
         return {
             "subtitles": self.subtitle_timestamps,
             "audio_name": self.output_merged_audio_name,
@@ -412,6 +408,7 @@ class PodcastRoundPostProcessor:
         if self.data_manager:
             await self.data_manager.clear_podcast_temp_session_dir(self.session_id)
             self.data_manager = None
+
 
 class VolcEnginePodcastClient:
     """
@@ -435,7 +432,7 @@ class VolcEnginePodcastClient:
     async def podcast_request(
         self,
         session_id: str,
-        data_manager = None,
+        data_manager=None,
         text: str = "",
         input_url: str = "",
         prompt_text: str = "",
@@ -635,6 +632,7 @@ class VolcEnginePodcastClient:
             if websocket:
                 await websocket.close()
         return None
+
 
 async def test(args):
     """
