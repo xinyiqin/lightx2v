@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 
+from loguru import logger
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time, str2time, time2str
 from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
@@ -29,7 +30,17 @@ class LocalTaskManager(BaseTaskManager):
         super().parse_dict(data)
         for k in ["create_t", "update_t", "ping_t", "valid_t"]:
             if k in data:
-                data[k] = str2time(data[k])
+                if isinstance(data[k], (int, float)):
+                    data[k] = float(data[k])
+                elif isinstance(data[k], str):
+                    data[k] = str2time(data[k])
+                else:
+                    logger.warning(f"Unexpected type for {k}: {type(data[k])}, value: {data[k]}")
+                    try:
+                        data[k] = float(data[k])
+                    except (ValueError, TypeError):
+                        logger.error(f"Failed to parse {k}: {data[k]}")
+                        data[k] = current_time()
 
     def save(self, task, subtasks, with_fmt=True):
         info = {"task": task, "subtasks": subtasks}
@@ -348,6 +359,61 @@ class LocalTaskManager(BaseTaskManager):
         data = json.load(open(fpath))
         self.parse_dict(data)
         return data
+
+    @class_try_catch_async
+    async def update_user_extra_info(self, user_id, extra_info):
+        """更新用户的 extra_info 字段"""
+        import time
+        fpath = self.get_user_filename(user_id)
+        if not os.path.exists(fpath):
+            raise ValueError(f"User {user_id} not found")
+        
+        with open(fpath, 'r', encoding='utf-8') as f:
+            user_data = json.load(f)
+        
+        user_data["extra_info"] = extra_info
+        user_data["update_t"] = time.time()
+        
+        with open(fpath, 'w', encoding='utf-8') as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=4)
+        
+        return True
+
+    @class_try_catch_async
+    async def save_user_voice_clone(self, user_id, speaker_id, name=""):
+        import time
+        user = await self.query_user(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+        extra_info = user.get("extra_info") or {}
+        if not isinstance(extra_info, dict):
+            extra_info = {}
+        voice_clones = extra_info.get("voice_clones", [])
+        if not isinstance(voice_clones, list):
+            voice_clones = []
+        existing_index = None
+        for i, vc in enumerate(voice_clones):
+            if isinstance(vc, dict) and vc.get("speaker_id") == speaker_id:
+                existing_index = i
+                break
+        
+        clone_info = {
+            "speaker_id": speaker_id,
+            "name": name or f"Voice Clone {len(voice_clones) + 1}",
+            "create_t": time.time() if existing_index is None else voice_clones[existing_index].get("create_t", time.time()),
+            "update_t": time.time(),
+        }
+        
+        if existing_index is not None:
+            voice_clones[existing_index] = clone_info
+        else:
+            voice_clones.append(clone_info)
+        extra_info["voice_clones"] = voice_clones
+        success = await self.update_user_extra_info(user_id, extra_info)
+        if not success:
+            raise ValueError(f"Failed to update user extra_info for user {user_id}")
+        
+        return True
 
 
 async def test():

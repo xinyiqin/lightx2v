@@ -211,8 +211,8 @@
           ></textarea>
         </div>
 
-        <!-- 语音指令区域 - Apple 风格 -->
-        <div>
+              <!-- 语音指令区域 - Apple 风格（克隆音色时隐藏） -->
+        <div v-if="!isCloneVoice">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <i class="fas fa-magic text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
@@ -238,119 +238,231 @@
 
         <!-- 音色选择区域 - Apple 风格 -->
         <div>
-          <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-2">
-              <i class="fas fa-microphone-alt text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
-              <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('selectVoice') }}</span>
-
+          <!-- 标签切换 -->
+          <div class="flex items-center gap-2 mb-4">
             <button
-              @click="openVoiceHistoryPanel"
-              class="w-8 h-8 flex items-center justify-center rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] transition-all duration-200"
-              :title="t('ttsHistoryTabVoice')"
+              @click="voiceTab = 'ai'"
+              class="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+              :class="voiceTab === 'ai'
+                ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white'
+                : 'bg-white/80 dark:bg-[#2c2c2e]/80 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c]'"
             >
-              <i class="fas fa-history text-xs"></i>
+              {{ t('aiVoice') }}
+            </button>
+            <button
+              @click="voiceTab = 'clone'"
+              class="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+              :class="voiceTab === 'clone'
+                ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white'
+                : 'bg-white/80 dark:bg-[#2c2c2e]/80 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c]'"
+            >
+              {{ t('clonedVoice') }}
             </button>
           </div>
 
-          <div class="flex items-center gap-3">
-            <!-- 搜索框 - Apple 风格 -->
-            <div class="relative w-52">
-              <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] dark:text-[#98989d] text-xs pointer-events-none z-10"></i>
-              <input
-                v-model="searchQuery"
-                :placeholder="t('searchVoice')"
-                class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-lg py-2 pl-9 pr-3 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 transition-all duration-200"
-                type="text"
-              />
+          <!-- AI音色区域 -->
+          <div v-if="voiceTab === 'ai'">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <i class="fas fa-microphone-alt text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('selectVoice') }}</span>
+
+                <button
+                  @click="openVoiceHistoryPanel"
+                  class="w-8 h-8 flex items-center justify-center rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] transition-all duration-200"
+                  :title="t('ttsHistoryTabVoice')"
+                >
+                  <i class="fas fa-history text-xs"></i>
+                </button>
+              </div>
             </div>
 
-            <!-- 筛选按钮 - Apple 风格 -->
-            <button @click="toggleFilterPanel"
-              class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-lg transition-all duration-200 text-sm font-medium tracking-tight">
-              <i class="fas fa-filter text-xs"></i>
-              <span>{{ t('filter') }}</span>
-            </button>
-          </div>
-          </div>
-          </div>
-          <!-- 音色列表容器 - Apple 风格 -->
-          <div class="bg-white/50 dark:bg-[#2c2c2e]/50 backdrop-blur-[10px] border border-black/6 dark:border-white/6 rounded-2xl p-5 max-h-[500px] overflow-y-auto main-scrollbar pr-3" ref="voiceListContainer">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label
-                v-for="(voice, index) in filteredVoices"
-                :key="index"
-                class="relative m-0 p-0 cursor-pointer"
-              >
+            <div class="flex items-center gap-3">
+              <!-- 搜索框 - Apple 风格 -->
+              <div class="relative w-52">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] dark:text-[#98989d] text-xs pointer-events-none z-10"></i>
                 <input
-                  type="radio"
-                  :value="voice.voice_type"
-                  v-model="selectedVoice"
-                  @change="onVoiceSelect(voice)"
-                  class="sr-only"
+                  v-model="searchQuery"
+                  :placeholder="t('searchVoice')"
+                  class="w-full bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-lg py-2 pl-9 pr-3 text-sm text-[#1d1d1f] dark:text-[#f5f5f7] placeholder-[#86868b] dark:placeholder-[#98989d] tracking-tight hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 focus:outline-none focus:border-[color:var(--brand-primary)]/50 dark:focus:border-[color:var(--brand-primary-light)]/60 transition-all duration-200"
+                  type="text"
                 />
-                <div
-                  class="relative flex items-center p-4 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-                  :class="{
-                    'border-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/12 dark:bg-[color:var(--brand-primary-light)]/20 shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.35)] ring-2 ring-[color:var(--brand-primary)]/20 dark:ring-[color:var(--brand-primary-light)]/30': selectedVoice === voice.voice_type
-                  }"
+              </div>
+
+              <!-- 筛选按钮 - Apple 风格 -->
+              <button @click="toggleFilterPanel"
+                class="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-white dark:hover:bg-[#3a3a3c] rounded-lg transition-all duration-200 text-sm font-medium tracking-tight">
+                <i class="fas fa-filter text-xs"></i>
+                <span>{{ t('filter') }}</span>
+              </button>
+            </div>
+            
+            <!-- 音色列表容器 - Apple 风格 -->
+            <div class="bg-white/50 dark:bg-[#2c2c2e]/50 backdrop-blur-[10px] border border-black/6 dark:border-white/6 rounded-2xl p-5 max-h-[500px] overflow-y-auto main-scrollbar pr-3 mt-4" ref="voiceListContainer">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label
+                  v-for="(voice, index) in filteredVoices"
+                  :key="index"
+                  class="relative m-0 p-0 cursor-pointer"
                 >
-                  <!-- 选中指示器 - Apple 风格 -->
-                  <div v-if="selectedVoice === voice.voice_type" class="absolute top-2 left-2 w-5 h-5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full flex items-center justify-center z-10 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]">
-                    <i class="fas fa-check text-white text-[10px]"></i>
-                  </div>
-                  <!-- V2 标签 - Apple 风格 -->
-                  <div v-if="voice.version === '2.0'" class="absolute top-2 right-2 px-2 py-1 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white text-[10px] font-semibold rounded-md z-10">
-                    v2.0
-                  </div>
+                  <input
+                    type="radio"
+                    :value="voice.voice_type"
+                    v-model="selectedVoice"
+                    @change="onVoiceSelect(voice)"
+                    class="sr-only"
+                  />
+                  <div
+                    class="relative flex items-center p-4 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                    :class="{
+                      'border-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/12 dark:bg-[color:var(--brand-primary-light)]/20 shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.35)] ring-2 ring-[color:var(--brand-primary)]/20 dark:ring-[color:var(--brand-primary-light)]/30': selectedVoice === voice.voice_type
+                    }"
+                  >
+                    <!-- 选中指示器 - Apple 风格 -->
+                    <div v-if="selectedVoice === voice.voice_type" class="absolute top-2 left-2 w-5 h-5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full flex items-center justify-center z-10 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]">
+                      <i class="fas fa-check text-white text-[10px]"></i>
+                    </div>
+                    <!-- V2 标签 - Apple 风格 -->
+                    <div v-if="voice.version === '2.0'" class="absolute top-2 right-2 px-2 py-1 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white text-[10px] font-semibold rounded-md z-10">
+                      v2.0
+                    </div>
 
-                  <!-- 头像容器 -->
-                  <div class="relative mr-3 flex-shrink-0">
-                    <!-- Female Avatar -->
-                    <img
-                      v-if="isFemaleVoice(voice.voice_type)"
-                      src="../../public/female.svg"
-                      alt="Female Avatar"
-                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                    />
-                    <!-- Male Avatar -->
-                    <img
-                      v-else
-                      src="../../public/male.svg"
-                      alt="Male Avatar"
-                      class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
-                    />
-                    <!-- Loading 指示器 - Apple 风格 -->
-                    <div v-if="isGenerating && selectedVoice === voice.voice_type" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white z-20">
-                      <i class="fas fa-spinner fa-spin text-xs"></i>
+                    <!-- 头像容器 -->
+                    <div class="relative mr-3 flex-shrink-0">
+                      <!-- Female Avatar -->
+                      <img
+                        v-if="isFemaleVoice(voice.voice_type)"
+                        src="../../public/female.svg"
+                        alt="Female Avatar"
+                        class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                      />
+                      <!-- Male Avatar -->
+                      <img
+                        v-else
+                        src="../../public/male.svg"
+                        alt="Male Avatar"
+                        class="w-12 h-12 rounded-full object-cover bg-white transition-all duration-200"
+                      />
+                      <!-- Loading 指示器 - Apple 风格 -->
+                      <div v-if="isGenerating && selectedVoice === voice.voice_type" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white z-20">
+                        <i class="fas fa-spinner fa-spin text-xs"></i>
+                      </div>
                     </div>
-                  </div>
 
-                  <!-- 音色信息 -->
-                  <div class="flex-1 min-w-0">
-                    <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-1 tracking-tight truncate">
-                      {{ voice.name }}
-                    </div>
-                    <div class="flex flex-wrap gap-1.5">
-                      <span v-if="voice.scene" class="inline-block px-2 py-0.5 bg-black/5 dark:bg-white/5 text-[#86868b] dark:text-[#98989d] rounded text-[11px] font-medium">
-                        {{ voice.scene }}
-                      </span>
-                      <span
-                        v-for="langCode in voice.language"
-                        :key="langCode"
-                        class="inline-block px-2 py-0.5 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded text-[11px] font-medium"
-                      >
-                        {{ getLanguageDisplayName(langCode) }}
-                      </span>
+                    <!-- 音色信息 -->
+                    <div class="flex-1 min-w-0">
+                      <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-1 tracking-tight truncate">
+                        {{ voice.name }}
+                      </div>
+                      <div class="flex flex-wrap gap-1.5">
+                        <span v-if="voice.scene" class="inline-block px-2 py-0.5 bg-black/5 dark:bg-white/5 text-[#86868b] dark:text-[#98989d] rounded text-[11px] font-medium">
+                          {{ voice.scene }}
+                        </span>
+                        <span
+                          v-for="langCode in voice.language"
+                          :key="langCode"
+                          class="inline-block px-2 py-0.5 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded text-[11px] font-medium"
+                        >
+                          {{ getLanguageDisplayName(langCode) }}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </label>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 克隆音色区域 -->
+          <div v-else class="space-y-4">
+            <div class="bg-white/50 dark:bg-[#2c2c2e]/50 backdrop-blur-[10px] border border-black/6 dark:border-white/6 rounded-2xl p-5 max-h-[500px] overflow-y-auto main-scrollbar pr-3" ref="cloneVoiceListContainer">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <!-- 添加音色按钮 -->
+                <button
+                  @click="openCloneModal"
+                  class="relative flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border-2 border-dashed border-[color:var(--brand-primary)]/50 dark:border-[color:var(--brand-primary-light)]/50 rounded-xl transition-all duration-200 hover:bg-[color:var(--brand-primary)]/10 dark:hover:bg-[color:var(--brand-primary-light)]/10 hover:border-[color:var(--brand-primary)] dark:hover:border-[color:var(--brand-primary-light)]"
+                >
+                  <div class="flex flex-row items-center gap-2">
+                    <div class="w-12 h-12 rounded-full bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 flex items-center justify-center">
+                      <i class="fas fa-plus text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                    </div>
+                    <span class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">{{ t('addClonedVoice') }}</span>
+                  </div>
+                </button>
+
+                <!-- 克隆音色列表 -->
+                <label
+                  v-for="(voice, index) in clonedVoices"
+                  :key="index"
+                  class="relative m-0 p-0 cursor-pointer"
+                >
+                  <input
+                    type="radio"
+                    :value="`clone_${voice.speaker_id}`"
+                    v-model="selectedVoice"
+                    @change="onCloneVoiceSelect(voice)"
+                    class="sr-only"
+                  />
+                  <div
+                    class="relative flex items-center p-4 bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-xl transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                    :class="{
+                      'border-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] bg-[color:var(--brand-primary)]/12 dark:bg-[color:var(--brand-primary-light)]/20 shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.25)] dark:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.35)] ring-2 ring-[color:var(--brand-primary)]/20 dark:ring-[color:var(--brand-primary-light)]/30': selectedVoice === `clone_${voice.speaker_id}`
+                    }"
+                  >
+                    <!-- 选中指示器 -->
+                    <div v-if="selectedVoice === `clone_${voice.speaker_id}`" class="absolute top-2 left-2 w-5 h-5 bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] rounded-full flex items-center justify-center z-10 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]">
+                      <i class="fas fa-check text-white text-[10px]"></i>
+                    </div>
+
+                    <!-- 头像容器 -->
+                    <div class="relative mr-3 flex-shrink-0">
+                      <div class="w-12 h-12 rounded-full bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 flex items-center justify-center">
+                        <i class="fas fa-user text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
+                      </div>
+                      <!-- Loading 指示器 -->
+                      <div v-if="isGenerating && selectedVoice === `clone_${voice.speaker_id}`" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white z-20">
+                        <i class="fas fa-spinner fa-spin text-xs"></i>
+                      </div>
+                    </div>
+
+                    <!-- 音色信息 -->
+                    <div class="flex-1 min-w-0">
+                      <div class="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] mb-1 tracking-tight truncate">
+                        {{ voice.name || t('unnamedVoice') }}
+                      </div>
+                      <div class="text-xs text-[#86868b] dark:text-[#98989d]">
+                        {{ formatDate(voice.create_t) }}
+                      </div>
+                    </div>
+
+                    <!-- 删除按钮 -->
+                    <button
+                      @click.stop="handleDeleteVoiceClone(voice)"
+                      class="ml-2 w-8 h-8 flex items-center justify-center bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:border-red-200 dark:hover:border-red-500/20 rounded-full transition-all duration-200 hover:scale-110 active:scale-100 flex-shrink-0"
+                      :title="t('delete')"
+                    >
+                      <i class="fas fa-trash-alt text-xs"></i>
+                    </button>
+                  </div>
+                </label>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
   </div>
+  </div>
+
+  <!-- 音色克隆Modal -->
+  <VoiceCloneModal
+    v-if="showCloneModal"
+    @close="closeCloneModal"
+    @saved="handleVoiceCloneSaved"
+  />
+
+  <!-- Confirm Dialog -->
+  <Confirm />
 
   <VoiceTtsHistoryPanel
     :visible="showHistoryPanel"
@@ -501,13 +613,17 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DropdownMenu from './DropdownMenu.vue'
 import VoiceTtsHistoryPanel from './VoiceTtsHistoryPanel.vue'
-import { ttsHistory, loadTtsHistory, addTtsHistoryEntry, removeTtsHistoryEntry } from '../utils/other'
+import VoiceCloneModal from './VoiceCloneModal.vue'
+import Confirm from './Confirm.vue'
+import { ttsHistory, loadTtsHistory, addTtsHistoryEntry, removeTtsHistoryEntry, showConfirmDialog, showAlert } from '../utils/other'
 
 export default {
   name: 'VoiceTTS',
   components: {
     DropdownMenu,
-    VoiceTtsHistoryPanel
+    VoiceTtsHistoryPanel,
+    VoiceCloneModal,
+    Confirm
   },
   emits: ['tts-complete', 'close-modal'],
   setup(props, { emit }) {
@@ -540,6 +656,11 @@ export default {
     const showTextHistoryPanel = ref(false)
     const showInstructionHistoryPanel = ref(false)
     const showVoiceHistoryPanel = ref(false)
+    const voiceTab = ref('ai') // 'ai' or 'clone'
+    const clonedVoices = ref([])
+    const showCloneModal = ref(false)
+    const cloneVoiceListContainer = ref(null)
+    const isCloneVoice = ref(false) // 标记当前选中的是否是克隆音色
 
     // Category filtering - 存储原始中文值
     const selectedCategory = ref('全部场景')
@@ -635,6 +756,7 @@ export default {
     // Load voices data
     onMounted(async () => {
       loadTtsHistory()
+      loadClonedVoices()
       try {
         const response = await fetch('/api/v1/voices/list')
         const data = await response.json()
@@ -854,6 +976,7 @@ export default {
     const onVoiceSelect = async (voice) => {
       selectedVoice.value = voice.voice_type
       selectedVoiceResourceId.value = voice.resource_id
+      isCloneVoice.value = false
       // Reset emotion if not available for this voice
       if (voice.emotions && !voice.emotions.includes(selectedEmotion.value)) {
         selectedEmotion.value = ''
@@ -861,6 +984,106 @@ export default {
 
       // Auto-generate TTS when voice is selected and text is available
       await generateTTS()
+    }
+
+    // Handle clone voice selection
+    const onCloneVoiceSelect = async (voice) => {
+      selectedVoice.value = `clone_${voice.speaker_id}`
+      selectedVoiceResourceId.value = voice.speaker_id
+      isCloneVoice.value = true
+      // Auto-generate TTS when voice is selected and text is available
+      await generateTTS()
+    }
+
+    // Load cloned voices
+    const loadClonedVoices = async () => {
+      try {
+        const token = localStorage.getItem('accessToken')
+        const response = await fetch('/api/v1/voice/clone/list', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+        if (response.ok) {
+          const data = await response.json()
+          clonedVoices.value = data.voice_clones || []
+        }
+      } catch (error) {
+        console.error('Failed to load cloned voices:', error)
+      }
+    }
+
+    // Open clone modal
+    const openCloneModal = () => {
+      showCloneModal.value = true
+    }
+
+    // Close clone modal
+    const closeCloneModal = () => {
+      showCloneModal.value = false
+    }
+
+    // Handle voice clone saved
+    const handleVoiceCloneSaved = async (voiceData) => {
+      await loadClonedVoices()
+      // Auto-select the newly created voice
+      const newVoice = clonedVoices.value.find(v => v.speaker_id === voiceData.speaker_id)
+      if (newVoice) {
+        await onCloneVoiceSelect(newVoice)
+      }
+    }
+
+    // Handle delete voice clone
+    const handleDeleteVoiceClone = async (voice) => {
+      try {
+        const confirmed = await showConfirmDialog({
+          title: t('deleteVoiceClone'),
+          message: t('deleteVoiceCloneMessage', { name: voice.name || t('unnamedVoice') }),
+          confirmText: t('confirmDelete')
+        })
+
+        if (!confirmed) {
+          return
+        }
+
+        const token = localStorage.getItem('accessToken')
+        const response = await fetch(`/api/v1/voice/clone/${voice.speaker_id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (response.ok) {
+          showAlert(t('voiceCloneDeleted'), 'success')
+          // 如果删除的是当前选中的音色，清除选择
+          if (selectedVoice.value === `clone_${voice.speaker_id}`) {
+            selectedVoice.value = ''
+            selectedVoiceResourceId.value = ''
+            isCloneVoice.value = false
+            audioUrl.value = ''
+            if (audioElement.value) {
+              audioElement.value.pause()
+              audioElement.value.src = ''
+            }
+          }
+          // 重新加载克隆音色列表
+          await loadClonedVoices()
+        } else {
+          const error = await response.json()
+          showAlert(error.error || t('deleteFailed'), 'danger')
+        }
+      } catch (error) {
+        console.error('Delete voice clone error:', error)
+        showAlert(t('deleteFailed'), 'danger')
+      }
+    }
+
+    // Format date
+    const formatDate = (timestamp) => {
+      if (!timestamp) return ''
+      const date = new Date(timestamp * 1000)
+      return date.toLocaleDateString('zh-CN')
     }
 
     // Generate TTS and auto-play
@@ -885,23 +1108,47 @@ export default {
       console.log('contextText', contextText.value)
       isGenerating.value = true
       try {
-        const response = await fetch('/api/v1/tts/generate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: inputText.value,
-            voice_type: selectedVoice.value,
-            context_texts: contextText.value,
-            emotion: selectedEmotion.value,
-            emotion_scale: emotionScale.value,
-            speech_rate: speechRate.value,
-            loudness_rate: loudnessRate.value,
-            pitch: pitch.value,
-            resource_id: selectedVoiceResourceId.value
+        let response
+        const token = localStorage.getItem('accessToken')
+        
+        // 如果是克隆音色，使用克隆音色合成接口
+        if (isCloneVoice.value) {
+          response = await fetch('/api/v1/voice/clone/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              text: inputText.value,
+              speaker_id: selectedVoiceResourceId.value,
+              style: '正常',
+              speed: getSpeechRateValue(speechRate.value),
+              volume: getLoudnessValue(loudnessRate.value),
+              pitch: getPitchValue(pitch.value),
+              language: 'ZH_CN'
+            })
           })
-        })
+        } else {
+          // 普通AI音色
+          response = await fetch('/api/v1/tts/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: inputText.value,
+              voice_type: selectedVoice.value,
+              context_texts: contextText.value,
+              emotion: selectedEmotion.value,
+              emotion_scale: emotionScale.value,
+              speech_rate: speechRate.value,
+              loudness_rate: loudnessRate.value,
+              pitch: pitch.value,
+              resource_id: selectedVoiceResourceId.value
+            })
+          })
+        }
 
         if (response.ok) {
           const blob = await response.blob()
@@ -1149,6 +1396,12 @@ export default {
       return `${speechRate.toFixed(1)}x`
     }
 
+    // Convert speech rate to API value for clone voice (0.5 to 2.0)
+    const getSpeechRateValue = (value) => {
+      const ratio = (parseInt(value) + 50) / 150
+      return 0.5 + (ratio * 1.5)
+    }
+
     // Convert loudness rate to display value (-100 to 100)
     const getLoudnessDisplayValue = (value) => {
       // Map -50 to 100 range to 50 to 200
@@ -1156,11 +1409,24 @@ export default {
       return `${apiValue}%`
     }
 
+    // Convert loudness rate to API value for clone voice (-12 to 12)
+    const getLoudnessValue = (value) => {
+      // Map -50 to 100 range to -12 to 12
+      const ratio = (parseInt(value) + 50) / 150
+      return -12 + (ratio * 24)
+    }
+
     // Convert pitch to display value (-100 to 100)
     const getPitchDisplayValue = (value) => {
       // Map -12 to 12 range to -100 to 100 for API
       const apiValue = Math.round(parseInt(value) * 100 / 12)
       return `${apiValue}`
+    }
+
+    // Convert pitch to API value for clone voice (-24 to 24)
+    const getPitchValue = (value) => {
+      // Map -12 to 12 range to -24 to 24
+      return parseInt(value) * 2
     }
 
     // Convert language code to Chinese display name
@@ -1261,7 +1527,22 @@ export default {
       openVoiceHistoryPanel,
       closeTextHistoryPanel,
       closeInstructionHistoryPanel,
-      closeVoiceHistoryPanel
+      closeVoiceHistoryPanel,
+      voiceTab,
+      clonedVoices,
+      showCloneModal,
+      cloneVoiceListContainer,
+      isCloneVoice,
+      onCloneVoiceSelect,
+      loadClonedVoices,
+      openCloneModal,
+      closeCloneModal,
+      handleVoiceCloneSaved,
+      handleDeleteVoiceClone,
+      formatDate,
+      getSpeechRateValue,
+      getLoudnessValue,
+      getPitchValue
     }
   }
 }

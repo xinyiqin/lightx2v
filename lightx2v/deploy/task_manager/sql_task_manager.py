@@ -41,7 +41,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
         super().parse_dict(data)
         for k in ["params", "extra_info", "inputs", "outputs", "previous"]:
             if k in data:
-                data[k] = json.loads(data[k])
+                try:
+                    if isinstance(data[k], str) and data[k].strip():
+                        data[k] = json.loads(data[k])
+                    elif isinstance(data[k], str) and not data[k].strip():
+                        data[k] = {} if k in ["params", "extra_info", "inputs", "outputs"] else []
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse {k} field: {e}, using empty dict/list")
+                    data[k] = {} if k in ["params", "extra_info", "inputs", "outputs"] else []
         for k in ["create_t", "update_t", "ping_t", "valid_t"]:
             if k in data:
                 data[k] = data[k].timestamp()
@@ -892,6 +899,63 @@ class PostgresSQLTaskManager(BaseTaskManager):
             return None
         finally:
             await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def update_user_extra_info(self, user_id, extra_info):
+        import json
+        conn = await self.get_conn()
+        try:
+            await conn.execute(
+                f"UPDATE {self.table_users} SET extra_info = $1, update_t = NOW() WHERE user_id = $2",
+                json.dumps(extra_info, ensure_ascii=False),
+                user_id
+            )
+            return True
+        except:  # noqa
+            logger.error(f"update_user_extra_info error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def save_user_voice_clone(self, user_id, speaker_id, name=""):
+        import time
+        user = await self.query_user(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+        
+        extra_info = user.get("extra_info") or {}
+        if not isinstance(extra_info, dict):
+            extra_info = {}
+        
+        voice_clones = extra_info.get("voice_clones", [])
+        if not isinstance(voice_clones, list):
+            voice_clones = []
+        
+        existing_index = None
+        for i, vc in enumerate(voice_clones):
+            if isinstance(vc, dict) and vc.get("speaker_id") == speaker_id:
+                existing_index = i
+                break
+        
+        clone_info = {
+            "speaker_id": speaker_id,
+            "name": name or f"Voice Clone {len(voice_clones) + 1}",
+            "create_t": time.time() if existing_index is None else voice_clones[existing_index].get("create_t", time.time()),
+            "update_t": time.time(),
+        }
+        
+        if existing_index is not None:
+            voice_clones[existing_index] = clone_info
+        else:
+            voice_clones.append(clone_info)
+        
+        extra_info["voice_clones"] = voice_clones
+        success = await self.update_user_extra_info(user_id, extra_info)
+        if not success:
+            raise ValueError(f"Failed to update user extra_info for user {user_id}")
+        
+        return True
 
 
 async def test():

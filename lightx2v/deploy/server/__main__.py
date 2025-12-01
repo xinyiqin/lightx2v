@@ -14,12 +14,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from loguru import logger
 from pydantic import BaseModel
 
 from lightx2v.deploy.common.pipeline import Pipeline
-from lightx2v.deploy.common.utils import check_params, data_name, load_inputs
+from lightx2v.deploy.common.utils import (
+    check_params,
+    data_name,
+    load_inputs,
+    extract_audio_from_video,
+    trim_audio_to_max_duration,
+    get_audio_duration,
+    convert_audio_to_wav,
+)
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
+from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
+from lightx2v.deploy.common.sensetime_voice_clone import SenseTimeTTSClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.server.auth import AuthManager
@@ -50,6 +61,21 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class VoiceCloneSaveRequest(BaseModel):
+    speaker_id: str
+    name: str = ""  # 音色名称
+
+
+class VoiceCloneTTSRequest(BaseModel):
+    text: str
+    speaker_id: str
+    style: str = "正常"
+    speed: float = 1.0
+    volume: float = 0
+    pitch: float = 0
+    language: str = "ZH_CN"
+
+
 # =========================
 # FastAPI Related Code
 # =========================
@@ -62,6 +88,8 @@ server_monitor = None
 auth_manager = None
 metrics_monitor = MetricMonitor()
 volcengine_tts_client = None
+volcengine_asr_client = None
+sensetime_voice_clone_client = None
 
 
 @asynccontextmanager
@@ -1027,7 +1055,385 @@ async def api_v1_tts_generate(request: TTSRequest):
         return JSONResponse({"error": f"TTS generation failed: {str(e)}"}, status_code=500)
 
 
-# 所有未知路由 fallback 到 index.html (必须在所有API路由之后)
+@app.post("/api/v1/voice/clone")
+async def api_v1_voice_clone(
+    request: Request,
+    user=Depends(verify_user_access)
+):
+    upload_path = None
+    audio_path = None
+    converted_audio_path = None
+    try:
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            logger.error("No file uploaded in voice clone request")
+            return JSONResponse({"error": "No file uploaded"}, status_code=400)
+        
+        file_ext = ""
+        file_content_type = file.content_type or ""
+        
+        if file.filename:
+            file_ext = os.path.splitext(file.filename)[1].lower()
+        else:
+            logger.warning(f"File has no filename, using MIME type: {file_content_type}")
+            mime_to_ext = {
+                'audio/webm': '.webm',
+                'audio/wav': '.wav',
+                'audio/wave': '.wav',
+                'audio/mp3': '.mp3',
+                'audio/mpeg': '.mp3',
+                'audio/m4a': '.m4a',
+                'audio/aac': '.aac',
+                'audio/ogg': '.ogg',
+                'audio/flac': '.flac',
+                'video/mp4': '.mp4',
+                'video/quicktime': '.mov',
+                'video/x-msvideo': '.avi',
+                'video/x-matroska': '.mkv',
+                'video/x-flv': '.flv',
+            }
+            file_ext = mime_to_ext.get(file_content_type.lower(), '')
+            if not file_ext:
+                logger.error(f"Unable to determine file type from MIME: {file_content_type}")
+                return JSONResponse({
+                    "error": f"Unable to determine file type. Please ensure the file has a valid extension or MIME type. Received MIME type: {file_content_type}"
+                }, status_code=400)
+        
+        is_video = False
+        is_audio = False
+        
+        if file_content_type:
+            if file_content_type.startswith('video/'):
+                is_video = True
+                logger.info(f"Detected video file from MIME type: {file_content_type}")
+            elif file_content_type.startswith('audio/'):
+                is_audio = True
+                logger.info(f"Detected audio file from MIME type: {file_content_type}")
+        
+        if not (is_video or is_audio):
+            is_video = file_ext in ['.mp4', '.mov', '.avi', '.mkv', '.flv']
+            if file_ext == '.webm':
+                if file_content_type and file_content_type.startswith('audio/'):
+                    is_audio = True
+                else:
+                    is_video = True
+            is_audio = is_audio or file_ext in ['.wav', '.mp3', '.m4a', '.aac', '.ogg', '.flac']
+        
+        if not (is_video or is_audio):
+            logger.error(f"Unsupported file format: ext={file_ext}, mime={file_content_type}, filename={file.filename}")
+            return JSONResponse({
+                "error": f"Unsupported file format. Supported formats: video (mp4, mov, avi, mkv, flv, webm) or audio (wav, mp3, m4a, aac, ogg, flac). Received: extension={file_ext or 'none'}, MIME type={file_content_type or 'none'}"
+            }, status_code=400)
+        
+        upload_filename = f"voice_clone_{uuid.uuid4().hex}{file_ext}"
+        upload_path = os.path.join(tempfile.gettempdir(), upload_filename)
+        with open(upload_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        try:
+            audio_path = upload_path
+            temp_audio_path = None
+            if is_video:
+                audio_filename = f"extracted_audio_{uuid.uuid4().hex}.wav"
+                temp_audio_path = os.path.join(tempfile.gettempdir(), audio_filename)
+                extract_audio_from_video(upload_path, temp_audio_path)
+                audio_path = temp_audio_path
+                logger.info(f"Extracted audio from video: {audio_path}")
+            
+            max_duration = 15.0
+            max_retries = 5
+            retry_count = 0
+            original_audio_path = audio_path
+            created_temp_files = []
+            
+            while retry_count <= max_retries:
+                try:
+                    duration = get_audio_duration(audio_path)
+                    logger.info(f"Audio duration: {duration:.2f} seconds (max: {max_duration:.2f}s)")
+                    if duration > max_duration:
+                        trimmed_filename = f"trimmed_audio_{uuid.uuid4().hex}_{retry_count}.wav"
+                        trimmed_path = os.path.join(tempfile.gettempdir(), trimmed_filename)
+                        created_temp_files.append(trimmed_path)
+                        trim_audio_to_max_duration(audio_path, max_duration=max_duration, output_path=trimmed_path)
+                        
+                        trimmed_duration = get_audio_duration(trimmed_path)
+                        logger.info(f"Audio trimmed from {duration:.2f}s to {trimmed_duration:.2f}s")
+                        
+                        if trimmed_duration > max_duration:
+                            logger.warning(f"Trimmed audio duration ({trimmed_duration:.2f}s) still exceeds {max_duration:.2f}s, this may cause clone failure")
+                        
+                        if audio_path != original_audio_path and audio_path != upload_path and os.path.exists(audio_path):
+                            try:
+                                os.unlink(audio_path)
+                            except:
+                                pass
+                        audio_path = trimmed_path
+                    
+                    if volcengine_asr_client is None:
+                        return JSONResponse({"error": "ASR client not initialized"}, status_code=500)
+                    
+                    asr_success, asr_result = await volcengine_asr_client.recognize_request(file_path=audio_path)
+                    
+                    if not asr_success:
+                        return JSONResponse({"error": f"ASR failed: {asr_result}"}, status_code=500)
+
+                    asr_text = ""
+                    if isinstance(asr_result, dict):
+                        result = asr_result.get("result", {})
+                        if isinstance(result, dict):
+                            asr_text = result.get("text", "")
+                    
+                    if not asr_text:
+                        return JSONResponse({"error": "Failed to extract text from audio"}, status_code=500)
+                    
+                    logger.info(f"ASR recognized text (attempt {retry_count + 1}): {asr_text}")
+                    
+                    final_audio_path = audio_path
+                    audio_ext = os.path.splitext(audio_path)[1].lower()
+                    
+                    if audio_ext != '.wav':
+                        converted_filename = f"converted_audio_{uuid.uuid4().hex}.wav"
+                        converted_audio_path = os.path.join(tempfile.gettempdir(), converted_filename)
+                        created_temp_files.append(converted_audio_path)
+                        try:
+                            convert_audio_to_wav(audio_path, converted_audio_path, sample_rate=16000, channels=1)
+                            final_audio_path = converted_audio_path
+                            logger.info(f"Converted audio to WAV format: {final_audio_path}")
+                        except Exception as e:
+                            logger.error(f"Failed to convert audio to WAV: {e}")
+                            return JSONResponse({"error": f"Failed to convert audio to WAV format: {str(e)}"}, status_code=500)
+                    
+                    if sensetime_voice_clone_client is None:
+                        return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+                    
+                    clone_success, clone_result = await sensetime_voice_clone_client.upload_audio_clone(
+                        audio_path=final_audio_path,
+                        audio_text=asr_text,
+                        disable_ns=False,
+                    )
+                    
+                    if clone_success:
+                        speaker_id = clone_result
+                        logger.info(f"Voice clone successful, speaker_id: {speaker_id} (after {retry_count} retries)")
+                        return JSONResponse({
+                            "speaker_id": speaker_id,
+                            "text": asr_text,
+                            "message": "Voice clone successful. Please save the voice to add it to your collection."
+                        })
+                    else:
+                        error_msg = str(clone_result)
+                        if "text length" in error_msg.lower() and "too long" in error_msg.lower():
+                            retry_count += 1
+                            if retry_count > max_retries:
+                                logger.error(f"Voice clone failed after {max_retries} retries: {error_msg}")
+                                return JSONResponse({"error": f"Voice clone failed: Text is too long even after shortening audio. {error_msg}"}, status_code=500)
+                            
+                            # 缩短最大时长（每次减少 1 秒）
+                            max_duration = max(5.0, max_duration - 1.0)  # 最少保留 5 秒
+                            logger.warning(f"Text too long error detected, retrying with shorter audio (max_duration: {max_duration:.2f}s, attempt {retry_count}/{max_retries})")
+                            
+                            # 使用原始音频路径重新开始
+                            audio_path = original_audio_path
+                            continue  # 重新尝试
+                        else:
+                            # 其他错误，直接返回
+                            return JSONResponse({"error": f"Voice clone failed: {clone_result}"}, status_code=500)
+                
+                except Exception as e:
+                    # 如果是重试过程中的错误，检查是否是文本长度错误
+                    error_msg = str(e)
+                    if "text length" in error_msg.lower() and "too long" in error_msg.lower():
+                        retry_count += 1
+                        if retry_count > max_retries:
+                            logger.error(f"Voice clone failed after {max_retries} retries: {error_msg}")
+                            return JSONResponse({"error": f"Voice clone failed: Text is too long even after shortening audio. {error_msg}"}, status_code=500)
+                        
+                        max_duration = max(5.0, max_duration - 1.0)
+                        logger.warning(f"Text too long error detected, retrying with shorter audio (max_duration: {max_duration:.2f}s, attempt {retry_count}/{max_retries})")
+                        audio_path = original_audio_path
+                        continue
+                    else:
+                        # 其他错误，直接抛出
+                        raise
+            
+            # 如果循环结束仍未成功，返回错误
+            return JSONResponse({"error": "Voice clone failed after maximum retries"}, status_code=500)
+            
+        finally:
+            # 清理所有临时文件
+            temp_files = [upload_path]
+            if 'temp_audio_path' in locals() and temp_audio_path and os.path.exists(temp_audio_path):
+                temp_files.append(temp_audio_path)
+            if 'audio_path' in locals() and audio_path and audio_path != upload_path:
+                temp_files.append(audio_path)
+            if 'converted_audio_path' in locals() and converted_audio_path:
+                temp_files.append(converted_audio_path)
+            if 'final_audio_path' in locals() and final_audio_path and final_audio_path not in temp_files:
+                temp_files.append(final_audio_path)
+            if 'created_temp_files' in locals():
+                temp_files.extend(created_temp_files)
+        
+            temp_files = list(set(temp_files))
+            for path in temp_files:
+                if path and os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete temp file {path}: {e}")
+        
+    except Exception as e:
+        logger.error(f"Voice clone error: {e}")
+        traceback.print_exc()
+        return JSONResponse({"error": f"Voice clone failed: {str(e)}"}, status_code=500)
+
+
+@app.post("/api/v1/voice/clone/tts")
+async def api_v1_voice_clone_tts(
+    request: VoiceCloneTTSRequest
+):
+    try:
+        if not request.text.strip():
+            return JSONResponse({"error": "Text cannot be empty"}, status_code=400)
+        
+        if not request.speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+
+        output_filename = f"voice_clone_tts_{uuid.uuid4().hex}.wav"
+        output_path = os.path.join(tempfile.gettempdir(), output_filename)
+        
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+        
+        success = await sensetime_voice_clone_client.tts_request(
+            text=request.text,
+            speaker=request.speaker_id,
+            style=request.style,
+            speed=request.speed,
+            volume=request.volume,
+            pitch=request.pitch,
+            language=request.language,
+            output=output_path,
+            sample_rate=24000,
+            audio_format="pcm",
+            stream_output=True,
+            output_subtitles=False,
+        )
+        
+        if success and os.path.exists(output_path):
+            return FileResponse(
+                output_path,
+                media_type="audio/wav",
+                filename=output_filename,
+                background=BackgroundTask(lambda: os.unlink(output_path) if os.path.exists(output_path) else None)
+            )
+        else:
+            return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"Voice clone TTS error: {e}")
+        traceback.print_exc()
+        return JSONResponse({"error": f"TTS generation failed: {str(e)}"}, status_code=500)
+
+
+@app.post("/api/v1/voice/clone/save")
+async def api_v1_voice_clone_save(
+    request: VoiceCloneSaveRequest,
+    user=Depends(verify_user_access)
+):
+    try:
+        if not request.speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        try:
+            await task_manager.save_user_voice_clone(user["user_id"], request.speaker_id, request.name)
+            logger.info(f"Voice clone saved: user={user['user_id']}, speaker_id={request.speaker_id}, name={request.name}")
+            return JSONResponse({
+                "message": "Voice clone saved successfully",
+                "speaker_id": request.speaker_id,
+                "name": request.name
+            })
+        except Exception as e:
+            logger.error(f"Failed to save voice clone to database: {e}")
+            traceback.print_exc()
+            return JSONResponse({"error": f"Failed to save voice clone: {str(e)}"}, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"Save voice clone error: {e}")
+        traceback.print_exc()
+        return JSONResponse({"error": f"Failed to save voice clone: {str(e)}"}, status_code=500)
+
+
+@app.delete("/api/v1/voice/clone/{speaker_id}")
+async def api_v1_voice_clone_delete(
+    speaker_id: str,
+    user=Depends(verify_user_access)
+):
+    try:
+        if not speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        user_info = await task_manager.query_user(user["user_id"])
+        if user_info:
+            extra_info = user_info.get("extra_info", {})
+            if isinstance(extra_info, str):
+                try:
+                    extra_info = json.loads(extra_info) if extra_info else {}
+                except (json.JSONDecodeError, TypeError):
+                    extra_info = {}
+            elif extra_info is None:
+                extra_info = {}
+            
+            voice_clones = extra_info.get("voice_clones", [])
+            speaker_ids = [vc.get("speaker_id") for vc in voice_clones if isinstance(vc, dict)]
+
+            if speaker_id in speaker_ids:
+                voice_clones = [vc for vc in voice_clones if vc.get("speaker_id") != speaker_id]
+                extra_info["voice_clones"] = voice_clones
+                try:
+                    await task_manager.update_user_extra_info(user["user_id"], extra_info)
+                    logger.info(f"Removed voice clone from user database: user={user['user_id']}, speaker_id={speaker_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove voice clone from database: {e}")
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+        
+        delete_success = await sensetime_voice_clone_client.delete_speaker(speaker_id)
+        if delete_success:
+            logger.info(f"Voice clone deleted from server: speaker_id={speaker_id}")
+            return JSONResponse({"message": "Voice clone deleted successfully"})
+        else:
+            logger.warning(f"Failed to delete voice clone from server: speaker_id={speaker_id}")
+            return JSONResponse({"error": "Failed to delete voice clone from server"}, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"Delete voice clone error: {e}")
+        traceback.print_exc()
+        return JSONResponse({"error": f"Failed to delete voice clone: {str(e)}"}, status_code=500)
+
+
+@app.get("/api/v1/voice/clone/list")
+async def api_v1_voice_clone_list(user=Depends(verify_user_access)):
+    try:
+        user_info = await task_manager.query_user(user["user_id"])
+        if not user_info:
+            return JSONResponse({"error": "User not found"}, status_code=404)
+        
+        extra_info = user_info.get("extra_info", {})
+        if isinstance(extra_info, str):
+            try:
+                extra_info = json.loads(extra_info) if extra_info else {}
+            except (json.JSONDecodeError, TypeError):
+                extra_info = {}
+        elif extra_info is None:
+            extra_info = {}
+        
+        voice_clones = extra_info.get("voice_clones", [])
+        return JSONResponse({"voice_clones": voice_clones})
+    except Exception as e:
+        logger.error(f"Get voice clone list error: {e}")
+        traceback.print_exc()
+        return JSONResponse({"error": f"Failed to get voice clone list: {str(e)}"}, status_code=500)
+
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def vue_fallback(full_path: str):
     index_path = os.path.join(static_dir, "index.html")
@@ -1066,6 +1472,8 @@ if __name__ == "__main__":
 
     model_pipelines = Pipeline(args.pipeline_json)
     volcengine_tts_client = VolcEngineTTSClient(args.volcengine_tts_list_json)
+    volcengine_asr_client = VolcEngineASRClient()
+    sensetime_voice_clone_client = SenseTimeTTSClient()
     auth_manager = AuthManager()
     if args.task_url.startswith("/"):
         task_manager = LocalTaskManager(args.task_url, metrics_monitor)

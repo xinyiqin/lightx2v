@@ -36,6 +36,12 @@ class BaseTaskManager:
     async def query_user(self, user_id):
         raise NotImplementedError
 
+    async def update_user_extra_info(self, user_id, extra_info):
+        raise NotImplementedError
+
+    async def save_user_voice_clone(self, user_id, speaker_id, name=""):
+        raise NotImplementedError
+
     async def insert_task(self, task, subtasks):
         raise NotImplementedError
 
