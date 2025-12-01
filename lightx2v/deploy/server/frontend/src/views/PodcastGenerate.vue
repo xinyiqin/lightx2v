@@ -179,7 +179,12 @@ function addCacheBustingParam(url) {
     }
     // 对于 API URL，添加缓存破坏参数
     const separator = url.includes('?') ? '&' : '?'
-    return `${url}${separator}t=${Date.now()}`
+    let newUrl = `${url}${separator}t=${Date.now()}`;
+    const token = localStorage.getItem('accessToken')
+    if (token) {
+        newUrl = `${newUrl}&token=${token}`
+    }
+    return newUrl;
 }
 
 // 检测是否为移动端
@@ -2772,7 +2777,7 @@ function downloadAudio() {
     const urlToDownload = sessionAudioUrl || currentAudioUrl || mergedAudioUrl || audioUrl.value
     if (urlToDownload) {
         const link = document.createElement('a')
-        link.href = urlToDownload
+        link.href = addCacheBustingParam(urlToDownload);
         link.download = 'podcast.mp3'
         document.body.appendChild(link)
         link.click()

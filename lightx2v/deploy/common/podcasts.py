@@ -7,6 +7,8 @@ import os
 import struct
 import time
 import uuid
+
+from pydub import AudioSegment
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Callable, List, Optional
@@ -337,6 +339,80 @@ async def finish_session(websocket: websockets.WebSocketClientProtocol, session_
     await websocket.send(msg.marshal())
 
 
+class PodcastRoundPostProcessor:
+    def __init__(self, session_id, data_manager):
+        self.session_id = session_id
+        self.data_manager = data_manager
+
+        self.temp_merged_audio_name = "merged_audio.mp3"
+        self.output_merged_audio_name = f"{session_id}-merged_audio.mp3"
+        self.subtitle_timestamps = [] # 记录字幕时间戳
+        self.current_audio_duration = 0.0 # 当前音频时长
+        self.merged_audio = None  # 用于存储合并的音频对象
+        self.merged_audio_bytes = None
+
+    async def init(self):
+        if self.data_manager:
+            await self.data_manager.create_podcast_temp_session_dir(self.session_id)
+
+    async def postprocess_round(self, current_round, voice, audio, podcast_texts):
+        text = ""
+        if podcast_texts:
+            text = podcast_texts[-1].get("text", "")
+        logger.debug(f"Processing round: {current_round}, voice: {voice}, text: {text}, audio: {len(audio)} bytes")
+
+        new_segment = AudioSegment.from_mp3(io.BytesIO(bytes(audio)))
+        round_duration = len(new_segment) / 1000.0
+
+        if self.merged_audio is None:
+            self.merged_audio = new_segment
+        else:
+            self.merged_audio = self.merged_audio + new_segment
+
+        # 保存合并后的音频到临时文件（用于前端实时访问）
+        merged_io = io.BytesIO()
+        self.merged_audio.export(merged_io, format="mp3")
+        self.merged_audio_bytes = merged_io.getvalue()
+        if self.data_manager:
+            await self.data_manager.save_podcast_temp_session_file(
+                self.session_id, self.temp_merged_audio_name, self.merged_audio_bytes
+            )
+        merged_file_size = len(self.merged_audio_bytes)
+
+        # 记录字幕时间戳
+        self.subtitle_timestamps.append({
+            "start": self.current_audio_duration,
+            "end": self.current_audio_duration + round_duration,
+            "text": text,
+            "speaker": voice,
+        })
+        self.current_audio_duration += round_duration
+        logger.debug(f"Merged audio updated: {merged_file_size} bytes, duration: {self.current_audio_duration:.2f}s")
+
+        return {
+            "url": f"/api/v1/podcast/audio?session_id={self.session_id}&filename={self.temp_merged_audio_name}",
+            "size": merged_file_size,
+            "duration": self.current_audio_duration,
+            "round": current_round,
+            "text": text,
+            "speaker": voice,
+        }
+
+    async def postprocess_final(self):
+        if self.data_manager:
+            await self.data_manager.save_podcast_output_file(
+                self.output_merged_audio_name, self.merged_audio_bytes
+            )
+        return {
+            "subtitles": self.subtitle_timestamps,
+            "audio_name": self.output_merged_audio_name,
+        }
+
+    async def cleanup(self):
+        if self.data_manager:
+            await self.data_manager.clear_podcast_temp_session_dir(self.session_id)
+            self.data_manager = None
+
 class VolcEnginePodcastClient:
     """
     VolcEngine Podcast客户端
@@ -358,6 +434,8 @@ class VolcEnginePodcastClient:
 
     async def podcast_request(
         self,
+        session_id: str,
+        data_manager = None,
         text: str = "",
         input_url: str = "",
         prompt_text: str = "",
@@ -372,7 +450,6 @@ class VolcEnginePodcastClient:
         only_nlp_text: bool = False,
         return_audio_url: bool = False,
         skip_round_audio_save: bool = False,
-        output_dir: str = "output",
         on_round_complete: Optional[Callable] = None,
     ):
         """
@@ -414,17 +491,19 @@ class VolcEnginePodcastClient:
         task_id = ""
         websocket = None
         retry_num = 5
-        podcast_audio = bytearray()
         audio = bytearray()
         voice = ""
         current_round = 0
         podcast_texts = []
 
+        post_processor = PodcastRoundPostProcessor(session_id, data_manager)
+        await post_processor.init()
+
         try:
             while retry_num > 0:
                 # 建立WebSocket连接
                 websocket = await websockets.connect(self.endpoint, additional_headers=headers)
-                logger.info(f"WebSocket connected: {websocket.response.headers}")
+                logger.debug(f"WebSocket connected: {websocket.response.headers}")
 
                 # 构建请求参数
                 if input_url:
@@ -461,7 +540,7 @@ class VolcEnginePodcastClient:
                         "audio_config": {"format": encoding, "sample_rate": 24000, "speech_rate": 0},
                     }
 
-                logger.info(f"Request params: {json.dumps(req_params, indent=2, ensure_ascii=False)}")
+                logger.debug(f"Request params: {json.dumps(req_params, indent=2, ensure_ascii=False)}")
 
                 if not is_podcast_round_end:
                     req_params["retry_info"] = {"retry_task_id": task_id, "last_finished_round_id": last_round_id}
@@ -489,7 +568,6 @@ class VolcEnginePodcastClient:
                         if not audio_received and audio:
                             audio_received = True
                         audio.extend(msg.payload)
-                        logger.debug(f"Audio received: {len(msg.payload)} bytes")
 
                     # 错误信息
                     elif msg.type == MsgType.Error:
@@ -509,56 +587,20 @@ class VolcEnginePodcastClient:
                             if current_round == 9999:
                                 voice = "tail_music"
                             is_podcast_round_end = False
-                            logger.info(f"New round started: {data}")
+                            logger.debug(f"New round started: {data}")
 
                         # 播客 round 结束
                         if msg.event == EventType.PodcastRoundEnd:
                             data = json.loads(msg.payload.decode())
-                            logger.info(f"Podcast round end: {data}")
+                            logger.debug(f"Podcast round end: {data}")
                             if data.get("is_error"):
                                 break
                             is_podcast_round_end = True
                             last_round_id = current_round
                             if audio:
-                                import os
-
-                                os.makedirs(output_dir, exist_ok=True)
-                                filename = f"{output_dir}/{voice}_{current_round}.{encoding}"
-                                text_filename = f"{output_dir}/{voice}_{current_round}.txt"
-
-                                # 保存音频文件
-                                if not skip_round_audio_save:
-                                    with open(filename, "wb") as f:
-                                        f.write(audio)
-                                podcast_audio.extend(audio)
-
-                                # 确保文件已保存
-                                time.sleep(0.1)
-
-                                logger.info(f"Saved partial audio: {filename}")
-
-                                # 保存当前轮次的文本信息
-                                if podcast_texts:
-                                    last_text = podcast_texts[-1]
-                                    with open(text_filename, "w", encoding="utf-8") as f:
-                                        f.write(f"Round: {current_round}\n")
-                                        f.write(f"Speaker: {voice}\n")
-                                        f.write(f"Text: {last_text.get('text', '')}\n")
-                                    logger.info(f"Saved partial text: {text_filename}")
-
-                                # 调用轮次完成回调
+                                round_info = await post_processor.postprocess_round(current_round, voice, audio, podcast_texts)
                                 if on_round_complete:
-                                    audio_filename = f"{voice}_{current_round}.{encoding}"
-                                    await on_round_complete(
-                                        {
-                                            "round": current_round,
-                                            "speaker": voice,
-                                            "url": f"/api/audio/{audio_filename}",
-                                            "text_file": f"/api/audio/{voice}_{current_round}.txt",
-                                            "text": last_text.get("text", "") if last_text else "",
-                                        }
-                                    )
-
+                                    await on_round_complete(round_info)
                                 audio.clear()
 
                         # 播客结束
@@ -579,35 +621,8 @@ class VolcEnginePodcastClient:
 
                 # 播客结束, 保存最终音频文件
                 if is_podcast_round_end:
-                    import os
-
-                    os.makedirs(output_dir, exist_ok=True)
-                    timestamp = time.time()
-
-                    if podcast_audio:
-                        filename = f"{output_dir}/podcast_final_{timestamp}.{encoding}"
-                        with open(filename, "wb") as f:
-                            f.write(podcast_audio)
-                        logger.info(f"Final audio saved: {filename}")
-
-                    # 总是保存文本信息
-                    if podcast_texts:
-                        json_filename = f"{output_dir}/podcast_texts_{timestamp}.json"
-                        with open(json_filename, "w", encoding="utf-8") as f:
-                            json.dump(podcast_texts, f, ensure_ascii=False, indent=4)
-                        logger.info(f"Final text (JSON) saved: {json_filename}")
-
-                        txt_filename = f"{output_dir}/podcast_texts_{timestamp}.txt"
-                        with open(txt_filename, "w", encoding="utf-8") as f:
-                            for i, text_item in enumerate(podcast_texts):
-                                f.write(f"\n{'=' * 60}\n")
-                                f.write(f"Round {i + 1}:\n")
-                                f.write(f"Speaker: {text_item.get('speaker', 'Unknown')}\n")
-                                f.write(f"Text:\n{text_item.get('text', '')}\n")
-                            f.write(f"\n{'=' * 60}\n")
-                        logger.info(f"Final text (TXT) saved: {txt_filename}")
-
-                    break
+                    podcast_info = await post_processor.postprocess_final()
+                    return podcast_info
                 else:
                     logger.error(f"Current podcast not finished, resuming from round {last_round_id}")
                     retry_num -= 1
@@ -616,11 +631,10 @@ class VolcEnginePodcastClient:
                         await websocket.close()
 
         finally:
+            await post_processor.cleanup()
             if websocket:
                 await websocket.close()
-
-        return podcast_texts, podcast_audio
-
+        return None
 
 async def test(args):
     """

@@ -38,6 +38,10 @@ class S3DataManager(BaseDataManager):
             self.template_videos_dir = os.path.join(template_dir, "videos")
             self.template_tasks_dir = os.path.join(template_dir, "tasks")
 
+        # podcast temp session dir and output dir
+        self.podcast_temp_session_dir = os.path.join(self.base_path, "podcast_temp_session")
+        self.podcast_output_dir = os.path.join(self.base_path, "podcast_output")
+
     async def init_presign_client(self):
         # init tos client for volces.com
         if "volces.com" in self.endpoint_url:
@@ -178,6 +182,18 @@ class S3DataManager(BaseDataManager):
             return out.signed_url
         else:
             return None
+
+    @class_try_catch_async
+    async def create_podcast_temp_session_dir(self, session_id):
+        pass
+
+    @class_try_catch_async
+    async def clear_podcast_temp_session_dir(self, session_id):
+        session_dir = os.path.join(self.podcast_temp_session_dir, session_id)
+        fs = await self.list_files(base_dir=session_dir)
+        logger.info(f"clear podcast temp session dir {session_dir} with files: {fs}")
+        for f in fs:
+            await self.delete_bytes(f, abs_path=os.path.join(session_dir, f))
 
 
 async def test():

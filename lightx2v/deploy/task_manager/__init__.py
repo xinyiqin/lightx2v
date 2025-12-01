@@ -72,6 +72,18 @@ class BaseTaskManager:
     async def query_share(self, share_id):
         raise NotImplementedError
 
+    async def insert_podcast(self, podcast):
+        raise NotImplementedError
+
+    async def query_podcast(self, session_id, user_id=None):
+        raise NotImplementedError
+
+    async def list_podcasts(self, **kwargs):
+        raise NotImplementedError
+
+    async def delete_podcast(self, session_id, user_id):
+        raise NotImplementedError
+
     def fmt_dict(self, data):
         for k in ["status"]:
             if k in data:
@@ -183,6 +195,24 @@ class BaseTaskManager:
         assert ret, f"create task {task_id} failed"
         self.metrics_commit(records)
         return task_id
+
+    async def create_podcast(self, session_id, user_id, user_input, audio_path, rounds):
+        cur_t = current_time()
+        podcast = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "user_input": user_input,
+            "create_t": cur_t,
+            "update_t": cur_t,
+            "has_audio": True,
+            "audio_path": audio_path,
+            "metadata_path": "",
+            "rounds": rounds,
+            "subtitles": [],
+            "extra_info": {},
+            "tag": "",
+        }
+        assert await self.insert_podcast(podcast), f"create podcast {podcast} failed"
 
     async def mark_server_restart(self):
         pass
