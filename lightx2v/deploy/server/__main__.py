@@ -55,23 +55,6 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
-class PodcastRequest(BaseModel):
-    text: str = ""
-    input_url: str = ""
-    prompt_text: str = ""
-    nlp_texts: str = ""
-    action: int = 0
-    resource_id: str = "volc.service_type.10050"
-    encoding: str = "mp3"
-    input_id: str = "podcast"
-    speaker_info: str = '{"random_order":false}'
-    use_head_music: bool = False
-    use_tail_music: bool = False
-    only_nlp_text: bool = False
-    return_audio_url: bool = False
-    skip_round_audio_save: bool = False
-
-
 # =========================
 # FastAPI Related Code
 # =========================
