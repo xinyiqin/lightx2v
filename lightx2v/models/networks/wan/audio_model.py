@@ -13,6 +13,7 @@ from lightx2v.models.networks.wan.weights.audio.transformer_weights import WanAu
 from lightx2v.models.networks.wan.weights.post_weights import WanPostWeights
 from lightx2v.models.networks.wan.weights.pre_weights import WanPreWeights
 from lightx2v.utils.utils import load_weights
+from lightx2v_platform.base.global_var import AI_DEVICE
 
 
 class WanAudioModel(WanModel):
@@ -22,8 +23,8 @@ class WanAudioModel(WanModel):
 
     def __init__(self, model_path, config, device):
         self.config = config
-        super().__init__(model_path, config, device)
         self._load_adapter_ckpt()
+        super().__init__(model_path, config, device)
 
     def _load_adapter_ckpt(self):
         if self.config.get("adapter_model_path", None) is None:
@@ -50,7 +51,7 @@ class WanAudioModel(WanModel):
         if not adapter_offload:
             if not dist.is_initialized() or not load_from_rank0:
                 for key in self.adapter_weights_dict:
-                    self.adapter_weights_dict[key] = self.adapter_weights_dict[key].to(torch.device(self.device))
+                    self.adapter_weights_dict[key] = self.adapter_weights_dict[key].to(torch.device(AI_DEVICE))
 
     def _init_infer_class(self):
         super()._init_infer_class()

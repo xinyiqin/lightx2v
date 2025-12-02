@@ -15,6 +15,7 @@ from lightx2v.utils.global_paras import CALIB
 from lightx2v.utils.memory_profiler import peak_memory_decorator
 from lightx2v.utils.profiler import *
 from lightx2v.utils.utils import save_to_video, vae_to_comfyui_image
+from lightx2v_platform.base.global_var import AI_DEVICE
 
 from .base_runner import BaseRunner
 
@@ -54,7 +55,7 @@ class DefaultRunner(BaseRunner):
         elif self.config["task"] == "s2v":
             self.run_input_encoder = self._run_input_encoder_local_s2v
         self.config.lock()  # lock config to avoid modification
-        if self.config.get("compile", False):
+        if self.config.get("compile", False) and hasattr(self.model, "comple"):
             logger.info(f"[Compile] Compile all shapes: {self.config.get('compile_shapes', [])}")
             self.model.compile(self.config.get("compile_shapes", []))
 
@@ -62,7 +63,7 @@ class DefaultRunner(BaseRunner):
         if self.config["cpu_offload"]:
             self.init_device = torch.device("cpu")
         else:
-            self.init_device = torch.device(self.config.get("run_device", "cuda"))
+            self.init_device = torch.device(AI_DEVICE)
 
     def load_vfi_model(self):
         if self.config["video_frame_interpolation"].get("algo", None) == "rife":
@@ -162,15 +163,25 @@ class DefaultRunner(BaseRunner):
                     total_all_steps = self.video_segment_num * infer_steps
                     self.progress_callback((current_step / total_all_steps) * 100, 100)
 
+        if segment_idx is not None and segment_idx == self.video_segment_num - 1:
+            del self.inputs
+            torch.cuda.empty_cache()
+
         return self.model.scheduler.latents
 
     def run_step(self):
         self.inputs = self.run_input_encoder()
-        self.run_main()
+        if hasattr(self, "sr_version") and self.sr_version is not None is not None:
+            self.config_sr["is_sr_running"] = True
+            self.inputs_sr = self.run_input_encoder()
+            self.config_sr["is_sr_running"] = False
+
+        self.run_main(total_steps=1)
 
     def end_run(self):
         self.model.scheduler.clear()
-        del self.inputs
+        if hasattr(self, "inputs"):
+            del self.inputs
         self.input_info = None
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             if hasattr(self.model.transformer_infer, "weights_stream_mgr"):
@@ -194,7 +205,7 @@ class DefaultRunner(BaseRunner):
         if GET_RECORDER_MODE():
             width, height = img_ori.size
             monitor_cli.lightx2v_input_image_len.observe(width * height)
-        img = TF.to_tensor(img_ori).sub_(0.5).div_(0.5).unsqueeze(0).cuda()
+        img = TF.to_tensor(img_ori).sub_(0.5).div_(0.5).unsqueeze(0).to(self.init_device)
         self.input_info.original_size = img_ori.size
         return img, img_ori
 
@@ -211,7 +222,7 @@ class DefaultRunner(BaseRunner):
 
     @ProfilingContext4DebugL2("Run Encoders")
     def _run_input_encoder_local_t2v(self):
-        self.input_info.latent_shape = self.get_latent_shape_with_target_hw(self.config["target_height"], self.config["target_width"])  # Important: set latent_shape in input_info
+        self.input_info.latent_shape = self.get_latent_shape_with_target_hw()  # Important: set latent_shape in input_info
         text_encoder_output = self.run_text_encoder(self.input_info)
         torch.cuda.empty_cache()
         gc.collect()
@@ -273,10 +284,17 @@ class DefaultRunner(BaseRunner):
         if self.config.get("model_cls") == "wan2.2" and self.config["task"] in ["i2v", "s2v"]:
             self.inputs["image_encoder_output"]["vae_encoder_out"] = None
 
+        if hasattr(self, "sr_version") and self.sr_version is not None:
+            self.lq_latents_shape = self.model.scheduler.latents.shape
+            self.model_sr.set_scheduler(self.scheduler_sr)
+            self.config_sr["is_sr_running"] = True
+            self.inputs_sr = self.run_input_encoder()
+            self.config_sr["is_sr_running"] = False
+
     @ProfilingContext4DebugL2("Run DiT")
     def run_main(self):
         self.init_run()
-        if self.config.get("compile", False):
+        if self.config.get("compile", False) and hasattr(self.model, "comple"):
             self.model.select_graph_for_compile(self.input_info)
         for segment_idx in range(self.video_segment_num):
             logger.info(f"🔄 start segment {segment_idx + 1}/{self.video_segment_num}")

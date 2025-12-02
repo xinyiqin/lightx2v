@@ -6,6 +6,8 @@ import torch
 from lightx2v.utils.envs import *
 from lightx2v.utils.registry_factory import LN_WEIGHT_REGISTER
 
+from .triton_ops import norm_infer
+
 
 class LNWeightTemplate(metaclass=ABCMeta):
     def __init__(self, weight_name=None, bias_name=None, create_cuda_buffer=False, lazy_load=False, lazy_load_file=None, is_post_adapter=False, eps=1e-6):
@@ -30,13 +32,7 @@ class LNWeightTemplate(metaclass=ABCMeta):
             else:
                 if self.weight_name is not None:
                     device = weight_dict[self.weight_name].device
-                    if device.type == "cuda":
-                        self.weight = weight_dict[self.weight_name]
-                        if self.bias_name is not None:
-                            self.bias = weight_dict[self.bias_name]
-                        else:
-                            self.bias = None
-                    elif device.type == "cpu":
+                    if device.type == "cpu":
                         weight_shape = weight_dict[self.weight_name].shape
                         weight_dtype = weight_dict[self.weight_name].dtype
                         self.pin_weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype)
@@ -52,7 +48,11 @@ class LNWeightTemplate(metaclass=ABCMeta):
                             self.pin_bias = None
                         del weight_dict[self.weight_name]
                     else:
-                        raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
+                        self.weight = weight_dict[self.weight_name]
+                        if self.bias_name is not None:
+                            self.bias = weight_dict[self.bias_name]
+                        else:
+                            self.bias = None
                 else:
                     self.weight = None
                     self.bias = None
@@ -164,4 +164,31 @@ class LNWeight(LNWeightTemplate):
         else:
             input_tensor = torch.nn.functional.layer_norm(input_tensor, (input_tensor.shape[-1],), self.weight, self.bias, self.eps)
 
+        return input_tensor
+
+
+@LN_WEIGHT_REGISTER("Triton")
+class LNWeight(LNWeightTemplate):
+    def __init__(self, weight_name=None, bias_name=None, create_cuda_buffer=False, lazy_load=False, lazy_load_file=None, is_post_adapter=False, eps=1e-6):
+        super().__init__(weight_name, bias_name, create_cuda_buffer, lazy_load, lazy_load_file, is_post_adapter, eps)
+
+    def load_from_disk(self):
+        if self.weight_name is not None:
+            if not torch._dynamo.is_compiling():
+                self.weight = self.lazy_load_file.get_tensor(self.weight_name).to(GET_DTYPE()).pin_memory()
+            else:
+                self.weight = self.lazy_load_file.get_tensor(self.weight_name).to(GET_DTYPE())
+        else:
+            self.weight = None
+
+        if self.bias_name is not None:
+            if not torch._dynamo.is_compiling():
+                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(GET_DTYPE()).pin_memory()
+            else:
+                self.bias = self.lazy_load_file.get_tensor(self.bias_name).to(GET_DTYPE())
+        else:
+            self.bias = None
+
+    def apply(self, input_tensor):
+        input_tensor = norm_infer(input_tensor, self.weight, self.bias, self.eps)
         return input_tensor

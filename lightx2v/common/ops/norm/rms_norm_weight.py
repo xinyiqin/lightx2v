@@ -30,16 +30,14 @@ class RMSWeightTemplate(metaclass=ABCMeta):
                 self.weight_cuda_buffer = weight_dict[self.weight_name].cuda()
             else:
                 device = weight_dict[self.weight_name].device
-                if device.type in ["cuda", "mlu", "npu"]:
-                    self.weight = weight_dict[self.weight_name]
-                elif device.type == "cpu":
+                if device.type == "cpu":
                     weight_shape = weight_dict[self.weight_name].shape
                     weight_dtype = weight_dict[self.weight_name].dtype
                     self.pin_weight = torch.empty(weight_shape, pin_memory=True, dtype=weight_dtype)
                     self.pin_weight.copy_(weight_dict[self.weight_name])
                     del weight_dict[self.weight_name]
                 else:
-                    raise ValueError(f"Unsupported device type: {device.type}, only 'cpu' and 'cuda' are supported")
+                    self.weight = weight_dict[self.weight_name]
 
     def clear(self):
         attrs = ["weight", "pinned_weight"]
@@ -80,14 +78,14 @@ class RMSWeight(RMSWeightTemplate):
         else:
             self.weight = self.lazy_load_file.get_tensor(self.weight_name).to(GET_DTYPE())
 
+    def _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+
     def apply(self, input_tensor):
         if GET_SENSITIVE_DTYPE() != GET_DTYPE():
-            input_tensor = input_tensor * torch.rsqrt(input_tensor.pow(2).mean(-1, keepdim=True) + self.eps)
-            input_tensor = input_tensor * self.weight
+            input_tensor = self._norm(input_tensor).type_as(input_tensor) * self.weight
         else:
-            input_tensor = input_tensor * torch.rsqrt(input_tensor.float().pow(2).mean(-1, keepdim=True) + self.eps)
-            input_tensor = (input_tensor * self.weight).to(GET_DTYPE())
-
+            input_tensor = self._norm(input_tensor.float()).type_as(input_tensor) * self.weight
         return input_tensor
 
     def state_dict(self, destination=None):
@@ -111,7 +109,15 @@ class RMSWeight(RMSWeightTemplate):
 
 @RMS_WEIGHT_REGISTER("sgl-kernel")
 class RMSWeightSgl(RMSWeight):
-    def __init__(self, weight_name, create_cuda_buffer=False, lazy_load=False, lazy_load_file=None, is_post_adapter=False, eps=1e-6):
+    def __init__(
+        self,
+        weight_name,
+        create_cuda_buffer=False,
+        lazy_load=False,
+        lazy_load_file=None,
+        is_post_adapter=False,
+        eps=1e-6,
+    ):
         super().__init__(weight_name, create_cuda_buffer, lazy_load, lazy_load_file, is_post_adapter, eps)
 
     def load_from_disk(self):

@@ -29,6 +29,7 @@ from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.utils import *
+from lightx2v_platform.base.global_var import AI_DEVICE
 
 
 @RUNNER_REGISTER("wan2.1")
@@ -65,7 +66,7 @@ class WanRunner(DefaultRunner):
             if clip_offload:
                 clip_device = torch.device("cpu")
             else:
-                clip_device = torch.device(self.init_device)
+                clip_device = torch.device(AI_DEVICE)
             # quant_config
             clip_quantized = self.config.get("clip_quantized", False)
             if clip_quantized:
@@ -101,8 +102,8 @@ class WanRunner(DefaultRunner):
         if t5_offload:
             t5_device = torch.device("cpu")
         else:
-            t5_device = torch.device(self.init_device)
-
+            t5_device = torch.device(AI_DEVICE)
+        tokenizer_path = os.path.join(self.config["model_path"], "google/umt5-xxl")
         # quant_config
         t5_quantized = self.config.get("t5_quantized", False)
         if t5_quantized:
@@ -112,13 +113,11 @@ class WanRunner(DefaultRunner):
             t5_model_name = f"models_t5_umt5-xxl-enc-{tmp_t5_quant_scheme}.pth"
             t5_quantized_ckpt = find_torch_model_path(self.config, "t5_quantized_ckpt", t5_model_name)
             t5_original_ckpt = None
-            tokenizer_path = os.path.join(os.path.dirname(t5_quantized_ckpt), "google/umt5-xxl")
         else:
             t5_quant_scheme = None
             t5_quantized_ckpt = None
             t5_model_name = "models_t5_umt5-xxl-enc-bf16.pth"
             t5_original_ckpt = find_torch_model_path(self.config, "t5_original_ckpt", t5_model_name)
-            tokenizer_path = os.path.join(os.path.dirname(t5_original_ckpt), "google/umt5-xxl")
 
         text_encoder = T5EncoderModel(
             text_len=self.config["text_len"],
@@ -142,7 +141,7 @@ class WanRunner(DefaultRunner):
         if vae_offload:
             vae_device = torch.device("cpu")
         else:
-            vae_device = torch.device(self.init_device)
+            vae_device = torch.device(AI_DEVICE)
 
         vae_config = {
             "vae_path": find_torch_model_path(self.config, "vae_path", self.vae_name),
@@ -222,7 +221,7 @@ class WanRunner(DefaultRunner):
             monitor_cli.lightx2v_input_prompt_len.observe(len(prompt))
         neg_prompt = input_info.negative_prompt
 
-        if self.config["cfg_parallel"]:
+        if self.config.get("enable_cfg", False) and self.config["cfg_parallel"]:
             cfg_p_group = self.config["device_mesh"].get_group(mesh_dim="cfg_p")
             cfg_p_rank = dist.get_rank(cfg_p_group)
             if cfg_p_rank == 0:
@@ -236,8 +235,11 @@ class WanRunner(DefaultRunner):
         else:
             context = self.text_encoders[0].infer([prompt])
             context = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context])
-            context_null = self.text_encoders[0].infer([neg_prompt])
-            context_null = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context_null])
+            if self.config.get("enable_cfg", False):
+                context_null = self.text_encoders[0].infer([neg_prompt])
+                context_null = torch.stack([torch.cat([u, u.new_zeros(self.config["text_len"] - u.size(0), u.size(1))]) for u in context_null])
+            else:
+                context_null = None
             text_encoder_output = {
                 "context": context,
                 "context_null": context_null,
@@ -316,7 +318,7 @@ class WanRunner(DefaultRunner):
             self.config["target_video_length"],
             lat_h,
             lat_w,
-            device=torch.device("cuda"),
+            device=torch.device(AI_DEVICE),
         )
         if last_frame is not None:
             msk[:, 1:-1] = 0
@@ -338,7 +340,7 @@ class WanRunner(DefaultRunner):
                     torch.nn.functional.interpolate(last_frame.cpu(), size=(h, w), mode="bicubic").transpose(0, 1),
                 ],
                 dim=1,
-            ).cuda()
+            ).to(AI_DEVICE)
         else:
             vae_input = torch.concat(
                 [
@@ -346,7 +348,7 @@ class WanRunner(DefaultRunner):
                     torch.zeros(3, self.config["target_video_length"] - 1, h, w),
                 ],
                 dim=1,
-            ).cuda()
+            ).to(AI_DEVICE)
 
         vae_encoder_out = self.vae_encoder.encode(vae_input.unsqueeze(0).to(GET_DTYPE()))
 
@@ -376,12 +378,12 @@ class WanRunner(DefaultRunner):
         ]
         return latent_shape
 
-    def get_latent_shape_with_target_hw(self, target_h, target_w):
+    def get_latent_shape_with_target_hw(self):
         latent_shape = [
             self.config.get("num_channels_latents", 16),
             (self.config["target_video_length"] - 1) // self.config["vae_stride"][0] + 1,
-            int(target_h) // self.config["vae_stride"][1],
-            int(target_w) // self.config["vae_stride"][2],
+            int(self.config["target_height"]) // self.config["vae_stride"][1],
+            int(self.config["target_width"]) // self.config["vae_stride"][2],
         ]
         return latent_shape
 
@@ -529,7 +531,7 @@ class Wan22DenseRunner(WanRunner):
         assert img.width == ow and img.height == oh
 
         # to tensor
-        img = TF.to_tensor(img).sub_(0.5).div_(0.5).cuda().unsqueeze(1)
+        img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(AI_DEVICE).unsqueeze(1)
         vae_encoder_out = self.get_vae_encoder_output(img)
         latent_w, latent_h = ow // self.config["vae_stride"][2], oh // self.config["vae_stride"][1]
         latent_shape = self.get_latent_shape_with_lat_hw(latent_h, latent_w)

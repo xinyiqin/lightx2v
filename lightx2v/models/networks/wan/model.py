@@ -32,12 +32,8 @@ from lightx2v.models.networks.wan.weights.transformer_weights import (
 )
 from lightx2v.utils.custom_compiler import CompiledMethodsMixin, compiled_method
 from lightx2v.utils.envs import *
+from lightx2v.utils.ggml_tensor import load_gguf_sd_ckpt
 from lightx2v.utils.utils import *
-
-try:
-    import gguf
-except ImportError:
-    gguf = None
 
 
 class WanModel(CompiledMethodsMixin):
@@ -75,6 +71,18 @@ class WanModel(CompiledMethodsMixin):
                 "mxfp6-mxfp8",
                 "mxfp8",
                 "int8-tmo",
+                "gguf-Q8_0",
+                "gguf-Q6_K",
+                "gguf-Q5_K_S",
+                "gguf-Q5_K_M",
+                "gguf-Q5_0",
+                "gguf-Q5_1",
+                "gguf-Q4_K_S",
+                "gguf-Q4_K_M",
+                "gguf-Q4_0",
+                "gguf-Q4_1",
+                "gguf-Q3_K_S",
+                "gguf-Q3_K_M",
             ]
         self.device = device
         self._init_infer_class()
@@ -138,12 +146,12 @@ class WanModel(CompiledMethodsMixin):
     def _load_safetensor_to_dict(self, file_path, unified_dtype, sensitive_layer):
         remove_keys = self.remove_keys if hasattr(self, "remove_keys") else []
 
-        if (self.device.type == "cuda" or self.device.type == "mlu") and dist.is_initialized():
-            device = torch.device("{}:{}".format(self.device.type, dist.get_rank()))
+        if self.config["parallel"]:
+            device = dist.get_rank()
         else:
-            device = self.device
+            device = str(self.device)
 
-        with safe_open(file_path, framework="pt", device=str(device)) as f:
+        with safe_open(file_path, framework="pt", device=device) as f:
             return {
                 key: (f.get_tensor(key).to(GET_DTYPE()) if unified_dtype or all(s not in key for s in sensitive_layer) else f.get_tensor(key).to(GET_SENSITIVE_DTYPE()))
                 for key in f.keys()
@@ -180,6 +188,17 @@ class WanModel(CompiledMethodsMixin):
         else:
             safetensors_path = self.model_path
 
+        if "gguf" in self.config.get("dit_quant_scheme", ""):
+            gguf_path = ""
+            if os.path.isdir(safetensors_path):
+                gguf_type = self.config.get("dit_quant_scheme").replace("gguf-", "")
+                gguf_files = list(filter(lambda x: gguf_type in x, glob.glob(os.path.join(safetensors_path, "*.gguf"))))
+                gguf_path = gguf_files[0]
+            else:
+                gguf_path = safetensors_path
+            weight_dict = self._load_gguf_ckpt(gguf_path)
+            return weight_dict
+
         if os.path.isdir(safetensors_path):
             safetensors_files = glob.glob(os.path.join(safetensors_path, "*.safetensors"))
         else:
@@ -191,6 +210,7 @@ class WanModel(CompiledMethodsMixin):
             if self.config.get("adapter_model_path", None) is not None:
                 if self.config["adapter_model_path"] == safetensor_path:
                     continue
+
             with safe_open(safetensor_path, framework="pt") as f:
                 logger.info(f"Loading weights from {safetensor_path}")
                 for k in f.keys():
@@ -239,13 +259,9 @@ class WanModel(CompiledMethodsMixin):
 
         return pre_post_weight_dict
 
-    def _load_gguf_ckpt(self):
-        gguf_path = self.dit_quantized_ckpt
-        logger.info(f"Loading gguf-quant dit model from {gguf_path}")
-        reader = gguf.GGUFReader(gguf_path)
-        for tensor in reader.tensors:
-            # TODO: implement _load_gguf_ckpt
-            pass
+    def _load_gguf_ckpt(self, gguf_path):
+        state_dict = load_gguf_sd_ckpt(gguf_path, to_device=self.device)
+        return state_dict
 
     def _init_weights(self, weight_dict=None):
         unified_dtype = GET_DTYPE() == GET_SENSITIVE_DTYPE()

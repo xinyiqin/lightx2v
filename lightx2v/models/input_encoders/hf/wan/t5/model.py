@@ -1,12 +1,10 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
-# 1. 标准库导入
 import gc
 import math
 import os
 import sys
 from pathlib import Path
 
-# 2. 第三方库导入
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,8 +24,8 @@ from lightx2v.models.input_encoders.hf.q_linear import (  # noqa E402
     SglQuantLinearFp8,  # noqa E402
     TorchaoQuantLinearInt8,  # noqa E402
     VllmQuantLinearInt8,  # noqa E402,
-    MluQuantLinearInt8,
 )
+from lightx2v_platform.ops.mm.cambricon_mlu.q_linear import MluQuantLinearInt8  # noqa E402
 from lightx2v.models.input_encoders.hf.wan.t5.tokenizer import HuggingfaceTokenizer  # noqa E402
 from lightx2v.utils.envs import *  # noqa E402
 from lightx2v.utils.registry_factory import (  # noqa E402
@@ -36,6 +34,7 @@ from lightx2v.utils.registry_factory import (  # noqa E402
     RMS_WEIGHT_REGISTER,  # noqa E402
 )
 from lightx2v.utils.utils import load_weights  # noqa E402
+from lightx2v_platform.base.global_var import AI_DEVICE  # noqa E402
 
 __all__ = [
     "T5Model",
@@ -807,8 +806,8 @@ class T5EncoderModel:
 
     def infer(self, texts):
         ids, mask = self.tokenizer(texts, return_mask=True, add_special_tokens=True)
-        ids = ids.to(self.device)
-        mask = mask.to(self.device)
+        ids = ids.to(AI_DEVICE)
+        mask = mask.to(AI_DEVICE)
         seq_lens = mask.gt(0).sum(dim=1).long()
 
         with torch.no_grad():
