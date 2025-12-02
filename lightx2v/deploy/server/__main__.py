@@ -1181,6 +1181,10 @@ async def api_v1_podcast_generate_ws(websocket: WebSocket):
 
         try:
             podcast_info = await podcast_task
+        except asyncio.CancelledError:
+            logger.warning("Podcast generation cancelled by user")
+            await safe_send_json({"type": "stopped"})
+            return
         finally:
             stop_listener_task.cancel()
         if podcast_info is None:
