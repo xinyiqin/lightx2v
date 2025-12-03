@@ -23,7 +23,7 @@ from lightx2v.deploy.common.audio_separator import AudioSeparator
 from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
-from lightx2v.deploy.common.utils import check_params, data_name, load_inputs
+from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_image_data, load_inputs
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
@@ -1330,54 +1330,29 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
             return error_response("Image input is empty", 400)
 
         image_bytes = None
-
-        # Check if input is a URL (blob:, http:, https:, or data: URL)
-        if request.image.startswith("data:image"):
-            # Data URL format: "data:image/png;base64,..."
-            try:
-                header, encoded = request.image.split(",", 1)
-                image_bytes = base64.b64decode(encoded)
-            except ValueError as e:
-                logger.error(f"Failed to parse data URL: {e}, image length: {len(request.image)}")
-                return error_response(f"Invalid data URL format: {str(e)}", 400)
-            except Exception as e:
-                logger.error(f"Failed to decode base64 from data URL: {e}")
-                return error_response(f"Invalid base64 data in data URL: {str(e)}", 400)
-        elif request.image.startswith(("http://", "https://")):
-            # HTTP/HTTPS URL format: fetch the image from URL
-            try:
-                from lightx2v.deploy.common.utils import fetch_resource
-
+        try:
+            # Check if input is a URL (blob:, http:, https:, or data: URL)
+            if request.image.startswith(("http://", "https://")):
                 timeout = int(os.getenv("REQUEST_TIMEOUT", "10"))
                 image_bytes = await fetch_resource(request.image, timeout=timeout)
-                logger.info(f"Fetched image from URL for face detection: {request.image[:100]}... (size: {len(image_bytes)} bytes)")
-            except Exception as e:
-                logger.error(f"Failed to fetch image from URL: {e}, URL: {request.image[:200] if request.image else 'None'}")
-                return error_response(f"Failed to fetch image from URL: {str(e)}", 400)
-        else:
-            # Assume it's base64 encoded string (without data URL prefix)
-            try:
-                image_bytes = base64.b64decode(request.image)
-            except Exception as e:
-                logger.error(f"Failed to decode base64 image: {e}, image length: {len(request.image) if request.image else 0}")
-                return error_response(f"Invalid image format: {str(e)}", 400)
+                logger.debug(f"Fetched image from URL for face detection: {request.image[:100]}... (size: {len(image_bytes)} bytes)")
+            else:
+                encoded = request.image
+                # Data URL format: "data:image/png;base64,..."
+                if encoded.startswith("data:image"):
+                    _, encoded = encoded.split(",", 1)
+                image_bytes = base64.b64decode(encoded)
+                logger.debug(f"Decoded base64 image: {request.image[:100]}... (size: {len(image_bytes)} bytes)")
 
-        if image_bytes is None:
-            return error_response("Failed to get image bytes", 400)
-
-        # Validate image format before passing to face detector
-        # This will catch invalid image data early
-        try:
-            from lightx2v.deploy.common.utils import format_image_data
-
+            # Validate image format before passing to face detector
             image_bytes = await asyncio.to_thread(format_image_data, image_bytes)
+
         except Exception as e:
-            logger.error(f"Invalid image data: {e}")
+            logger.error(f"Failed to decode base64 image: {e}, image length: {len(request.image) if request.image else 0}")
             return error_response(f"Invalid image format: {str(e)}", 400)
 
         # Detect faces only (no cropping)
         result = face_detector.detect_faces(image_bytes, return_image=False)
-
         faces_data = []
         for i, face in enumerate(result["faces"]):
             faces_data.append(
@@ -1390,11 +1365,7 @@ async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_use
                     # Note: face_image is not included - frontend will crop it based on bbox
                 }
             )
-
-        return {
-            "faces": faces_data,
-            "total": len(faces_data),
-        }
+        return {"faces": faces_data, "total": len(faces_data)}
 
     except Exception as e:
         logger.error(f"Face detection error: {traceback.format_exc()}")
@@ -1407,37 +1378,18 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
     try:
         if not audio_separator:
             return error_response("Audio separator not initialized", 500)
-
-        # Decode base64 audio
+        audio_bytes = None
         try:
-            if request.audio.startswith("data:"):
+            encoded = request.audio
+            if encoded.startswith("data:"):
                 # Remove data URL prefix (e.g., "data:audio/mpeg;base64," or "data:application/octet-stream;base64,")
-                header, encoded = request.audio.split(",", 1)
-                logger.debug(f"Audio data URL header: {header}, encoded length: {len(encoded)}")
-            else:
-                encoded = request.audio
-                logger.debug(f"Audio base64 string length: {len(encoded)}")
-
-            # Clean the base64 string: remove whitespace and ensure proper padding
-            encoded = encoded.strip().replace("\n", "").replace("\r", "").replace(" ", "")
-            original_length = len(encoded)
-
-            # Add padding if needed (base64 strings must be multiples of 4)
-            missing_padding = len(encoded) % 4
-            if missing_padding:
-                logger.warning(f"Base64 string length ({original_length}) is not a multiple of 4, adding {4 - missing_padding} padding characters")
-                encoded += "=" * (4 - missing_padding)
-
-            # Validate base64 string before decoding
-            if len(encoded) % 4 != 0:
-                raise ValueError(f"Base64 string length ({len(encoded)}) is still not a multiple of 4 after padding")
-
-            audio_bytes = base64.b64decode(encoded, validate=True)
+                _, encoded = encoded.split(",", 1)
+            audio_bytes = await asyncio.to_thread(base64.b64decode, encoded, validate=True)
             logger.debug(f"Successfully decoded base64 audio, size: {len(audio_bytes)} bytes")
+
         except Exception as e:
-            logger.error(f"Failed to decode base64 audio: {str(e)}")
-            logger.error(f"Audio string length: {len(request.audio)}, first 100 chars: {request.audio[:100]}")
-            raise ValueError(f"Invalid base64 audio data: {str(e)}")
+            logger.error(f"Failed to decode base64 audio {request.audio[:100]}..., error: {str(e)}")
+            return error_response(f"Invalid base64 audio data", 400)
 
         # Separate speakers
         result = audio_separator.separate_speakers(audio_bytes, num_speakers=request.num_speakers)
@@ -1447,7 +1399,6 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
         for speaker in result["speakers"]:
             # Convert audio tensor directly to base64
             audio_base64 = audio_separator.speaker_audio_to_base64(speaker["audio"], speaker["sample_rate"], format="wav")
-
             speakers_data.append(
                 {
                     "speaker_id": speaker["speaker_id"],
@@ -1456,12 +1407,7 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
                     "sample_rate": speaker["sample_rate"],
                 }
             )
-
-        return {
-            "speakers": speakers_data,
-            "total": len(speakers_data),
-            "method": result.get("method", "pyannote"),
-        }
+        return {"speakers": speakers_data, "total": len(speakers_data), "method": result.get("method", "pyannote")}
 
     except Exception as e:
         logger.error(f"Audio separation error: {traceback.format_exc()}")
@@ -1502,6 +1448,7 @@ if __name__ == "__main__":
     parser.add_argument("--volcengine_tts_list_json", type=str, default=dft_volcengine_tts_list_json)
     parser.add_argument("--ip", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--face_detector_model_path", type=str, default=None)
     parser.add_argument("--audio_separator_model_path", type=str, default="")
     args = parser.parse_args()
     logger.info(f"args: {args}")
@@ -1509,7 +1456,7 @@ if __name__ == "__main__":
     model_pipelines = Pipeline(args.pipeline_json)
     volcengine_tts_client = VolcEngineTTSClient(args.volcengine_tts_list_json)
     volcengine_podcast_client = VolcEnginePodcastClient()
-    face_detector = FaceDetector()
+    face_detector = FaceDetector(model_path=args.face_detector_model_path)
     audio_separator = AudioSeparator(model_path=args.audio_separator_model_path)
     auth_manager = AuthManager()
     if args.task_url.startswith("/"):
