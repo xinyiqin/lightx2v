@@ -40,9 +40,13 @@ class LocalDataManager(BaseDataManager):
 
     @class_try_catch_async
     async def load_bytes(self, filename, abs_path=None):
-        inp_path = self.fmt_path(self.local_dir, filename, abs_path)
-        with open(inp_path, "rb") as fin:
-            return fin.read()
+        if filename and "," in str(filename):
+            paths = [p.strip() for p in str(filename).split(",")]
+            return [await self.load_bytes(path, abs_path) for path in paths]
+        else:
+            inp_path = self.fmt_path(self.local_dir, filename, abs_path)
+            with open(inp_path, "rb") as fin:
+                return fin.read()
 
     @class_try_catch_async
     async def delete_bytes(self, filename, abs_path=None):

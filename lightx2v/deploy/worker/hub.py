@@ -60,23 +60,35 @@ class BaseWorker:
         for k, v in params.get("processed_video_paths", {}).items():
             logger.info(f"set {k} to {v}")
             setattr(self.input_info, k, v)
+        self.input_info.last_frame_path = params.get("last_frame_path", "")
 
     async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
         input_image_path = inputs.get("input_image", "")
-        tmp_image_path = os.path.join(tmp_dir, input_image_path)
-
+        
         # prepare tmp image
         if "image_path" in self.input_info.__dataclass_fields__:
-            img_data = await data_manager.load_bytes(input_image_path)
-            with open(tmp_image_path, "wb") as fout:
-                fout.write(img_data)
-            params["image_path"] = tmp_image_path
+            img_datas = await data_manager.load_bytes(input_image_path)
+            if isinstance(img_datas, list):
+                # Multiple files: process all of them
+                image_paths = [p.strip() for p in input_image_path.split(",")]
+                tmp_image_paths = []
+                for idx, img_data in enumerate(img_datas):
+                    tmp_path = os.path.join(tmp_dir, os.path.basename(image_paths[idx]))
+                    with open(tmp_path, "wb") as fout:
+                        fout.write(img_data)
+                    tmp_image_paths.append(tmp_path)
+                params["image_path"] = ",".join(tmp_image_paths)
+            else:
+                tmp_image_path = os.path.join(tmp_dir, input_image_path)
+                with open(tmp_image_path, "wb") as fout:
+                    fout.write(img_datas)
+                params["image_path"] = tmp_image_path
 
     async def prepare_input_video(self, params, inputs, tmp_dir, data_manager):
         if not self.is_animate_model():
             return
         init_tools_preprocess()
-        from preprocess_data import get_preprocess_parser, process_input_video
+        from tools.preprocess.preprocess_data import get_preprocess_parser, process_input_video
 
         result_paths = {}
         if self.rank == 0:
@@ -104,7 +116,15 @@ class BaseWorker:
                 if k in pre_config:
                     setattr(pre_args, k, pre_config[k])
 
-            process_input_video(pre_args)
+            logger.info(f"Starting video preprocessing in thread pool (this may take a while)...")
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(None, process_input_video, pre_args)
+                logger.info(f"Video preprocessing completed successfully")
+            except Exception as e:
+                logger.error(f"Video preprocessing failed: {e}")
+                raise
+
             result_paths = {
                 "src_pose_path": os.path.join(processed_video_path, "src_pose.mp4"),
                 "src_face_path": os.path.join(processed_video_path, "src_face.mp4"),
@@ -119,6 +139,18 @@ class BaseWorker:
         for p in result_paths.values():
             assert os.path.exists(p), f"Input video processed result not found: {p}!"
         params["processed_video_paths"] = result_paths
+
+    async def prepare_input_last_frame(self, params, inputs, tmp_dir, data_manager):
+        input_last_frame_path = inputs.get("input_last_frame", "")
+        tmp_last_frame_path = os.path.join(tmp_dir, input_last_frame_path)
+
+        # prepare tmp last frame
+        if "last_frame_path" in self.input_info.__dataclass_fields__:
+            img_data = await data_manager.load_bytes(input_last_frame_path)
+            with open(tmp_last_frame_path, "wb") as fout:
+                fout.write(img_data)
+
+        params["last_frame_path"] = tmp_last_frame_path
 
     async def prepare_input_audio(self, params, inputs, tmp_dir, data_manager):
         input_audio_path = inputs.get("input_audio", "")
@@ -160,6 +192,19 @@ class BaseWorker:
         params["save_result_path"] = tmp_video_path
         return tmp_video_path, output_video_path
 
+    def prepare_output_image(self, params, outputs, tmp_dir, data_manager):
+        output_image_path = outputs.get("output_image", "")
+        if not output_image_path:
+            logger.warning(f"output_image_path is empty in outputs: {outputs}")
+            # Fallback: generate a default filename
+            output_image_path = "output_image.png"
+        tmp_image_path = os.path.join(tmp_dir, output_image_path)
+        if data_manager.name == "local":
+            tmp_image_path = os.path.join(data_manager.local_dir, output_image_path)
+        params["save_result_path"] = tmp_image_path
+        logger.info(f"prepare_output_image: output_image_path={output_image_path}, tmp_image_path={tmp_image_path}, save_result_path={params['save_result_path']}")
+        return tmp_image_path, output_image_path
+
     async def prepare_dit_inputs(self, inputs, data_manager):
         device = torch.device("cuda", self.rank)
         text_out = inputs["text_encoder_output"]
@@ -194,11 +239,23 @@ class BaseWorker:
             video_data = open(tmp_video_path, "rb").read()
             await data_manager.save_bytes(video_data, output_video_path)
 
+    async def save_output_image(self, tmp_image_path, output_image_path, data_manager):
+        # save output image
+        if data_manager.name != "local" and self.rank == self.out_video_rank and isinstance(tmp_image_path, str):
+            image_data = open(tmp_image_path, "rb").read()
+            await data_manager.save_bytes(image_data, output_image_path)
+
     def is_audio_model(self):
         return "audio" in self.runner.config["model_cls"] or "seko_talk" in self.runner.config["model_cls"]
 
     def is_animate_model(self):
         return self.runner.config.get("task") == "animate"
+
+    def is_i2i_model(self):
+        return self.runner.config.get("task") == "i2i"
+
+    def is_t2i_model(self):
+        return self.runner.config.get("task") == "t2i"
 
     async def broadcast_data(self, data, src_rank=0):
         if self.world_size <= 1:
@@ -292,7 +349,11 @@ class PipelineWorker(BaseWorker):
             await self.prepare_input_image(params, inputs, tmp_dir, data_manager)
             await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
             await self.prepare_input_video(params, inputs, tmp_dir, data_manager)
-            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
+            await self.prepare_input_last_frame(params, inputs, tmp_dir, data_manager)
+            if self.is_i2i_model() or self.is_t2i_model():
+                tmp_image_path, output_image_path = self.prepare_output_image(params, outputs, tmp_dir, data_manager)
+            else:
+                tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
 
             self.set_inputs(params)
@@ -304,7 +365,10 @@ class PipelineWorker(BaseWorker):
             status, _ = await future
             if not status:
                 return False
-            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
+            if self.is_i2i_model() or self.is_t2i_model():
+                await self.save_output_image(tmp_image_path, output_image_path, data_manager)
+            else:
+                await self.save_output_video(tmp_video_path, output_video_path, data_manager)
             return True
 
 
@@ -325,8 +389,12 @@ class TextEncoderWorker(BaseWorker):
         if self.runner.config["use_prompt_enhancer"]:
             prompt = self.runner.config["prompt_enhanced"]
 
-        if self.runner.config["task"] == "i2v" and not self.is_audio_model():
+        if (self.runner.config["task"] == "i2v" or self.is_i2i_model()) and not self.is_audio_model():
             img = await data_manager.load_image(input_image_path)
+            # load_image may return a list for multiple images, or a single image
+            if isinstance(img, list):
+                # For multiple images, use the first one for text encoder
+                img = img[0]
             img = self.runner.read_image_input(img)
             if isinstance(img, tuple):
                 img = img[0]
@@ -351,11 +419,26 @@ class ImageEncoderWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
 
-        img = await data_manager.load_image(inputs["input_image"])
+        input_image_path = inputs.get("input_image", "")
+        img = await data_manager.load_image(input_image_path)
+        # load_image may return a list for multiple images, or a single image
+        if isinstance(img, list):
+            # For multiple images, use the first one for image encoder
+            img = img[0]
         img = self.runner.read_image_input(img)
         if isinstance(img, tuple):
             img = img[0]
-        out = self.runner.run_image_encoder(img)
+        
+        last_frame = None
+        if self.runner.config.get("task") == "flf2v" and "last_frame_path" in self.input_info.__dataclass_fields__:
+            input_last_frame_path = inputs.get("input_last_frame", "")
+            if input_last_frame_path:
+                last_frame_img = await data_manager.load_image(input_last_frame_path)
+                last_frame = self.runner.read_image_input(last_frame_img)
+                if isinstance(last_frame, tuple):
+                    last_frame = last_frame[0]
+        
+        out = self.runner.run_image_encoder(img, last_frame)
         if self.rank == 0:
             await data_manager.save_object(out, outputs["clip_encoder_output"])
 
@@ -375,13 +458,28 @@ class VaeEncoderWorker(BaseWorker):
     async def run(self, inputs, outputs, params, data_manager):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
-        img = await data_manager.load_image(inputs["input_image"])
+        input_image_path = inputs.get("input_image", "")
+        img = await data_manager.load_image(input_image_path)
+        # load_image may return a list for multiple images, or a single image
+        if isinstance(img, list):
+            # For multiple images, use the first one for VAE encoder
+            img = img[0]
         # could change config.lat_h, lat_w, tgt_h, tgt_w
         img = self.runner.read_image_input(img)
         if isinstance(img, tuple):
             img = img[1] if self.runner.vae_encoder_need_img_original else img[0]
-        # run vae encoder changed the config, we use kwargs pass changes
-        vals = self.runner.run_vae_encoder(img)
+        
+        # Handle flf2v task: process last frame if present
+        last_frame = None
+        if self.runner.config.get("task") == "flf2v" and "last_frame_path" in self.input_info.__dataclass_fields__:
+            input_last_frame_path = inputs.get("input_last_frame", "")
+            if input_last_frame_path:
+                last_frame_img = await data_manager.load_image(input_last_frame_path)
+                last_frame = self.runner.read_image_input(last_frame_img)
+                if isinstance(last_frame, tuple):
+                    last_frame = last_frame[1] if self.runner.vae_encoder_need_img_original else last_frame[0]
+        
+        vals = self.runner.run_vae_encoder(img, last_frame)
         out = {"vals": vals, "kwargs": {}}
 
         for key in ["original_shape", "resized_shape", "latent_shape", "target_shape"]:
@@ -392,6 +490,8 @@ class VaeEncoderWorker(BaseWorker):
             await data_manager.save_object(out, outputs["vae_encoder_output"])
 
         del out, img, vals
+        if last_frame is not None:
+            del last_frame
         torch.cuda.empty_cache()
         gc.collect()
         return True
@@ -442,16 +542,23 @@ class VaeDecoderWorker(BaseWorker):
     @class_try_catch_async
     async def run(self, inputs, outputs, params, data_manager):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
+            if self.is_i2i_model() or self.is_t2i_model():
+                tmp_image_path, output_image_path = self.prepare_output_image(params, outputs, tmp_dir, data_manager)
+            else:
+                tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.set_inputs(params)
 
             device = torch.device("cuda", self.rank)
             latents = await data_manager.load_tensor(inputs["latents"], device)
             self.runner.gen_video = self.runner.run_vae_decoder(latents)
-            self.runner.process_images_after_vae_decoder(save_video=True)
+            is_image_task = self.is_i2i_model() or self.is_t2i_model()
+            self.runner.process_images_after_vae_decoder(save_video=not is_image_task)
 
-            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
+            if is_image_task:
+                await self.save_output_image(tmp_image_path, output_image_path, data_manager)
+            else:
+                await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
             del latents
             torch.cuda.empty_cache()
@@ -473,7 +580,11 @@ class SegmentDiTWorker(BaseWorker):
     @class_try_catch_async_with_thread
     async def run(self, inputs, outputs, params, data_manager):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
+            is_image_task = self.is_i2i_model() or self.is_t2i_model()
+            if is_image_task:
+                tmp_image_path, output_image_path = self.prepare_output_image(params, outputs, tmp_dir, data_manager)
+            else:
+                tmp_video_path, output_video_path = self.prepare_output_video(params, outputs, tmp_dir, data_manager)
             await self.prepare_input_audio(params, inputs, tmp_dir, data_manager)
             logger.info(f"run params: {params}, {inputs}, {outputs}")
             self.set_inputs(params)
@@ -487,7 +598,10 @@ class SegmentDiTWorker(BaseWorker):
             if not status:
                 return False
 
-            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
+            if is_image_task:
+                await self.save_output_image(tmp_image_path, output_image_path, data_manager)
+            else:
+                await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
             torch.cuda.empty_cache()
             gc.collect()
@@ -495,4 +609,6 @@ class SegmentDiTWorker(BaseWorker):
 
     def run_dit(self):
         self.runner.run_main()
-        self.runner.process_images_after_vae_decoder(save_video=True)
+        # For i2i and t2i tasks, save as image; otherwise save as video
+        is_image_task = self.is_i2i_model() or self.is_t2i_model()
+        self.runner.process_images_after_vae_decoder(save_video=not is_image_task)

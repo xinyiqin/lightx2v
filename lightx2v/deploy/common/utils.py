@@ -67,12 +67,16 @@ def class_try_catch_async(func):
 
 
 def data_name(x, task_id):
-    if x == "input_image":
+    if x == "input_image" or x.startswith("input_image_"):
         x = x + ".png"
     elif x == "input_video":
         x = x + ".mp4"
+    elif x == "input_last_frame":
+        x = x + ".png"
     elif x == "output_video":
         x = x + ".mp4"
+    elif x == "output_image":
+        x = x + ".png"
     return f"{task_id}-{x}"
 
 
@@ -167,8 +171,94 @@ async def preload_data(inp, inp_type, typ, val):
             timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
             data = await fetch_resource(val, timeout=timeout)
         elif typ == "base64":
-            # Decode base64 in background thread to avoid blocking event loop
-            data = await asyncio.to_thread(base64.b64decode, val)
+            # Check if this is multiple base64 images (for i2i tasks)
+            # Frontend now sends a list of base64 strings: ["base64string1", "base64string2", ...]
+            # For backward compatibility, also support comma-separated string format
+            if inp_type == "IMAGE":
+                # Check if val is a list (new format)
+                if isinstance(val, list):
+                    # New format: array of base64 strings
+                    decoded_parts = []
+                    for idx, base64_str in enumerate(val):
+                        if not base64_str:
+                            continue
+                        try:
+                            # Remove data URL prefix if present
+                            if isinstance(base64_str, str) and base64_str.startswith("data:image/"):
+                                base64_part = base64_str.split(",", 1)
+                                if len(base64_part) > 1:
+                                    base64_str = base64_part[1]
+                                else:
+                                    logger.warning(f"Invalid data URL format for image {idx + 1} in {inp}, skipping")
+                                    continue
+                            
+                            decoded = await asyncio.to_thread(base64.b64decode, base64_str)
+                            if len(decoded) > 0:
+                                decoded_parts.append(decoded)
+                                logger.info(f"Successfully decoded image {idx + 1}/{len(val)} for {inp}, size: {len(decoded)} bytes")
+                            else:
+                                logger.warning(f"Decoded image {idx + 1} for {inp} is empty, skipping")
+                        except Exception as e:
+                            logger.error(f"Failed to decode base64 part {idx + 1}/{len(val)} for {inp}: {e}")
+                            # Continue with other images even if one fails
+                    
+                    # If we successfully decoded multiple images, return them as a list
+                    if len(decoded_parts) > 1:
+                        logger.info(f"Successfully decoded {len(decoded_parts)}/{len(val)} images for {inp}")
+                        return {"type": "multi_image", "data": decoded_parts}
+                    elif len(decoded_parts) == 1:
+                        logger.warning(f"Only one image decoded successfully for {inp} (expected {len(val)}), treating as single image")
+                        data = decoded_parts[0]
+                    else:
+                        raise ValueError(f"Failed to decode any images for {inp} (tried {len(val)} parts)")
+                # Backward compatibility: check if val is a comma-separated string
+                elif isinstance(val, str) and "," in val and len(val) > 100:
+                    # Old format: comma-separated string
+                    parts = [p.strip() for p in val.split(",") if p.strip()]
+                    if len(parts) > 1:
+                        decoded_parts = []
+                        for idx, part in enumerate(parts):
+                            if not part:
+                                continue
+                            try:
+                                # Remove data URL prefix if present
+                                if part.startswith("data:image/"):
+                                    base64_part = part.split(",", 1)
+                                    if len(base64_part) > 1:
+                                        part = base64_part[1]
+                                    else:
+                                        logger.warning(f"Invalid data URL format for image {idx + 1} in {inp}, skipping")
+                                        continue
+                                
+                                decoded = await asyncio.to_thread(base64.b64decode, part)
+                                if len(decoded) > 0:
+                                    decoded_parts.append(decoded)
+                                    logger.info(f"Successfully decoded image {idx + 1}/{len(parts)} for {inp}, size: {len(decoded)} bytes")
+                                else:
+                                    logger.warning(f"Decoded image {idx + 1} for {inp} is empty, skipping")
+                            except Exception as e:
+                                logger.error(f"Failed to decode base64 part {idx + 1}/{len(parts)} for {inp}: {e}")
+                                # Continue with other images even if one fails
+                            
+                        # If we successfully decoded multiple images, return them as a list
+                        if len(decoded_parts) > 1:
+                            logger.info(f"Successfully decoded {len(decoded_parts)}/{len(parts)} images for {inp}")
+                            return {"type": "multi_image", "data": decoded_parts}
+                        elif len(decoded_parts) == 1:
+                            logger.warning(f"Only one image decoded successfully for {inp} (expected {len(parts)}), treating as single image")
+                            data = decoded_parts[0]
+                        else:
+                            logger.error(f"Failed to decode any images for {inp} (tried {len(parts)} parts), falling back to single image decode")
+                            data = await asyncio.to_thread(base64.b64decode, val)
+                    else:
+                        # Single base64 data (only one part after split)
+                        data = await asyncio.to_thread(base64.b64decode, val)
+                else:
+                    # Single base64 data
+                    data = await asyncio.to_thread(base64.b64decode, val)
+            else:
+                # Non-image type: single base64 data
+                data = await asyncio.to_thread(base64.b64decode, val)
         # For multi-person audio directory, val should be a dict with file structure
         elif typ == "directory":
             data = {}
@@ -213,6 +303,26 @@ async def load_inputs(params, raw_inputs, types):
                 inputs_data[f"{inp}/{fname}"] = fdata
                 fs.append(f"{inp}/{fname}")
             params["extra_inputs"] = {inp: fs}
+        # Handle multiple images (for i2i tasks)
+        elif bytes_data is not None and isinstance(bytes_data, dict) and bytes_data.get("type") == "multi_image":
+            # Format each image
+            formatted_images = []
+            for img_data in bytes_data["data"]:
+                formatted_img = await asyncio.to_thread(format_image_data, img_data)
+                formatted_images.append(formatted_img)
+            
+            # Store all formatted images in inputs_data
+            # The first image is stored under the main input key for backward compatibility
+            # All images are stored under numbered keys (input_image_0, input_image_1, etc.)
+            for idx, img_data in enumerate(formatted_images):
+                if idx == 0:
+                    inputs_data[inp] = img_data
+                else:
+                    inputs_data[f"{inp}_{idx}"] = img_data
+            
+            # Store the list of all filenames (including the first one) in params for later use
+            # This will be used to update the inputs mapping after saving
+            params[f"{inp}_filenames"] = [inp] + [f"{inp}_{idx}" for idx in range(1, len(formatted_images))]
         elif bytes_data is not None:
             inputs_data[inp] = bytes_data
         else:

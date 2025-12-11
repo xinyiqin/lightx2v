@@ -341,7 +341,7 @@ class DefaultRunner(BaseRunner):
                     logger.info(f"Enhanced prompt: {enhanced_prompt}")
                     return enhanced_prompt
 
-    def process_images_after_vae_decoder(self):
+    def process_images_after_vae_decoder(self, save_video=True):
         self.gen_video_final = vae_to_comfyui_image(self.gen_video_final)
 
         if "video_frame_interpolation" in self.config:
@@ -357,16 +357,32 @@ class DefaultRunner(BaseRunner):
         if self.input_info.return_result_tensor:
             return {"video": self.gen_video_final}
         elif self.input_info.save_result_path is not None:
-            if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
-                fps = self.config["video_frame_interpolation"]["target_fps"]
-            else:
-                fps = self.config.get("fps", 16)
-
             if not dist.is_initialized() or dist.get_rank() == 0:
-                logger.info(f"🎬 Start to save video 🎬")
+                # Check if task is i2i (image-to-image) or t2i (text-to-image)
+                task = self.config.get("task", "")
+                is_image_task = task == "i2i" or task == "t2i"
+                
+                if is_image_task and not save_video:
+                    # Save as image for i2i or t2i task
+                    logger.info(f"🖼️ Start to save image 🖼️")
+                    # Take first frame: [N, H, W, C] -> [H, W, C]
+                    first_frame = self.gen_video_final[0]
+                    # Convert to numpy uint8
+                    image_array = (first_frame * 255).clamp(0, 255).to(torch.uint8).numpy()
+                    # Convert to PIL Image and save
+                    pil_image = Image.fromarray(image_array)
+                    pil_image.save(self.input_info.save_result_path)
+                    logger.info(f"✅ Image saved successfully to: {self.input_info.save_result_path} ✅")
+                else:
+                    # Save as video
+                    if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
+                        fps = self.config["video_frame_interpolation"]["target_fps"]
+                    else:
+                        fps = self.config.get("fps", 16)
 
-                save_to_video(self.gen_video_final, self.input_info.save_result_path, fps=fps, method="ffmpeg")
-                logger.info(f"✅ Video saved successfully to: {self.input_info.save_result_path} ✅")
+                    logger.info(f"🎬 Start to save video 🎬")
+                    save_to_video(self.gen_video_final, self.input_info.save_result_path, fps=fps, method="ffmpeg")
+                    logger.info(f"✅ Video saved successfully to: {self.input_info.save_result_path} ✅")
             return {"video": None}
 
     @ProfilingContext4DebugL1("RUN pipeline", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_worker_request_duration, metrics_labels=["DefaultRunner"])

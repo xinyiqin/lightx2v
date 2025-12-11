@@ -131,10 +131,21 @@ class BaseDataManager:
 
     @class_try_catch_async
     async def load_image(self, filename):
-        bytes_data = await self.load_bytes(filename)
-        buffer = io.BytesIO(bytes_data)
-        img = Image.open(buffer).convert("RGB")
-        return img
+        # Support multiple images: if filename contains comma, load all images
+        if filename and "," in str(filename):
+            paths = [p.strip() for p in str(filename).split(",")]
+            images = []
+            for path in paths:
+                bytes_data = await self.load_bytes(path)
+                buffer = io.BytesIO(bytes_data)
+                img = Image.open(buffer).convert("RGB")
+                images.append(img)
+            return images
+        else:
+            bytes_data = await self.load_bytes(filename)
+            buffer = io.BytesIO(bytes_data)
+            img = Image.open(buffer).convert("RGB")
+            return img
 
     def get_delete_func(self, type):
         maps = {

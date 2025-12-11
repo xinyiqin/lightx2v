@@ -110,9 +110,13 @@ class S3DataManager(BaseDataManager):
 
     @class_try_catch_async
     async def load_bytes(self, filename, abs_path=None):
-        filename = self.fmt_path(self.base_path, filename, abs_path)
-        response = await self.s3_client.get_object(Bucket=self.bucket_name, Key=filename)
-        return await response["Body"].read()
+        if filename and "," in str(filename):
+            paths = [p.strip() for p in str(filename).split(",")]
+            return [await self.load_bytes(path, abs_path) for path in paths]
+        else:
+            filename = self.fmt_path(self.base_path, filename, abs_path)
+            response = await self.s3_client.get_object(Bucket=self.bucket_name, Key=filename)
+            return await response["Body"].read()
 
     @class_try_catch_async
     async def delete_bytes(self, filename, abs_path=None):
