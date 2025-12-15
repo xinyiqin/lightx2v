@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import base64
-import io
 import json
 import mimetypes
 import os
@@ -10,7 +9,6 @@ import tempfile
 import traceback
 import uuid
 from contextlib import asynccontextmanager
-from PIL import Image
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -361,93 +359,7 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
 
         # save multimodal inputs data
         for inp, data in inputs_data.items():
-            # Ensure data is bytes (format_image_data always returns bytes, but check for safety)
-            if isinstance(data, Image.Image):
-                # Convert PIL Image to bytes
-                buffer = io.BytesIO()
-                data.save(buffer, format="PNG")
-                data = buffer.getvalue()
-            elif not isinstance(data, bytes):
-                logger.error(f"Unexpected data type for {inp}: {type(data)}, skipping save")
-                continue
-            
-            # Validate data is not empty
-            if len(data) == 0:
-                logger.error(f"Empty data for {inp}, skipping save")
-                continue
-            
-            filename = data_name(inp, task_id)
-            await data_manager.save_bytes(data, filename)
-            logger.info(f"Saved input data: {inp} -> {filename}, size: {len(data)} bytes")
-        
-        # Handle multiple images: save individual fields (input_image_0, input_image_1, etc.) and keep input_image as comma-separated
-        for inp in inputs:
-            if f"{inp}_filenames" in params:
-                image_filenames = params[f"{inp}_filenames"]
-                if len(image_filenames) > 1:
-                    # Generate data names for all images
-                    data_names = [data_name(fname, task_id) for fname in image_filenames]
-                    comma_separated_names = ",".join(data_names)
-                    
-                    # Update task inputs
-                    task, subtasks = await task_manager.query_task(task_id, only_task=False)
-                    if task and inp in task["inputs"]:
-                        # Keep main input field as comma-separated names (for backward compatibility)
-                        task["inputs"][inp] = comma_separated_names
-                        
-                        # Save individual fields: input_image_0, input_image_1, input_image_2, etc.
-                        for idx, fname in enumerate(image_filenames):
-                            individual_key = f"{inp}_{idx}"
-                            individual_filename = data_names[idx]
-                            task["inputs"][individual_key] = individual_filename
-                        
-                        # Update all subtask inputs that use this input
-                        for sub in subtasks:
-                            if inp in sub["inputs"]:
-                                # Keep main input field as comma-separated names
-                                sub["inputs"][inp] = comma_separated_names
-                                # Save individual fields in subtasks
-                                for idx, fname in enumerate(image_filenames):
-                                    individual_key = f"{inp}_{idx}"
-                                    individual_filename = data_names[idx]
-                                    sub["inputs"][individual_key] = individual_filename
-                        
-                        # Save updated task and subtasks
-                        # For LocalTaskManager, save() will overwrite the file
-                        if hasattr(task_manager, 'save'):
-                            # LocalTaskManager
-                            task_manager.save(task, subtasks)
-                        else:
-                            # PostgresSQLTaskManager - update via SQL
-                            from lightx2v.deploy.task_manager.sql_task_manager import PostgresSQLTaskManager
-                            if isinstance(task_manager, PostgresSQLTaskManager):
-                                conn = await task_manager.get_conn()
-                                try:
-                                    async with conn.transaction(isolation="read_uncommitted"):
-                                        # Format task data for database (convert dict to JSON string)
-                                        task_formatted = task.copy()
-                                        task_manager.fmt_dict(task_formatted)
-                                        await conn.execute(
-                                            f"UPDATE {task_manager.table_tasks} SET inputs = $1::jsonb WHERE task_id = $2",
-                                            task_formatted["inputs"],
-                                            task_id
-                                        )
-                                        # Format and update subtask inputs
-                                        for sub in subtasks:
-                                            sub_formatted = sub.copy()
-                                            task_manager.fmt_dict(sub_formatted)
-                                            await conn.execute(
-                                                f"UPDATE {task_manager.table_subtasks} SET inputs = $1::jsonb WHERE task_id = $2 AND worker_name = $3",
-                                                sub_formatted["inputs"],
-                                                task_id,
-                                                sub["worker_name"]
-                                            )
-                                finally:
-                                    await task_manager.release_conn(conn)
-                        
-                        logger.info(f"Updated task {task_id} inputs: {inp} = {comma_separated_names}, individual fields: {[f'{inp}_{idx}' for idx in range(len(image_filenames))]}")
-                        
-                        logger.info(f"Updated task {task_id} inputs[{inp}] to comma-separated: {comma_separated_names}")
+            await data_manager.save_bytes(data, data_name(inp, task_id))
 
         await prepare_subtasks(task_id)
         return {"task_id": task_id, "workers": workers, "params": params, "wait_time": wait_time}
@@ -606,25 +518,12 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
         
-        # Handle multi-image case: if filename is provided and name is input_image
-        # This handles URLs like: ./assets/task/input?task_id=xxx&name=input_image&filename=xxx-input_image_1.png
-        if filename is not None and name == "input_image":
-            # Use the filename directly
-            actual_filename = filename
-            data = await data_manager.load_bytes(actual_filename)
-            
-            # Set correct Content-Type
-            content_type = guess_file_type(actual_filename, "application/octet-stream")
-            headers = {"Content-Disposition": f'attachment; filename="{actual_filename}"'}
-            headers["Cache-Control"] = "public, max-age=3600"
-            return Response(content=data, media_type=content_type, headers=headers)
-        
         # Standard case: name exists in inputs
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         if name in task["params"]:
             return error_response(f"Input {name} is a stream", 400)
 
-        # eg, multi person audio directory input
+        # eg, multi person audio directory input, multi image input
         if filename is not None:
             extra_inputs = task["params"]["extra_inputs"][name]
             name = f"{name}/{filename}"

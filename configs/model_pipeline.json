@@ -171,29 +171,6 @@
                         "inputs": ["input_image", "input_last_frame"],
                         "outputs": ["output_video"]
                     }
-                },
-                "multi_stage": {
-                    "text_encoder": {
-                        "inputs": ["input_image"],
-                        "outputs": ["text_encoder_output"]
-                    },
-                    "image_encoder": {
-                        "inputs": ["input_image", "input_last_frame"],
-                        "outputs": ["clip_encoder_output"]
-                    },
-                    "vae_encoder": {
-                        "inputs": ["input_image", "input_last_frame"],
-                        "outputs": ["vae_encoder_output"]
-                    },
-                    "segment_dit": {
-                        "inputs": [
-                            "input_audio",
-                            "clip_encoder_output",
-                            "vae_encoder_output",
-                            "text_encoder_output"
-                        ],
-                        "outputs": ["output_video"]
-                    }
                 }
             },
             "Wan2.2-I2V-A14B-distill": {
