@@ -73,7 +73,9 @@ class BaseWorker:
             # for multi image input
             if len(extra_image_inputs) > 0:
                 tmp_paths = []
-                os.makedirs(tmp_image_path, exist_ok=True)
+                # xxx-input_image.png -> xxx-input_image
+                base_image_path = tmp_image_path.rsplit(".", 1)[0]
+                os.makedirs(base_image_path, exist_ok=True)
                 for inp in extra_image_inputs:
                     tmp_paths.append(os.path.join(tmp_dir, inputs[inp]))
                     inp_data = await data_manager.load_bytes(inputs[inp])

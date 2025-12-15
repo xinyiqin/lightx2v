@@ -61,17 +61,14 @@ const getImageMaterials = computed(() => {
     const inputImage = modalTask.value.inputs.input_image
     const taskId = modalTask.value.task_id
     const inputs = modalTask.value.inputs || {}
+    // multi-images
+    const inputImages = Object.keys(inputs).filter(key => key.startsWith("input_image/"));
 
-    // 检查是否是逗号分隔的多图路径
-    if (inputImage.includes(',')) {
-        // 按逗号拆分路径
-        const imagePaths = inputImage.split(',').map(path => path.trim()).filter(path => path)
-
+    if (inputImages.length > 0) {
         // 为每个路径生成 URL
         const imageMaterials = []
-        imagePaths.forEach((path, index) => {
-            // 使用 input_image_0, input_image_1, input_image_2 等作为 key（统一使用带索引的格式）
-            const inputName = `input_image_${index}`
+        // 多图输入时，名字分别为：input_image/xxx
+        inputImages.forEach((inputName, index) => {
             const cacheKey = `${taskId}_${inputName}`
 
             // 先尝试从同步缓存获取
@@ -99,12 +96,11 @@ const getImageMaterials = computed(() => {
         })
 
         // 如果所有图片都获取到了 URL，返回结果；否则回退到单图模式
-        return imageMaterials.length > 0 ? imageMaterials : [['input_image_0', getTaskFileUrlSync(taskId, 'input_image_0') || getTaskFileUrlSync(taskId, 'input_image')]]
+        return imageMaterials.length > 0 ? imageMaterials : [['input_image', getTaskFileUrlSync(taskId, 'input_image')]]
     } else {
-        // 单图情况：优先使用 input_image_0，如果没有则使用 input_image（向后兼容）
-        const url0 = getTaskFileUrlSync(taskId, 'input_image_0')
-        const url = url0 || getTaskFileUrlSync(taskId, 'input_image')
-        return [['input_image_0', url]]
+        // 单图情况：使用 input_image
+        const url = getTaskFileUrlSync(taskId, 'input_image')
+        return [['input_image', url]]
     }
 })
 
@@ -159,12 +155,14 @@ watch(() => modalTask.value?.task_id, async (taskId) => {
 
     const inputImage = modalTask.value.inputs.input_image
     const inputs = modalTask.value.inputs || {}
+    // multi-images
+    const inputImages = Object.keys(inputs).filter(key => key.startsWith("input_image/"));
 
-    // 如果是多图，预加载所有图片 URL（使用 input_image_0, input_image_1, input_image_2 等）
-    if (inputImage.includes(',')) {
-        const imagePaths = inputImage.split(',').map(path => path.trim()).filter(path => path)
-        imagePaths.forEach((path, index) => {
-            const inputName = `input_image_${index}`
+    if (inputImages.length > 0) {
+        // 为每个路径生成 URL
+        const imageMaterials = []
+        // 多图输入时，名字分别为：input_image/xxx
+        inputImages.forEach((inputName, index) => {
             const cacheKey = `${taskId}_${inputName}`
 
             // 如果缓存中没有，异步加载
@@ -179,8 +177,8 @@ watch(() => modalTask.value?.task_id, async (taskId) => {
             }
         })
     } else {
-        // 单图情况：优先使用 input_image_0，如果没有则使用 input_image（向后兼容）
-        const inputName = inputs.input_image_0 ? 'input_image_0' : 'input_image'
+        // 单图情况：使用 input_image
+        const inputName = inputImage;
         const cacheKey = `${taskId}_${inputName}`
         if (!getTaskFileUrlSync(taskId, inputName) && !imageMaterialsCache.value[cacheKey]) {
             getTaskFileUrl(taskId, inputName).then(loadedUrl => {
