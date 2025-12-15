@@ -50,6 +50,9 @@ class TorchrunInferenceWorker:
             return False
 
     async def process_request(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
+        has_error = False
+        error_msg = ""
+
         try:
             if self.world_size > 1 and self.rank == 0:
                 task_data = self.dist_manager.broadcast_task_data(task_data)
@@ -58,10 +61,13 @@ class TorchrunInferenceWorker:
             task_data["return_result_tensor"] = False
             task_data["negative_prompt"] = task_data.get("negative_prompt", "")
 
-            if task_data.get("target_fps") is not None and "video_frame_interpolation" in self.runner.config:
-                task_data["video_frame_interpolation"] = dict(self.runner.config["video_frame_interpolation"])
-                task_data["video_frame_interpolation"]["target_fps"] = task_data["target_fps"]
-                del task_data["target_fps"]
+            target_fps = task_data.pop("target_fps", None)
+            if target_fps is not None:
+                vfi_cfg = self.runner.config.get("video_frame_interpolation")
+                if vfi_cfg:
+                    task_data["video_frame_interpolation"] = {**vfi_cfg, "target_fps": target_fps}
+                else:
+                    logger.warning(f"Target FPS {target_fps} is set, but video frame interpolation is not configured")
 
             task_data = EasyDict(task_data)
             input_info = set_input_info(task_data)
@@ -71,36 +77,35 @@ class TorchrunInferenceWorker:
 
             await asyncio.sleep(0)
 
-            if self.world_size > 1:
-                self.dist_manager.barrier()
+        except Exception as e:
+            has_error = True
+            error_msg = str(e)
+            logger.exception(f"Rank {self.rank} inference failed: {error_msg}")
 
-            if self.rank == 0:
+        if self.world_size > 1:
+            self.dist_manager.barrier()
+
+        if self.rank == 0:
+            if has_error:
+                return {
+                    "task_id": task_data.get("task_id", "unknown"),
+                    "status": "failed",
+                    "error": error_msg,
+                    "message": f"Inference failed: {error_msg}",
+                }
+            else:
                 return {
                     "task_id": task_data["task_id"],
                     "status": "success",
                     "save_result_path": task_data.get("video_path", task_data["save_result_path"]),
                     "message": "Inference completed",
                 }
-            else:
-                return None
-
-        except Exception as e:
-            logger.exception(f"Rank {self.rank} inference failed: {str(e)}")
-            if self.world_size > 1:
-                self.dist_manager.barrier()
-
-            if self.rank == 0:
-                return {
-                    "task_id": task_data.get("task_id", "unknown"),
-                    "status": "failed",
-                    "error": str(e),
-                    "message": f"Inference failed: {str(e)}",
-                }
-            else:
-                return None
+        else:
+            return None
 
     async def worker_loop(self):
         while True:
+            task_data = None
             try:
                 task_data = self.dist_manager.broadcast_task_data()
                 if task_data is None:
@@ -110,7 +115,17 @@ class TorchrunInferenceWorker:
                 await self.process_request(task_data)
 
             except Exception as e:
-                logger.error(f"Rank {self.rank} worker loop error: {str(e)}")
+                error_str = str(e)
+                if "Connection closed by peer" in error_str or "Connection reset by peer" in error_str:
+                    logger.info(f"Rank {self.rank} detected master process shutdown, exiting worker loop")
+                    break
+                logger.error(f"Rank {self.rank} worker loop error: {error_str}")
+                if self.world_size > 1 and task_data is not None:
+                    try:
+                        self.dist_manager.barrier()
+                    except Exception as barrier_error:
+                        logger.warning(f"Rank {self.rank} barrier failed, exiting: {barrier_error}")
+                        break
                 continue
 
     def cleanup(self):

@@ -1,7 +1,10 @@
+import os
 import re
 from abc import ABCMeta, abstractmethod
+from pathlib import Path
 
 import torch
+from safetensors import safe_open
 
 from lightx2v.utils.envs import *
 from lightx2v.utils.ggml_tensor import GGMLTensor
@@ -54,9 +57,14 @@ except ImportError:
     deep_gemm = None
 
 try:
-    from torchao.quantization.utils import quant_int8_per_token_matmul, quantize_activation_per_token_absmax
+    from torchao.quantization.utils import quant_int8_per_token_matmul as torchao_int8_gemm
+    from torchao.quantization.utils import quantize_activation_per_token_absmax as torchao_int8_quant
 except ImportError:
-    quant_int8_per_token_matmul, quantize_activation_per_token_absmax = None, None
+    try:
+        from torchao.quantization.utils import _quant_int8_per_token_matmul as torchao_int8_gemm
+        from torchao.quantization.utils import _quantize_activation_per_token_absmax as torchao_int8_quant
+    except ImportError:
+        torchao_int8_gemm, torchao_int8_quant = None, None
 
 try:
     import gguf
@@ -128,7 +136,12 @@ class MMWeight(MMWeightTemplate):
 
     def _get_source_tensor(self, source_name, weight_dict=None):
         if self.lazy_load:
-            return self.lazy_load_file.get_tensor(source_name)
+            if Path(self.lazy_load_file).is_file():
+                lazy_load_file_path = self.lazy_load_file
+            else:
+                lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{source_name.split('.')[1]}.safetensors")
+            with safe_open(lazy_load_file_path, framework="pt", device="cpu") as lazy_load_file:
+                return lazy_load_file.get_tensor(source_name)
         return weight_dict[source_name]
 
     def _create_pin_tensor(self, tensor, transpose=False):
@@ -145,15 +158,21 @@ class MMWeight(MMWeightTemplate):
             self.bias_cuda_buffer = self._get_source_tensor(self.bias_name, weight_dict).to(AI_DEVICE)
 
     def _load_cpu_pin_buffers(self):
-        weight_tensor = self.lazy_load_file.get_tensor(self.weight_name)
-        self.pin_weight = self._create_pin_tensor(weight_tensor, transpose=True)
+        if self.lazy_load:
+            if Path(self.lazy_load_file).is_file():
+                lazy_load_file_path = self.lazy_load_file
+            else:
+                lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{self.weight_name.split('.')[1]}.safetensors")
+            with safe_open(lazy_load_file_path, framework="pt", device="cpu") as lazy_load_file:
+                weight_tensor = lazy_load_file.get_tensor(self.weight_name)
+                self.pin_weight = self._create_pin_tensor(weight_tensor, transpose=True)
 
-        if self.bias_name is not None:
-            bias_tensor = self.lazy_load_file.get_tensor(self.bias_name)
-            self.pin_bias = self._create_pin_tensor(bias_tensor)
-        else:
-            self.bias = None
-            self.pin_bias = None
+                if self.bias_name is not None:
+                    bias_tensor = lazy_load_file.get_tensor(self.bias_name)
+                    self.pin_bias = self._create_pin_tensor(bias_tensor)
+                else:
+                    self.bias = None
+                    self.pin_bias = None
 
     def _load_default_tensors(self, weight_dict):
         if not self.lazy_load:
@@ -197,20 +216,25 @@ class MMWeight(MMWeightTemplate):
         else:
             self.weight_name = re.sub(r"\.\d+", lambda m: f".{block_index}", self.weight_name, count=1)
 
-        weight_tensor = self.lazy_load_file.get_tensor(self.weight_name).t()
-        self.pin_weight = self.pin_weight.copy_(weight_tensor)
-        del weight_tensor
-
         if self.bias_name is not None:
             if self.is_post_adapter:
                 assert adapter_block_index is not None
                 self.bias_name = re.sub(r"\.\d+", lambda m: f".{adapter_block_index}", self.bias_name, count=1)
             else:
                 self.bias_name = re.sub(r"\.\d+", lambda m: f".{block_index}", self.bias_name, count=1)
+        if Path(self.lazy_load_file).is_file():
+            lazy_load_file_path = self.lazy_load_file
+        else:
+            lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{block_index}.safetensors")
+        with safe_open(lazy_load_file_path, framework="pt", device="cpu") as lazy_load_file:
+            weight_tensor = lazy_load_file.get_tensor(self.weight_name).t()
+            self.pin_weight = self.pin_weight.copy_(weight_tensor)
+            del weight_tensor
 
-            bias_tensor = self.lazy_load_file.get_tensor(self.bias_name)
-            self.pin_bias.copy_(bias_tensor)
-            del bias_tensor
+            if self.bias_name is not None:
+                bias_tensor = lazy_load_file.get_tensor(self.bias_name)
+                self.pin_bias.copy_(bias_tensor)
+                del bias_tensor
 
     def load_state_dict(self, destination, block_index, adapter_block_index=None):
         if self.is_post_adapter:
@@ -283,9 +307,18 @@ class MMWeightQuantTemplate(MMWeightTemplate):
             self._load_default_tensors(weight_dict)
 
     def _load_cuda_buffers(self, weight_dict):
-        source = self.lazy_load_file if self.lazy_load else weight_dict
-        self.weight_cuda_buffer, self.weight_scale_cuda_buffer = self._get_cuda_tensor_pair(source, self.lazy_load)
-        self.bias_cuda_buffer = self._get_cuda_bias_tensor(source, self.lazy_load)
+        if self.lazy_load:
+            if Path(self.lazy_load_file).is_file():
+                lazy_load_file_path = self.lazy_load_file
+            else:
+                lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{self.weight_name.split('.')[1]}.safetensors")
+            with safe_open(lazy_load_file_path, framework="pt", device="cpu") as source:
+                self.weight_cuda_buffer, self.weight_scale_cuda_buffer = self._get_cuda_tensor_pair(source, self.lazy_load)
+                self.bias_cuda_buffer = self._get_cuda_bias_tensor(source, self.lazy_load)
+        else:
+            source = weight_dict
+            self.weight_cuda_buffer, self.weight_scale_cuda_buffer = self._get_cuda_tensor_pair(source, self.lazy_load)
+            self.bias_cuda_buffer = self._get_cuda_bias_tensor(source, self.lazy_load)
 
     def _get_cuda_tensor_pair(self, source, is_lazy):
         if is_lazy:
@@ -318,30 +351,44 @@ class MMWeightQuantTemplate(MMWeightTemplate):
 
     def _get_cpu_pin_tensor_pair(self, source, is_lazy):
         if is_lazy:
-            weight_tensor = source.get_tensor(self.weight_name)
-            scale_tensor = source.get_tensor(self.weight_scale_name)
-            scale_dtype = torch.float
+            if Path(self.lazy_load_file).is_file():
+                lazy_load_file_path = self.lazy_load_file
+            else:
+                lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{self.weight_name.split('.')[1]}.safetensors")
+            with safe_open(lazy_load_file_path, framework="pt", device="cpu") as source:
+                weight_tensor = source.get_tensor(self.weight_name)
+                scale_tensor = source.get_tensor(self.weight_scale_name)
+                scale_dtype = torch.float
+                pin_weight = self._create_pin_tensor(weight_tensor)
+                pin_scale = self._create_pin_tensor(scale_tensor, scale_dtype)
         else:
             weight_tensor = source[self.weight_name]
             scale_tensor = source[self.weight_scale_name]
             scale_dtype = torch.float
-
-        pin_weight = self._create_pin_tensor(weight_tensor)
-        pin_scale = self._create_pin_tensor(scale_tensor, scale_dtype)
+            pin_weight = self._create_pin_tensor(weight_tensor)
+            pin_scale = self._create_pin_tensor(scale_tensor, scale_dtype)
         return pin_weight, pin_scale
 
     def _get_cpu_pin_bias_tensor(self, source, is_lazy):
         if self.bias_name is None:
             return None
         if is_lazy:
-            bias_tensor = source.get_tensor(self.bias_name)
-            if not self.bias_force_fp32:
-                bias_tensor = bias_tensor.to(self.infer_dtype)
+            if Path(self.lazy_load_file).is_file():
+                lazy_load_file_path = self.lazy_load_file
+            else:
+                lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{self.weight_name.split('.')[1]}.safetensors")
+            with safe_open(lazy_load_file_path, framework="pt", device="cpu") as source:
+                bias_tensor = source.get_tensor(self.bias_name)
+                if not self.bias_force_fp32:
+                    bias_tensor = bias_tensor.to(self.infer_dtype)
+                if self.bias_force_fp32:
+                    bias_tensor = bias_tensor.to(torch.float32)
+                return self._create_pin_tensor(bias_tensor)
         else:
             bias_tensor = source[self.bias_name]
-        if self.bias_force_fp32:
-            bias_tensor = bias_tensor.to(torch.float32)
-        return self._create_pin_tensor(bias_tensor)
+            if self.bias_force_fp32:
+                bias_tensor = bias_tensor.to(torch.float32)
+            return self._create_pin_tensor(bias_tensor)
 
     def _create_pin_tensor(self, tensor, dtype=None):
         dtype = dtype or tensor.dtype
@@ -553,8 +600,15 @@ class MMWeightQuantTemplate(MMWeightTemplate):
     # act quant kernels
     # =========================
     def act_quant_int8_perchannel_sym_torchao(self, x):
-        input_tensor_quant, input_tensor_scale = quantize_activation_per_token_absmax(x)
+        input_tensor_quant, input_tensor_scale = torchao_int8_quant(x)
         return input_tensor_quant, input_tensor_scale
+
+    def act_quant_fp8_perchannel_sym_torchao(self, x):
+        abs_max = x.abs().max(dim=-1, keepdim=True)[0]
+        abs_max = torch.clamp(abs_max, min=1e-8)
+        scale = abs_max / 448.0
+        quantized = torch.clamp(x / scale, -448, 448).to(torch.float8_e4m3fn)
+        return quantized, scale.float()
 
     def act_quant_fp8_perchannel_sym_vllm(self, x):
         input_tensor_quant, input_tensor_scale = ops.scaled_fp8_quant(x, None, scale_ub=None, use_per_token_if_dynamic=True)
@@ -643,27 +697,33 @@ class MMWeightQuantTemplate(MMWeightTemplate):
             self.weight_name = re.sub(r"\.\d+", lambda m: f".{block_index}", self.weight_name, count=1)
             self.weight_scale_name = re.sub(r"\.\d+", lambda m: f".{block_index}", self.weight_scale_name, count=1)
 
-        if self.weight_need_transpose:
-            weight_tensor = self.lazy_load_file.get_tensor(self.weight_name).t()
-        else:
-            weight_tensor = self.lazy_load_file.get_tensor(self.weight_name)
-        self.pin_weight = self.pin_weight.copy_(weight_tensor)
-
-        weight_scale_tensor = self.lazy_load_file.get_tensor(self.weight_scale_name)
-        self.pin_weight_scale = self.pin_weight_scale.copy_(weight_scale_tensor)
-
-        del weight_tensor
-
         if self.bias_name is not None:
             if self.is_post_adapter:
                 assert adapter_block_index is not None
                 self.bias_name = re.sub(r"\.\d+", lambda m: f".{adapter_block_index}", self.bias_name, count=1)
             else:
                 self.bias_name = re.sub(r"\.\d+", lambda m: f".{block_index}", self.bias_name, count=1)
+        if Path(self.lazy_load_file).is_file():
+            lazy_load_file_path = self.lazy_load_file
+        else:
+            lazy_load_file_path = os.path.join(self.lazy_load_file, f"block_{block_index}.safetensors")
+        with safe_open(lazy_load_file_path, framework="pt", device="cpu") as lazy_load_file:
+            if self.weight_need_transpose:
+                weight_tensor = lazy_load_file.get_tensor(self.weight_name).t()
+            else:
+                weight_tensor = lazy_load_file.get_tensor(self.weight_name)
 
-            bias_tensor = self.lazy_load_file.get_tensor(self.bias_name)
-            self.pin_bias.copy_(bias_tensor)
-            del bias_tensor
+            self.pin_weight = self.pin_weight.copy_(weight_tensor)
+            del weight_tensor
+
+            weight_scale_tensor = lazy_load_file.get_tensor(self.weight_scale_name)
+            self.pin_weight_scale = self.pin_weight_scale.copy_(weight_scale_tensor)
+            del weight_scale_tensor
+
+            if self.bias_name is not None:
+                bias_tensor = lazy_load_file.get_tensor(self.bias_name)
+                self.pin_bias.copy_(bias_tensor)
+                del bias_tensor
 
 
 @MM_WEIGHT_REGISTER("fp8-vllm")
@@ -1061,6 +1121,37 @@ class MMWeightWint8channelAint8channeldynamicSglActVllm(MMWeightQuantTemplate):
         return output_tensor
 
 
+@MM_WEIGHT_REGISTER("fp8-torchao")
+class MMWeightWfp8channelAfp8channeldynamicTorchao(MMWeightQuantTemplate):
+    """
+    Name: W-fp8-channel-sym-A-fp8-channel-sym-dynamic-Torchao
+
+    Quant MM:
+        Weight: fp8 perchannel sym
+        Act: fp8 perchannel dynamic sym
+        Kernel: Torchao
+    """
+
+    def __init__(self, weight_name, bias_name, create_cuda_buffer=False, create_cpu_buffer=False, lazy_load=False, lazy_load_file=None, is_post_adapter=False):
+        super().__init__(weight_name, bias_name, create_cuda_buffer, create_cpu_buffer, lazy_load, lazy_load_file, is_post_adapter)
+        self.load_func = self.load_fp8_perchannel_sym
+        self.weight_need_transpose = True
+        self.act_quant_func = self.act_quant_fp8_perchannel_sym_torchao
+
+    def apply(self, input_tensor):
+        input_tensor_quant, input_tensor_scale = self.act_quant_fp8_perchannel_sym_torchao(input_tensor)
+        out = torch._scaled_mm(
+            input_tensor_quant,
+            self.weight,
+            scale_a=input_tensor_scale,
+            scale_b=self.weight_scale.t(),
+            bias=self.bias,
+            out_dtype=self.infer_dtype,
+            use_fast_accum=True,
+        )
+        return out
+
+
 @MM_WEIGHT_REGISTER("int8-torchao")
 class MMWeightWint8channelAint8channeldynamicTorchao(MMWeightQuantTemplate):
     """
@@ -1081,9 +1172,9 @@ class MMWeightWint8channelAint8channeldynamicTorchao(MMWeightQuantTemplate):
     def apply(self, input_tensor):
         input_tensor = input_tensor
         input_tensor_quant, input_tensor_scale = self.act_quant_func(input_tensor)
-        output_tensor = quant_int8_per_token_matmul(input_tensor_quant, input_tensor_scale, self.weight, self.weight_scale.t().float(), output_dtype=self.infer_dtype)
+        output_tensor = torchao_int8_gemm(input_tensor_quant, input_tensor_scale, self.weight, self.weight_scale.t().float(), output_dtype=self.infer_dtype)
         if self.bias is not None:
-            output_tensor = output_tensor + self.bias
+            output_tensor.add_(self.bias)
 
         return output_tensor
 

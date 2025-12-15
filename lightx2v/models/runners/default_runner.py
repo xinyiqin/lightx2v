@@ -56,7 +56,7 @@ class DefaultRunner(BaseRunner):
         elif self.config["task"] == "s2v":
             self.run_input_encoder = self._run_input_encoder_local_s2v
         self.config.lock()  # lock config to avoid modification
-        if self.config.get("compile", False) and hasattr(self.model, "comple"):
+        if self.config.get("compile", False) and hasattr(self.model, "compile"):
             logger.info(f"[Compile] Compile all shapes: {self.config.get('compile_shapes', [])}")
             self.model.compile(self.config.get("compile_shapes", []))
 
@@ -185,7 +185,19 @@ class DefaultRunner(BaseRunner):
             del self.inputs
         self.input_info = None
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
-            del self.model
+            if hasattr(self.model, "model") and len(self.model.model) == 2:  # MultiModelStruct
+                for model in self.model.model:
+                    if hasattr(model.transformer_infer, "offload_manager"):
+                        del model.transformer_infer.offload_manager
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                    del model
+            else:
+                if hasattr(self.model.transformer_infer, "offload_manager"):
+                    del self.model.transformer_infer.offload_manager
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                del self.model
         if self.config.get("do_mm_calib", False):
             calib_path = os.path.join(os.getcwd(), "calib.pt")
             torch.save(CALIB, calib_path)
@@ -307,7 +319,14 @@ class DefaultRunner(BaseRunner):
                 # 2. main inference loop
                 latents = self.run_segment(segment_idx)
                 # 3. vae decoder
-                self.gen_video = self.run_vae_decoder(latents)
+                if self.config.get("use_stream_vae", False):
+                    frames = []
+                    for frame_segment in self.run_vae_decoder_stream(latents):
+                        frames.append(frame_segment)
+                        logger.info(f"frame sagment: {len(frames)} done")
+                    self.gen_video = torch.cat(frames, dim=2)
+                else:
+                    self.gen_video = self.run_vae_decoder(latents)
                 # 4. default do nothing
                 self.end_run_segment(segment_idx)
         gen_video_final = self.process_images_after_vae_decoder()
@@ -324,6 +343,19 @@ class DefaultRunner(BaseRunner):
             torch.cuda.empty_cache()
             gc.collect()
         return images
+
+    @ProfilingContext4DebugL1("Run VAE Decoder Stream", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_vae_decode_duration, metrics_labels=["DefaultRunner"])
+    def run_vae_decoder_stream(self, latents):
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
+            self.vae_decoder = self.load_vae_decoder()
+
+        for frame_segment in self.vae_decoder.decode_stream(latents.to(GET_DTYPE())):
+            yield frame_segment
+
+        if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
+            del self.vae_decoder
+            torch.cuda.empty_cache()
+            gc.collect()
 
     def post_prompt_enhancer(self):
         while True:
@@ -384,3 +416,17 @@ class DefaultRunner(BaseRunner):
         if GET_RECORDER_MODE():
             monitor_cli.lightx2v_worker_request_success.inc()
         return gen_video_final
+
+    def __del__(self):
+        if hasattr(self, "model"):
+            del self.model
+        if hasattr(self, "text_encoders"):
+            del self.text_encoders
+        if hasattr(self, "image_encoder"):
+            del self.image_encoder
+        if hasattr(self, "vae_encoder"):
+            del self.vae_encoder
+        if hasattr(self, "vae_decoder"):
+            del self.vae_decoder
+        torch.cuda.empty_cache()
+        gc.collect()
