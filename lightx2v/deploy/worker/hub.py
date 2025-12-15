@@ -428,10 +428,11 @@ class VaeEncoderWorker(BaseWorker):
         logger.info(f"run params: {params}, {inputs}, {outputs}")
         self.set_inputs(params)
         img = await data_manager.load_image(inputs["input_image"])
+        # could change config.lat_h, lat_w, tgt_h, tgt_w
         img = self.runner.read_image_input(img)
         if isinstance(img, tuple):
             img = img[1] if self.runner.vae_encoder_need_img_original else img[0]
-        # run vae encoder changed config, we use kwargs pass changes
+        # run vae encoder changed the config, we use kwargs pass changes
         vals = self.runner.run_vae_encoder(img)
         out = {"vals": vals, "kwargs": {}}
 
@@ -502,7 +503,7 @@ class VaeDecoderWorker(BaseWorker):
             self.runner.gen_video = self.runner.run_vae_decoder(latents)
             self.runner.process_images_after_vae_decoder()
 
-            await self.save_output_image(tmp_video_path, output_video_path, data_manager)
+            await self.save_output_video(tmp_video_path, output_video_path, data_manager)
 
             del latents
             torch.cuda.empty_cache()
