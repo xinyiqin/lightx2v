@@ -16,7 +16,6 @@ from lightx2v.server.metrics import monitor_cli
 from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
-from lightx2v.utils.utils import vae_to_comfyui_image
 from lightx2v_platform.base.global_var import AI_DEVICE
 
 torch_device_module = getattr(torch, AI_DEVICE)
@@ -251,24 +250,6 @@ class QwenImageRunner(DefaultRunner):
             torch_device_module.empty_cache()
             gc.collect()
         return images
-
-    def process_images_after_vae_decoder(self):
-        self.gen_video_final = vae_to_comfyui_image(self.gen_video_final)
-        if self.input_info.return_result_tensor:
-            return {"image": self.gen_video_final}
-        elif self.input_info.save_result_path is not None:
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                # Save as image for i2i or t2i task
-                logger.info(f"🖼️ Start to save image 🖼️")
-                # Take first frame: [N, H, W, C] -> [H, W, C]
-                first_frame = self.gen_video_final[0]
-                # Convert to numpy uint8
-                image_array = (first_frame * 255).clamp(0, 255).to(torch.uint8).numpy()
-                # Convert to PIL Image and save
-                pil_image = Image.fromarray(image_array)
-                pil_image.save(self.input_info.save_result_path)
-                logger.info(f"✅ Image saved successfully to: {self.input_info.save_result_path} ✅")
-        return {"image": self.gen_video_final}
 
     def run_pipeline(self, input_info):
         self.input_info = input_info
