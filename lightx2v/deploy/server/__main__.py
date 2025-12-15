@@ -518,7 +518,7 @@ async def assets_task_input(request: Request, user=Depends(verify_user_access_fr
 
         task = await task_manager.query_task(task_id, user_id=user["user_id"])
         assert task is not None, f"Task {task_id} not found"
-        
+
         # Standard case: name exists in inputs
         assert name in task["inputs"], f"Input {name} not found in task {task_id}"
         if name in task["params"]:
@@ -990,7 +990,7 @@ async def api_v1_share_get(share_id: str):
 
         # 判断是否是图片输出任务（i2i 或 t2i）
         is_image_task = task["task_type"] in ["i2i", "t2i"]
-        
+
         share_info = {
             "task_id": task_id,
             "share_type": share_type,

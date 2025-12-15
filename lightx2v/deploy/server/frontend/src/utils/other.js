@@ -1427,25 +1427,25 @@ export const locale = i18n.global.locale
                 if (!i2iForm.value.imageFiles) {
                     i2iForm.value.imageFiles = [];
                 }
-                
+
                 // 计算当前已有图片数量
                 const currentImageCount = i2iForm.value.imageFiles.length;
                 const maxImages = 3;
-                
+
                 // 限制最多3张图片
                 if (currentImageCount >= maxImages) {
                     showAlert(t('maxImagesReached') || `最多只能上传 ${maxImages} 张图片`, 'warning');
                     return;
                 }
-                
+
                 // 计算还能添加多少张图片
                 const remainingSlots = maxImages - currentImageCount;
                 const filesToAdd = imageFiles.slice(0, remainingSlots);
-                
+
                 if (filesToAdd.length < imageFiles.length) {
                     showAlert(t('maxImagesReached') || `最多只能上传 ${maxImages} 张图片，已添加 ${filesToAdd.length} 张`, 'warning');
                 }
-                
+
                 // 读取所有图片
                 const previewPromises = filesToAdd.map(file => {
                     return new Promise((resolve) => {
@@ -1461,7 +1461,7 @@ export const locale = i18n.global.locale
                 });
 
                 const imageData = await Promise.all(previewPromises);
-                
+
                 // 添加到表单和预览（直接操作数组，避免触发 setCurrentImagePreview 清空数组）
                 imageData.forEach(({ file, dataUrl }) => {
                     i2iForm.value.imageFiles.push(file);
@@ -1779,7 +1779,7 @@ export const locale = i18n.global.locale
                     setCurrentImagePreview(e.target.result);
                 };
                 reader.readAsDataURL(i2vForm.value.imageFile);
-            } 
+            }
             else if (taskType === 'i2i') {
                 // i2i 模式：恢复多图预览
                 if (i2iForm.value.imageFiles && i2iForm.value.imageFiles.length > 0) {
@@ -1955,7 +1955,7 @@ export const locale = i18n.global.locale
                 if (i2iForm.value.imageFiles && index >= 0 && index < i2iForm.value.imageFiles.length) {
                     i2iForm.value.imageFiles.splice(index, 1);
                     i2iImagePreviews.value.splice(index, 1);
-                    
+
                     // 更新单图预览和文件（保持向后兼容）
                     if (i2iForm.value.imageFiles.length > 0) {
                         i2iForm.value.imageFile = i2iForm.value.imageFiles[0];
@@ -4202,38 +4202,38 @@ export const locale = i18n.global.locale
                         // 处理图片文件（支持多图）
                         if (imageUrl) {
                             // 检查是否是 i2i 任务且是多图场景
-                            const isI2IMultiImage = selectedTaskId.value === 'i2i' && 
-                                task.inputs && 
-                                task.inputs.input_image && 
-                                typeof task.inputs.input_image === 'string' && 
+                            const isI2IMultiImage = selectedTaskId.value === 'i2i' &&
+                                task.inputs &&
+                                task.inputs.input_image &&
+                                typeof task.inputs.input_image === 'string' &&
                                 task.inputs.input_image.includes(',');
-                            
+
                             if (isI2IMultiImage) {
                                 // 多图场景：加载所有图片
                                 try {
                                     // 解析逗号分隔的图片路径
                                     const imagePaths = task.inputs.input_image.split(',').map(path => path.trim()).filter(path => path);
-                                    
+
                                     // 初始化数组
                                     if (!i2iForm.value.imageFiles) {
                                         i2iForm.value.imageFiles = [];
                                     }
                                     i2iImagePreviews.value = [];
-                                    
+
                                     // 加载每张图片
                                     const imageLoadPromises = imagePaths.map(async (imagePath, index) => {
                                         try {
                                             // 获取图片 URL（使用 input_image_0, input_image_1, input_image_2 等）
                                             const inputName = `input_image_${index}`;
                                             const singleImageUrl = await getTaskFileUrl(task.task_id, inputName);
-                                            
+
                                             if (singleImageUrl) {
                                                 const imageResponse = await fetch(singleImageUrl);
                                                 if (imageResponse && imageResponse.ok) {
                                                     const blob = await imageResponse.blob();
                                                     const filename = task.inputs[inputName] || `image_${index}.png`;
                                                     const file = new File([blob], filename, { type: blob.type });
-                                                    
+
                                                     // 读取为 data URL 用于预览
                                                     const dataUrl = await new Promise((resolve, reject) => {
                                                         const reader = new FileReader();
@@ -4241,7 +4241,7 @@ export const locale = i18n.global.locale
                                                         reader.onerror = reject;
                                                         reader.readAsDataURL(file);
                                                     });
-                                                    
+
                                                     return { file, dataUrl };
                                                 }
                                             }
@@ -4251,22 +4251,22 @@ export const locale = i18n.global.locale
                                         }
                                         return null;
                                     });
-                                    
+
                                     // 等待所有图片加载完成
                                     const imageData = await Promise.all(imageLoadPromises);
                                     const validImageData = imageData.filter(item => item !== null);
-                                    
+
                                     // 添加到表单和预览
                                     validImageData.forEach(({ file, dataUrl }) => {
                                         i2iForm.value.imageFiles.push(file);
                                         i2iImagePreviews.value.push(dataUrl);
                                     });
-                                    
+
                                     // 同步更新 imageFile 以保持兼容性
                                     if (i2iForm.value.imageFiles.length > 0) {
                                         i2iForm.value.imageFile = i2iForm.value.imageFiles[0];
                                     }
-                                    
+
                                     console.log(`复用任务 - 从后端加载 ${validImageData.length} 张图片（i2i 多图模式）`);
                                 } catch (error) {
                                     console.warn('Failed to load multiple images:', error);
@@ -4282,7 +4282,7 @@ export const locale = i18n.global.locale
                                             task.inputs[key].toString().toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)
                                         )] || 'image.jpg';
                                         const file = new File([blob], filename, { type: blob.type });
-                                        
+
                                         if (selectedTaskId.value === 'i2i') {
                                             // i2i 单图：也使用 imageFiles 数组（保持一致性）
                                             if (!i2iForm.value.imageFiles) {
@@ -4290,7 +4290,7 @@ export const locale = i18n.global.locale
                                             }
                                             i2iForm.value.imageFiles = [file];
                                             i2iForm.value.imageFile = file;
-                                            
+
                                             // 读取为 data URL 用于预览
                                             const reader = new FileReader();
                                             reader.onload = (e) => {
@@ -4425,7 +4425,7 @@ export const locale = i18n.global.locale
                                 if (videoResponse && videoResponse.ok) {
                                     const blob = await videoResponse.blob();
                                     const filename = task.inputs.input_video || 'input_video.mp4';
-                                    
+
                                     // 根据文件扩展名确定正确的MIME类型
                                     let mimeType = blob.type;
                                     if (!mimeType || mimeType === 'application/octet-stream') {
@@ -4439,17 +4439,17 @@ export const locale = i18n.global.locale
                                         };
                                         mimeType = mimeTypes[ext] || 'video/mp4';
                                     }
-                                    
+
                                     const file = new File([blob], filename, { type: mimeType });
                                     animateForm.value.videoFile = file;
-                                    
+
                                     // 读取为 data URL 用于预览
                                     const reader = new FileReader();
                                     reader.onload = (e) => {
                                         setCurrentVideoPreview(e.target.result);
                                     };
                                     reader.readAsDataURL(file);
-                                    
+
                                     console.log('复用任务 - 从后端加载视频文件:', {
                                         name: file.name,
                                         type: file.type,
@@ -5927,7 +5927,7 @@ export const locale = i18n.global.locale
                             seenImages.add(task.inputs.input_image);
                         }
                     }
-                    
+
                     // 处理 input_last_frame（尾帧图片）
                     if (task.inputs && task.inputs.input_last_frame && !seenImages.has(task.inputs.input_last_frame)) {
                         // 获取尾帧图片URL
@@ -6035,7 +6035,7 @@ export const locale = i18n.global.locale
 
                 // 更新表单
                 const currentForm = getCurrentForm();
-                
+
                 // i2i 模式始终使用多图模式
                 if (selectedTaskId.value === 'i2i') {
                     if (!i2iForm.value.imageFiles) {
@@ -6053,7 +6053,7 @@ export const locale = i18n.global.locale
                     setCurrentImagePreview(imageUrl);
                     currentForm.imageFile = file;
                 }
-                
+
                 updateUploadedContentStatus();
 
                 // Reset detected faces
@@ -7125,7 +7125,7 @@ export const locale = i18n.global.locale
                         }
                         const filename = template.inputs.input_image || 'template_image.jpg';
                         const file = new File([blob], filename, { type: blob.type || 'image/jpeg' });
-                        
+
                         // i2i 模式始终使用多图模式
                         if (selectedTaskId.value === 'i2i') {
                             if (!i2iForm.value.imageFiles) {
@@ -7229,7 +7229,7 @@ export const locale = i18n.global.locale
 
             // 优先使用 input_last_frame，如果没有则使用 input_image
             const lastFrameKey = template?.inputs?.input_last_frame ? 'input_last_frame' : 'input_image';
-            
+
             if (!template?.inputs?.[lastFrameKey]) {
                 showAlert(t('applyImageFailed'), 'danger');
                 return;
@@ -7265,12 +7265,12 @@ export const locale = i18n.global.locale
                         }
                         const filename = template.inputs[lastFrameKey] || 'template_last_frame_image.jpg';
                         const file = new File([blob], filename, { type: blob.type || 'image/jpeg' });
-                        
+
                         // 更新表单
                         if (selectedTaskId.value === 'flf2v') {
                             flf2vForm.value.lastFrameFile = file;
                         }
-                        
+
                         updateUploadedContentStatus();
                         console.log('模板尾帧图片文件已加载');
                     } else {

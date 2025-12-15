@@ -334,7 +334,7 @@ onUnmounted(() => {
                     class="w-full h-full object-contain"
                     @load="onVideoLoaded"
                     @error="onVideoError">
-                
+
                 <!-- 已完成：其他任务显示视频播放器 -->
                 <video
                     v-else-if="isCompleted && videoUrl"

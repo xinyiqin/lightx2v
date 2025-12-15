@@ -2642,7 +2642,7 @@ onUnmounted(() => {
                                                     </div>
                                                 </div>
                                             </div>
-                                                <input type="file" ref="imageInput" @change="handleImageUpload" 
+                                                <input type="file" ref="imageInput" @change="handleImageUpload"
                                                 :accept="selectedTaskId === 'i2i' ? 'image/*' : 'image/*'"
                                                 :multiple="selectedTaskId === 'i2i'"
                                                 style="display: none;">

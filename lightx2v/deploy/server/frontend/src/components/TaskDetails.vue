@@ -57,31 +57,31 @@ const imageMaterialsCache = ref({})
 // 获取图片素材（支持多图，逗号分隔）
 const getImageMaterials = computed(() => {
     if (!modalTask.value?.inputs?.input_image) return []
-    
+
     const inputImage = modalTask.value.inputs.input_image
     const taskId = modalTask.value.task_id
     const inputs = modalTask.value.inputs || {}
-    
+
     // 检查是否是逗号分隔的多图路径
     if (inputImage.includes(',')) {
         // 按逗号拆分路径
         const imagePaths = inputImage.split(',').map(path => path.trim()).filter(path => path)
-        
+
         // 为每个路径生成 URL
         const imageMaterials = []
         imagePaths.forEach((path, index) => {
             // 使用 input_image_0, input_image_1, input_image_2 等作为 key（统一使用带索引的格式）
             const inputName = `input_image_${index}`
             const cacheKey = `${taskId}_${inputName}`
-            
+
             // 先尝试从同步缓存获取
             let url = getTaskFileUrlSync(taskId, inputName)
-            
+
             // 如果同步缓存中没有，尝试从异步缓存获取
             if (!url && imageMaterialsCache.value[cacheKey]) {
                 url = imageMaterialsCache.value[cacheKey]
             }
-            
+
             // 如果还是没有，异步加载（不阻塞渲染）
             if (!url) {
                 // 异步加载 URL
@@ -93,11 +93,11 @@ const getImageMaterials = computed(() => {
                     console.warn(`Failed to load image URL for ${inputName}:`, err)
                 })
             }
-            
+
             // 返回结果（url 可能为 null，模板会处理）
             imageMaterials.push([inputName, url, index])
         })
-        
+
         // 如果所有图片都获取到了 URL，返回结果；否则回退到单图模式
         return imageMaterials.length > 0 ? imageMaterials : [['input_image_0', getTaskFileUrlSync(taskId, 'input_image_0') || getTaskFileUrlSync(taskId, 'input_image')]]
     } else {
@@ -156,17 +156,17 @@ const handleImageError = async (event, taskId, inputName) => {
 // 监听 modalTask 变化，预加载所有图片 URL
 watch(() => modalTask.value?.task_id, async (taskId) => {
     if (!taskId || !modalTask.value?.inputs?.input_image) return
-    
+
     const inputImage = modalTask.value.inputs.input_image
     const inputs = modalTask.value.inputs || {}
-    
+
     // 如果是多图，预加载所有图片 URL（使用 input_image_0, input_image_1, input_image_2 等）
     if (inputImage.includes(',')) {
         const imagePaths = inputImage.split(',').map(path => path.trim()).filter(path => path)
         imagePaths.forEach((path, index) => {
             const inputName = `input_image_${index}`
             const cacheKey = `${taskId}_${inputName}`
-            
+
             // 如果缓存中没有，异步加载
             if (!getTaskFileUrlSync(taskId, inputName) && !imageMaterialsCache.value[cacheKey]) {
                 getTaskFileUrl(taskId, inputName).then(loadedUrl => {
@@ -602,7 +602,7 @@ watch(audioMaterials, (newMaterials) => {
                                             :src="getTaskFileUrlSync(modalTask.task_id, 'output_image')"
                                             :alt="getTaskTypeName(modalTask?.task_type)"
                                             class="w-full h-full object-contain">
-                                        
+
                                         <!-- 其他任务：显示视频播放器 -->
                                         <video
                                             v-else-if="!isImageTask && modalTask?.outputs?.output_video"
@@ -617,7 +617,7 @@ watch(audioMaterials, (newMaterials) => {
                                             @error="onVideoError">
                                             {{ t('browserNotSupported') }}
                                         </video>
-                                        
+
                                         <!-- 无输出内容时显示占位符 -->
                                         <div v-else class="w-full h-full flex flex-col items-center justify-center bg-[#f5f5f7] dark:bg-[#1c1c1e]">
                                             <div class="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4">
@@ -686,7 +686,7 @@ watch(audioMaterials, (newMaterials) => {
                                                         <i class="fas fa-download text-sm"></i>
                                                         <span>{{ t('downloadImage') || t('downloadVideo') }}</span>
                                                     </button>
-                                                    
+
                                                     <!-- 其他任务：下载视频按钮 -->
                                                     <button v-else-if="!isImageTask && modalTask?.outputs?.output_video"
                                                             @click="handleDownloadFile(modalTask.task_id, 'output_video', modalTask.outputs.output_video)"

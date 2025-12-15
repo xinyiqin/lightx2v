@@ -209,21 +209,21 @@ const getVisibleMaterials = computed(() => {
 // 获取图片素材（支持多图，参考TaskDetails实现）
 const getImageMaterials = computed(() => {
     if (!shareData.value?.inputs?.input_image || !inputUrls.value) return []
-    
+
     const inputImage = shareData.value.inputs.input_image
     const imageMaterials = []
-    
+
     // 检查是否是逗号分隔的多图路径
     if (typeof inputImage === 'string' && inputImage.includes(',')) {
         // 按逗号拆分路径
         const imagePaths = inputImage.split(',').map(path => path.trim()).filter(path => path)
-        
+
         // 为每个路径生成 URL
         imagePaths.forEach((path, index) => {
             // 使用 input_image_0, input_image_1, input_image_2 等作为 key
             const inputName = `input_image_${index}`
             const url = inputUrls.value[inputName] || inputUrls.value[`input_image_${index}`]
-            
+
             if (url) {
                 imageMaterials.push([inputName, url, index])
             }
@@ -236,7 +236,7 @@ const getImageMaterials = computed(() => {
             imageMaterials.push(['input_image_0', url, 0])
         }
     }
-    
+
     return imageMaterials
 })
 
@@ -451,34 +451,34 @@ const createSimilar = async () => {
                 setTimeout(async () => {
                     try {
                         // 检查是否是 i2i 任务且是多图场景
-                        const isI2IMultiImage = shareData.value.task_type === 'i2i' && 
-                            shareData.value.inputs && 
-                            shareData.value.inputs.input_image && 
-                            typeof shareData.value.inputs.input_image === 'string' && 
+                        const isI2IMultiImage = shareData.value.task_type === 'i2i' &&
+                            shareData.value.inputs &&
+                            shareData.value.inputs.input_image &&
+                            typeof shareData.value.inputs.input_image === 'string' &&
                             shareData.value.inputs.input_image.includes(',');
-                        
+
                         if (isI2IMultiImage) {
                             // i2i 多图场景：加载所有图片
                             try {
                                 // 解析逗号分隔的图片路径
                                 const imagePaths = shareData.value.inputs.input_image.split(',').map(path => path.trim()).filter(path => path);
-                                
+
                                 // 初始化数组
                                 if (!i2iForm.value.imageFiles) {
                                     i2iForm.value.imageFiles = [];
                                 }
                                 i2iImagePreviews.value = [];
-                                
+
                                 // 加载每张图片
                                 const imageLoadPromises = imagePaths.map(async (imagePath, index) => {
                                     try {
                                         // 获取图片 URL（使用 input_image_0, input_image_1, input_image_2 等）
                                         const inputName = `input_image_${index}`;
                                         let singleImageUrl;
-                                        
+
                                         // 优先使用 input_urls 中的 URL（模板和任务都可能有）
                                         singleImageUrl = shareData.value.input_urls?.[inputName];
-                                        
+
                                         if (!singleImageUrl) {
                                             if (shareData.value.share_type === 'template') {
                                                 // 模板：使用模板文件URL
@@ -488,14 +488,14 @@ const createSimilar = async () => {
                                                 singleImageUrl = await getTaskFileUrl(shareData.value.task_id, inputName);
                                             }
                                         }
-                                        
+
                                         if (singleImageUrl) {
                                             const imageResponse = await fetch(singleImageUrl);
                                             if (imageResponse && imageResponse.ok) {
                                                 const blob = await imageResponse.blob();
                                                 const filename = shareData.value.inputs[inputName] || `image_${index}.png`;
                                                 const file = new File([blob], filename, { type: blob.type });
-                                                
+
                                                 // 读取为 data URL 用于预览
                                                 const dataUrl = await new Promise((resolve, reject) => {
                                                     const reader = new FileReader();
@@ -503,7 +503,7 @@ const createSimilar = async () => {
                                                     reader.onerror = reject;
                                                     reader.readAsDataURL(file);
                                                 });
-                                                
+
                                                 return { file, dataUrl };
                                             }
                                         }
@@ -513,22 +513,22 @@ const createSimilar = async () => {
                                     }
                                     return null;
                                 });
-                                
+
                                 // 等待所有图片加载完成
                                 const imageData = await Promise.all(imageLoadPromises);
                                 const validImageData = imageData.filter(item => item !== null);
-                                
+
                                 // 添加到表单和预览
                                 validImageData.forEach(({ file, dataUrl }) => {
                                     i2iForm.value.imageFiles.push(file);
                                     i2iImagePreviews.value.push(dataUrl);
                                 });
-                                
+
                                 // 同步更新 imageFile 以保持兼容性
                                 if (i2iForm.value.imageFiles.length > 0) {
                                     i2iForm.value.imageFile = i2iForm.value.imageFiles[0];
                                 }
-                                
+
                                 console.log(`分享 - 从后端加载 ${validImageData.length} 张图片（i2i 多图模式）`);
                             } catch (error) {
                                 console.warn('Failed to load multiple images:', error);
@@ -540,7 +540,7 @@ const createSimilar = async () => {
                                 const blob = await imageResponse.blob();
                                 const filename = shareData.value.inputs.input_image
                                 const file = new File([blob], filename, { type: blob.type });
-                                
+
                                 if (shareData.value.task_type === 'i2i') {
                                     // i2i 单图：也使用 imageFiles 数组（保持一致性）
                                     if (!i2iForm.value.imageFiles) {
@@ -548,7 +548,7 @@ const createSimilar = async () => {
                                     }
                                     i2iForm.value.imageFiles = [file];
                                     i2iForm.value.imageFile = file;
-                                    
+
                                     // 读取为 data URL 用于预览
                                     const reader = new FileReader();
                                     reader.onload = (e) => {
@@ -563,7 +563,7 @@ const createSimilar = async () => {
                                     currentForm.imageFile = file;
                                     setCurrentImagePreview(URL.createObjectURL(file));
                                 }
-                                
+
                                 console.log('分享图片文件已加载');
                             }
                         }
@@ -575,7 +575,7 @@ const createSimilar = async () => {
         }
 
         // 如果有输入视频，先设置URL，延迟加载文件（仅 animate 任务）
-        if (shareData.value.inputs && shareData.value.inputs.input_video && 
+        if (shareData.value.inputs && shareData.value.inputs.input_video &&
             shareData.value.task_type === 'animate') {
             let videoUrl
             if (shareData.value.share_type === 'template' && shareData.value.inputs?.input_video) {
@@ -598,7 +598,7 @@ const createSimilar = async () => {
                         if (videoResponse.ok) {
                             const blob = await videoResponse.blob()
                             const filename = shareData.value.inputs.input_video || 'input_video.mp4'
-                            
+
                             // 根据文件扩展名确定正确的MIME类型
                             let mimeType = blob.type
                             if (!mimeType || mimeType === 'application/octet-stream') {
@@ -612,17 +612,17 @@ const createSimilar = async () => {
                                 }
                                 mimeType = mimeTypes[ext] || 'video/mp4'
                             }
-                            
+
                             const file = new File([blob], filename, { type: mimeType })
                             currentForm.videoFile = file
-                            
+
                             // 读取为 data URL 用于预览
                             const reader = new FileReader()
                             reader.onload = (e) => {
                                 setCurrentVideoPreview(e.target.result)
                             }
                             reader.readAsDataURL(file)
-                            
+
                             console.log('分享视频文件已加载:', {
                                 name: file.name,
                                 type: file.type,
@@ -637,7 +637,7 @@ const createSimilar = async () => {
         }
 
         // 如果有输入音频，先设置URL，延迟加载文件（i2i 和 t2i 任务不需要音频）
-        if (shareData.value.inputs && shareData.value.inputs.input_audio && 
+        if (shareData.value.inputs && shareData.value.inputs.input_audio &&
             shareData.value.task_type !== 'i2i' && shareData.value.task_type !== 't2i') {
             let audioUrl
             if (shareData.value.share_type === 'template' && shareData.value.inputs?.input_audio) {

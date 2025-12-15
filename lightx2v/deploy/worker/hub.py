@@ -421,7 +421,7 @@ class ImageEncoderWorker(BaseWorker):
         img = self.runner.read_image_input(img)
         if isinstance(img, tuple):
             img = img[0]
-        
+
         last_frame = None
         if self.runner.config.get("task") == "flf2v" and "last_frame_path" in self.input_info.__dataclass_fields__:
             input_last_frame_path = inputs.get("input_last_frame", "")
@@ -430,7 +430,7 @@ class ImageEncoderWorker(BaseWorker):
                 last_frame = self.runner.read_image_input(last_frame_img)
                 if isinstance(last_frame, tuple):
                     last_frame = last_frame[0]
-        
+
         out = self.runner.run_image_encoder(img, last_frame)
         if self.rank == 0:
             await data_manager.save_object(out, outputs["clip_encoder_output"])
@@ -461,7 +461,7 @@ class VaeEncoderWorker(BaseWorker):
         img = self.runner.read_image_input(img)
         if isinstance(img, tuple):
             img = img[1] if self.runner.vae_encoder_need_img_original else img[0]
-        
+
         # Handle flf2v task: process last frame if present
         last_frame = None
         if self.runner.config.get("task") == "flf2v" and "last_frame_path" in self.input_info.__dataclass_fields__:
@@ -471,7 +471,7 @@ class VaeEncoderWorker(BaseWorker):
                 last_frame = self.runner.read_image_input(last_frame_img)
                 if isinstance(last_frame, tuple):
                     last_frame = last_frame[1] if self.runner.vae_encoder_need_img_original else last_frame[0]
-        
+
         vals = self.runner.run_vae_encoder(img, last_frame)
         out = {"vals": vals, "kwargs": {}}
 

@@ -35,7 +35,7 @@ class VolcEngineTTSClient:
         if self.proxy:
             logger.info(f"volcengine tts use proxy: {self.proxy}")
 
-    def get_voice_list(self): 
+    def get_voice_list(self):
         return self.voices_list
 
     async def tts_http_stream(self, headers, params, audio_save_path):
