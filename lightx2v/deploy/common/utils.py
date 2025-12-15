@@ -67,7 +67,7 @@ def class_try_catch_async(func):
 
 
 def data_name(x, task_id):
-    if x == "input_image" or x.startswith("input_image_"):
+    if x == "input_image" or x.startswith("input_image/"):
         x = x + ".png"
     elif x == "input_video":
         x = x + ".mp4"

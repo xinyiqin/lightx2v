@@ -178,7 +178,7 @@ watch(() => modalTask.value?.task_id, async (taskId) => {
         })
     } else {
         // 单图情况：使用 input_image
-        const inputName = inputImage;
+        const inputName = 'input_image';
         const cacheKey = `${taskId}_${inputName}`
         if (!getTaskFileUrlSync(taskId, inputName) && !imageMaterialsCache.value[cacheKey]) {
             getTaskFileUrl(taskId, inputName).then(loadedUrl => {
