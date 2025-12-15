@@ -389,13 +389,14 @@ class DefaultRunner(BaseRunner):
         if self.input_info.return_result_tensor:
             return {"video": self.gen_video_final}
         elif self.input_info.save_result_path is not None:
-            # Save as video
             if "video_frame_interpolation" in self.config and self.config["video_frame_interpolation"].get("target_fps"):
                 fps = self.config["video_frame_interpolation"]["target_fps"]
             else:
                 fps = self.config.get("fps", 16)
+
             if not dist.is_initialized() or dist.get_rank() == 0:
                 logger.info(f"🎬 Start to save video 🎬")
+
                 save_to_video(self.gen_video_final, self.input_info.save_result_path, fps=fps, method="ffmpeg")
                 logger.info(f"✅ Video saved successfully to: {self.input_info.save_result_path} ✅")
             return {"video": None}
