@@ -1,4 +1,4 @@
-keyFROM node:alpine3.21 AS frontend_builder
+FROM node:alpine3.21 AS frontend_builder
 COPY lightx2v /opt/lightx2v
 
 RUN cd /opt/lightx2v/deploy/server/frontend \
