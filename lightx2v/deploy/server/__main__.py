@@ -474,6 +474,11 @@ async def api_v1_task_input_url(request: Request, user=Depends(verify_user_acces
             assert name in task["inputs"], f"Extra input {name} not found in task {task_id}"
             assert name in extra_inputs, f"Filename {filename} not found in extra inputs"
 
+        # multi-images, rename input_image to input_image/input_image_1
+        all_extra_inputs = task["params"].get("extra_inputs", {})
+        if name in all_extra_inputs:
+            name = all_extra_inputs[name][0]
+
         url = await data_manager.presign_url(task["inputs"][name])
         if url is None:
             url = f"./assets/task/input?task_id={task_id}&name={name}"
