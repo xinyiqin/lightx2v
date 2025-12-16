@@ -144,180 +144,26 @@ def format_image_data(data, max_size=1280):
     return output.getvalue()
 
 
-def media_to_wav(data):
+def media_to_wav(data, max_duration=None):
     with tempfile.NamedTemporaryFile() as fin:
         fin.write(data)
         fin.flush()
-        cmd = ["ffmpeg", "-i", fin.name, "-f", "wav", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", "pipe:1"]
+        ds = ["-t", str(max_duration)] if max_duration is not None else []
+        cmd = ["ffmpeg", "-i", fin.name, *ds, "-f", "wav", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", "pipe:1"]
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert p.returncode == 0, f"media to wav failed: {p.stderr.decode()}"
         return p.stdout
 
 
-def format_audio_data(data):
+def format_audio_data(data, max_duration=None):
     if len(data) < 4:
         raise ValueError("Audio file too short")
-    data = media_to_wav(data)
+    data = media_to_wav(data, max_duration)
     waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
     logger.info(f"load audio: {waveform.size()}, {sample_rate}")
     assert waveform.numel() > 0, "audio is empty"
     assert sample_rate > 0, "audio sample rate is not valid"
     return data
-
-
-def extract_audio_from_video(video_path: str, output_audio_path: str) -> str:
-    """从视频文件中提取音频"""
-    cmd = [
-        'ffmpeg', '-i', video_path,
-        '-vn', '-acodec', 'pcm_s16le',
-        '-ar', '16000', '-ac', '1',
-        '-y', output_audio_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if result.returncode != 0:
-        raise ValueError(f"Failed to extract audio from video: {result.stderr}")
-    return output_audio_path
-
-
-def trim_audio_to_max_duration(audio_path: str, max_duration: float = 15.0, output_path: str = None) -> str:
-    """
-    裁剪音频到最大时长（秒）
-    
-    注意：如果输出路径是 WAV 格式，会自动转换为 PCM 编码，因为某些输入格式（如 opus）不能直接复制到 WAV
-    会确保裁剪后的音频严格小于等于 max_duration
-    """
-    if output_path is None:
-        output_path = audio_path
-    
-    # 检查输出格式
-    output_ext = os.path.splitext(output_path)[1].lower() if output_path else ''
-    is_wav_output = output_ext == '.wav'
-    
-    # 使用稍微小一点的值来确保不超过限制（留出 0.1 秒的缓冲）
-    trim_duration = max_duration - 0.1
-    
-    # 使用 ffmpeg 裁剪音频
-    # 如果输出是 WAV，需要转换编码（不能使用 copy），否则可以尝试 copy
-    if is_wav_output:
-        # 转换为 WAV (PCM 16-bit, 16kHz, 单声道)，同时裁剪时长
-        cmd = [
-            'ffmpeg', '-i', audio_path,
-            '-t', str(trim_duration),  # 使用稍微小一点的值
-            '-acodec', 'pcm_s16le',  # PCM 16-bit little-endian
-            '-ar', '16000',  # 采样率 16kHz
-            '-ac', '1',  # 单声道
-            '-y', output_path
-        ]
-    else:
-        # 对于其他格式，尝试使用 copy（更快）
-        cmd = [
-            'ffmpeg', '-i', audio_path,
-            '-t', str(trim_duration),  # 使用稍微小一点的值
-            '-acodec', 'copy',
-            '-y', output_path
-        ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        # 如果 copy 失败，尝试转换编码
-        if not is_wav_output:
-            logger.warning(f"Failed to trim with copy codec, trying with conversion: {result.stderr}")
-            cmd = [
-                'ffmpeg', '-i', audio_path,
-                '-t', str(trim_duration),
-                '-acodec', 'pcm_s16le',
-                '-ar', '16000',
-                '-ac', '1',
-                '-y', output_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
-        if result.returncode != 0:
-            raise ValueError(f"Failed to trim audio: {result.stderr}")
-    
-    # 验证裁剪后的时长，确保不超过限制
-    try:
-        actual_duration = get_audio_duration(output_path)
-        if actual_duration > max_duration:
-            logger.warning(f"Trimmed audio duration ({actual_duration:.2f}s) still exceeds max_duration ({max_duration}s), re-trimming with smaller value")
-            # 如果还是超过，使用更小的值重新裁剪
-            trim_duration = max_duration - 0.2
-            if is_wav_output:
-                cmd = [
-                    'ffmpeg', '-i', audio_path,
-                    '-t', str(trim_duration),
-                    '-acodec', 'pcm_s16le',
-                    '-ar', '16000',
-                    '-ac', '1',
-                    '-y', output_path
-                ]
-            else:
-                cmd = [
-                    'ffmpeg', '-i', audio_path,
-                    '-t', str(trim_duration),
-                    '-acodec', 'copy',
-                    '-y', output_path
-                ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
-                raise ValueError(f"Failed to re-trim audio: {result.stderr}")
-            
-            # 再次验证
-            actual_duration = get_audio_duration(output_path)
-            if actual_duration > max_duration:
-                logger.error(f"Audio duration ({actual_duration:.2f}s) still exceeds max_duration ({max_duration}s) after re-trimming")
-                raise ValueError(f"Failed to trim audio to {max_duration}s, actual duration: {actual_duration:.2f}s")
-            else:
-                logger.info(f"Audio successfully trimmed to {actual_duration:.2f}s (max: {max_duration}s)")
-        else:
-            logger.info(f"Audio successfully trimmed to {actual_duration:.2f}s (max: {max_duration}s)")
-    except Exception as e:
-        logger.warning(f"Failed to verify trimmed audio duration: {e}, but continuing")
-    
-    return output_path
-
-
-def get_audio_duration(audio_path: str) -> float:
-    """获取音频时长（秒）"""
-    cmd = [
-        'ffprobe', '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        audio_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    if result.returncode != 0:
-        raise ValueError(f"Failed to get audio duration: {result.stderr}")
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        raise ValueError(f"Invalid duration output: {result.stdout}")
-
-
-def convert_audio_to_wav(input_audio_path: str, output_wav_path: str, sample_rate: int = 16000, channels: int = 1) -> str:
-    """
-    将音频文件转换为 WAV 格式（PCM 编码）
-    
-    Args:
-        input_audio_path: 输入音频文件路径
-        output_wav_path: 输出 WAV 文件路径
-        sample_rate: 采样率，默认 16000 Hz
-        channels: 声道数，默认 1（单声道）
-    
-    Returns:
-        输出文件路径
-    """
-    cmd = [
-        'ffmpeg', '-i', input_audio_path,
-        '-acodec', 'pcm_s16le',  # PCM 16-bit little-endian
-        '-ar', str(sample_rate),  # 采样率
-        '-ac', str(channels),  # 声道数
-        '-y', output_wav_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if result.returncode != 0:
-        raise ValueError(f"Failed to convert audio to WAV: {result.stderr}")
-    return output_wav_path
 
 
 async def preload_data(inp, inp_type, typ, val):

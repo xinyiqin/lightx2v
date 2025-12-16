@@ -36,12 +36,6 @@ class BaseTaskManager:
     async def query_user(self, user_id):
         raise NotImplementedError
 
-    async def update_user_extra_info(self, user_id, extra_info):
-        raise NotImplementedError
-
-    async def save_user_voice_clone(self, user_id, speaker_id, name=""):
-        raise NotImplementedError
-
     async def insert_task(self, task, subtasks):
         raise NotImplementedError
 
@@ -88,6 +82,18 @@ class BaseTaskManager:
         raise NotImplementedError
 
     async def delete_podcast(self, session_id, user_id):
+        raise NotImplementedError
+
+    async def insert_voice_clone_if_not_exists(self, voice_clone):
+        raise NotImplementedError
+
+    async def query_voice_clone(self, user_id, speaker_id):
+        raise NotImplementedError
+
+    async def delete_voice_clone(self, user_id, speaker_id):
+        raise NotImplementedError
+
+    async def list_voice_clones(self, user_id):
         raise NotImplementedError
 
     def fmt_dict(self, data):
@@ -219,6 +225,20 @@ class BaseTaskManager:
             "tag": "",
         }
         assert await self.insert_podcast(podcast), f"create podcast {podcast} failed"
+
+    async def create_voice_clone(self, user_id, speaker_id, name):
+        cur_t = current_time()
+        voice_clone = {
+            "user_id": user_id,
+            "speaker_id": speaker_id,
+            "name": name,
+            "create_t": cur_t,
+            "update_t": cur_t,
+            "extra_info": {},
+            "tag": "",
+        }
+        assert await self.insert_voice_clone_if_not_exists(voice_clone), f"create voice clone {voice_clone} failed"
+        return True
 
     async def mark_server_restart(self):
         pass
