@@ -1,7 +1,7 @@
 <template>
   <div class="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-2">
     <div class="relative w-full h-full max-w-4xl max-h-[100vh] bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-[40px] border border-black/10 dark:border-white/10 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] overflow-hidden flex flex-col">
-      
+
       <!-- Method Selection Screen -->
       <div v-if="currentScreen === 'METHOD_SELECT'" class="flex-1 flex flex-col">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/8 dark:border-white/8">
@@ -23,7 +23,7 @@
               </div>
               <i class="fas fa-chevron-right text-[#86868b] dark:text-[#98989d]"></i>
             </button>
-            
+
             <button @click="videoInputRef?.click()" class="w-full p-6 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 rounded-xl hover:bg-white dark:hover:bg-[#3a3a3c] transition-all text-left flex items-center gap-4">
               <div class="w-14 h-14 rounded-xl bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 flex items-center justify-center">
                 <i class="fas fa-video text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
@@ -35,7 +35,7 @@
               <input type="file" ref="videoInputRef" accept="video/*" class="hidden" @change="handleVideoFile" />
               <i class="fas fa-chevron-right text-[#86868b] dark:text-[#98989d]"></i>
             </button>
-            
+
             <button @click="audioInputRef?.click()" class="w-full p-6 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 rounded-xl hover:bg-white dark:hover:bg-[#3a3a3c] transition-all text-left flex items-center gap-4">
               <div class="w-14 h-14 rounded-xl bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 flex items-center justify-center">
                 <i class="fas fa-upload text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] text-xl"></i>
@@ -111,14 +111,14 @@
               ></textarea>
             </div>
           </div>
-          
+
           <div class="relative">
             <div v-if="isRecording" class="absolute inset-0 bg-red-500 rounded-full animate-ping opacity-30"></div>
             <button
               @click="isRecording ? stopRecording() : startRecording()"
               :class="`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all ${
-                isRecording 
-                  ? 'bg-red-500 text-white scale-110' 
+                isRecording
+                  ? 'bg-red-500 text-white scale-110'
                   : 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white hover:scale-105'
               }`"
             >
@@ -142,7 +142,7 @@
         </div>
         <div class="flex-1 overflow-y-auto p-6">
           <audio ref="audioRef" :src="audioUrl" class="hidden" @timeupdate="updateTime" @loadedmetadata="updateDuration" @ended="onEnded" />
-          
+
           <div class="max-w-2xl mx-auto space-y-6">
             <!-- Duration Warning -->
             <div v-if="showDurationWarning" class="flex justify-center animate-in slide-in-from-top-2 fade-in">
@@ -154,65 +154,65 @@
 
             <!-- Audio Visualizer with Interactive Trim Controls -->
             <div class="w-full flex flex-col gap-4">
-              <div 
+              <div
                 ref="visualizerRef"
                 class="w-full h-40 bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 rounded-2xl flex items-center justify-center relative select-none touch-none overflow-hidden"
               >
                 <!-- Waveform Bars -->
-                <div 
+                <div
                   ref="waveformContainerRef"
                   class="flex items-center gap-1.5 h-20 w-full justify-center relative z-0"
                 >
-                  <div 
-                    v-for="i in waveformBarCount" 
-                    :key="i" 
+                  <div
+                    v-for="i in waveformBarCount"
+                    :key="i"
                     class="w-1.5 rounded-full transition-all duration-300 flex-shrink-0"
                     :style="getWaveformBarStyle(i)"
                   ></div>
                 </div>
-                
+
                 <!-- Left Trim Mask (Visible in Trim Mode, not when trimmed) -->
-                <div 
+                <div
                   v-if="isTrimMode && !isTrimmed"
                   class="absolute left-0 top-0 bottom-0 bg-white/80 dark:bg-[#2c2c2e]/80 border-r-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] transition-all duration-75 backdrop-blur-sm z-10"
                   :style="{ width: `${trimStartPercent}%` }"
                 >
-                  <div 
+                  <div
                     class="absolute right-[-12px] top-1/2 -translate-y-1/2 w-8 h-12 cursor-ew-resize z-20 flex items-center justify-center group outline-none"
                     @pointerdown="handlePointerDown($event, 'start')"
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
                   >
-                    <div 
+                    <div
                       :class="`w-1.5 h-8 bg-white dark:bg-white rounded-full shadow-lg transition-colors ${
                         dragTarget === 'start' ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)]' : 'group-hover:bg-[color:var(--brand-primary)] dark:group-hover:bg-[color:var(--brand-primary-light)]'
                       }`"
                     ></div>
                   </div>
                 </div>
-                
+
                 <!-- Right Trim Mask (Visible in Trim Mode, not when trimmed) -->
-                <div 
+                <div
                   v-if="isTrimMode && !isTrimmed"
                   class="absolute right-0 top-0 bottom-0 bg-white/80 dark:bg-[#2c2c2e]/80 border-l-2 border-[color:var(--brand-primary)] dark:border-[color:var(--brand-primary-light)] transition-all duration-75 z-10"
                   :style="{ width: `${100 - trimEndPercent}%` }"
                 >
-                  <div 
+                  <div
                     class="absolute left-[-12px] top-1/2 -translate-y-1/2 w-8 h-12 cursor-ew-resize z-20 flex items-center justify-center group outline-none"
                     @pointerdown="handlePointerDown($event, 'end')"
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
                   >
-                    <div 
+                    <div
                       :class="`w-1.5 h-8 bg-white dark:bg-white rounded-full shadow-lg transition-colors ${
                         dragTarget === 'end' ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)]' : 'group-hover:bg-[color:var(--brand-primary)] dark:group-hover:bg-[color:var(--brand-primary-light)]'
                       }`"
                     ></div>
                   </div>
                 </div>
-                
+
                 <!-- Selection Drag Area (Only in Trim Mode, not when trimmed) -->
-                <div 
+                <div
                   v-if="isTrimMode && !isTrimmed"
                   class="absolute top-0 bottom-0 z-0 cursor-grab active:cursor-grabbing hover:bg-white/5 dark:hover:bg-white/5 transition-colors"
                   :style="{ left: `${trimStartPercent}%`, width: `${trimEndPercent - trimStartPercent}%` }"
@@ -222,17 +222,17 @@
                   :title="t('dragToMoveSelection')"
                 ></div>
               </div>
-              
+
               <!-- Time Info Row -->
               <div class="flex items-center justify-between text-xs font-mono px-2">
                 <div class="text-[#86868b] dark:text-[#98989d]">
                   <span class="block text-[10px] opacity-50">{{ t('start') }}</span>
                   {{ formatTime(trimStart) }}
                 </div>
-                
+
                 <div class="flex flex-col items-center justify-center">
                   <span class="text-[10px] text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] mb-0.5">{{ t('selectedDuration') }}</span>
-                  <span 
+                  <span
                     :class="`text-sm font-bold text-white bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/10 px-2 py-0.5 rounded border ${
                       selectionDuration > 15 ? 'border-red-500/50 text-red-400' : 'border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20'
                     }`"
@@ -240,7 +240,7 @@
                     {{ selectionDuration.toFixed(1) }}s
                   </span>
                 </div>
-                
+
                 <div class="text-[#86868b] dark:text-[#98989d] text-right">
                   <span class="block text-[10px] opacity-50">{{ t('end') }}</span>
                   {{ formatTime(trimEnd) }}
@@ -250,16 +250,16 @@
 
             <!-- Global Progress Bar -->
             <div class="w-full space-y-2 max-w-sm mx-auto">
-              <input 
-                type="range" 
-                :min="0" 
-                :max="sliderMax || 100" 
+              <input
+                type="range"
+                :min="0"
+                :max="sliderMax || 100"
                 step="0.01"
-                :value="sliderValue" 
+                :value="sliderValue"
                 @input="handleSliderChange"
                 @mousedown="isDraggingProgress = true"
                 @mouseup="isDraggingProgress = false"
-                class="w-full h-1.5 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer" 
+                class="w-full h-1.5 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
               />
               <div class="flex justify-between text-xs text-[#86868b] dark:text-[#98989d] font-mono">
                 <span>{{ formatTime(sliderValue) }}</span>
@@ -272,20 +272,20 @@
               <button
                 @click="toggleLoop"
                 :class="`p-3 rounded-full transition-all border ${
-                  isLooping 
-                    ? 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)]/30 dark:border-[color:var(--brand-primary-light)]/30 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/10 shadow-[0_0_10px_rgba(var(--brand-primary-rgb),0.1)]' 
+                  isLooping
+                    ? 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)]/30 dark:border-[color:var(--brand-primary-light)]/30 bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/10 shadow-[0_0_10px_rgba(var(--brand-primary-rgb),0.1)]'
                     : 'text-[#86868b] dark:text-[#98989d] border-transparent hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'
                 }`"
                 :title="t('loopPlayback')"
               >
                 <i class="fas fa-redo text-lg"></i>
               </button>
-              
-              <button 
+
+              <button
                 @click="handleToggleTrimMode"
                 :class="`p-4 rounded-full border transition-all ${
-                  isTrimMode 
-                    ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)] text-white shadow-[0_0_20px_rgba(var(--brand-primary-rgb),0.4)]' 
+                  isTrimMode
+                    ? 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)] text-white shadow-[0_0_20px_rgba(var(--brand-primary-rgb),0.4)]'
                     : 'bg-white/80 dark:bg-[#2c2c2e]/80 border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c]'
                 }`"
                 :title="isTrimMode ? t('confirmTrim') : t('trimMode')"
@@ -293,28 +293,28 @@
                 <i v-if="isTrimMode" class="fas fa-check text-lg"></i>
                 <i v-else class="fas fa-cut text-lg"></i>
               </button>
-              
-              <button 
-                @click="togglePlay" 
+
+              <button
+                @click="togglePlay"
                 class="w-20 h-20 rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white flex items-center justify-center shadow-[0_0_25px_rgba(var(--brand-primary-rgb),0.4)] hover:scale-105 transition-transform hover:shadow-[0_0_35px_rgba(var(--brand-primary-rgb),0.6)]"
               >
                 <i v-if="isPlaying" class="fas fa-pause text-2xl"></i>
                 <i v-else class="fas fa-play text-2xl ml-1"></i>
               </button>
-              
-              <button 
-                @click="handleReset" 
+
+              <button
+                @click="handleReset"
                 class="p-4 rounded-full bg-white/80 dark:bg-[#2c2c2e]/80 border border-black/8 dark:border-white/8 text-[#86868b] dark:text-[#98989d] hover:bg-white dark:hover:bg-[#3a3a3c] transition-colors"
                 :title="t('reset')"
               >
                 <i class="fas fa-redo text-lg"></i>
               </button>
-              
+
               <button
                 @click="cycleSpeed"
                 :class="`p-3 w-12 flex flex-col items-center justify-center rounded-full font-mono text-xs font-bold border transition-all ${
-                  playbackRate !== 1 
-                    ? 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)]/30' 
+                  playbackRate !== 1
+                    ? 'text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] border-[color:var(--brand-primary)]/30'
                     : 'text-[#86868b] dark:text-[#98989d] border-transparent hover:border-black/8 dark:hover:border-white/8'
                 }`"
                 :title="t('playbackSpeed')"
@@ -322,7 +322,7 @@
                 <span>{{ playbackRate }}x</span>
               </button>
             </div>
-            
+
             <!-- Hint Text -->
             <p class="text-sm text-[#86868b] dark:text-[#98989d] text-center h-4">
               {{ isTrimMode ? t('dragToAdjustSelection') : isTrimmed ? t('trimConfirmed') : ' ' }}
@@ -330,12 +330,12 @@
           </div>
         </div>
         <div class="px-6 py-4 border-t border-black/8 dark:border-white/8">
-          <button 
-            @click="startCloning" 
+          <button
+            @click="startCloning"
             :disabled="selectionDuration > 15"
             class="w-full px-5 py-3 rounded-full font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-            :class="selectionDuration > 15 
-              ? 'bg-gray-400 dark:bg-gray-600 text-white' 
+            :class="selectionDuration > 15
+              ? 'bg-gray-400 dark:bg-gray-600 text-white'
               : 'bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] text-white'"
           >
             {{ selectionDuration > 15 ? t('pleaseSelect15sOrLess') : t('startCloning') }}
@@ -365,8 +365,8 @@
             <!-- Preview Buttons -->
             <div class="w-full space-y-3">
               <button @click="playPreview('cn')" :class="`w-full p-5 rounded-2xl border flex items-center justify-between transition-all ${
-                isPlayingPreview === 'cn' 
-                  ? 'bg-[color:var(--brand-primary)]/20 dark:bg-[color:var(--brand-primary-light)]/20 border-[color:var(--brand-primary)] text-[color:var(--brand-primary)]' 
+                isPlayingPreview === 'cn'
+                  ? 'bg-[color:var(--brand-primary)]/20 dark:bg-[color:var(--brand-primary-light)]/20 border-[color:var(--brand-primary)] text-[color:var(--brand-primary)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border-black/8 dark:border-white/8'
               }`">
                 <div class="flex items-center gap-3">
@@ -378,10 +378,10 @@
                 <i v-if="isPlayingPreview === 'cn'" class="fas fa-volume-up animate-pulse"></i>
                 <i v-else class="fas fa-play text-[#86868b]"></i>
               </button>
-              
+
               <button @click="playPreview('en')" :class="`w-full p-5 rounded-2xl border flex items-center justify-between transition-all ${
-                isPlayingPreview === 'en' 
-                  ? 'bg-[color:var(--brand-primary)]/20 dark:bg-[color:var(--brand-primary-light)]/20 border-[color:var(--brand-primary)] text-[color:var(--brand-primary)]' 
+                isPlayingPreview === 'en'
+                  ? 'bg-[color:var(--brand-primary)]/20 dark:bg-[color:var(--brand-primary-light)]/20 border-[color:var(--brand-primary)] text-[color:var(--brand-primary)]'
                   : 'bg-white/80 dark:bg-[#2c2c2e]/80 border-black/8 dark:border-white/8'
               }`">
                 <div class="flex items-center gap-3">
@@ -576,19 +576,19 @@ export default {
       audioUrl.value = URL.createObjectURL(blob)
       currentScreen.value = 'AUDIO_EDITOR'
     }
-    
+
     const confirmTrim = async () => {
       if (!audioBlob.value || isTrimming.value) return
-      
+
       isTrimming.value = true
       try {
         // 保存当前裁剪范围
         const startTime = trimStart.value
         const endTime = trimEnd.value
-        
+
         // 裁剪音频
         const trimmedBlob = await trimAudio(audioBlob.value, startTime, endTime)
-        
+
         // 更新音频
         if (audioUrl.value) {
           URL.revokeObjectURL(audioUrl.value)
@@ -596,7 +596,7 @@ export default {
         audioBlob.value = trimmedBlob
         originalAudioBlob.value = trimmedBlob  // 更新原始音频为裁剪后的音频
         audioUrl.value = URL.createObjectURL(trimmedBlob)
-        
+
         // 等待音频加载完成并更新时长
         if (audioRef.value) {
           await new Promise((resolve) => {
@@ -613,17 +613,17 @@ export default {
             audioRef.value.load()
           })
         }
-        
+
         // 重置播放状态
         if (audioRef.value) {
           audioRef.value.currentTime = 0
         }
         currentTime.value = 0
         isPlaying.value = false
-        
+
         // 退出裁剪模式
         isTrimMode.value = false
-        
+
         console.log(`Audio trimmed successfully from ${formatTime(startTime)} to ${formatTime(endTime)}`)
       } catch (error) {
         console.error('Failed to trim audio:', error)
@@ -634,7 +634,7 @@ export default {
         isTrimming.value = false
       }
     }
-    
+
     const cancelTrim = () => {
       // 恢复原始裁剪范围
       trimStart.value = 0
@@ -647,7 +647,7 @@ export default {
       if (audioRef.value) {
         const startSec = trimStart.value
         const endSec = trimEnd.value
-        
+
         if (isPlaying.value) {
           audioRef.value.pause()
           isPlaying.value = false
@@ -664,22 +664,22 @@ export default {
         }
       }
     }
-    
+
     const toggleLoop = () => {
       isLooping.value = !isLooping.value
     }
-    
+
     const cycleSpeed = () => {
       const speeds = [0.5, 1, 1.5, 2]
       const currentIndex = speeds.indexOf(playbackRate.value)
       const nextIndex = (currentIndex + 1) % speeds.length
       playbackRate.value = speeds[nextIndex]
-      
+
       if (audioRef.value) {
         audioRef.value.playbackRate = playbackRate.value
       }
     }
-    
+
     const handleToggleTrimMode = () => {
       if (isTrimMode.value) {
         // 确认裁剪
@@ -701,10 +701,10 @@ export default {
         }
       }
     }
-    
+
     const handleSliderChange = (e) => {
       const val = Number(e.target.value)
-      
+
       if (audioRef.value) {
         if (isTrimmed.value) {
           const startSec = trimStart.value
@@ -720,7 +720,7 @@ export default {
         const curr = audioRef.value.currentTime
         const startSec = trimStart.value
         const endSec = trimEnd.value
-        
+
         // 如果已裁剪，强制在裁剪范围内
         if (isTrimmed.value) {
           if (curr < startSec - 0.1) {
@@ -764,7 +764,7 @@ export default {
         if (trimStart.value < 0) {
           trimStart.value = 0
         }
-        
+
         // 如果音频超过15秒，自动进入裁剪模式
         if (duration.value > 15) {
           isTrimMode.value = true
@@ -777,43 +777,43 @@ export default {
         }
       }
     }
-    
+
     // 计算属性
     const trimStartPercent = computed(() => {
       return duration.value > 0 ? (trimStart.value / duration.value) * 100 : 0
     })
-    
+
     const trimEndPercent = computed(() => {
       return duration.value > 0 ? (trimEnd.value / duration.value) * 100 : 100
     })
-    
+
     // 计算波形条数量，使其刚好填满容器
     const calculateWaveformBarCount = () => {
       if (!waveformContainerRef.value) return 50
-      
+
       const container = waveformContainerRef.value
       const containerWidth = container.offsetWidth
-      
+
       // 如果容器宽度为 0，说明还没有渲染完成
       if (containerWidth === 0) return 50
-      
+
       // 已去除 padding，直接使用容器宽度
       const availableWidth = containerWidth
-      
+
       // 每个波形条宽度 6px (w-1.5 = 0.375rem = 6px)，gap 6px (gap-1.5 = 0.375rem = 6px)
       const barWidth = 6
       const gapWidth = 6
-      
+
       // 计算能放多少个波形条：n * barWidth + (n-1) * gapWidth <= availableWidth
       // n * barWidth + n * gapWidth - gapWidth <= availableWidth
       // n * (barWidth + gapWidth) <= availableWidth + gapWidth
       // n <= (availableWidth + gapWidth) / (barWidth + gapWidth)
       const maxBars = Math.floor((availableWidth + gapWidth) / (barWidth + gapWidth))
-      
+
       // 确保至少有一些波形条，最多不超过合理范围
       return Math.max(20, Math.min(maxBars, 100))
     }
-    
+
     // 更新波形条数量
     const updateWaveformBarCount = () => {
       if (waveformContainerRef.value) {
@@ -823,7 +823,7 @@ export default {
         }
       }
     }
-    
+
     // 获取波形条样式
     const getWaveformBarStyle = (index) => {
       // 计算波形条的位置百分比
@@ -834,29 +834,29 @@ export default {
       const barPosition = index / waveformBarCount.value  // 波形条位置，范围约 1/n 到 1.0
       const startThreshold = trimStartPercent.value / 100  // 转换为 0-1 范围
       const endThreshold = trimEndPercent.value / 100      // 转换为 0-1 范围
-      
+
       // 计算透明度
       // 判断波形条是否在裁剪范围内
       let opacity = 1
       if (!isTrimmed.value && isTrimMode.value) {
         opacity = (barPosition >= startThreshold && barPosition <= endThreshold) ? 1 : 0.3
       }
-      
+
       return {
         height: `${20 + Math.random() * 70}%`,
         backgroundColor: 'var(--brand-primary)',
         opacity: opacity
       }
     }
-    
+
     const selectionDuration = computed(() => {
       return trimEnd.value - trimStart.value
     })
-    
+
     const sliderMax = computed(() => {
       return isTrimmed ? selectionDuration.value : duration.value
     })
-    
+
     const sliderValue = computed(() => {
       if (isTrimmed) {
         // 如果已裁剪，显示相对时间
@@ -866,7 +866,7 @@ export default {
         return currentTime.value
       }
     })
-    
+
     // Pointer事件处理（用于拖动）
     const handlePointerDown = (e, target) => {
       e.preventDefault()
@@ -874,7 +874,7 @@ export default {
       dragTarget.value = target
       isTrimMode.value = true
       isTrimmed.value = false
-      
+
       if (target === 'selection') {
         dragStartRef.value = {
           x: e.clientX,
@@ -882,26 +882,26 @@ export default {
           end: trimEnd.value
         }
       }
-      
+
       if (e.currentTarget) {
         e.currentTarget.setPointerCapture(e.pointerId)
       }
     }
-    
+
     const handlePointerMove = (e) => {
       if (!dragTarget.value || !visualizerRef.value) return
-      
+
       const rect = visualizerRef.value.getBoundingClientRect()
-      
+
       // 处理选择区域拖动
       if (dragTarget.value === 'selection' && dragStartRef.value) {
         const deltaX = e.clientX - dragStartRef.value.x
         const deltaPct = (deltaX / rect.width) * 100
         const deltaTime = (deltaPct / 100) * duration.value
-        
+
         let newStart = dragStartRef.value.start + deltaTime
         let newEnd = dragStartRef.value.end + deltaTime
-        
+
         if (newStart < 0) {
           newEnd = newEnd - newStart
           newStart = 0
@@ -910,24 +910,24 @@ export default {
           newStart = newStart - (newEnd - duration.value)
           newEnd = duration.value
         }
-        
+
         trimStart.value = Math.max(0, newStart)
         trimEnd.value = Math.min(duration.value, newEnd)
         return
       }
-      
+
       // 处理单独调整
       const x = e.clientX - rect.left
       let percentage = (x / rect.width) * 100
       percentage = Math.max(0, Math.min(100, percentage))
       const time = (percentage / 100) * duration.value
-      
+
       if (dragTarget.value === 'start') {
         trimStart.value = Math.max(0, Math.min(time, trimEnd.value - 0.5))
       } else if (dragTarget.value === 'end') {
         trimEnd.value = Math.max(trimStart.value + 0.5, Math.min(time, duration.value))
       }
-      
+
       // 检查时长警告
       if (selectionDuration.value > 15.1) {
         showDurationWarning.value = true
@@ -935,14 +935,14 @@ export default {
         showDurationWarning.value = false
       }
     }
-    
+
     const handlePointerUp = (e) => {
       dragTarget.value = null
       dragStartRef.value = null
       if (e.currentTarget) {
         e.currentTarget.releasePointerCapture(e.pointerId)
       }
-      
+
       if (selectionDuration.value > 15.1) {
         showDurationWarning.value = true
       } else {
@@ -992,7 +992,7 @@ export default {
         isTrimmed.value = false
         showDurationWarning.value = false
       }
-      
+
       playbackRate.value = 1
       isLooping.value = false
       if (audioRef.value) {
@@ -1003,13 +1003,13 @@ export default {
       isPlaying.value = false
       currentTime.value = 0
     }
-    
+
     // 裁剪音频
     const trimAudio = async (audioBlob, startTime, endTime) => {
       return new Promise((resolve, reject) => {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)()
         const fileReader = new FileReader()
-        
+
         fileReader.onload = async (e) => {
           try {
             const audioBuffer = await audioContext.decodeAudioData(e.target.result)
@@ -1017,14 +1017,14 @@ export default {
             const startSample = Math.floor(startTime * sampleRate)
             const endSample = Math.floor(endTime * sampleRate)
             const length = endSample - startSample
-            
+
             // 创建新的音频缓冲区
             const newBuffer = audioContext.createBuffer(
               audioBuffer.numberOfChannels,
               length,
               sampleRate
             )
-            
+
             // 复制音频数据
             for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
               const oldData = audioBuffer.getChannelData(channel)
@@ -1033,7 +1033,7 @@ export default {
                 newData[i] = oldData[startSample + i]
               }
             }
-            
+
             // 转换为 WAV
             const wav = audioBufferToWav(newBuffer)
             const blob = new Blob([wav], { type: 'audio/wav' })
@@ -1042,12 +1042,12 @@ export default {
             reject(error)
           }
         }
-        
+
         fileReader.onerror = reject
         fileReader.readAsArrayBuffer(audioBlob)
       })
     }
-    
+
     // 将 AudioBuffer 转换为 WAV
     const audioBufferToWav = (buffer) => {
       const length = buffer.length
@@ -1060,14 +1060,14 @@ export default {
       const bufferSize = 44 + dataSize
       const arrayBuffer = new ArrayBuffer(bufferSize)
       const view = new DataView(arrayBuffer)
-      
+
       // WAV header
       const writeString = (offset, string) => {
         for (let i = 0; i < string.length; i++) {
           view.setUint8(offset + i, string.charCodeAt(i))
         }
       }
-      
+
       writeString(0, 'RIFF')
       view.setUint32(4, bufferSize - 8, true)
       writeString(8, 'WAVE')
@@ -1081,7 +1081,7 @@ export default {
       view.setUint16(34, 16, true) // bits per sample
       writeString(36, 'data')
       view.setUint32(40, dataSize, true)
-      
+
       // Write audio data
       let offset = 44
       for (let i = 0; i < length; i++) {
@@ -1091,7 +1091,7 @@ export default {
           offset += 2
         }
       }
-      
+
       return arrayBuffer
     }
 
@@ -1101,11 +1101,11 @@ export default {
       const sec = Math.floor(time % 60)
       return `${min}:${sec.toString().padStart(2, '0')}`
     }
-    
+
     // 处理错误信息，将英文错误转换为中文
     const processErrorMessage = (errorMessage) => {
       if (!errorMessage) return ''
-      
+
       // 提取实际错误信息（去除 "Voice clone failed: " 等前缀）
       let message = errorMessage
       if (message.includes('Voice clone failed:')) {
@@ -1117,18 +1117,18 @@ export default {
       if (message.includes('Error:')) {
         message = message.split('Error:')[1]?.trim() || message
       }
-      
+
       // 检查是否包含中文（简单判断：包含中文字符）
       const hasChinese = /[\u4e00-\u9fa5]/.test(message)
-      
+
       // 如果已经是中文，直接返回
       if (hasChinese) {
         return message
       }
-      
+
       // 错误信息映射（英文 -> 中文），按优先级匹配
       const lowerMessage = message.toLowerCase()
-      
+
       // 1. 字符错误率过高
       if (lowerMessage.includes('char error rate high') || lowerMessage.includes('error rate high')) {
         if (lowerMessage.includes('noisy') || lowerMessage.includes('too noisy')) {
@@ -1136,7 +1136,7 @@ export default {
         }
         return '字符错误率过高，请重试。'
       }
-      
+
       // 2. 文本长度过长
       if (lowerMessage.includes('text length') && lowerMessage.includes('too long')) {
         if (lowerMessage.includes('greater than 50') || lowerMessage.includes('> 50')) {
@@ -1144,7 +1144,7 @@ export default {
         }
         return '文本长度过长，请选择更短的音频片段（建议15秒以内）。'
       }
-      
+
       // 3. 其他常见错误
       const errorMap = {
         'failed to extract text from audio': '无法从音频中提取文本',
@@ -1156,26 +1156,26 @@ export default {
         'voice clone failed': '语音克隆失败',
         'clone failed': '克隆失败'
       }
-      
+
       // 尝试匹配错误信息
       for (const [en, zh] of Object.entries(errorMap)) {
         if (lowerMessage.includes(en)) {
           return zh
         }
       }
-      
+
       // 如果没有匹配到，返回原始错误信息
       return message
     }
 
     const startCloning = async () => {
       if (!audioBlob.value) return
-      
+
       currentScreen.value = 'PROCESSING'
-      
+
       try {
         const formData = new FormData()
-        
+
         // 裁剪音频（如果已确认裁剪或在裁剪模式下有选择）
         let fileToUpload = audioBlob.value
         if (isTrimmed.value || (isTrimMode.value && (trimStart.value > 0 || trimEnd.value < duration.value))) {
@@ -1188,7 +1188,7 @@ export default {
             // 如果裁剪失败，使用原始音频
           }
         }
-        
+
         // 如果 audioBlob 是 Blob（没有文件名），创建一个 File 对象
         if (fileToUpload instanceof Blob && !(fileToUpload instanceof File)) {
           // 根据 MIME 类型确定文件扩展名
@@ -1202,11 +1202,11 @@ export default {
           } else if (fileToUpload.type.startsWith('video/')) {
             extension = '.mp4' // 视频文件默认使用 .mp4
           }
-          
+
           // 创建 File 对象，指定文件名
           fileToUpload = new File([fileToUpload], `audio${extension}`, { type: fileToUpload.type })
         }
-        
+
         formData.append('file', fileToUpload)
         // 不再在克隆时传递名称，名称在保存时传递
 
@@ -1300,7 +1300,7 @@ export default {
       const audio = new Audio(url)
       previewAudioRef.value = audio
       isPlayingPreview.value = lang
-      
+
       audio.play()
       audio.onended = () => {
         isPlayingPreview.value = null
@@ -1331,7 +1331,7 @@ export default {
 
         // 保存成功，标记为已保存
         isSaved.value = true
-        
+
         // 通知父组件
         emit('saved', {
           speaker_id: speakerId.value,
@@ -1348,7 +1348,7 @@ export default {
 
     const deleteVoiceClone = async (speakerIdToDelete) => {
       if (!speakerIdToDelete) return
-      
+
       try {
         const token = localStorage.getItem('accessToken')
         const response = await fetch(`/api/v1/voice/clone/${speakerIdToDelete}`, {
@@ -1357,7 +1357,7 @@ export default {
             'Authorization': `Bearer ${token}`
           }
         })
-        
+
         if (response.ok) {
           console.log('Voice clone deleted:', speakerIdToDelete)
         } else {
@@ -1374,7 +1374,7 @@ export default {
       if (speakerId.value) {
         await deleteVoiceClone(speakerId.value)
       }
-      
+
       // Reset to method selection
       currentScreen.value = 'METHOD_SELECT'
       audioUrl.value = null
@@ -1407,26 +1407,26 @@ export default {
 
     // ResizeObserver 实例
     let resizeObserver = null
-    
+
     // 初始化波形条和监听器
     const initWaveformObserver = () => {
       if (!waveformContainerRef.value) return
-      
+
       // 先更新一次
       updateWaveformBarCount()
-      
+
       // 如果已经有观察器，先断开
       if (resizeObserver) {
         resizeObserver.disconnect()
       }
-      
+
       // 创建新的观察器
       resizeObserver = new ResizeObserver(() => {
         updateWaveformBarCount()
       })
       resizeObserver.observe(waveformContainerRef.value)
     }
-    
+
     // 监听屏幕切换，当进入音频编辑器时初始化
     watch(currentScreen, (newScreen) => {
       if (newScreen === 'AUDIO_EDITOR') {
@@ -1436,10 +1436,10 @@ export default {
         })
       }
     }, { immediate: true })
-    
+
     onMounted(() => {
       changeSentence()
-      
+
       // 如果初始就在音频编辑器屏幕，初始化波形条
       if (currentScreen.value === 'AUDIO_EDITOR') {
         nextTick(() => {
@@ -1454,7 +1454,7 @@ export default {
         resizeObserver.disconnect()
         resizeObserver = null
       }
-      
+
       if (audioUrl.value) URL.revokeObjectURL(audioUrl.value)
       if (cnPreviewUrl.value) URL.revokeObjectURL(cnPreviewUrl.value)
       if (enPreviewUrl.value) URL.revokeObjectURL(enPreviewUrl.value)
@@ -1528,4 +1528,3 @@ export default {
   }
 }
 </script>
-

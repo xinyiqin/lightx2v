@@ -132,25 +132,18 @@ class VolcEngineASRClient:
         try:
             start_time = time.time()
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.url, json=request_payload, headers=headers, proxy=self.proxy
-                ) as response:
+                async with session.post(self.url, json=request_payload, headers=headers, proxy=self.proxy) as response:
                     # Check status code in response headers
                     status_code = response.headers.get("X-Api-Status-Code", "")
                     message = response.headers.get("X-Api-Message", "")
                     logid = response.headers.get("X-Tt-Logid", "")
 
-                    logger.info(
-                        f"ASR request status code: {status_code}, message: {message}, logid: {logid}"
-                    )
+                    logger.info(f"ASR request status code: {status_code}, message: {message}, logid: {logid}")
 
                     if status_code == "20000000":  # Success
                         result_data = await response.json()
                         elapsed_time = time.time() - start_time
-                        logger.info(
-                            f"VolcEngineASRClient recognize request success, "
-                            f"elapsed time: {elapsed_time:.3f} seconds"
-                        )
+                        logger.info(f"VolcEngineASRClient recognize request success, elapsed time: {elapsed_time:.3f} seconds")
                         return True, result_data
                     elif status_code in ["20000001", "20000002"]:  # Task in progress or waiting
                         error_msg = f"Task in progress, status: {status_code}, message: {message}"
@@ -158,7 +151,7 @@ class VolcEngineASRClient:
                         return False, error_msg
                     else:  # Task failed
                         result_data = await response.json() if response.content_type == "application/json" else {}
-                        
+
                         # Get detailed error code description
                         error_description = self.ERROR_CODES.get(status_code, "")
                         if error_description:
@@ -167,7 +160,7 @@ class VolcEngineASRClient:
                             error_msg = f"ASR request failed, code: {status_code} (Internal service processing error), message: {message}"
                         else:
                             error_msg = f"ASR request failed, code: {status_code}, message: {message}"
-                        
+
                         if result_data:
                             error_msg += f", response: {result_data}"
                         logger.error(error_msg)

@@ -2,25 +2,25 @@
 
 import asyncio
 import os
-import sys
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import aiohttp
 import numpy as np
 import soundfile as sf
 from aiohttp import ClientWebSocketResponse
-from loguru import logger
 
 # Protobuf imports
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+from loguru import logger
 
 # ============================================================================
 # Generated protocol buffer code (from tts.proto)
@@ -33,48 +33,47 @@ DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'tts_pb2', _globals)
-if _descriptor._USE_C_DESCRIPTORS == False:
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "tts_pb2", _globals)
+if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._options = None
-    _globals['_REQUESTMESSAGETYPE']._serialized_start = 1180
-    _globals['_REQUESTMESSAGETYPE']._serialized_end = 1349
-    _globals['_TEXTTYPE']._serialized_start = 1351
-    _globals['_TEXTTYPE']._serialized_end = 1382
-    _globals['_LANGUAGE']._serialized_start = 1384
-    _globals['_LANGUAGE']._serialized_end = 1449
-    _globals['_AUDIOENCODING']._serialized_start = 1451
-    _globals['_AUDIOENCODING']._serialized_end = 1493
-    _globals['_STATUSCODE']._serialized_start = 1496
-    _globals['_STATUSCODE']._serialized_end = 1663
-    _globals['_ERRORSUBCODE']._serialized_start = 1666
-    _globals['_ERRORSUBCODE']._serialized_end = 2019
-    _globals['_SUBTITLEENTRY']._serialized_start = 19
-    _globals['_SUBTITLEENTRY']._serialized_end = 157
-    _globals['_AUDIOCHUNK']._serialized_start = 160
-    _globals['_AUDIOCHUNK']._serialized_end = 296
-    _globals['_TTSREQUEST']._serialized_start = 299
-    _globals['_TTSREQUEST']._serialized_end = 815
-    _globals['_TTSRESPONSE']._serialized_start = 818
-    _globals['_TTSRESPONSE']._serialized_end = 1177
+    _globals["_REQUESTMESSAGETYPE"]._serialized_start = 1180
+    _globals["_REQUESTMESSAGETYPE"]._serialized_end = 1349
+    _globals["_TEXTTYPE"]._serialized_start = 1351
+    _globals["_TEXTTYPE"]._serialized_end = 1382
+    _globals["_LANGUAGE"]._serialized_start = 1384
+    _globals["_LANGUAGE"]._serialized_end = 1449
+    _globals["_AUDIOENCODING"]._serialized_start = 1451
+    _globals["_AUDIOENCODING"]._serialized_end = 1493
+    _globals["_STATUSCODE"]._serialized_start = 1496
+    _globals["_STATUSCODE"]._serialized_end = 1663
+    _globals["_ERRORSUBCODE"]._serialized_start = 1666
+    _globals["_ERRORSUBCODE"]._serialized_end = 2019
+    _globals["_SUBTITLEENTRY"]._serialized_start = 19
+    _globals["_SUBTITLEENTRY"]._serialized_end = 157
+    _globals["_AUDIOCHUNK"]._serialized_start = 160
+    _globals["_AUDIOCHUNK"]._serialized_end = 296
+    _globals["_TTSREQUEST"]._serialized_start = 299
+    _globals["_TTSREQUEST"]._serialized_end = 815
+    _globals["_TTSRESPONSE"]._serialized_start = 818
+    _globals["_TTSRESPONSE"]._serialized_end = 1177
 
 # Import protobuf classes for easier access
 # These are created by the protobuf builder above and added to _globals
 # ============================================================================
 # Get protobuf classes from _globals (they are created by the builder)
-SubtitleEntry = _globals.get('SubtitleEntry')
-AudioChunk = _globals.get('AudioChunk')
-TtsRequest = _globals.get('TtsRequest')
-TtsResponse = _globals.get('TtsResponse')
-RequestMessageType = _globals.get('RequestMessageType')
-TextType = _globals.get('TextType')
-Language = _globals.get('Language')
-AudioEncoding = _globals.get('AudioEncoding')
-StatusCode = _globals.get('StatusCode')
-ErrorSubCode = _globals.get('ErrorSubCode')
+SubtitleEntry = _globals.get("SubtitleEntry")
+AudioChunk = _globals.get("AudioChunk")
+TtsRequest = _globals.get("TtsRequest")
+TtsResponse = _globals.get("TtsResponse")
+RequestMessageType = _globals.get("RequestMessageType")
+TextType = _globals.get("TextType")
+Language = _globals.get("Language")
+AudioEncoding = _globals.get("AudioEncoding")
+StatusCode = _globals.get("StatusCode")
+ErrorSubCode = _globals.get("ErrorSubCode")
 
 # Verify that all required classes are available
-if not all([SubtitleEntry, AudioChunk, TtsRequest, TtsResponse, RequestMessageType, 
-            TextType, Language, AudioEncoding, StatusCode, ErrorSubCode]):
+if not all([SubtitleEntry, AudioChunk, TtsRequest, TtsResponse, RequestMessageType, TextType, Language, AudioEncoding, StatusCode, ErrorSubCode]):
     raise RuntimeError("Failed to load protobuf classes. Please check protobuf installation.")
 # ============================================================================
 
@@ -198,7 +197,7 @@ async def receive_full_message(websocket: ClientWebSocketResponse) -> Tuple[int,
     except aiohttp.WSServerHandshakeError as e:
         # WebSocket handshake error, may contain error information
         error_msg = f"WebSocket handshake error: {str(e)}"
-        if hasattr(e, 'message') and e.message:
+        if hasattr(e, "message") and e.message:
             error_msg = e.message
         raise ValueError(error_msg)
     except Exception as e:
@@ -267,18 +266,12 @@ class SenseTimeTTSClient:
                             start_time = result_dict.get("start_time")
                             if start_time is not None:
                                 first_latency = (time.time() - start_time) * 1000
-                                logger.info(
-                                    f"Session {session_id} stream({int(stream)}) "
-                                    f"Got first package, cost(ms): {first_latency:.3f}"
-                                )
+                                logger.info(f"Session {session_id} stream({int(stream)}) Got first package, cost(ms): {first_latency:.3f}")
 
                         if response.audio_data:
                             data += response.audio_data
 
-                        logger.info(
-                            f"Audio seq:{chunk_seq},is_last:{is_last_chunk} "
-                            f"data length: {len(response.audio_data)} bytes"
-                        )
+                        logger.info(f"Audio seq:{chunk_seq},is_last:{is_last_chunk} data length: {len(response.audio_data)} bytes")
 
                         if response.subtitles:
                             for subtitle in response.subtitles:
@@ -454,9 +447,7 @@ class SenseTimeTTSClient:
                     result_dict["start_time"] = start_time
 
                     # Start receive loop
-                    receive_task = asyncio.create_task(
-                        self._receive_loop(websocket, session_id, params, result_dict)
-                    )
+                    receive_task = asyncio.create_task(self._receive_loop(websocket, session_id, params, result_dict))
 
                     # Simulate streaming: send character by character
                     for i, chunk in enumerate(text):
@@ -545,30 +536,23 @@ class SenseTimeTTSClient:
                     session_id = str(uuid.uuid4())
 
                     # Start receive loop
-                    receive_task = asyncio.create_task(
-                        self._receive_loop(websocket, session_id, {}, result_dict)
-                    )
+                    receive_task = asyncio.create_task(self._receive_loop(websocket, session_id, {}, result_dict))
 
                     # Read and send audio
                     # Check file format, if it's a video file (e.g., MP4), extract audio first
                     tmp_audio_path = None
                     original_audio_path = audio_path
-                    
+
                     try:
                         file_ext = os.path.splitext(audio_path)[1].lower()
-                        if file_ext in ['.mp4', '.mov', '.avi', '.mkv', '.flv']:
+                        if file_ext in [".mp4", ".mov", ".avi", ".mkv", ".flv"]:
                             # Video file, need to extract audio first
-                            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
+                            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                                 tmp_audio_path = tmp_audio.name
-                            
+
                             try:
                                 # Use ffmpeg to extract audio
-                                cmd = [
-                                    'ffmpeg', '-i', audio_path,
-                                    '-vn', '-acodec', 'pcm_s16le',
-                                    '-ar', '16000', '-ac', '1',
-                                    '-y', tmp_audio_path
-                                ]
+                                cmd = ["ffmpeg", "-i", audio_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-y", tmp_audio_path]
                                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
                                 if result.returncode != 0:
                                     raise ValueError(f"Failed to extract audio from video: {result.stderr}")
@@ -580,10 +564,10 @@ class SenseTimeTTSClient:
                                 raise ValueError("ffmpeg not found. Please install ffmpeg to process video files.")
                             except Exception as e:
                                 raise ValueError(f"Failed to extract audio: {str(e)}")
-                        
+
                         with open(audio_path, "rb") as fp:
                             audio_bytes = fp.read()
-                        
+
                         # Check file size (recommended not to exceed 10MB)
                         if len(audio_bytes) > 10 * 1024 * 1024:
                             logger.warning(f"Audio file size ({len(audio_bytes) / 1024 / 1024:.2f} MB) may be too large")
@@ -651,9 +635,7 @@ class SenseTimeTTSClient:
                     session_id = str(uuid.uuid4())
 
                     # Start receive loop
-                    receive_task = asyncio.create_task(
-                        self._receive_loop(websocket, session_id, {}, result_dict)
-                    )
+                    receive_task = asyncio.create_task(self._receive_loop(websocket, session_id, {}, result_dict))
 
                     # Send query request
                     request = create_synthesis_request(
@@ -702,9 +684,7 @@ class SenseTimeTTSClient:
                     session_id = str(uuid.uuid4())
 
                     # Start receive loop
-                    receive_task = asyncio.create_task(
-                        self._receive_loop(websocket, session_id, {}, result_dict)
-                    )
+                    receive_task = asyncio.create_task(self._receive_loop(websocket, session_id, {}, result_dict))
 
                     # Send delete request
                     request = create_synthesis_request(
@@ -858,4 +838,3 @@ if __name__ == "__main__":
     else:
         # Regular TTS test mode: python sensetime_tts.py [text] [speaker] ...
         asyncio.run(test(sys.argv[1:]))
-
