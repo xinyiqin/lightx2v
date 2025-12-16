@@ -25,6 +25,8 @@ import { showTaskDetailModal,
         getTaskFileUrlSync,
         getTaskFileFromCache,
         getTaskFileUrl,
+        getTaskFileUrlFromApi,
+        getTaskInputAudio,
         downloadLoading,
         showAlert,
         apiRequest,
@@ -41,24 +43,230 @@ const router = useRouter()
 const showDetails = ref(false)
 const loadingTaskFiles = ref(false)
 
-// 音频播放器相关
-const audioElement = ref(null)
-const isPlaying = ref(false)
-const audioDuration = ref(0)
-const currentTime = ref(0)
-const isDragging = ref(false)
+// 音频播放器相关（支持多个音频）
+const audioElements = ref({}) // 使用对象存储多个音频元素，key 为 inputName
+const audioStates = ref({}) // 存储每个音频的状态，key 为 inputName
 const currentAudioUrl = ref('')
 
-// 获取图片素材
-const getImageMaterials = () => {
+// 音频素材 URL（响应式，支持异步加载）
+const audioMaterials = ref([])
+
+// 图片素材 URL 缓存（用于异步加载）
+const imageMaterialsCache = ref({})
+
+// 获取图片素材（支持多图，逗号分隔）
+const getImageMaterials = computed(() => {
     if (!modalTask.value?.inputs?.input_image) return []
-    return [['input_image', getTaskFileUrlSync(modalTask.value.task_id, 'input_image')]]
+
+    const inputImage = modalTask.value.inputs.input_image
+    const taskId = modalTask.value.task_id
+    const inputs = modalTask.value.inputs || {}
+    // multi-images
+    const inputImages = Object.keys(inputs).filter(key => key.startsWith("input_image/"));
+
+    if (inputImages.length > 0) {
+        // 为每个路径生成 URL
+        const imageMaterials = []
+        // 多图输入时，名字分别为：input_image/xxx
+        inputImages.forEach((inputName, index) => {
+            const cacheKey = `${taskId}_${inputName}`
+
+            // 先尝试从同步缓存获取
+            let url = getTaskFileUrlSync(taskId, inputName)
+
+            // 如果同步缓存中没有，尝试从异步缓存获取
+            if (!url && imageMaterialsCache.value[cacheKey]) {
+                url = imageMaterialsCache.value[cacheKey]
+            }
+
+            // 如果还是没有，异步加载（不阻塞渲染）
+            if (!url) {
+                // 异步加载 URL
+                getTaskFileUrl(taskId, inputName).then(loadedUrl => {
+                    if (loadedUrl) {
+                        imageMaterialsCache.value[cacheKey] = loadedUrl
+                    }
+                }).catch(err => {
+                    console.warn(`Failed to load image URL for ${inputName}:`, err)
+                })
+            }
+
+            // 返回结果（url 可能为 null，模板会处理）
+            imageMaterials.push([inputName, url, index])
+        })
+
+        // 如果所有图片都获取到了 URL，返回结果；否则回退到单图模式
+        return imageMaterials.length > 0 ? imageMaterials : [['input_image', getTaskFileUrlSync(taskId, 'input_image')]]
+    } else {
+        // 单图情况：使用 input_image
+        const url = getTaskFileUrlSync(taskId, 'input_image')
+        return [['input_image', url]]
+    }
+})
+
+// 监听 imageMaterialsCache 变化，触发重新计算
+watch(imageMaterialsCache, () => {
+    // 当缓存更新时，computed 会自动重新计算
+}, { deep: true })
+
+// 获取视频素材
+const getVideoMaterials = () => {
+    if (!modalTask.value?.inputs?.input_video) return []
+    return [['input_video', getTaskFileUrlSync(modalTask.value.task_id, 'input_video')]]
 }
 
-// 获取音频素材
+// 获取音频素材（使用响应式 ref）
 const getAudioMaterials = () => {
-    if (!modalTask.value?.inputs?.input_audio) return []
-    return [['input_audio', getTaskFileUrlSync(modalTask.value.task_id, 'input_audio')]]
+    return audioMaterials.value
+}
+
+// 判断是否是图片输出任务（i2i 或 t2i）
+const isImageTask = computed(() => {
+    return modalTask.value?.task_type === 'i2i' || modalTask.value?.task_type === 't2i'
+})
+
+// 保持向后兼容
+const isI2ITask = computed(() => {
+    return modalTask.value?.task_type === 'i2i'
+})
+
+// 处理图片加载错误
+const handleImageError = async (event, taskId, inputName) => {
+    console.warn(`图片加载失败: ${inputName}`, event)
+    // 尝试异步加载 URL
+    try {
+        const url = await getTaskFileUrl(taskId, inputName)
+        if (url) {
+            const cacheKey = `${taskId}_${inputName}`
+            imageMaterialsCache.value[cacheKey] = url
+            // 更新图片源
+            if (event.target) {
+                event.target.src = url
+            }
+        }
+    } catch (error) {
+        console.error(`无法加载图片 URL: ${inputName}`, error)
+    }
+}
+
+// 监听 modalTask 变化，预加载所有图片 URL
+watch(() => modalTask.value?.task_id, async (taskId) => {
+    if (!taskId || !modalTask.value?.inputs?.input_image) return
+
+    const inputImage = modalTask.value.inputs.input_image
+    const inputs = modalTask.value.inputs || {}
+    // multi-images
+    const inputImages = Object.keys(inputs).filter(key => key.startsWith("input_image/"));
+
+    if (inputImages.length > 0) {
+        // 为每个路径生成 URL
+        const imageMaterials = []
+        // 多图输入时，名字分别为：input_image/xxx
+        inputImages.forEach((inputName, index) => {
+            const cacheKey = `${taskId}_${inputName}`
+
+            // 如果缓存中没有，异步加载
+            if (!getTaskFileUrlSync(taskId, inputName) && !imageMaterialsCache.value[cacheKey]) {
+                getTaskFileUrl(taskId, inputName).then(loadedUrl => {
+                    if (loadedUrl) {
+                        imageMaterialsCache.value[cacheKey] = loadedUrl
+                    }
+                }).catch(err => {
+                    console.warn(`Failed to preload image URL for ${inputName}:`, err)
+                })
+            }
+        })
+    } else {
+        // 单图情况：使用 input_image
+        const inputName = 'input_image';
+        const cacheKey = `${taskId}_${inputName}`
+        if (!getTaskFileUrlSync(taskId, inputName) && !imageMaterialsCache.value[cacheKey]) {
+            getTaskFileUrl(taskId, inputName).then(loadedUrl => {
+                if (loadedUrl) {
+                    imageMaterialsCache.value[cacheKey] = loadedUrl
+                }
+            }).catch(err => {
+                console.warn(`Failed to preload image URL for ${inputName}:`, err)
+            })
+        }
+    }
+}, { immediate: true })
+
+// 根据任务类型获取应该显示的内容类型
+const getVisibleMaterials = computed(() => {
+    if (!modalTask.value?.task_type) {
+        return { image: false, video: false, audio: false, prompt: false }
+    }
+
+    const taskType = modalTask.value.task_type
+
+    // 根据任务类型定义应该显示的内容
+    const visibilityMap = {
+        't2v': {
+            image: false,
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        'i2v': {
+            image: true,
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        'i2i': {
+            image: true,
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        't2i': {
+            image: false,  // t2i 不需要输入图片
+            video: false,
+            audio: false,
+            prompt: true
+        },
+        's2v': {
+            image: true,
+            video: false,
+            audio: true,
+            prompt: true
+        },
+        'animate': {
+            image: true,
+            video: true,
+            audio: false,
+            prompt: false  // animate 任务不显示 prompt
+        }
+    }
+
+    return visibilityMap[taskType] || {
+        image: true,
+        video: false,
+        audio: true,
+        prompt: true
+    }
+})
+
+// 异步加载音频素材 URL（支持目录模式）
+const loadAudioMaterials = async () => {
+    if (!modalTask.value?.inputs?.input_audio) {
+        audioMaterials.value = []
+        return
+    }
+
+    try {
+        // 使用 getTaskInputAudio 来获取音频 URL，它会自动处理目录情况
+        const audioUrl = await getTaskInputAudio(modalTask.value)
+        if (audioUrl) {
+            audioMaterials.value = [['input_audio', audioUrl]]
+        } else {
+            audioMaterials.value = []
+        }
+    } catch (error) {
+        console.error('Failed to load audio materials:', error)
+        audioMaterials.value = []
+    }
 }
 
 // 路由关闭功能
@@ -161,11 +369,15 @@ const viewTaskDetail = async (task) => {
 
 // 监听modalTask的第一次变化，确保任务详情正确加载
 const hasLoadedTask = ref(false);
-watch(modalTask, (newTask) => {
+watch(modalTask, async (newTask) => {
     if (newTask && !hasLoadedTask.value) {
         console.log('modalTask第一次变化，加载任务详情:', newTask);
         viewTaskDetail(newTask);
         hasLoadedTask.value = true;
+    }
+    // 加载音频素材（支持目录模式）
+    if (newTask) {
+        await loadAudioMaterials();
     }
 }, { immediate: true });
 
@@ -177,11 +389,14 @@ onMounted(async () => {
 
 onUnmounted(() => {
     document.removeEventListener('keydown', handleKeydown)
-    // 清理音频资源
-    const audio = getCurrentAudioElement()
-    if (audio) {
-        audio.pause()
-    }
+    // 清理所有音频资源
+    Object.values(audioElements.value).forEach(audio => {
+        if (audio) {
+            audio.pause()
+        }
+    })
+    audioElements.value = {}
+    audioStates.value = {}
 })
 
 // 格式化音频时间
@@ -192,19 +407,57 @@ const formatAudioTime = (seconds) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// 获取当前音频元素（处理可能是数组的情况）
-const getCurrentAudioElement = () => {
-    return Array.isArray(audioElement.value) ? audioElement.value[0] : audioElement.value
+// 设置音频元素 ref（安全版本）
+const setAudioElement = (inputName, el) => {
+    if (!audioElements.value) {
+        audioElements.value = {}
+    }
+    if (el) {
+        audioElements.value[inputName] = el
+    } else if (audioElements.value[inputName]) {
+        // 元素被卸载时，清理 ref
+        delete audioElements.value[inputName]
+    }
+}
+
+// 获取音频元素
+const getAudioElement = (inputName) => {
+    if (!audioElements.value) {
+        audioElements.value = {}
+    }
+    return audioElements.value[inputName]
+}
+
+// 获取音频状态
+const getAudioState = (inputName) => {
+    if (!audioStates.value) {
+        audioStates.value = {}
+    }
+    if (!audioStates.value[inputName]) {
+        audioStates.value[inputName] = {
+            isPlaying: false,
+            duration: 0,
+            currentTime: 0,
+            isDragging: false
+        }
+    }
+    return audioStates.value[inputName]
 }
 
 // 切换播放/暂停
-const toggleAudioPlayback = () => {
-    const audio = getCurrentAudioElement()
-    if (!audio) return
+const toggleAudioPlayback = (inputName) => {
+    const audio = getAudioElement(inputName)
+    if (!audio) {
+        console.warn('Audio element not found for:', inputName)
+        return
+    }
+
+    const state = getAudioState(inputName)
 
     if (audio.paused) {
         audio.play().catch(error => {
-            console.log('播放失败:', error)
+            console.error('播放失败:', error)
+            showAlert(t('audioPlaybackFailed') + ': ' + error.message, 'error')
         })
     } else {
         audio.pause()
@@ -212,63 +465,102 @@ const toggleAudioPlayback = () => {
 }
 
 // 音频加载完成
-const onAudioLoaded = () => {
-    const audio = getCurrentAudioElement()
-    if (audio) {
-        audioDuration.value = audio.duration || 0
+const onAudioLoaded = (inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state) {
+        state.duration = audio.duration || 0
     }
 }
 
 // 时间更新
-const onTimeUpdate = () => {
-    const audio = getCurrentAudioElement()
-    if (audio && !isDragging.value) {
-        currentTime.value = audio.currentTime || 0
+const onTimeUpdate = (inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state && !state.isDragging) {
+        state.currentTime = audio.currentTime || 0
     }
 }
 
 // 进度条变化处理
-const onProgressChange = (event) => {
-    const audio = getCurrentAudioElement()
-    if (audioDuration.value > 0 && audio && event.target) {
+const onProgressChange = (event, inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (state && state.duration > 0 && audio && event.target) {
         const newTime = parseFloat(event.target.value)
-        currentTime.value = newTime
+        state.currentTime = newTime
         audio.currentTime = newTime
     }
 }
 
 // 进度条拖拽结束处理
-const onProgressEnd = (event) => {
-    const audio = getCurrentAudioElement()
-    if (audio && audioDuration.value > 0 && event.target) {
+const onProgressEnd = (event, inputName) => {
+    const audio = getAudioElement(inputName)
+    const state = getAudioState(inputName)
+    if (audio && state && state.duration > 0 && event.target) {
         const newTime = parseFloat(event.target.value)
         audio.currentTime = newTime
-        currentTime.value = newTime
+        state.currentTime = newTime
     }
-    isDragging.value = false
+    if (state) {
+        state.isDragging = false
+    }
 }
 
 // 播放结束
-const onAudioEnded = () => {
-    isPlaying.value = false
-    currentTime.value = 0
+const onAudioEnded = (inputName) => {
+    const state = getAudioState(inputName)
+    if (state) {
+        state.isPlaying = false
+        state.currentTime = 0
+    }
+}
+
+// 视频事件处理函数
+const onVideoLoadStart = () => {
+    // 视频开始加载
+}
+
+const onVideoCanPlay = () => {
+    // 视频可以播放
+}
+
+const onVideoError = () => {
+    // 视频加载错误
+    console.error('Video load error')
 }
 
 // 监听音频URL变化
-watch(() => getAudioMaterials(), (newMaterials) => {
+watch(audioMaterials, (newMaterials) => {
     if (newMaterials && newMaterials.length > 0) {
         currentAudioUrl.value = newMaterials[0][1]
-        nextTick(() => {
-            const audio = getCurrentAudioElement()
-            if (audio) {
-                audio.load()
+        // 确保 audioStates.value 存在
+        if (!audioStates.value) {
+            audioStates.value = {}
+        }
+        // 为每个音频初始化状态
+        newMaterials.forEach(([inputName, url]) => {
+            if (!audioStates.value[inputName]) {
+                audioStates.value[inputName] = {
+                    isPlaying: false,
+                    duration: 0,
+                    currentTime: 0,
+                    isDragging: false
+                }
             }
+        })
+        // 加载所有音频
+        nextTick(() => {
+            newMaterials.forEach(([inputName]) => {
+                const audio = getAudioElement(inputName)
+                if (audio) {
+                    audio.load()
+                }
+            })
         })
     } else {
         currentAudioUrl.value = ''
-        isPlaying.value = false
-        currentTime.value = 0
-        audioDuration.value = 0
+        audioStates.value = {}
     }
 }, { immediate: true })
 </script>
@@ -302,9 +594,16 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                 <!-- 左侧视频区域 -->
                                 <div class="flex items-center justify-center">
                                     <div class="w-full max-w-[400px] aspect-[9/16] bg-black dark:bg-[#000000] rounded-2xl overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.15)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
-                                        <!-- 视频播放器 -->
+                                        <!-- 图片输出任务（i2i 或 t2i）：显示输出图片 -->
+                                        <img
+                                            v-if="isImageTask && modalTask?.outputs?.output_image"
+                                            :src="getTaskFileUrlSync(modalTask.task_id, 'output_image')"
+                                            :alt="getTaskTypeName(modalTask?.task_type)"
+                                            class="w-full h-full object-contain">
+
+                                        <!-- 其他任务：显示视频播放器 -->
                                         <video
-                                            v-if="modalTask?.outputs?.output_video"
+                                            v-else-if="!isImageTask && modalTask?.outputs?.output_video"
                                             :src="getTaskFileUrlSync(modalTask.task_id, 'output_video')"
                                             :poster="getTaskFileUrlSync(modalTask.task_id, 'input_image')"
                                             class="w-full h-full object-contain"
@@ -316,11 +615,13 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                             @error="onVideoError">
                                             {{ t('browserNotSupported') }}
                                         </video>
+
+                                        <!-- 无输出内容时显示占位符 -->
                                         <div v-else class="w-full h-full flex flex-col items-center justify-center bg-[#f5f5f7] dark:bg-[#1c1c1e]">
                                             <div class="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4">
-                                                <i class="fas fa-video text-3xl text-[#86868b] dark:text-[#98989d]"></i>
+                                                <i :class="isImageTask ? 'fas fa-image' : 'fas fa-video'" class="text-3xl text-[#86868b] dark:text-[#98989d]"></i>
                                             </div>
-                                            <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('videoNotAvailable') }}</p>
+                                            <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ isImageTask ? (t('imageNotAvailable') || t('videoNotAvailable')) : t('videoNotAvailable') }}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -374,7 +675,18 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                 <!-- 操作按钮 - Apple 风格 -->
                                                 <div class="space-y-2.5">
-                                                    <button v-if="modalTask?.outputs?.output_video"
+                                                    <!-- 图片输出任务（i2i 或 t2i）：下载图片按钮 -->
+                                                    <button v-if="isImageTask && modalTask?.outputs?.output_image"
+                                                            @click="handleDownloadFile(modalTask.task_id, 'output_image', modalTask.outputs.output_image)"
+                                                            :disabled="downloadLoading"
+                                                            class="w-full rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-0 px-6 py-3 text-[15px] font-semibold text-white transition-all duration-200 ease-out tracking-tight flex items-center justify-center gap-2"
+                                                            :class="downloadLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-[1.02] hover:shadow-[0_8px_24px_rgba(var(--brand-primary-rgb),0.35)] dark:hover:shadow-[0_8px_24px_rgba(var(--brand-primary-light-rgb),0.4)] active:scale-100'">
+                                                        <i class="fas fa-download text-sm"></i>
+                                                        <span>{{ t('downloadImage') || t('downloadVideo') }}</span>
+                                                    </button>
+
+                                                    <!-- 其他任务：下载视频按钮 -->
+                                                    <button v-else-if="!isImageTask && modalTask?.outputs?.output_video"
                                                             @click="handleDownloadFile(modalTask.task_id, 'output_video', modalTask.outputs.output_video)"
                                                             :disabled="downloadLoading"
                                                             class="w-full rounded-full bg-[color:var(--brand-primary)] dark:bg-[color:var(--brand-primary-light)] border-0 px-6 py-3 text-[15px] font-semibold text-white transition-all duration-200 ease-out tracking-tight flex items-center justify-center gap-2"
@@ -408,17 +720,17 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         <span>{{ t('inputMaterials') }}</span>
                                     </h2>
 
-                                    <!-- 三个并列的分块卡片 - Apple 风格 -->
+                                    <!-- 根据任务类型显示相应的素材卡片 - Apple 风格 -->
                                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                         <!-- 图片卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.image" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
                                                     <i class="fas fa-image text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
                                                     <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('image') }}</h3>
                                                 </div>
-                                                <button v-if="getImageMaterials().length > 0"
+                                                <button v-if="getImageMaterials.length > 0"
                                                         @click="handleDownloadFile(modalTask.task_id, 'input_image', modalTask.inputs.input_image)"
                                                         :disabled="downloadLoading"
                                                         class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
@@ -429,9 +741,15 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                             </div>
                                             <!-- 卡片内容 -->
                                             <div class="p-6 min-h-[200px]">
-                                                <div v-if="getImageMaterials().length > 0">
-                                                    <div v-for="[inputName, url] in getImageMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
-                                                        <img :src="url" :alt="inputName" class="w-full h-auto object-contain">
+                                                <div v-if="getImageMaterials.length > 0">
+                                                    <div v-for="([inputName, url, index]) in getImageMaterials" :key="inputName || index" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8 mb-3 last:mb-0">
+                                                        <div class="relative">
+                                                            <img :src="url" :alt="inputName || `图片 ${index + 1}`" class="w-full h-auto object-contain">
+                                                            <!-- 多图时显示序号 -->
+                                                            <div v-if="getImageMaterials.length > 1" class="absolute top-2 left-2 px-2 py-1 bg-black/50 dark:bg-black/70 text-white text-xs rounded backdrop-blur-sm">
+                                                                {{ index + 1 }} / {{ getImageMaterials.length }}
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div v-else class="flex flex-col items-center justify-center h-[150px]">
@@ -441,8 +759,41 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                             </div>
                                         </div>
 
+                                        <!-- 视频卡片 - Apple 风格 -->
+                                        <div v-if="getVisibleMaterials.video" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                            <!-- 卡片头部 -->
+                                            <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
+                                                <div class="flex items-center gap-3">
+                                                    <i class="fas fa-video text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                    <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('video') }}</h3>
+                                                </div>
+                                                <button v-if="getVideoMaterials().length > 0"
+                                                        @click="handleDownloadFile(modalTask.task_id, 'input_video', modalTask.inputs.input_video)"
+                                                        :disabled="downloadLoading"
+                                                        class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
+                                                        :class="downloadLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-110 active:scale-100'"
+                                                        :title="t('download')">
+                                                    <i class="fas fa-download text-xs"></i>
+                                                </button>
+                                            </div>
+                                            <!-- 卡片内容 -->
+                                            <div class="p-6 min-h-[200px]">
+                                                <div v-if="getVideoMaterials().length > 0">
+                                                    <div v-for="[inputName, url] in getVideoMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
+                                                        <video :src="url" :alt="inputName" class="w-full h-auto object-contain" controls preload="metadata">
+                                                            {{ t('browserNotSupported') }}
+                                                        </video>
+                                                    </div>
+                                                </div>
+                                                <div v-else class="flex flex-col items-center justify-center h-[150px]">
+                                                    <i class="fas fa-video text-3xl text-[#86868b]/30 dark:text-[#98989d]/30 mb-3"></i>
+                                                    <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('noVideo') }}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- 音频卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.audio" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
@@ -471,10 +822,10 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                     <div class="w-12 h-12 rounded-full bg-white/40 dark:bg-white/20 border border-white/30 dark:border-white/20 transition-all duration-200"></div>
                                                                     <!-- 播放/暂停按钮 -->
                                                                     <button
-                                                                        @click="toggleAudioPlayback"
+                                                                        @click="toggleAudioPlayback(inputName)"
                                                                         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]"
                                                                     >
-                                                                        <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
+                                                                        <i :class="getAudioState(inputName).isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
                                                                     </button>
                                                                 </div>
 
@@ -487,23 +838,23 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                                 <!-- 音频时长 -->
                                                                 <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
-                                                                    {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
+                                                                    {{ formatAudioTime(getAudioState(inputName).currentTime) }} / {{ formatAudioTime(getAudioState(inputName).duration) }}
                                                                 </div>
                                                             </div>
 
                                                             <!-- 进度条 -->
-                                                            <div class="flex items-center gap-2" v-if="audioDuration > 0">
+                                                            <div class="flex items-center gap-2" v-if="getAudioState(inputName).duration > 0">
                                                                 <input
                                                                     type="range"
                                                                     :min="0"
-                                                                    :max="audioDuration"
-                                                                    :value="currentTime"
-                                                                    @input="onProgressChange"
-                                                                    @change="onProgressChange"
-                                                                    @mousedown="isDragging = true"
-                                                                    @mouseup="onProgressEnd"
-                                                                    @touchstart="isDragging = true"
-                                                                    @touchend="onProgressEnd"
+                                                                    :max="getAudioState(inputName).duration"
+                                                                    :value="getAudioState(inputName).currentTime"
+                                                                    @input="(e) => onProgressChange(e, inputName)"
+                                                                    @change="(e) => onProgressChange(e, inputName)"
+                                                                    @mousedown="getAudioState(inputName).isDragging = true"
+                                                                    @mouseup="(e) => onProgressEnd(e, inputName)"
+                                                                    @touchstart="getAudioState(inputName).isDragging = true"
+                                                                    @touchend="(e) => onProgressEnd(e, inputName)"
                                                                     class="flex-1 h-1 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                                                                 />
                                                             </div>
@@ -511,13 +862,15 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                         <!-- 隐藏的音频元素 -->
                                                         <audio
-                                                            ref="audioElement"
+                                                            :ref="(el) => setAudioElement(inputName, el)"
                                                             :src="url"
-                                                            @loadedmetadata="onAudioLoaded"
-                                                            @timeupdate="onTimeUpdate"
-                                                            @ended="onAudioEnded"
-                                                            @play="isPlaying = true"
-                                                            @pause="isPlaying = false"
+                                                            @loadedmetadata="() => onAudioLoaded(inputName)"
+                                                            @timeupdate="() => onTimeUpdate(inputName)"
+                                                            @ended="() => onAudioEnded(inputName)"
+                                                            @play="() => getAudioState(inputName).isPlaying = true"
+                                                            @pause="() => getAudioState(inputName).isPlaying = false"
+                                                            @error="(e) => { console.error('Audio error:', e, url); showAlert(t('audioLoadFailed'), 'error') }"
+                                                            preload="metadata"
                                                             class="hidden"
                                                         ></audio>
                                                     </div>
@@ -530,7 +883,7 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         </div>
 
                                         <!-- 提示词卡片 - Apple 风格 -->
-                                        <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <div v-if="getVisibleMaterials.prompt" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                             <!-- 卡片头部 -->
                                             <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                                 <div class="flex items-center gap-3">
@@ -589,9 +942,9 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         <!-- 根据状态显示不同的占位图 -->
                                         <!-- 进行中状态 -->
                                         <div v-if="['CREATED', 'PENDING', 'RUNNING'].includes(modalTask?.status)" class="w-full h-full flex flex-col items-center justify-center relative bg-[#f5f5f7] dark:bg-[#1c1c1e]">
-                                            <!-- 如果有图像输入，显示为背景 -->
-                                            <div v-if="getImageMaterials().length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
-                                                <img :src="getImageMaterials()[0][1]" :alt="getImageMaterials()[0][0]" class="w-full h-full object-cover opacity-20 blur-sm">
+                                            <!-- 如果有图像输入，显示为背景（使用第一张图片） -->
+                                            <div v-if="getImageMaterials.length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
+                                                <img :src="getImageMaterials[0][1]" :alt="getImageMaterials[0][0] || '输入图片'" class="w-full h-full object-cover opacity-20 blur-sm">
                                             </div>
                                             <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2]">
                                                 <div class="relative w-12 h-12 mb-6">
@@ -603,8 +956,8 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         </div>
                                         <!-- 失败状态 -->
                                         <div v-else-if="modalTask?.status === 'FAILED'" class="w-full h-full flex flex-col items-center justify-center relative bg-[#fef2f2] dark:bg-[#2c1b1b]">
-                                            <div v-if="getImageMaterials().length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
-                                                <img :src="getImageMaterials()[0][1]" :alt="getImageMaterials()[0][0]" class="w-full h-full object-cover opacity-10 blur-sm">
+                                            <div v-if="getImageMaterials.length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
+                                                <img :src="getImageMaterials[0][1]" :alt="getImageMaterials[0][0]" class="w-full h-full object-cover opacity-10 blur-sm">
                                             </div>
                                             <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2]">
                                                 <div class="w-16 h-16 rounded-full bg-red-500/10 dark:bg-red-400/10 flex items-center justify-center mb-4">
@@ -615,8 +968,8 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         </div>
                                         <!-- 取消状态 -->
                                         <div v-else-if="modalTask?.status === 'CANCEL'" class="w-full h-full flex flex-col items-center justify-center relative bg-[#f5f5f7] dark:bg-[#1c1c1e]">
-                                            <div v-if="getImageMaterials().length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
-                                                <img :src="getImageMaterials()[0][1]" :alt="getImageMaterials()[0][0]" class="w-full h-full object-cover opacity-10 blur-sm">
+                                            <div v-if="getImageMaterials.length > 0" class="absolute top-0 left-0 w-full h-full z-[1]">
+                                                <img :src="getImageMaterials[0][1]" :alt="getImageMaterials[0][0]" class="w-full h-full object-cover opacity-10 blur-sm">
                                             </div>
                                             <div class="absolute top-0 left-0 w-full h-full flex flex-col justify-center items-center z-[2]">
                                                 <div class="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center mb-4">
@@ -699,7 +1052,7 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                 <!-- 描述 - Apple 风格 -->
                                                 <div class="text-sm sm:text-base text-[#86868b] dark:text-[#98989d] text-center mb-6 tracking-tight">
                                                     <p v-if="['RUNNING'].includes(modalTask?.status)" class="mb-0">
-                                                        {{ t('aiIsGeneratingYourVideo') }}
+                                                        {{ isImageTask ? (t('aiIsGeneratingYourImage') || t('aiIsGeneratingYourVideo')) : t('aiIsGeneratingYourVideo') }}
                                                     </p>
                                                     <p v-else-if="['CREATED'].includes(modalTask?.status)" class="mb-0">
                                                         {{ t('taskSubmittedSuccessfully') }}
@@ -782,17 +1135,17 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                     <span>{{ t('inputMaterials') }}</span>
                                 </h2>
 
-                                <!-- 三个并列的分块卡片 - Apple 风格 -->
+                                <!-- 根据任务类型显示相应的素材卡片 - Apple 风格 -->
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <!-- 图片卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.image" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">
                                                 <i class="fas fa-image text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
                                                 <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('image') }}</h3>
                                             </div>
-                                            <button v-if="getImageMaterials().length > 0"
+                                            <button v-if="getImageMaterials.length > 0"
                                                     @click="handleDownloadFile(modalTask.task_id, 'input_image', modalTask.inputs.input_image)"
                                                     :disabled="downloadLoading"
                                                     class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
@@ -803,9 +1156,20 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         </div>
                                         <!-- 卡片内容 -->
                                         <div class="p-6 min-h-[200px]">
-                                            <div v-if="getImageMaterials().length > 0">
-                                                <div v-for="[inputName, url] in getImageMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
-                                                    <img :src="url" :alt="inputName" class="w-full h-auto object-contain">
+                                            <div v-if="getImageMaterials.length > 0">
+                                                <div v-for="([inputName, url, index]) in getImageMaterials" :key="inputName || index" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8 mb-3 last:mb-0">
+                                                    <div class="relative">
+                                                        <img v-if="url" :src="url" :alt="inputName || `图片 ${index + 1}`" class="w-full h-auto object-contain" @error="handleImageError($event, modalTask.task_id, inputName)">
+                                                        <!-- 加载中或错误状态 -->
+                                                        <div v-else class="flex flex-col items-center justify-center h-[150px] bg-[#f5f5f7] dark:bg-[#1c1c1e]">
+                                                            <i class="fas fa-spinner fa-spin text-2xl text-[#86868b]/50 dark:text-[#98989d]/50 mb-2"></i>
+                                                            <p class="text-xs text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('loading') || '加载中...' }}</p>
+                                                        </div>
+                                                        <!-- 多图时显示序号 -->
+                                                        <div v-if="getImageMaterials.length > 1 && url" class="absolute top-2 left-2 px-2 py-1 bg-black/50 dark:bg-black/70 text-white text-xs rounded backdrop-blur-sm">
+                                                            {{ index + 1 }} / {{ getImageMaterials.length }}
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div v-else class="flex flex-col items-center justify-center h-[150px]">
@@ -815,8 +1179,41 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                         </div>
                                     </div>
 
+                                    <!-- 视频卡片 - Apple 风格 -->
+                                    <div v-if="getVisibleMaterials.video" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                        <!-- 卡片头部 -->
+                                        <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
+                                            <div class="flex items-center gap-3">
+                                                <i class="fas fa-video text-lg text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)]"></i>
+                                                <h3 class="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] tracking-tight">{{ t('video') }}</h3>
+                                            </div>
+                                            <button v-if="getVideoMaterials().length > 0"
+                                                    @click="handleDownloadFile(modalTask.task_id, 'input_video', modalTask.inputs.input_video)"
+                                                    :disabled="downloadLoading"
+                                                    class="w-8 h-8 flex items-center justify-center bg-[color:var(--brand-primary)]/10 dark:bg-[color:var(--brand-primary-light)]/15 border border-[color:var(--brand-primary)]/20 dark:border-[color:var(--brand-primary-light)]/20 text-[color:var(--brand-primary)] dark:text-[color:var(--brand-primary-light)] rounded-lg transition-all duration-200"
+                                                    :class="downloadLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-110 active:scale-100'"
+                                                    :title="t('download')">
+                                                <i class="fas fa-download text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <!-- 卡片内容 -->
+                                        <div class="p-6 min-h-[200px]">
+                                            <div v-if="getVideoMaterials().length > 0">
+                                                <div v-for="[inputName, url] in getVideoMaterials()" :key="inputName" class="rounded-xl overflow-hidden border border-black/8 dark:border-white/8">
+                                                    <video :src="url" :alt="inputName" class="w-full h-auto object-contain" controls preload="metadata">
+                                                        {{ t('browserNotSupported') }}
+                                                    </video>
+                                                </div>
+                                            </div>
+                                            <div v-else class="flex flex-col items-center justify-center h-[150px]">
+                                                <i class="fas fa-video text-3xl text-[#86868b]/30 dark:text-[#98989d]/30 mb-3"></i>
+                                                <p class="text-sm text-[#86868b] dark:text-[#98989d] tracking-tight">{{ t('noVideo') }}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <!-- 音频卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.audio" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">
@@ -845,10 +1242,10 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                                                 <div class="w-12 h-12 rounded-full bg-white/40 dark:bg-white/20 border border-white/30 dark:border-white/20 transition-all duration-200"></div>
                                                                 <!-- 播放/暂停按钮 -->
                                                                 <button
-                                                                    @click="toggleAudioPlayback"
+                                                                    @click="toggleAudioPlayback(inputName)"
                                                                     class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[color:var(--brand-primary)]/90 dark:bg-[color:var(--brand-primary-light)]/90 rounded-full flex items-center justify-center text-white cursor-pointer hover:scale-110 transition-all duration-200 z-20 shadow-[0_2px_8px_rgba(var(--brand-primary-rgb),0.3)] dark:shadow-[0_2px_8px_rgba(var(--brand-primary-light-rgb),0.4)]"
                                                                 >
-                                                                    <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
+                                                                    <i :class="getAudioState(inputName).isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="text-xs ml-0.5"></i>
                                                                 </button>
                                                             </div>
 
@@ -861,23 +1258,23 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                             <!-- 音频时长 -->
                                                             <div class="text-xs font-medium text-[#86868b] dark:text-[#98989d] tracking-tight flex-shrink-0">
-                                                                {{ formatAudioTime(currentTime) }} / {{ formatAudioTime(audioDuration) }}
+                                                                {{ formatAudioTime(getAudioState(inputName).currentTime) }} / {{ formatAudioTime(getAudioState(inputName).duration) }}
                                                             </div>
                                                         </div>
 
                                                         <!-- 进度条 -->
-                                                        <div class="flex items-center gap-2" v-if="audioDuration > 0">
+                                                        <div class="flex items-center gap-2" v-if="getAudioState(inputName).duration > 0">
                                                             <input
                                                                 type="range"
                                                                 :min="0"
-                                                                :max="audioDuration"
-                                                                :value="currentTime"
-                                                                @input="onProgressChange"
-                                                                @change="onProgressChange"
-                                                                @mousedown="isDragging = true"
-                                                                @mouseup="onProgressEnd"
-                                                                @touchstart="isDragging = true"
-                                                                @touchend="onProgressEnd"
+                                                                :max="getAudioState(inputName).duration"
+                                                                :value="getAudioState(inputName).currentTime"
+                                                                @input="(e) => onProgressChange(e, inputName)"
+                                                                @change="(e) => onProgressChange(e, inputName)"
+                                                                @mousedown="getAudioState(inputName).isDragging = true"
+                                                                @mouseup="(e) => onProgressEnd(e, inputName)"
+                                                                @touchstart="getAudioState(inputName).isDragging = true"
+                                                                @touchend="(e) => onProgressEnd(e, inputName)"
                                                                 class="flex-1 h-1 bg-black/6 dark:bg-white/15 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[color:var(--brand-primary)] dark:[&::-webkit-slider-thumb]:bg-[color:var(--brand-primary-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                                                             />
                                                         </div>
@@ -885,13 +1282,15 @@ watch(() => getAudioMaterials(), (newMaterials) => {
 
                                                     <!-- 隐藏的音频元素 -->
                                                     <audio
-                                                        ref="audioElement"
+                                                        :ref="(el) => setAudioElement(inputName, el)"
                                                         :src="url"
-                                                        @loadedmetadata="onAudioLoaded"
-                                                        @timeupdate="onTimeUpdate"
-                                                        @ended="onAudioEnded"
-                                                        @play="isPlaying = true"
-                                                        @pause="isPlaying = false"
+                                                        @loadedmetadata="() => onAudioLoaded(inputName)"
+                                                        @timeupdate="() => onTimeUpdate(inputName)"
+                                                        @ended="() => onAudioEnded(inputName)"
+                                                        @play="() => getAudioState(inputName).isPlaying = true"
+                                                        @pause="() => getAudioState(inputName).isPlaying = false"
+                                                        @error="(e) => { console.error('Audio error:', e, url); showAlert(t('audioLoadFailed'), 'error') }"
+                                                        preload="metadata"
                                                         class="hidden"
                                                     ></audio>
                                                 </div>
@@ -904,7 +1303,7 @@ watch(() => getAudioMaterials(), (newMaterials) => {
                                     </div>
 
                                     <!-- 提示词卡片 - Apple 风格 -->
-                                    <div class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
+                                    <div v-if="getVisibleMaterials.prompt" class="bg-white/80 dark:bg-[#2c2c2e]/80 backdrop-blur-[20px] border border-black/8 dark:border-white/8 rounded-2xl overflow-hidden transition-all duration-200 hover:bg-white dark:hover:bg-[#3a3a3c] hover:border-black/12 dark:hover:border-white/12 hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
                                         <!-- 卡片头部 -->
                                         <div class="flex items-center justify-between px-5 py-4 bg-[color:var(--brand-primary)]/5 dark:bg-[color:var(--brand-primary-light)]/10 border-b border-black/8 dark:border-white/8">
                                             <div class="flex items-center gap-3">
