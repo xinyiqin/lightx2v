@@ -553,9 +553,15 @@ class SenseTimeTTSClient:
                             try:
                                 # Use ffmpeg to extract audio
                                 cmd = ["ffmpeg", "-i", audio_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-y", tmp_audio_path]
-                                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                                if result.returncode != 0:
-                                    raise ValueError(f"Failed to extract audio from video: {result.stderr}")
+                                proc = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
+                                try:
+                                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+                                except asyncio.TimeoutError:
+                                    proc.kill()
+                                    await proc.wait()
+                                    raise ValueError("Audio extraction timeout. Video file may be too large.")
+                                if proc.returncode != 0:
+                                    raise ValueError(f"Failed to extract audio from video: {stderr.decode(errors='ignore')}")
                                 logger.info(f"Extracted audio from video file to {tmp_audio_path}")
                                 audio_path = tmp_audio_path
                             except subprocess.TimeoutError:

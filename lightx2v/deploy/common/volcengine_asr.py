@@ -110,7 +110,7 @@ class VolcEngineASRClient:
                 error_msg = f"File not found: {file_path}"
                 logger.error(error_msg)
                 return False, error_msg
-            base64_data = self._file_to_base64(file_path)
+            base64_data = await asyncio.to_thread(self._file_to_base64, file_path)
             audio_data = {"data": base64_data}
         else:
             error_msg = "Either file_url or file_path must be provided"
