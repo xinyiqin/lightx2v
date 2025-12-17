@@ -11,6 +11,7 @@ import traceback
 import uuid
 from contextlib import asynccontextmanager
 
+import aiofiles
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,12 +20,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from lightx2v.deploy.common.audio_separator import AudioSeparator
 from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
-from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_image_data, load_inputs
+from lightx2v.deploy.common.sensetime_voice_clone import SenseTimeTTSClient
+from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_audio_data, format_image_data, load_inputs
+from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
@@ -56,6 +60,21 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class VoiceCloneSaveRequest(BaseModel):
+    speaker_id: str
+    name: str = ""  # 音色名称
+
+
+class VoiceCloneTTSRequest(BaseModel):
+    text: str
+    speaker_id: str
+    style: str = "正常"
+    speed: float = 1.0
+    volume: float = 0
+    pitch: float = 0
+    language: str = "ZH_CN"
+
+
 # =========================
 # FastAPI Related Code
 # =========================
@@ -68,6 +87,8 @@ server_monitor = None
 auth_manager = None
 metrics_monitor = MetricMonitor()
 volcengine_tts_client = None
+volcengine_asr_client = None
+sensetime_voice_clone_client = None
 volcengine_podcast_client = None
 face_detector = None
 audio_separator = None
@@ -1103,13 +1124,146 @@ async def api_v1_tts_generate(request: TTSRequest):
 
         if success and os.path.exists(output_path):
             # Return the audio file
-            return FileResponse(output_path, media_type="audio/mpeg", filename=output_filename)
+            return FileResponse(output_path, media_type="audio/mpeg", filename=output_filename, background=BackgroundTask(lambda: os.unlink(output_path) if os.path.exists(output_path) else None))
         else:
             return JSONResponse({"error": "TTS generation failed"}, status_code=500)
 
     except Exception as e:
         logger.error(f"TTS generation error: {e}")
         return JSONResponse({"error": f"TTS generation failed: {str(e)}"}, status_code=500)
+
+
+@app.post("/api/v1/voice/clone")
+async def api_v1_voice_clone(request: Request, user=Depends(verify_user_access)):
+    try:
+        if volcengine_asr_client is None:
+            return JSONResponse({"error": "ASR client not initialized"}, status_code=500)
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            return JSONResponse({"error": "No file uploaded"}, status_code=400)
+        raw_data = await file.read()
+        cur_duration, min_duration, step_duration = 10.0, 5.0, 2.0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            while True:
+                audio_data = await asyncio.to_thread(format_audio_data, raw_data, max_duration=cur_duration)
+                audio_path = os.path.join(tmp_dir, "formatted_audio.wav")
+                async with aiofiles.open(audio_path, "wb") as fout:
+                    await fout.write(audio_data)
+
+                asr_success, asr_result = await volcengine_asr_client.recognize_request(file_path=audio_path)
+                if not asr_success:
+                    return JSONResponse({"error": f"ASR failed: {asr_result}"}, status_code=500)
+                asr_text = asr_result.get("result", {}).get("text", "")
+                if not asr_text:
+                    return JSONResponse({"error": "Failed to extract text from audio"}, status_code=500)
+                logger.info(f"ASR recognized text: {asr_text}")
+
+                clone_success, clone_result = await sensetime_voice_clone_client.upload_audio_clone(
+                    audio_path=audio_path,
+                    audio_text=asr_text,
+                )
+                if not clone_success:
+                    err_msg = str(clone_result).lower()
+                    cur_duration -= step_duration
+                    if "text length" in err_msg and "too long" in err_msg and cur_duration >= min_duration:
+                        logger.warning(f"Voice clone failed: {err_msg}, reducing duration to {cur_duration}s")
+                        continue
+                    return JSONResponse({"error": f"Voice clone failed: {clone_result}"}, status_code=500)
+                logger.info(f"Voice clone successful with duration: {cur_duration}s, speaker_id: {clone_result}")
+                return JSONResponse({"speaker_id": clone_result, "text": asr_text, "message": "Voice clone successful. Please save the voice to add it to your collection."}, status_code=200)
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse({"error": "Voice clone failed"}, status_code=500)
+
+
+@app.post("/api/v1/voice/clone/tts")
+async def api_v1_voice_clone_tts(request: VoiceCloneTTSRequest):
+    try:
+        if not request.text.strip():
+            return JSONResponse({"error": "Text cannot be empty"}, status_code=400)
+        if not request.speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+        output_filename = f"voice_clone_tts_{uuid.uuid4().hex}.wav"
+        output_path = os.path.join(tempfile.gettempdir(), output_filename)
+
+        success = await sensetime_voice_clone_client.tts_request(
+            text=request.text,
+            speaker=request.speaker_id,
+            style=request.style,
+            speed=request.speed,
+            volume=request.volume,
+            pitch=request.pitch,
+            language=request.language,
+            output=output_path,
+            sample_rate=24000,
+            audio_format="pcm",
+            stream_output=True,
+            output_subtitles=False,
+        )
+        if success and os.path.exists(output_path):
+            return FileResponse(output_path, media_type="audio/wav", filename=output_filename, background=BackgroundTask(lambda: os.unlink(output_path) if os.path.exists(output_path) else None))
+        else:
+            return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+
+
+@app.post("/api/v1/voice/clone/save")
+async def api_v1_voice_clone_save(request: VoiceCloneSaveRequest, user=Depends(verify_user_access)):
+    try:
+        if not request.speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        if not request.name.strip():
+            return JSONResponse({"error": "Name is required"}, status_code=400)
+        ret = await task_manager.create_voice_clone(user["user_id"], request.speaker_id, request.name)
+        if not ret:
+            return JSONResponse({"error": "Failed to create voice clone"}, status_code=500)
+        return {"message": "Voice clone saved successfully", "speaker_id": request.speaker_id, "name": request.name}
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse({"error": "Failed to save voice clone"}, status_code=500)
+
+
+@app.delete("/api/v1/voice/clone/{speaker_id}")
+async def api_v1_voice_clone_delete(speaker_id: str, user=Depends(verify_user_access)):
+    try:
+        if not speaker_id:
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+
+        delete_success = await sensetime_voice_clone_client.delete_speaker(speaker_id)
+        if not delete_success:
+            return JSONResponse({"error": "Failed to delete voice clone from server"}, status_code=500)
+
+        ret = await task_manager.delete_voice_clone(user["user_id"], speaker_id)
+        if not ret:
+            return JSONResponse({"error": "Failed to delete voice clone"}, status_code=500)
+        return {"message": "Voice clone deleted successfully"}
+
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse({"error": "Failed to delete voice clone"}, status_code=500)
+
+
+@app.get("/api/v1/voice/clone/list")
+async def api_v1_voice_clone_list(user=Depends(verify_user_access)):
+    try:
+        voice_clones = await task_manager.list_voice_clones(user["user_id"])
+        if voice_clones is None:
+            return JSONResponse({"error": "Failed to get voice clone list"}, status_code=500)
+        return {"voice_clones": voice_clones}
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse({"error": "Failed to get voice clone list"}, status_code=500)
 
 
 @app.websocket("/api/v1/podcast/generate")
@@ -1484,6 +1638,8 @@ if __name__ == "__main__":
 
     model_pipelines = Pipeline(args.pipeline_json)
     volcengine_tts_client = VolcEngineTTSClient(args.volcengine_tts_list_json)
+    volcengine_asr_client = VolcEngineASRClient()
+    sensetime_voice_clone_client = SenseTimeTTSClient()
     volcengine_podcast_client = VolcEnginePodcastClient()
     face_detector = FaceDetector(model_path=args.face_detector_model_path)
     try:

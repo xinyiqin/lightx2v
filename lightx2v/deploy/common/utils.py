@@ -144,20 +144,21 @@ def format_image_data(data, max_size=1280):
     return output.getvalue()
 
 
-def media_to_wav(data):
+def media_to_wav(data, max_duration=None):
     with tempfile.NamedTemporaryFile() as fin:
         fin.write(data)
         fin.flush()
-        cmd = ["ffmpeg", "-i", fin.name, "-f", "wav", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", "pipe:1"]
+        ds = ["-t", str(max_duration)] if max_duration is not None else []
+        cmd = ["ffmpeg", "-i", fin.name, *ds, "-f", "wav", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", "pipe:1"]
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert p.returncode == 0, f"media to wav failed: {p.stderr.decode()}"
         return p.stdout
 
 
-def format_audio_data(data):
+def format_audio_data(data, max_duration=None):
     if len(data) < 4:
         raise ValueError("Audio file too short")
-    data = media_to_wav(data)
+    data = media_to_wav(data, max_duration)
     waveform, sample_rate = torchaudio.load(io.BytesIO(data), num_frames=10)
     logger.info(f"load audio: {waveform.size()}, {sample_rate}")
     assert waveform.numel() > 0, "audio is empty"

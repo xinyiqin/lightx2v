@@ -26,14 +26,14 @@ class VolcEngineTTSClient:
         self.access_token = os.getenv("VOLCENGINE_TTS_ACCESS_TOKEN")
         if not self.appid or not self.access_token:
             raise ValueError("VOLCENGINE_TTS_APPID and VOLCENGINE_TTS_ACCESS_TOKEN must be set")
+        self.proxy = os.getenv("HTTPS_PROXY", None)
+        if self.proxy:
+            logger.info(f"volcengine tts use proxy: {self.proxy}")
         if voices_list_file is not None:
             with open(voices_list_file, "r", encoding="utf-8") as f:
                 self.voices_list = json.load(f)
         else:
             self.voices_list = None
-        self.proxy = os.getenv("HTTPS_PROXY", None)
-        if self.proxy:
-            logger.info(f"volcengine tts use proxy: {self.proxy}")
 
     def get_voice_list(self):
         return self.voices_list
