@@ -1169,14 +1169,11 @@ async def api_v1_voice_clone(request: Request, user=Depends(verify_user_access))
                 )
                 if not clone_success:
                     err_msg = str(clone_result).lower()
-                    if "text length" in err_msg and "too long" in err_msg:
-                        cur_duration -= step_duration
-                        if cur_duration < min_duration:
-                            return JSONResponse({"error": "Text length too long"}, status_code=500)
+                    cur_duration -= step_duration
+                    if "text length" in err_msg and "too long" in err_msg and cur_duration >= min_duration:
                         logger.warning(f"Voice clone failed: {err_msg}, reducing duration to {cur_duration}s")
                         continue
-                    else:
-                        return JSONResponse({"error": f"Voice clone failed: {clone_result}"}, status_code=500)
+                    return JSONResponse({"error": f"Voice clone failed: {clone_result}"}, status_code=500)
                 logger.info(f"Voice clone successful with duration: {cur_duration}s, speaker_id: {clone_result}")
                 return JSONResponse({"speaker_id": clone_result, "text": asr_text, "message": "Voice clone successful. Please save the voice to add it to your collection."}, status_code=200)
     except Exception:

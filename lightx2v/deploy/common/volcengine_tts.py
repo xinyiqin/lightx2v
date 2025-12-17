@@ -34,9 +34,6 @@ class VolcEngineTTSClient:
                 self.voices_list = json.load(f)
         else:
             self.voices_list = None
-        self.proxy = os.getenv("HTTPS_PROXY", None)
-        if self.proxy:
-            logger.info(f"volcengine tts use proxy: {self.proxy}")
 
     def get_voice_list(self):
         return self.voices_list
