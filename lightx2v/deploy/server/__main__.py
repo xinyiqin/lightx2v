@@ -1124,7 +1124,7 @@ async def api_v1_tts_generate(request: TTSRequest):
 
         if success and os.path.exists(output_path):
             # Return the audio file
-            return FileResponse(output_path, media_type="audio/mpeg", filename=output_filename)
+            return FileResponse(output_path, media_type="audio/mpeg", filename=output_filename, background=BackgroundTask(lambda: os.unlink(output_path) if os.path.exists(output_path) else None))
         else:
             return JSONResponse({"error": "TTS generation failed"}, status_code=500)
 
@@ -1137,52 +1137,62 @@ async def api_v1_tts_generate(request: TTSRequest):
 async def api_v1_voice_clone(request: Request, user=Depends(verify_user_access)):
     try:
         if volcengine_asr_client is None:
-            return error_response("ASR client not initialized", 500)
+            return JSONResponse({"error": "ASR client not initialized"}, status_code=500)
         if sensetime_voice_clone_client is None:
-            return error_response("Voice clone client not initialized", 500)
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
 
         form = await request.form()
         file = form.get("file")
         if not file:
-            return error_response("No file uploaded", 400)
+            return JSONResponse({"error": "No file uploaded"}, status_code=400)
         raw_data = await file.read()
-        audio_data = await asyncio.to_thread(format_audio_data, raw_data, max_duration=15.0)
+        cur_duration, min_duration, step_duration = 10.0, 5.0, 2.0
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            audio_path = os.path.join(tmp_dir, "formatted_audio.wav")
-            async with aiofiles.open(audio_path, "wb") as fout:
-                await fout.write(audio_data)
+            while True:
+                audio_data = await asyncio.to_thread(format_audio_data, raw_data, max_duration=cur_duration)
+                audio_path = os.path.join(tmp_dir, "formatted_audio.wav")
+                async with aiofiles.open(audio_path, "wb") as fout:
+                    await fout.write(audio_data)
 
-            asr_success, asr_result = await volcengine_asr_client.recognize_request(file_path=audio_path)
-            if not asr_success:
-                return error_response(f"ASR failed: {asr_result}", 500)
-            asr_text = asr_result.get("result", {}).get("text", "")
-            if not asr_text:
-                return error_response("Failed to extract text from audio", 500)
-            logger.info(f"ASR recognized text: {asr_text}")
+                asr_success, asr_result = await volcengine_asr_client.recognize_request(file_path=audio_path)
+                if not asr_success:
+                    return JSONResponse({"error": f"ASR failed: {asr_result}"}, status_code=500)
+                asr_text = asr_result.get("result", {}).get("text", "")
+                if not asr_text:
+                    return JSONResponse({"error": "Failed to extract text from audio"}, status_code=500)
+                logger.info(f"ASR recognized text: {asr_text}")
 
-            clone_success, clone_result = await sensetime_voice_clone_client.upload_audio_clone(
-                audio_path=audio_path,
-                audio_text=asr_text,
-            )
-            if not clone_success:
-                return error_response(f"Voice clone failed: {clone_result}", 500)
-            logger.info(f"Voice clone successful, speaker_id: {clone_result}")
-            return {"speaker_id": clone_result, "text": asr_text, "message": "Voice clone successful. Please save the voice to add it to your collection."}
+                clone_success, clone_result = await sensetime_voice_clone_client.upload_audio_clone(
+                    audio_path=audio_path,
+                    audio_text=asr_text,
+                )
+                if not clone_success:
+                    err_msg = str(clone_result).lower()
+                    if "text length" in err_msg and "too long" in err_msg:
+                        cur_duration -= step_duration
+                        if cur_duration < min_duration:
+                            return JSONResponse({"error": "Text length too long"}, status_code=500)
+                        logger.warning(f"Voice clone failed: {err_msg}, reducing duration to {cur_duration}s")
+                        continue
+                    else:
+                        return JSONResponse({"error": f"Voice clone failed: {clone_result}"}, status_code=500)
+                logger.info(f"Voice clone successful with duration: {cur_duration}s, speaker_id: {clone_result}")
+                return JSONResponse({"speaker_id": clone_result, "text": asr_text, "message": "Voice clone successful. Please save the voice to add it to your collection."}, status_code=200)
     except Exception:
         traceback.print_exc()
-        return error_response("Voice clone failed", 500)
+        return JSONResponse({"error": "Voice clone failed"}, status_code=500)
 
 
 @app.post("/api/v1/voice/clone/tts")
 async def api_v1_voice_clone_tts(request: VoiceCloneTTSRequest):
     try:
         if not request.text.strip():
-            return error_response("Text cannot be empty", 400)
+            return JSONResponse({"error": "Text cannot be empty"}, status_code=400)
         if not request.speaker_id:
-            return error_response("Speaker ID is required", 400)
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
         if sensetime_voice_clone_client is None:
-            return error_response("Voice clone client not initialized", 500)
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
         output_filename = f"voice_clone_tts_{uuid.uuid4().hex}.wav"
         output_path = os.path.join(tempfile.gettempdir(), output_filename)
 
@@ -1203,38 +1213,48 @@ async def api_v1_voice_clone_tts(request: VoiceCloneTTSRequest):
         if success and os.path.exists(output_path):
             return FileResponse(output_path, media_type="audio/wav", filename=output_filename, background=BackgroundTask(lambda: os.unlink(output_path) if os.path.exists(output_path) else None))
         else:
-            return error_response("TTS generation failed", 500)
+            return JSONResponse({"error": "TTS generation failed"}, status_code=500)
     except Exception:
         traceback.print_exc()
-        return error_response("TTS generation failed", 500)
+        return JSONResponse({"error": "TTS generation failed"}, status_code=500)
 
 
 @app.post("/api/v1/voice/clone/save")
 async def api_v1_voice_clone_save(request: VoiceCloneSaveRequest, user=Depends(verify_user_access)):
     try:
         if not request.speaker_id:
-            return error_response("Speaker ID is required", 400)
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        if not request.name.strip():
+            return JSONResponse({"error": "Name is required"}, status_code=400)
         ret = await task_manager.create_voice_clone(user["user_id"], request.speaker_id, request.name)
         if not ret:
-            return error_response("Failed to create voice clone", 500)
+            return JSONResponse({"error": "Failed to create voice clone"}, status_code=500)
         return {"message": "Voice clone saved successfully", "speaker_id": request.speaker_id, "name": request.name}
     except Exception:
         traceback.print_exc()
-        return error_response("Failed to save voice clone", 500)
+        return JSONResponse({"error": "Failed to save voice clone"}, status_code=500)
 
 
 @app.delete("/api/v1/voice/clone/{speaker_id}")
 async def api_v1_voice_clone_delete(speaker_id: str, user=Depends(verify_user_access)):
     try:
         if not speaker_id:
-            return error_response("Speaker ID is required", 400)
+            return JSONResponse({"error": "Speaker ID is required"}, status_code=400)
+        if sensetime_voice_clone_client is None:
+            return JSONResponse({"error": "Voice clone client not initialized"}, status_code=500)
+
+        delete_success = await sensetime_voice_clone_client.delete_speaker(speaker_id)
+        if not delete_success:
+            return JSONResponse({"error": "Failed to delete voice clone from server"}, status_code=500)
+
         ret = await task_manager.delete_voice_clone(user["user_id"], speaker_id)
         if not ret:
-            return error_response("Failed to delete voice clone", 500)
+            return JSONResponse({"error": "Failed to delete voice clone"}, status_code=500)
         return {"message": "Voice clone deleted successfully"}
+
     except Exception:
         traceback.print_exc()
-        return error_response("Failed to delete voice clone", 500)
+        return JSONResponse({"error": "Failed to delete voice clone"}, status_code=500)
 
 
 @app.get("/api/v1/voice/clone/list")
@@ -1242,11 +1262,11 @@ async def api_v1_voice_clone_list(user=Depends(verify_user_access)):
     try:
         voice_clones = await task_manager.list_voice_clones(user["user_id"])
         if voice_clones is None:
-            return error_response("Failed to get voice clone list", 500)
+            return JSONResponse({"error": "Failed to get voice clone list"}, status_code=500)
         return {"voice_clones": voice_clones}
     except Exception:
         traceback.print_exc()
-        return error_response("Failed to get voice clone list", 500)
+        return JSONResponse({"error": "Failed to get voice clone list"}, status_code=500)
 
 
 @app.websocket("/api/v1/podcast/generate")
