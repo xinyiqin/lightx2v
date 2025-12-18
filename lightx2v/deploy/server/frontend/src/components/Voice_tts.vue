@@ -530,7 +530,7 @@
                     <span>{{ t('filter') }}</span>
                   </button>
                 </div>
-
+                
                 <!-- 音色列表容器 - Apple 风格 -->
                 <div class="bg-white/50 dark:bg-[#2c2c2e]/50 backdrop-blur-[10px] border border-black/6 dark:border-white/6 rounded-2xl p-5 max-h-[500px] overflow-y-auto main-scrollbar pr-3 mt-4" ref="voiceListContainer">
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1425,7 +1425,7 @@ export default {
       try {
         let response
         const token = localStorage.getItem('accessToken')
-
+        
         // 如果是克隆音色，使用克隆音色合成接口
         if (isCloneVoice.value) {
           response = await fetch('/api/v1/voice/clone/tts', {
