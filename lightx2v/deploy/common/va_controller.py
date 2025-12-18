@@ -34,6 +34,9 @@ class VAController:
         self.init_reader(model_runner)
 
     def init_base(self, config, input_info, has_vfi_model, has_vsr_model):
+        if "stream_config" in input_info.__dataclass_fields__:
+            self.stream_config = input_info.stream_config
+            logger.info(f"VAController init base with stream config: {self.stream_config}")
         self.audio_path = input_info.audio_path
         self.output_video_path = input_info.save_result_path
         if isinstance(self.output_video_path, dict):
@@ -93,6 +96,7 @@ class VAController:
                 sample_rate=self.audio_sr,
                 slice_frame=self.slice_frame,
                 prev_frame=self.prev_frame_length,
+                stream_config=self.stream_config,
             )
 
     def init_reader(self, model_runner=None):
@@ -115,6 +119,7 @@ class VAController:
                 target_rank=self.target_reader_rank,
                 model_runner=model_runner,
                 huoshan_tts_voice_type=self.audio_path.get("huoshan_tts_voice_type", None),
+                stream_config=self.stream_config,
             )
         else:
             from lightx2v.deploy.common.va_reader import VAReader
