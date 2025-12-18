@@ -257,7 +257,9 @@ export const locale = i18n.global.locale
             model_cls: '',
             stage: '',
             prompt: '',
-            seed: 42
+            seed: 42,
+            customShape: null,  // [height, width] for video tasks
+            aspectRatio: null  // aspect ratio for video tasks
         });
 
         const i2vForm = ref({
@@ -267,7 +269,8 @@ export const locale = i18n.global.locale
             imageFile: null,
             prompt: '',
             seed: 42,
-            detectedFaces: []  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+            detectedFaces: [],  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+            customShape: null  // [height, width] for video tasks
         });
 
         const s2vForm = ref({
@@ -279,7 +282,8 @@ export const locale = i18n.global.locale
             prompt: '',
             seed: 42,
             detectedFaces: [],  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
-            separatedAudios: []  // List of separated audio tracks: [{ speaker_id, audio (base64), roleName, ... }]
+            separatedAudios: [],  // List of separated audio tracks: [{ speaker_id, audio (base64), roleName, ... }]
+            customShape: null  // [height, width] for video tasks
         });
 
         const animateForm = ref({
@@ -290,7 +294,8 @@ export const locale = i18n.global.locale
             videoFile: null,
             prompt: '视频中的人在做动作',
             seed: 42,
-            detectedFaces: []  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+            detectedFaces: [],  // List of detected faces: [{ index, bbox, face_image, roleName, ... }]
+            customShape: null  // [height, width] for video tasks
         });
 
         const i2iForm = ref({
@@ -301,6 +306,7 @@ export const locale = i18n.global.locale
             imageFiles: [],   // 多图支持
             prompt: 'turn the style of the photo to vintage comic book',
             seed: 42,
+            customShape: null  // [height, width] - 统一使用 customShape，宽高比选择时也会转换为 customShape
         });
 
         const t2iForm = ref({
@@ -308,7 +314,8 @@ export const locale = i18n.global.locale
             model_cls: '',
             stage: '',
             prompt: '',
-            seed: 42
+            seed: 42,
+            customShape: null  // [height, width] - 统一使用 customShape，宽高比选择时也会转换为 customShape
         });
 
         const flf2vForm = ref({
@@ -317,6 +324,7 @@ export const locale = i18n.global.locale
             stage: 'single_stage',
             imageFile: null,
             lastFrameFile: null,
+            customShape: null  // [height, width] for video tasks
         });
 
         // 根据当前选择的任务类型获取对应的表单
@@ -852,7 +860,9 @@ export const locale = i18n.global.locale
         };
 
         const loginWithGitHub = async () => {
+            if (loginLoading.value) return; // 防止重复点击
             try {
+                loginLoading.value = true;
                 console.log('starting GitHub login')
                 const response = await fetch('/auth/login/github');
                 if (!response.ok) {
@@ -860,15 +870,20 @@ export const locale = i18n.global.locale
                 }
                 const data = await response.json();
                 localStorage.setItem('loginSource', 'github');
+                // 添加短暂延迟，让用户看到加载状态
+                await new Promise(resolve => setTimeout(resolve, 300));
                 window.location.href = data.auth_url;
             } catch (error) {
                 console.log('GitHub login error:', error);
                 showAlert(t('getGitHubAuthUrlFailed'), 'danger');
+                loginLoading.value = false;
             }
         };
 
         const loginWithGoogle = async () => {
+            if (loginLoading.value) return; // 防止重复点击
             try {
+                loginLoading.value = true;
                 console.log('starting Google login')
                 const response = await fetch('/auth/login/google');
                 if (!response.ok) {
@@ -876,15 +891,19 @@ export const locale = i18n.global.locale
                 }
                 const data = await response.json();
                 localStorage.setItem('loginSource', 'google');
+                // 添加短暂延迟，让用户看到加载状态
+                await new Promise(resolve => setTimeout(resolve, 300));
                 window.location.href = data.auth_url;
             } catch (error) {
                 console.error('Google login error:', error);
                 showAlert(t('getGoogleAuthUrlFailed'), 'danger');
+                loginLoading.value = false;
             }
         };
 
         // 发送短信验证码
         const sendSmsCode = async () => {
+            if (smsCountdown.value > 0 || loginLoading.value) return; // 防止重复点击
             if (!phoneNumber.value) {
                 showAlert(t('pleaseEnterPhoneNumber'), 'warning');
                 return;
@@ -898,6 +917,7 @@ export const locale = i18n.global.locale
             }
 
             try {
+                loginLoading.value = true;
                 const response = await fetch(`./auth/login/sms?phone_number=${phoneNumber.value}`);
                 const data = await response.json();
 
@@ -910,17 +930,21 @@ export const locale = i18n.global.locale
                 }
             } catch (error) {
                 showAlert(t('sendVerificationCodeFailedRetry'), 'danger');
+            } finally {
+                loginLoading.value = false;
             }
         };
 
         // 短信验证码登录
         const loginWithSms = async () => {
+            if (loginLoading.value) return; // 防止重复点击
             if (!phoneNumber.value || !verifyCode.value) {
                 showAlert(t('pleaseEnterPhoneAndCode'), 'warning');
                 return;
             }
 
             try {
+                loginLoading.value = true;
                 const response = await fetch(`./auth/callback/sms?phone_number=${phoneNumber.value}&verify_code=${verifyCode.value}`);
                 const data = await response.json();
 
@@ -942,9 +966,11 @@ export const locale = i18n.global.locale
                     showAlert(t('loginSuccess'), 'success');
                 } else {
                     showAlert(data.message || t('verificationCodeErrorOrExpired'), 'danger');
+                    loginLoading.value = false;
                 }
             } catch (error) {
                 showAlert(t('loginFailedRetry'), 'danger');
+                loginLoading.value = false;
             }
         };
 
@@ -2623,6 +2649,14 @@ export const locale = i18n.global.locale
                     stage: currentForm.stage,
                     seed: currentForm.seed || Math.floor(Math.random() * 1000000)
                 };
+
+                // 添加尺寸参数
+                if (currentForm.customShape) {
+                    formData.custom_shape = currentForm.customShape;
+                }
+                if (currentForm.aspectRatio) {
+                    formData.aspect_ratio = currentForm.aspectRatio;
+                }
 
                 // animate 任务类型使用默认 prompt，其他任务类型需要用户输入
                 if (selectedTaskId.value === 'animate') {

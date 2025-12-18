@@ -38,7 +38,6 @@ class LocalDataManager(BaseDataManager):
         parent_dir = os.path.dirname(out_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)
-            logger.debug(f"Created parent directory: {parent_dir}")
         with open(out_path, "wb") as fout:
             fout.write(bytes_data)
             return True
@@ -68,10 +67,6 @@ class LocalDataManager(BaseDataManager):
 
     @class_try_catch_async
     async def presign_url(self, filename, abs_path=None):
-        """
-        For LocalDataManager, presign_url returns None.
-        The caller should fallback to using /assets/task/result endpoint.
-        """
         return None
 
     @class_try_catch_async
