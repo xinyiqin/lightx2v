@@ -217,7 +217,7 @@ class QwenImageRunner(DefaultRunner):
         height = 2 * (int(height) // (self.vae.vae_scale_factor * 2))
         width = 2 * (int(width) // (self.vae.vae_scale_factor * 2))
         num_channels_latents = self.model.in_channels // 4
-        self.input_info.target_shape = (self.config["batchsize"], 1, num_channels_latents, height, width)
+        self.input_info.target_shape = (1, 1, num_channels_latents, height, width)
 
     def set_img_shapes(self):
         if hasattr(self.input_info, 'custom_shape') and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
@@ -282,6 +282,7 @@ class QwenImageRunner(DefaultRunner):
 
         image = images[0]
         image.save(f"{input_info.save_result_path}")
+        logger.info(f"Image saved: {input_info.save_result_path}")
 
         del latents, generator
         torch_device_module.empty_cache()

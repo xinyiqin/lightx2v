@@ -2416,6 +2416,16 @@ const imageAspectRatios = [
     { label: '3:4', value: '3:4', key: 'aspectRatio3_4' }
 ]
 
+// 宽高比到尺寸的映射（基于后端 ASPECT_RATIO_MAP）
+// 格式: [width, height] -> 转换为 customShape 格式 [height, width]
+const aspectRatioToSizeMap = {
+    '16:9': [928, 1664],   // [height, width] 对应后端的 [1664, 928]
+    '9:16': [1664, 928],   // [height, width] 对应后端的 [928, 1664]
+    '1:1': [1328, 1328],   // [height, width] 对应后端的 [1328, 1328]
+    '4:3': [1140, 1472],  // [height, width] 对应后端的 [1472, 1140]
+    '3:4': [1024, 768]     // [height, width] 对应后端的 [768, 1024]
+}
+
 // 视频任务预设分辨率选项（仅用于 t2v 任务）
 // value 格式: [height, width]
 const videoResolutions = [
@@ -2442,6 +2452,10 @@ const selectImageAspectRatio = (aspectRatio) => {
     const form = getCurrentForm()
     if (form) {
         form.aspectRatio = aspectRatio.value
+        // 设置 customShape，格式为 [height, width]
+        if (aspectRatioToSizeMap[aspectRatio.value]) {
+            form.customShape = aspectRatioToSizeMap[aspectRatio.value]
+        }
         showCustomSize.value = false
         customWidth.value = ''
         customHeight.value = ''
@@ -2494,11 +2508,11 @@ const getCurrentAspectRatio = () => {
     }
     const [height, width] = form.customShape
     // 检查是否匹配某个预设值
-    // customShape 格式是 [height, width]，imageAspectRatioMap 的 value 格式是 [width, height]
-    for (const ratioItem of imageAspectRatios) {
-        const [presetWidth, presetHeight] = ratioItem.value
-        if (width === presetWidth && height === presetHeight) {
-            return ratioItem.label
+    // customShape 格式是 [height, width]
+    for (const [ratioValue, sizeArray] of Object.entries(aspectRatioToSizeMap)) {
+        const [presetHeight, presetWidth] = sizeArray
+        if (height === presetHeight && width === presetWidth) {
+            return ratioValue  // 返回 '16:9' 等格式
         }
     }
     return null
@@ -2524,8 +2538,12 @@ const getCurrentSizeValue = () => {
     
     // 图片任务：检查是否匹配预设宽高比
     if (selectedTaskId.value === 't2i' || selectedTaskId.value === 'i2i') {
+        // 如果自定义尺寸输入框已打开，优先显示 "custom"
+        if (showCustomSize.value) {
+            return 'custom'
+        }
         if (!form || !form.customShape) {
-            return '16:9'  // 默认 16:9 横屏
+            return 'default'  // 默认 16:9 横屏
         }
         const aspectRatio = getCurrentAspectRatio()
         if (aspectRatio) {
