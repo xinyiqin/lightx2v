@@ -27,7 +27,7 @@ from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
 from lightx2v.deploy.common.sensetime_voice_clone import SenseTimeTTSClient
-from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_audio_data, format_image_data, load_inputs
+from lightx2v.deploy.common.utils import check_params, data_name, extract_audio_from_video, fetch_resource, format_audio_data, format_image_data, load_inputs
 from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
@@ -129,9 +129,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# 添加assets目录的静态文件服务
-assets_dir = os.path.join(os.path.dirname(__file__), "static", "assets")
-app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 security = HTTPBearer()
 
 
@@ -1498,6 +1495,13 @@ class AudioSeparateRequest(BaseModel):
     num_speakers: int = None  # Optional: number of speakers to separate
 
 
+class AudioExtractRequest(BaseModel):
+    video: str  # Base64 encoded video
+    output_format: str = "wav"  # Output audio format: wav, mp3
+    sample_rate: int = 44100  # Output sample rate
+    channels: int = 2  # Output channels: 1=mono, 2=stereo
+
+
 @app.post("/api/v1/face/detect")
 async def api_v1_face_detect(request: FaceDetectRequest, user=Depends(verify_user_access)):
     """Detect faces in image (only detection, no cropping - cropping is done on frontend)
@@ -1595,6 +1599,68 @@ async def api_v1_audio_separate(request: AudioSeparateRequest, user=Depends(veri
     except Exception as e:
         logger.error(f"Audio separation error: {traceback.format_exc()}")
         return error_response(f"Audio separation failed: {str(e)}", 500)
+
+
+@app.post("/api/v1/audio/extract")
+async def api_v1_audio_extract(request: AudioExtractRequest, user=Depends(verify_user_access)):
+    """Extract audio from video file"""
+    try:
+        video_bytes = None
+        try:
+            encoded = request.video
+            if encoded.startswith("data:"):
+                # Remove data URL prefix (e.g., "data:video/mp4;base64,")
+                _, encoded = encoded.split(",", 1)
+            video_bytes = await asyncio.to_thread(base64.b64decode, encoded, validate=True)
+            logger.debug(f"Successfully decoded base64 video, size: {len(video_bytes)} bytes")
+
+        except Exception as e:
+            logger.error(f"Failed to decode base64 video {request.video[:100]}..., error: {str(e)}")
+            return error_response(f"Invalid base64 video data", 400)
+
+        # Validate output format
+        if request.output_format not in ["wav", "mp3"]:
+            return error_response(f"Unsupported output format: {request.output_format}. Supported formats: wav, mp3", 400)
+
+        # Extract audio from video
+        audio_bytes = await asyncio.to_thread(extract_audio_from_video, video_bytes, output_format=request.output_format, sample_rate=request.sample_rate, channels=request.channels)
+
+        # Convert audio bytes to base64
+        audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        # Determine MIME type based on output format
+        mime_type = "audio/wav" if request.output_format == "wav" else "audio/mpeg"
+        audio_data_url = f"data:{mime_type};base64,{audio_base64}"
+
+        logger.info(f"Successfully extracted audio from video: {len(audio_bytes)} bytes, format={request.output_format}")
+        return {
+            "audio": audio_data_url,  # Data URL format for easy use in frontend
+            "format": request.output_format,
+            "sample_rate": request.sample_rate,
+            "channels": request.channels,
+            "size": len(audio_bytes),
+        }
+
+    except ValueError as e:
+        # Handle specific errors like "no audio track"
+        error_msg = str(e)
+        logger.error(f"Audio extraction error: {error_msg}")
+        # Return 400 for user input errors (like no audio track)
+        if "does not contain an audio track" in error_msg:
+            return error_response(error_msg, 400)
+        return error_response(f"Audio extraction failed: {error_msg}", 500)
+    except Exception as e:
+        logger.error(f"Audio extraction error: {traceback.format_exc()}")
+        return error_response(f"Audio extraction failed: {str(e)}", 500)
+
+
+# =========================
+# Static file mount (must be after all dynamic routes)
+# =========================
+# 添加assets目录的静态文件服务（用于前端静态资源）
+assets_dir = os.path.join(os.path.dirname(__file__), "static", "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 
 # 所有未知路由 fallback 到 index.html (必须在所有API路由之后)

@@ -64,6 +64,17 @@ class BaseWorker:
         if "stream_config" in self.input_info.__dataclass_fields__:
             self.input_info.stream_config = params.get("stream_config", {})
 
+        if "aspect_ratio" in self.input_info.__dataclass_fields__ and "aspect_ratio" in params:
+            aspect_ratio = params.get("aspect_ratio")
+            if aspect_ratio and isinstance(aspect_ratio, str):
+                self.input_info.aspect_ratio = aspect_ratio
+                logger.info(f"Set aspect_ratio from params: {aspect_ratio}")
+        if "custom_shape" in self.input_info.__dataclass_fields__ and "custom_shape" in params:
+            custom_shape = params.get("custom_shape")
+            if custom_shape and isinstance(custom_shape, list) and len(custom_shape) == 2:
+                self.input_info.custom_shape = custom_shape
+                logger.info(f"Set custom_shape from params: {custom_shape}")
+
     async def prepare_input_image(self, params, inputs, tmp_dir, data_manager):
         input_image_path = inputs.get("input_image", "")
         tmp_image_path = os.path.join(tmp_dir, input_image_path)
