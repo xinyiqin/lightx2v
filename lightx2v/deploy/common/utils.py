@@ -175,13 +175,13 @@ def extract_audio_from_video(video_data, output_format="wav", sample_rate=44100,
     """
     Extract audio from video file.
     Supports various video formats including MP4, MOV, AVI, MKV, WebM, etc.
-    
+
     Args:
         video_data: bytes, video file data
         output_format: str, output audio format (wav, mp3, etc.)
         sample_rate: int, output audio sample rate
         channels: int, output audio channels (1=mono, 2=stereo)
-    
+
     Returns:
         bytes: extracted audio data
     """
@@ -191,33 +191,45 @@ def extract_audio_from_video(video_data, output_format="wav", sample_rate=44100,
         fin.write(video_data)
         fin.flush()
         temp_path = fin.name
-    
+
     try:
         # Use ffmpeg to extract audio
         # ffmpeg will auto-detect the input format from file content
         if output_format == "wav":
             cmd = [
-                "ffmpeg", "-i", temp_path,
+                "ffmpeg",
+                "-i",
+                temp_path,
                 "-vn",  # No video
-                "-acodec", "pcm_s16le",  # PCM 16-bit little-endian
-                "-ar", str(sample_rate),  # Sample rate
-                "-ac", str(channels),  # Channels
-                "-f", "wav",
-                "pipe:1"
+                "-acodec",
+                "pcm_s16le",  # PCM 16-bit little-endian
+                "-ar",
+                str(sample_rate),  # Sample rate
+                "-ac",
+                str(channels),  # Channels
+                "-f",
+                "wav",
+                "pipe:1",
             ]
         elif output_format == "mp3":
             cmd = [
-                "ffmpeg", "-i", temp_path,
+                "ffmpeg",
+                "-i",
+                temp_path,
                 "-vn",  # No video
-                "-acodec", "libmp3lame",
-                "-ar", str(sample_rate),
-                "-ac", str(channels),
-                "-f", "mp3",
-                "pipe:1"
+                "-acodec",
+                "libmp3lame",
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                str(channels),
+                "-f",
+                "mp3",
+                "pipe:1",
             ]
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
-        
+
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if p.returncode != 0:
             error_msg = p.stderr.decode()
@@ -226,11 +238,11 @@ def extract_audio_from_video(video_data, output_format="wav", sample_rate=44100,
             if "does not contain any stream" in error_msg or "no audio stream" in error_msg.lower():
                 raise ValueError("Video file does not contain an audio track. Please upload a video with audio.")
             raise ValueError(f"Failed to extract audio from video: {error_msg}")
-        
+
         # Check if output is empty (no audio stream)
         if len(p.stdout) == 0:
             raise ValueError("Video file does not contain an audio track. Please upload a video with audio.")
-        
+
         audio_data = p.stdout
         logger.info(f"Extracted audio from video: {len(audio_data)} bytes, format={output_format}, sample_rate={sample_rate}, channels={channels}")
         return audio_data

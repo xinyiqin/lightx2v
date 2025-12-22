@@ -28,6 +28,7 @@ ASPECT_RATIO_MAP = {
     "3:4": [768, 1024],
 }
 
+
 def calculate_dimensions(target_area, ratio):
     width = math.sqrt(target_area * ratio)
     height = width / ratio
@@ -196,9 +197,9 @@ class QwenImageRunner(DefaultRunner):
         return self.model.scheduler.latents, self.model.scheduler.generator
 
     def set_target_shape(self):
-        if hasattr(self.input_info, 'custom_shape') and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
+        if hasattr(self.input_info, "custom_shape") and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
             height, width = self.input_info.custom_shape
-        elif hasattr(self.input_info, 'aspect_ratio') and isinstance(self.input_info.aspect_ratio, str):
+        elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str):
             width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.input_info.aspect_ratio]
         else:
             if self.config["task"] == "t2i":
@@ -220,9 +221,9 @@ class QwenImageRunner(DefaultRunner):
         self.input_info.target_shape = (1, 1, num_channels_latents, height, width)
 
     def set_img_shapes(self):
-        if hasattr(self.input_info, 'custom_shape') and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
+        if hasattr(self.input_info, "custom_shape") and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
             height, width = self.input_info.custom_shape
-        elif hasattr(self.input_info, 'aspect_ratio') and isinstance(self.input_info.aspect_ratio, str):
+        elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str):
             width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.input_info.aspect_ratio]
         else:
             width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.config["aspect_ratio"]]

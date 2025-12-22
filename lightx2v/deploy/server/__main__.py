@@ -1623,17 +1623,11 @@ async def api_v1_audio_extract(request: AudioExtractRequest, user=Depends(verify
             return error_response(f"Unsupported output format: {request.output_format}. Supported formats: wav, mp3", 400)
 
         # Extract audio from video
-        audio_bytes = await asyncio.to_thread(
-            extract_audio_from_video,
-            video_bytes,
-            output_format=request.output_format,
-            sample_rate=request.sample_rate,
-            channels=request.channels
-        )
+        audio_bytes = await asyncio.to_thread(extract_audio_from_video, video_bytes, output_format=request.output_format, sample_rate=request.sample_rate, channels=request.channels)
 
         # Convert audio bytes to base64
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-        
+
         # Determine MIME type based on output format
         mime_type = "audio/wav" if request.output_format == "wav" else "audio/mpeg"
         audio_data_url = f"data:{mime_type};base64,{audio_base64}"
@@ -1644,7 +1638,7 @@ async def api_v1_audio_extract(request: AudioExtractRequest, user=Depends(verify
             "format": request.output_format,
             "sample_rate": request.sample_rate,
             "channels": request.channels,
-            "size": len(audio_bytes)
+            "size": len(audio_bytes),
         }
 
     except ValueError as e:

@@ -59,11 +59,11 @@ const getImageMaterials = computed(() => {
     const taskId = modalTask.value?.task_id
     const taskType = modalTask.value?.task_type
     const inputs = modalTask.value?.inputs || {}
-    
+
     // flf2v 任务：同时显示首帧和尾帧
     if (taskType === 'flf2v') {
         const imageMaterials = []
-        
+
         // 首帧图片
         if (inputs.input_image) {
             const cacheKey = `${taskId}_input_image`
@@ -82,7 +82,7 @@ const getImageMaterials = computed(() => {
             }
             imageMaterials.push(['input_image', url, 0, 'firstFrameImage'])
         }
-        
+
         // 尾帧图片
         if (inputs.input_last_frame) {
             const cacheKey = `${taskId}_input_last_frame`
@@ -101,10 +101,10 @@ const getImageMaterials = computed(() => {
             }
             imageMaterials.push(['input_last_frame', url, 1, 'lastFrameImage'])
         }
-        
+
         return imageMaterials
     }
-    
+
     // 其他任务类型：原有的多图逻辑
     if (!inputs.input_image) return []
 
@@ -200,10 +200,10 @@ const handleImageError = async (event, taskId, inputName) => {
 // 监听 modalTask 变化，预加载所有图片 URL
 watch(() => modalTask.value?.task_id, async (taskId) => {
     if (!taskId) return
-    
+
     const taskType = modalTask.value?.task_type
     const inputs = modalTask.value?.inputs || {}
-    
+
     // flf2v 任务：预加载首帧和尾帧
     if (taskType === 'flf2v') {
         // 预加载首帧
@@ -219,7 +219,7 @@ watch(() => modalTask.value?.task_id, async (taskId) => {
                 })
             }
         }
-        
+
         // 预加载尾帧
         if (inputs.input_last_frame) {
             const cacheKey = `${taskId}_input_last_frame`
@@ -235,7 +235,7 @@ watch(() => modalTask.value?.task_id, async (taskId) => {
         }
         return
     }
-    
+
     // 其他任务类型：原有的预加载逻辑
     if (!inputs.input_image) return
 

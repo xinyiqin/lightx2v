@@ -63,7 +63,7 @@ class BaseWorker:
         self.input_info.last_frame_path = params.get("last_frame_path", "")
         if "stream_config" in self.input_info.__dataclass_fields__:
             self.input_info.stream_config = params.get("stream_config", {})
-        
+
         if "aspect_ratio" in self.input_info.__dataclass_fields__ and "aspect_ratio" in params:
             aspect_ratio = params.get("aspect_ratio")
             if aspect_ratio and isinstance(aspect_ratio, str):

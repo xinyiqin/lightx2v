@@ -26,6 +26,7 @@ try:
     # Add safe globals for pyannote.audio classes
     # This allows torch.load to work with pyannote.audio model files
     from pyannote.audio.core.task import Specifications
+
     torch.serialization.add_safe_globals([Specifications])
 except (ImportError, AttributeError) as e:
     # If pyannote.audio is not installed or class doesn't exist, log warning
@@ -74,6 +75,7 @@ class AudioSeparator:
             # PyTorch 2.6 changed torch.load default to weights_only=True
             try:
                 from pyannote.audio.core.task import Specifications
+
                 safe_globals_context = torch.serialization.safe_globals([Specifications])
             except (ImportError, AttributeError):
                 # If Specifications class is not available, use empty context

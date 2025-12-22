@@ -2,6 +2,7 @@ import io
 import os
 import traceback
 from typing import Dict, List, Union
+
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
@@ -10,16 +11,18 @@ from ultralytics import YOLO
 
 # Try to import transformers for Grounding DINO
 try:
-    from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+    from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
     logger.warning("transformers not available, Grounding DINO method will not work")
 
+
 class FaceDetector:
     """
     Face detection using multiple methods
-    
+
     Supports three detection methods:
 
     1. YOLO World (method='yolo'):
@@ -27,7 +30,7 @@ class FaceDetector:
        - Supports various face types: human, animal, anime, sketch
        - More flexible but slower
        - Can detect custom classes via text description
-    
+
     2. Grounding DINO (method='grounding'):
        - Open-vocabulary object detection
        - Supports various face types via text prompts
@@ -68,7 +71,7 @@ class FaceDetector:
             # Initialize YOLO World detector
             # Set custom classes (default to "face")
             if custom_classes is None:
-                custom_classes = ["human face","animal face","anime face","sketch face"]
+                custom_classes = ["human face", "animal face", "anime face", "sketch face"]
             self.custom_classes = custom_classes
 
             # Adaptive confidence threshold based on class specificity
@@ -110,15 +113,12 @@ class FaceDetector:
             self.model.set_classes(self.custom_classes)
             logger.info(f"Face detector initialized with YOLO World, custom classes: {self.custom_classes}, confidence threshold: {self.conf_threshold}")
             self.face_cascade = None
-            
+
         elif self.method == "grounding":
             # Initialize Grounding DINO detector
             if not TRANSFORMERS_AVAILABLE:
-                raise ImportError(
-                    "transformers library is required for Grounding DINO. "
-                    "Install it with: pip install transformers torch"
-                )
-            
+                raise ImportError("transformers library is required for Grounding DINO. Install it with: pip install transformers torch")
+
             # Set up proxy for HuggingFace model download
             # Check if proxy is already set, if not try to use common proxy settings
             if not os.environ.get("HTTP_PROXY") and not os.environ.get("http_proxy"):
@@ -128,16 +128,16 @@ class FaceDetector:
                     os.environ["HTTP_PROXY"] = https_proxy
                     os.environ["http_proxy"] = https_proxy
                     logger.info(f"Using proxy from HTTPS_PROXY: {https_proxy}")
-            
+
             # Log proxy settings
             http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
             https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
             if http_proxy or https_proxy:
                 logger.info(f"Using proxy - HTTP: {http_proxy}, HTTPS: {https_proxy}")
-            
+
             # Set custom classes (default to "face")
             if custom_classes is None:
-                custom_classes = ["human face","animal face","anime face","sketch face"]
+                custom_classes = ["human face", "animal face", "anime face", "sketch face"]
             self.custom_classes = custom_classes
 
             # Adaptive confidence threshold
@@ -166,7 +166,7 @@ class FaceDetector:
                     logger.error("You can set proxy with: export http_proxy=... && export https_proxy=...")
                 raise
             self.face_cascade = None
-            
+
         else:
             raise ValueError(f"Unknown method: {method}. Must be 'yolo', or 'grounding'")
 
@@ -299,43 +299,43 @@ class FaceDetector:
     def _calculate_iou(self, bbox1: List[float], bbox2: List[float]) -> float:
         """
         Calculate Intersection over Union (IoU) between two bounding boxes
-        
+
         Args:
             bbox1: [x1, y1, x2, y2] format
             bbox2: [x1, y1, x2, y2] format
-            
+
         Returns:
             IoU value between 0 and 1
         """
         x1_1, y1_1, x2_1, y2_1 = bbox1
         x1_2, y1_2, x2_2, y2_2 = bbox2
-        
+
         # Calculate intersection area
         inter_x1 = max(x1_1, x1_2)
         inter_y1 = max(y1_1, y1_2)
         inter_x2 = min(x2_1, x2_2)
         inter_y2 = min(y2_1, y2_2)
-        
+
         if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
             return 0.0
-        
+
         inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
-        
+
         # Calculate union area
         area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
         area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
         union_area = area1 + area2 - inter_area
-        
+
         if union_area == 0:
             return 0.0
-        
+
         return inter_area / union_area
-    
+
     def _calculate_bbox_area(self, bbox: List[float]) -> float:
         """Calculate the area of a bounding box"""
         x1, y1, x2, y2 = bbox
         return (x2 - x1) * (y2 - y1)
-    
+
     def _calculate_containment(self, bbox_small: List[float], bbox_large: List[float]) -> float:
         """
         Calculate how much of bbox_small is contained in bbox_large
@@ -343,73 +343,73 @@ class FaceDetector:
         """
         x1_s, y1_s, x2_s, y2_s = bbox_small
         x1_l, y1_l, x2_l, y2_l = bbox_large
-        
+
         # Calculate intersection
         inter_x1 = max(x1_s, x1_l)
         inter_y1 = max(y1_s, y1_l)
         inter_x2 = min(x2_s, x2_l)
         inter_y2 = min(y2_s, y2_l)
-        
+
         if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
             return 0.0
-        
+
         inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
         small_area = (x2_s - x1_s) * (y2_s - y1_s)
-        
+
         if small_area == 0:
             return 0.0
-        
+
         return inter_area / small_area
-    
+
     def _apply_nms(self, faces: List[Dict], iou_threshold: float = 0.4, containment_threshold: float = 0.6) -> List[Dict]:
         """
         Apply Non-Maximum Suppression (NMS) to remove duplicate detections.
         When detections overlap, keeps the one with larger area (preferring whole objects over parts).
-        
+
         Args:
             faces: List of face detection dictionaries
             iou_threshold: IoU threshold for considering detections as duplicates
             containment_threshold: If a smaller box is contained in a larger box by this ratio, suppress it
-            
+
         Returns:
             Filtered list of faces with duplicates removed
         """
         if len(faces) == 0:
             return faces
-        
+
         # Sort by area (largest first), then by confidence as tie-breaker
         # This ensures we keep the larger detection (whole object) over smaller ones (parts)
         for face in faces:
             face["_area"] = self._calculate_bbox_area(face["bbox"])
-        
+
         sorted_faces = sorted(faces, key=lambda x: (x["_area"], x["confidence"]), reverse=True)
-        
+
         keep = []
         suppressed = set()
-        
+
         for i, face in enumerate(sorted_faces):
             if i in suppressed:
                 continue
-            
+
             keep.append(face)
             bbox_i = face["bbox"]
             area_i = face["_area"]
-            
+
             # Suppress overlapping detections (prefer larger area)
             for j in range(i + 1, len(sorted_faces)):
                 if j in suppressed:
                     continue
-                
+
                 bbox_j = sorted_faces[j]["bbox"]
                 area_j = sorted_faces[j]["_area"]
-                
+
                 # Check IoU overlap
                 iou = self._calculate_iou(bbox_i, bbox_j)
                 if iou > iou_threshold:
                     # If overlapping, suppress the smaller one
                     suppressed.add(j)
                     continue
-                
+
                 # Check if smaller box is mostly contained in larger box
                 # (e.g., face is contained in whole animal body)
                 # Since we sorted by area, area_i >= area_j for j > i
@@ -417,11 +417,11 @@ class FaceDetector:
                     containment = self._calculate_containment(bbox_j, bbox_i)
                     if containment > containment_threshold:
                         suppressed.add(j)
-        
+
         # Clean up temporary area field
         for face in keep:
             face.pop("_area", None)
-        
+
         logger.info(f"NMS filtered {len(faces)} detections to {len(keep)} (IoU threshold: {iou_threshold}, containment threshold: {containment_threshold}, prefer larger area)")
         return keep
 
@@ -464,7 +464,7 @@ class FaceDetector:
             input_ids=inputs["input_ids"],
             threshold=self.conf_threshold,
             text_threshold=self.conf_threshold,
-            target_sizes=[img.size[::-1]]  # [height, width]
+            target_sizes=[img.size[::-1]],  # [height, width]
         )
 
         faces = []
@@ -472,7 +472,7 @@ class FaceDetector:
 
         if len(results) > 0:
             result = results[0]
-            
+
             # Get detections
             # Use text_labels instead of labels to avoid FutureWarning
             boxes = result.get("boxes", [])
@@ -501,11 +501,11 @@ class FaceDetector:
                     x2 = x_center + width / 2
                     y2 = y_center + height / 2
                     bbox = [float(x1), float(y1), float(x2), float(y2)]
-                
+
                 # Get class name from label
                 # Grounding DINO may return multiple class names concatenated
                 class_name_raw = label if isinstance(label, str) else self.custom_classes[0]
-                
+
                 # If class_name contains multiple classes, try to extract the most specific one
                 # Priority: specific classes (animal, anime, sketch) > human > generic face
                 class_name = class_name_raw
@@ -532,7 +532,7 @@ class FaceDetector:
                             if any(k in c.lower() for k in ["human", "person"]):
                                 class_name = c
                                 break
-                
+
                 # Determine face type based on class name
                 if class_name.lower() == "face":
                     face_type = "face"
@@ -676,7 +676,7 @@ def detect_faces_in_image(
         conf_threshold: Confidence threshold (None for adaptive, only for method="yolo")
         return_image: Whether to return annotated image
         custom_classes: List of custom class names for YOLO (default: ["face"])
-        
+
     Returns:
         Detection result dictionary containing:
             - faces: List of face detection results with bbox coordinates [x1, y1, x2, y2]
@@ -688,9 +688,9 @@ def detect_faces_in_image(
         result = detect_faces_in_image("image.jpg", method="yolo")
 
         # Detect with YOLO World and custom classes
-        result = detect_faces_in_image("image.jpg", method="yolo", 
+        result = detect_faces_in_image("image.jpg", method="yolo",
                                       custom_classes=["human face", "animal face"])
-        
+
         # Detect with Grounding DINO
         result = detect_faces_in_image("image.jpg", method="grounding",
                                       custom_classes=["animal face"])

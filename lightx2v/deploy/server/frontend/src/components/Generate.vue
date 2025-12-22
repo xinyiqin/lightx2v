@@ -433,7 +433,7 @@ watch(selectedTaskId, (newTaskId, oldTaskId) => {
         // 重置分离记录
         lastSeparatedFaceCount.value = 0
         lastSeparatedAudioUrl.value = ''
-        
+
         // 对于 t2v 和 t2i 任务，如果 customShape 为 null，自动设置默认值
         const form = getCurrentForm()
         if (form && !form.customShape) {
@@ -2478,12 +2478,12 @@ const useDefaultSize = () => {
 const applyCustomSize = () => {
     const width = parseInt(customWidth.value)
     const height = parseInt(customHeight.value)
-    
+
     // 如果输入为空或无效，不应用
     if (!customWidth.value || !customHeight.value || isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
         return
     }
-    
+
     const form = getCurrentForm()
     if (form) {
         form.customShape = [height, width]
@@ -2521,7 +2521,7 @@ const getCurrentAspectRatio = () => {
 // 获取当前选中的尺寸值（用于下拉菜单）
 const getCurrentSizeValue = () => {
     const form = getCurrentForm()
-    
+
     // t2v 任务：检查是否匹配预设分辨率
     if (selectedTaskId.value === 't2v') {
         if (!form || !form.customShape) {
@@ -2535,7 +2535,7 @@ const getCurrentSizeValue = () => {
         }
         return '720p_landscape'  // 默认 720p（横屏）
     }
-    
+
     // 图片任务：检查是否匹配预设宽高比
     if (selectedTaskId.value === 't2i' || selectedTaskId.value === 'i2i') {
         // 如果自定义尺寸输入框已打开，优先显示 "custom"
@@ -2551,7 +2551,7 @@ const getCurrentSizeValue = () => {
         }
         return 'custom'
     }
-    
+
     // 其他任务：使用输入尺寸
     return 'default'
 }
@@ -2562,9 +2562,9 @@ const videoSizeOptions = computed(() => {
     if (selectedTaskId.value !== 't2v') {
         return []
     }
-    
+
     const options = []
-    
+
     videoResolutions.forEach(resolution => {
         options.push({
             value: resolution.label,
@@ -2572,14 +2572,14 @@ const videoSizeOptions = computed(() => {
             icon: 'fas fa-video'
         })
     })
-    
+
     return options
 })
 
 // 图片任务尺寸选项
 const imageSizeOptions = computed(() => {
     const options = []
-    
+
     // t2i 任务不显示"使用默认尺寸"选项
     if (selectedTaskId.value !== 't2i') {
         options.push({
@@ -2588,7 +2588,7 @@ const imageSizeOptions = computed(() => {
             icon: 'fas fa-undo'
         })
     }
-    
+
     imageAspectRatios.forEach(ratio => {
         options.push({
             value: ratio.value,
@@ -2596,13 +2596,13 @@ const imageSizeOptions = computed(() => {
             icon: 'fas fa-image'
         })
     })
-    
+
     options.push({
         value: 'custom',
         label: t('custom'),
         icon: 'fas fa-edit'
     })
-    
+
     return options
 })
 
@@ -3575,7 +3575,7 @@ onUnmounted(() => {
                                             {{ t('sizeSetting') }}
                                         </label>
                                     </div>
-                                    
+
                                     <!-- t2v 任务：横屏/竖屏选择 -->
                                     <div v-if="selectedTaskId === 't2v'">
                                         <DropdownMenu
@@ -3586,7 +3586,7 @@ onUnmounted(() => {
                                             class="flex-1 max-w-50"
                                         />
                                     </div>
-                                    
+
                                     <!-- 图片任务：下拉选择 -->
                                     <div v-else-if="selectedTaskId === 't2i' || selectedTaskId === 'i2i'">
                                         <div class="flex items-center gap-3">
@@ -3597,7 +3597,7 @@ onUnmounted(() => {
                                                 @select-item="handleSizeSelect"
                                                 class="flex-1 max-w-50"
                                             />
-                                            
+
                                             <!-- 自定义尺寸输入 -->
                                             <div v-if="showCustomSize" class="flex items-center gap-1.5">
                                                 <input

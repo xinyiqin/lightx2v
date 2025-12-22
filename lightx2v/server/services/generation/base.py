@@ -49,7 +49,7 @@ class BaseGenerationService(ABC):
                     part = part.strip()
                     if part and is_base64_image(part):
                         base64_parts.append(part)
-                
+
                 # If we have multiple valid base64 images, save them separately
                 if len(base64_parts) > 1:
                     saved_paths = []

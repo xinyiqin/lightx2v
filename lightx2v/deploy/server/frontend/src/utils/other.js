@@ -2243,17 +2243,17 @@ export const locale = i18n.global.locale
             const mimeType = file.type || '';
             const fileName = file.name || '';
             const fileExtension = fileName.toLowerCase().split('.').pop() || '';
-            
+
             // 视频文件扩展名列表
             const videoExtensions = ['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'mpeg', 'mpg', '3gp', 'ts', 'mts', 'm2ts'];
             // 音频文件扩展名列表
             const audioExtensions = ['mp3', 'wav', 'aac', 'ogg', 'm4a', 'flac', 'wma', 'opus'];
-            
+
             // 判断是否为视频文件
             const isVideoByMime = mimeType.startsWith('video/');
             const isVideoByExt = videoExtensions.includes(fileExtension);
             const isVideo = isVideoByMime || isVideoByExt;
-            
+
             // 判断是否为音频文件
             const isAudioByMime = mimeType.startsWith('audio/');
             const isAudioByExt = audioExtensions.includes(fileExtension);
@@ -2265,7 +2265,7 @@ export const locale = i18n.global.locale
                     try {
                         setLoading(true);
                         showAlert(t('extractingAudioFromVideo') || '正在从视频中提取音频...', 'info');
-                        
+
                         // 读取视频文件为 base64
                         const videoDataUrl = await new Promise((resolve, reject) => {
                             const reader = new FileReader();
@@ -2273,7 +2273,7 @@ export const locale = i18n.global.locale
                             reader.onerror = reject;
                             reader.readAsDataURL(file);
                         });
-                        
+
                         // 调用后端 API 提取音频
                         const response = await apiCall('/api/v1/audio/extract', {
                             method: 'POST',
@@ -2284,7 +2284,7 @@ export const locale = i18n.global.locale
                                 channels: 2
                             })
                         });
-                        
+
                         if (!response.ok) {
                             const error = await response.json();
                             // Extract error message, remove "error: " prefix and "!" suffix if present
@@ -2297,33 +2297,33 @@ export const locale = i18n.global.locale
                             }
                             throw new Error(errorMessage);
                         }
-                        
+
                         const result = await response.json();
                         const extractedAudioDataUrl = result.audio; // 已经是 data URL 格式
-                        
+
                         // 创建一个新的音频 File 对象用于后续处理
                         const audioBlob = await fetch(extractedAudioDataUrl).then(r => r.blob());
                         const audioFile = new File([audioBlob], file.name.replace(/\.[^/.]+$/, '.wav'), { type: 'audio/wav' });
-                        
+
                         s2vForm.value.audioFile = audioFile;
                         setCurrentAudioPreview(extractedAudioDataUrl);
                         updateUploadedContentStatus();
-                        
+
                         showAlert(t('audioExtractedSuccessfully') || '音频提取成功', 'success');
                         console.log('[handleAudioUpload] 视频音频提取完成，音频分离将由统一的监听器自动处理');
-                        
+
                     } catch (error) {
                         console.error('[handleAudioUpload] 视频音频提取失败:', error);
-                        
+
                         // 检查是否是"视频无音轨"的错误
                         let errorMessage = error.message || '';
-                        if (errorMessage.includes('does not contain an audio track') || 
+                        if (errorMessage.includes('does not contain an audio track') ||
                             errorMessage.includes('不包含音轨')) {
                             errorMessage = t('videoNoAudioTrack') || '视频文件不包含音轨，请上传包含音频的视频文件。';
                         } else if (!errorMessage) {
                             errorMessage = t('audioExtractionFailed') || '音频提取失败';
                         }
-                        
+
                         showAlert(errorMessage, 'error');
                         setCurrentAudioPreview(null);
                         s2vForm.value.separatedAudios = [];
