@@ -224,6 +224,18 @@ def set_input_info(args):
             negative_prompt=args.negative_prompt,
             save_result_path=args.save_result_path,
         )
+        if hasattr(args, "aspect_ratio") and args.aspect_ratio:
+            input_info.aspect_ratio = args.aspect_ratio
+        if hasattr(args, "custom_shape") and args.custom_shape:
+            try:
+                # Parse "height,width" format
+                parts = args.custom_shape.split(",")
+                if len(parts) == 2:
+                    height = int(parts[0].strip())
+                    width = int(parts[1].strip())
+                    input_info.custom_shape = [height, width]
+            except ValueError as e:
+                raise ValueError(f"Failed to parse custom_shape '{args.custom_shape}': {e}. Ignoring.")
     elif args.task == "i2i":
         input_info = I2IInputInfo(
             seed=args.seed,
@@ -232,6 +244,20 @@ def set_input_info(args):
             image_path=args.image_path,
             save_result_path=args.save_result_path,
         )
+        # Set aspect_ratio if provided
+        if hasattr(args, "aspect_ratio") and args.aspect_ratio:
+            input_info.aspect_ratio = args.aspect_ratio
+        # Set custom_shape if provided (takes precedence over aspect_ratio)
+        if hasattr(args, "custom_shape") and args.custom_shape:
+            try:
+                # Parse "height,width" format
+                parts = args.custom_shape.split(",")
+                if len(parts) == 2:
+                    height = int(parts[0].strip())
+                    width = int(parts[1].strip())
+                    input_info.custom_shape = [height, width]
+            except ValueError as e:
+                raise ValueError(f"Failed to parse custom_shape '{args.custom_shape}': {e}. Ignoring.")
     else:
         raise ValueError(f"Unsupported task: {args.task}")
     return input_info

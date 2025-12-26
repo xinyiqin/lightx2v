@@ -6,12 +6,11 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from loguru import logger
 
-from lightx2v.models.input_encoders.hf.qwen25.qwen25_vlforconditionalgeneration import Qwen25_VLForConditionalGeneration_TextEncoder
-from lightx2v.models.networks.qwen_image.lora_adapter import QwenImageLoraWrapper
-from lightx2v.models.networks.qwen_image.model import QwenImageTransformerModel
+from lightx2v.models.input_encoders.hf.z_image.qwen3_model import Qwen3Model_TextEncoder
+from lightx2v.models.networks.z_image.model import ZImageTransformerModel
 from lightx2v.models.runners.default_runner import DefaultRunner
-from lightx2v.models.schedulers.qwen_image.scheduler import QwenImageScheduler
-from lightx2v.models.video_encoders.hf.qwen_image.vae import AutoencoderKLQwenImageVAE
+from lightx2v.models.schedulers.z_image.scheduler import ZImageScheduler
+from lightx2v.models.video_encoders.hf.z_image.vae import AutoencoderKLZImageVAE
 from lightx2v.server.metrics import monitor_cli
 from lightx2v.utils.envs import *
 from lightx2v.utils.profiler import *
@@ -39,8 +38,8 @@ def calculate_dimensions(target_area, ratio):
     return width, height, None
 
 
-@RUNNER_REGISTER("qwen_image")
-class QwenImageRunner(DefaultRunner):
+@RUNNER_REGISTER("z_image")
+class ZImageRunner(DefaultRunner):
     model_cpu_offload_seq = "text_encoder->transformer->vae"
     _callback_tensor_inputs = ["latents", "prompt_embeds"]
 
@@ -54,20 +53,11 @@ class QwenImageRunner(DefaultRunner):
         self.vae = self.load_vae()
 
     def load_transformer(self):
-        model = QwenImageTransformerModel(self.config)
-        if self.config.get("lora_configs") and self.config.lora_configs:
-            assert not self.config.get("dit_quantized", False)
-            lora_wrapper = QwenImageLoraWrapper(model)
-            for lora_config in self.config.lora_configs:
-                lora_path = lora_config["path"]
-                strength = lora_config.get("strength", 1.0)
-                lora_name = lora_wrapper.load_lora(lora_path)
-                lora_wrapper.apply_lora(lora_name, strength)
-                logger.info(f"Loaded LoRA: {lora_name} with strength: {strength}")
+        model = ZImageTransformerModel(self.config)
         return model
 
     def load_text_encoder(self):
-        text_encoder = Qwen25_VLForConditionalGeneration_TextEncoder(self.config)
+        text_encoder = Qwen3Model_TextEncoder(self.config)
         text_encoders = [text_encoder]
         return text_encoders
 
@@ -75,7 +65,7 @@ class QwenImageRunner(DefaultRunner):
         pass
 
     def load_vae(self):
-        vae = AutoencoderKLQwenImageVAE(self.config)
+        vae = AutoencoderKLZImageVAE(self.config)
         return vae
 
     def init_modules(self):
@@ -147,31 +137,66 @@ class QwenImageRunner(DefaultRunner):
             "image_encoder_output": image_encoder_output_list,
         }
 
-    @ProfilingContext4DebugL1("Run Text Encoder", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_text_encode_duration, metrics_labels=["QwenImageRunner"])
+    @ProfilingContext4DebugL1("Run Text Encoder", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_text_encode_duration, metrics_labels=["ZImageRunner"])
     def run_text_encoder(self, text, image_list=None, neg_prompt=None):
         if GET_RECORDER_MODE():
             monitor_cli.lightx2v_input_prompt_len.observe(len(text))
         text_encoder_output = {}
+        
         if self.config["task"] == "t2i":
-            prompt_embeds, _, _ = self.text_encoders[0].infer([text])
-            self.input_info.txt_seq_lens = [prompt_embeds.shape[1]]
+            # T2I task: only text encoding
+            # qwen3_model.infer always returns (embedding_list, image_info)
+            # For t2i, image_info is empty dict {}
+            prompt_embeds_list, _ = self.text_encoders[0].infer([text])
+            prompt_embeds = prompt_embeds_list[0]  # Get first (and only) embedding
+            # embedding_list[0] shape is (seq_len, hidden_dim), use shape[0] for sequence length
+            self.input_info.txt_seq_lens = [prompt_embeds.shape[0]]
             text_encoder_output["prompt_embeds"] = prompt_embeds
             if self.config["enable_cfg"] and neg_prompt is not None:
-                neg_prompt_embeds, _, _ = self.text_encoders[0].infer([neg_prompt])
-                self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[1])
+                neg_prompt_embeds_list, _ = self.text_encoders[0].infer([neg_prompt])
+                neg_prompt_embeds = neg_prompt_embeds_list[0]
+                self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[0])
                 text_encoder_output["negative_prompt_embeds"] = neg_prompt_embeds
         elif self.config["task"] == "i2i":
-            prompt_embeds, _, image_info = self.text_encoders[0].infer([text], image_list)
-            self.input_info.txt_seq_lens = [prompt_embeds.shape[1]]
+            # I2I task: text encoding + image preprocessing
+            if image_list is not None:
+                prompt_embeds_list, image_info = self.text_encoders[0].infer([text], image_list)
+                prompt_embeds = prompt_embeds_list[0]  # Get first (and only) embedding
+                # embedding_list[0] shape is (seq_len, hidden_dim), use shape[0] for sequence length
+                self.input_info.txt_seq_lens = [prompt_embeds.shape[0]]
+                text_encoder_output["prompt_embeds"] = prompt_embeds
+                text_encoder_output["image_info"] = image_info
+                if self.config["enable_cfg"] and neg_prompt is not None:
+                    neg_prompt_embeds_list, _ = self.text_encoders[0].infer([neg_prompt], image_list)
+                    neg_prompt_embeds = neg_prompt_embeds_list[0]
+                    self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[0])
+                    text_encoder_output["negative_prompt_embeds"] = neg_prompt_embeds
+            else:
+                # No images provided, treat as t2i
+                prompt_embeds_list, _ = self.text_encoders[0].infer([text])
+                prompt_embeds = prompt_embeds_list[0]
+                self.input_info.txt_seq_lens = [prompt_embeds.shape[0]]
+                text_encoder_output["prompt_embeds"] = prompt_embeds
+                if self.config["enable_cfg"] and neg_prompt is not None:
+                    neg_prompt_embeds_list, _ = self.text_encoders[0].infer([neg_prompt])
+                    neg_prompt_embeds = neg_prompt_embeds_list[0]
+                    self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[0])
+                    text_encoder_output["negative_prompt_embeds"] = neg_prompt_embeds
+        else:
+            # Default: t2i behavior
+            prompt_embeds_list, _ = self.text_encoders[0].infer([text])
+            prompt_embeds = prompt_embeds_list[0]
+            self.input_info.txt_seq_lens = [prompt_embeds.shape[0]]
             text_encoder_output["prompt_embeds"] = prompt_embeds
-            text_encoder_output["image_info"] = image_info
             if self.config["enable_cfg"] and neg_prompt is not None:
-                neg_prompt_embeds, _, _ = self.text_encoders[0].infer([neg_prompt], image_list)
-                self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[1])
+                neg_prompt_embeds_list, _ = self.text_encoders[0].infer([neg_prompt])
+                neg_prompt_embeds = neg_prompt_embeds_list[0]
+                self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[0])
                 text_encoder_output["negative_prompt_embeds"] = neg_prompt_embeds
+        
         return text_encoder_output
 
-    @ProfilingContext4DebugL1("Run VAE Encoder", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration, metrics_labels=["QwenImageRunner"])
+    @ProfilingContext4DebugL1("Run VAE Encoder", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration, metrics_labels=["ZImageRunner"])
     def run_vae_encoder(self, image):
         image_latents = self.vae.encode_vae_image(image.to(GET_DTYPE()))
         return {"image_latents": image_latents}
@@ -199,45 +224,52 @@ class QwenImageRunner(DefaultRunner):
     def set_target_shape(self):
         if hasattr(self.input_info, "custom_shape") and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
             height, width = self.input_info.custom_shape
-        elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str):
-            width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.input_info.aspect_ratio]
-        else:
-            if self.config["task"] == "t2i":
-                width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.config["aspect_ratio"]]
-            elif self.config["task"] == "i2i":
-                width, height = self.input_info.original_size[-1]
-                calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, width / height)
-                multiple_of = self.vae.vae_scale_factor * 2
-                width = calculated_width // multiple_of * multiple_of
-                height = calculated_height // multiple_of * multiple_of
-                self.input_info.auto_width = width
-                self.input_info.auto_height = height
-
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (self.vae.vae_scale_factor * 2))
-        width = 2 * (int(width) // (self.vae.vae_scale_factor * 2))
-        num_channels_latents = self.model.in_channels // 4
-        self.input_info.target_shape = (1, 1, num_channels_latents, height, width)
-
-    def set_img_shapes(self):
-        if hasattr(self.input_info, "custom_shape") and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
-            height, width = self.input_info.custom_shape
-        elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str):
+        elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str) and self.input_info.aspect_ratio:
             width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.input_info.aspect_ratio]
         else:
             width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.config["aspect_ratio"]]
-        if self.config["task"] == "t2i":
-            image_shapes = [(1, height // self.config["vae_scale_factor"] // 2, width // self.config["vae_scale_factor"] // 2)] * self.config["batchsize"]
-        elif self.config["task"] == "i2i":
-            image_shapes = [[(1, height // self.config["vae_scale_factor"] // 2, width // self.config["vae_scale_factor"] // 2)]]
-            for image_height, image_width in self.inputs["text_encoder_output"]["image_info"]["vae_image_info_list"]:
-                image_shapes[0].append((1, image_height // self.config["vae_scale_factor"] // 2, image_width // self.config["vae_scale_factor"] // 2))
+        # VAE applies 8x compression on images but we must also account for packing which requires
+        # latent height and width to be divisible by 2.
+        # Use config vae_scale_factor to match official pipeline calculation
+        vae_scale_factor = self.config.get("vae_scale_factor", 8)
+        height = 2 * (int(height) // (vae_scale_factor * 2))
+        width = 2 * (int(width) // (vae_scale_factor * 2))
+        # For Z-Image: in_channels=16, num_channels_latents=16 (not in_channels//4)
+        # The patchify step will convert 16 channels to 64 (16*4) before Linear projection
+        # NOTE: target_shape should be [B, C, H, W] format, NOT [B, F, C, H, W]
+        # Official pipeline: prepare_latents returns [B, C, H, W], then unsqueeze(2) -> [B, C, F, H, W]
+        num_channels_latents = self.model.in_channels
+        from loguru import logger
+        logger.info(f"Setting target_shape: num_channels_latents={num_channels_latents}, height={height}, width={width}")
+        logger.info(f"model.in_channels={self.model.in_channels}")
+        # Official format: [B, C, H, W] (frame dimension is added later via unsqueeze)
+        self.input_info.target_shape = (1, num_channels_latents, height, width)
 
+    def set_img_shapes(self):
+        if hasattr(self.input_info, "target_shape") and self.input_info.target_shape is not None:
+            if len(self.input_info.target_shape) != 4:
+                raise ValueError(f"target_shape must be 4D [B, C, H, W], got {len(self.input_info.target_shape)}D: {self.input_info.target_shape}")
+            _, _, latent_height, latent_width = self.input_info.target_shape
+        else:
+            if hasattr(self.input_info, "custom_shape") and isinstance(self.input_info.custom_shape, list) and len(self.input_info.custom_shape) == 2:
+                height, width = self.input_info.custom_shape
+            elif hasattr(self.input_info, "aspect_ratio") and isinstance(self.input_info.aspect_ratio, str) and self.input_info.aspect_ratio:
+                width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.input_info.aspect_ratio]
+            else:
+                width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.config["aspect_ratio"]]
+            vae_scale_factor = self.config.get("vae_scale_factor", 8)
+            latent_height = 2 * (int(height) // (vae_scale_factor * 2))
+            latent_width = 2 * (int(width) // (vae_scale_factor * 2))
+        
+        patch_size = self.config.get("patch_size", 2)
+        patch_height = latent_height // patch_size
+        patch_width = latent_width // patch_size
+        
+        image_shapes = [(1, patch_height, patch_width)] * self.config["batchsize"]
         self.input_info.image_shapes = image_shapes
-
+        
     def init_scheduler(self):
-        self.scheduler = QwenImageScheduler(self.config)
+        self.scheduler = ZImageScheduler(self.config)
 
     def get_encoder_output_i2v(self):
         pass
@@ -249,15 +281,13 @@ class QwenImageRunner(DefaultRunner):
     def load_model(self):
         self.model = self.load_transformer()
         self.text_encoders = self.load_text_encoder()
-        self.image_encoder = self.load_image_encoder()
         self.vae = self.load_vae()
-        self.vfi_model = self.load_vfi_model() if "video_frame_interpolation" in self.config else None
 
     @ProfilingContext4DebugL1(
         "Run VAE Decoder",
         recorder_mode=GET_RECORDER_MODE(),
         metrics_func=monitor_cli.lightx2v_run_vae_decode_duration,
-        metrics_labels=["QwenImageRunner"],
+        metrics_labels=["ZImageRunner"],
     )
     def run_vae_decoder(self, latents):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
