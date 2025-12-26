@@ -8,7 +8,6 @@ from lightx2v.common.ops import *
 from lightx2v.models.runners.hunyuan_video.hunyuan_video_15_distill_runner import HunyuanVideo15DistillRunner  # noqa: F401
 from lightx2v.models.runners.hunyuan_video.hunyuan_video_15_runner import HunyuanVideo15Runner  # noqa: F401
 from lightx2v.models.runners.qwen_image.qwen_image_runner import QwenImageRunner  # noqa: F401
-from lightx2v.models.runners.z_image.z_image_runner import ZImageRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_animate_runner import WanAnimateRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_audio_runner import Wan22AudioRunner, WanAudioRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_distill_runner import WanDistillRunner  # noqa: F401
@@ -16,6 +15,7 @@ from lightx2v.models.runners.wan.wan_matrix_game2_runner import WanSFMtxg2Runner
 from lightx2v.models.runners.wan.wan_runner import Wan22MoeRunner, WanRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_sf_runner import WanSFRunner  # noqa: F401
 from lightx2v.models.runners.wan.wan_vace_runner import WanVaceRunner  # noqa: F401
+from lightx2v.models.runners.z_image.z_image_runner import ZImageRunner  # noqa: F401
 from lightx2v.utils.envs import *
 from lightx2v.utils.input_info import set_input_info
 from lightx2v.utils.profiler import *
@@ -120,7 +120,7 @@ def main():
     )
     parser.add_argument("--save_result_path", type=str, default=None, help="The path to save video path/file")
     parser.add_argument("--return_result_tensor", action="store_true", help="Whether to return result tensor. (Useful for comfyui)")
-       
+
     # Aspect ratio and custom shape for image tasks (t2i, i2i)
     parser.add_argument(
         "--aspect_ratio",

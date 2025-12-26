@@ -1,8 +1,8 @@
 import torch
+
 from lightx2v.common.transformer_infer.transformer_infer import BaseTransformerInfer
 
 from .triton_ops import (
-    fuse_scale_shift_gate_select01_kernel,
     fuse_scale_shift_kernel,
 )
 from .utils import apply_rotary_emb_qwen, apply_wan_rope_with_flashinfer
@@ -39,7 +39,6 @@ class ZImageTransformerInfer(BaseTransformerInfer):
     def set_scheduler(self, scheduler):
         self.scheduler = scheduler
 
-
     def apply_attn(self, block_weight, hidden_states, freqs_cis):
         is_3d = hidden_states.dim() == 3
         if is_3d:
@@ -49,7 +48,7 @@ class ZImageTransformerInfer(BaseTransformerInfer):
         else:
             hidden_states_2d = hidden_states
             freqs_cis_2d = freqs_cis
-        
+
         query = block_weight.attention.to_q.apply(hidden_states_2d)
         key = block_weight.attention.to_k.apply(hidden_states_2d)
         value = block_weight.attention.to_v.apply(hidden_states_2d)
@@ -95,11 +94,11 @@ class ZImageTransformerInfer(BaseTransformerInfer):
                 max_seqlen_kv=total_seq_len,
                 model_cls="z_image",
             )
-        
+
         output = block_weight.attention.to_out[0].apply(hidden_states_out)
         if len(block_weight.attention.to_out) > 1:
             output = block_weight.attention.to_out[1].apply(output)
-        
+
         if is_3d:
             output = output.reshape(B, T, -1)
 
@@ -116,13 +115,13 @@ class ZImageTransformerInfer(BaseTransformerInfer):
             assert adaln_input is not None
             mod_params = block_weight.adaLN_modulation.apply(adaln_input)
             scale_msa, gate_msa, scale_mlp, gate_mlp = mod_params.unsqueeze(1).chunk(4, dim=2)
-            
+
             gate_msa, gate_mlp = gate_msa.tanh(), gate_mlp.tanh()
             scale_msa, scale_mlp = 1.0 + scale_msa, 1.0 + scale_mlp
-            
+
             norm1_out = block_weight.attention_norm1.apply(hidden_states)
             scaled_norm1 = norm1_out * scale_msa
-            
+
             # Attention block
             attn_out = self.apply_attn(
                 block_weight=block_weight,
@@ -130,19 +129,19 @@ class ZImageTransformerInfer(BaseTransformerInfer):
                 freqs_cis=freqs_cis,
             )
             norm2_attn = block_weight.attention_norm2.apply(attn_out)
-            
+
             hidden_states = hidden_states + gate_msa * norm2_attn
 
             ffn_norm1_out = block_weight.ffn_norm1.apply(hidden_states)
             scaled_ffn_norm1 = ffn_norm1_out * scale_mlp
-            
+
             ffn_out = block_weight.feed_forward.forward(scaled_ffn_norm1)
             norm2_ffn = block_weight.ffn_norm2.apply(ffn_out)
-            
+
             hidden_states = hidden_states + gate_mlp * norm2_ffn
         else:
             norm1_out = block_weight.attention_norm1.apply(hidden_states)
-            
+
             # Attention block
             attn_out = self.apply_attn(
                 block_weight=block_weight,
@@ -165,9 +164,9 @@ class ZImageTransformerInfer(BaseTransformerInfer):
         return hidden_states
 
     def infer_calculating(
-        self, 
-        block_weights, 
-        hidden_states, 
+        self,
+        block_weights,
+        hidden_states,
         encoder_hidden_states,
         x_freqs_cis,
         cap_freqs_cis,
@@ -176,10 +175,10 @@ class ZImageTransformerInfer(BaseTransformerInfer):
         cap_item_seqlens,
     ):
         from torch.nn.utils.rnn import pad_sequence
-        
+
         batch_size = hidden_states.shape[0]
         device = hidden_states.device
-        
+
         # ==================== Stage 1: Noise Refiner (Image Stream) ====================
         # Process image stream with modulation
         if block_weights.noise_refiner is not None and len(block_weights.noise_refiner) > 0:
@@ -188,7 +187,7 @@ class ZImageTransformerInfer(BaseTransformerInfer):
             x_attn_mask = torch.zeros((batch_size, x_max_seqlen), dtype=torch.bool, device=device)
             for i, seq_len in enumerate(x_item_seqlens):
                 x_attn_mask[i, :seq_len] = True
-            
+
             # Process through noise_refiner layers (with modulation)
             # Use 3D [B, T, D] format to match official implementation
             for idx in range(len(block_weights.noise_refiner)):
@@ -198,7 +197,7 @@ class ZImageTransformerInfer(BaseTransformerInfer):
                     freqs_cis=x_freqs_cis,
                     adaln_input=adaln_input,
                 )
-        
+
         # ==================== Stage 2: Context Refiner (Text Stream) ====================
         # Process text stream without modulation
         if block_weights.context_refiner is not None and len(block_weights.context_refiner) > 0:
@@ -207,7 +206,7 @@ class ZImageTransformerInfer(BaseTransformerInfer):
             cap_attn_mask = torch.zeros((batch_size, cap_max_seqlen), dtype=torch.bool, device=device)
             for i, seq_len in enumerate(cap_item_seqlens):
                 cap_attn_mask[i, :seq_len] = True
-            
+
             # Process through context_refiner layers (without modulation)
             # Use 3D [B, L, D] format to match official implementation
             for idx in range(len(block_weights.context_refiner)):
@@ -217,44 +216,49 @@ class ZImageTransformerInfer(BaseTransformerInfer):
                     freqs_cis=cap_freqs_cis,  # [B, L, D_rope]
                     adaln_input=None,  # No modulation for context_refiner
                 )
-            
-        
+
         # ==================== Stage 3: Unified Layers (Merged Stream) ====================
         # Merge image and text streams
         unified_list = []
         unified_freqs_cis_list = []
         unified_item_seqlens = []
-        
+
         for b in range(batch_size):
             x_len = x_item_seqlens[b]
             cap_len = cap_item_seqlens[b]
-            
+
             # Concatenate image and text tokens: [image_tokens, text_tokens]
-            unified_item = torch.cat([
-                hidden_states[b, :x_len],
-                encoder_hidden_states[b, :cap_len],
-            ], dim=0)
+            unified_item = torch.cat(
+                [
+                    hidden_states[b, :x_len],
+                    encoder_hidden_states[b, :cap_len],
+                ],
+                dim=0,
+            )
             unified_list.append(unified_item)
-            
+
             # Concatenate freqs_cis: [image_freqs, text_freqs]
-            unified_freqs_item = torch.cat([
-                x_freqs_cis[b, :x_len],
-                cap_freqs_cis[b, :cap_len],
-            ], dim=0)
+            unified_freqs_item = torch.cat(
+                [
+                    x_freqs_cis[b, :x_len],
+                    cap_freqs_cis[b, :cap_len],
+                ],
+                dim=0,
+            )
             unified_freqs_cis_list.append(unified_freqs_item)
-            
+
             unified_item_seqlens.append(x_len + cap_len)
-        
+
         # Pad unified sequences
         unified_max_seqlen = max(unified_item_seqlens)
         unified = pad_sequence(unified_list, batch_first=True, padding_value=0.0)  # [B, max_seqlen, D]
         unified_freqs_cis = pad_sequence(unified_freqs_cis_list, batch_first=True, padding_value=0.0)  # [B, max_seqlen, D_rope]
-        
+
         # Build attention mask for unified stream
         unified_attn_mask = torch.zeros((batch_size, unified_max_seqlen), dtype=torch.bool, device=device)
         for i, seq_len in enumerate(unified_item_seqlens):
             unified_attn_mask[i, :seq_len] = True
-        
+
         # Process through unified layers (with modulation)
         # Use 3D [B, T_unified, D] format to match official implementation
         if block_weights.blocks is not None and len(block_weights.blocks) > 0:
@@ -265,7 +269,7 @@ class ZImageTransformerInfer(BaseTransformerInfer):
                     freqs_cis=unified_freqs_cis,
                     adaln_input=adaln_input,
                 )
-        
+
         return unified
 
     def infer(self, block_weights, pre_infer_out):
@@ -274,11 +278,11 @@ class ZImageTransformerInfer(BaseTransformerInfer):
         adaln_input = pre_infer_out.adaln_input
         x_item_seqlens = pre_infer_out.x_item_seqlens
         cap_item_seqlens = pre_infer_out.cap_item_seqlens
-        
+
         # Use freqs_cis generated from position ids in pre_infer
         x_freqs_cis = pre_infer_out.x_freqs_cis
         cap_freqs_cis = pre_infer_out.cap_freqs_cis
-        
+
         hidden_states = self.infer_calculating(
             block_weights=block_weights,
             hidden_states=hidden_states,

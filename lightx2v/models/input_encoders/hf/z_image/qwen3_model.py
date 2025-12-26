@@ -11,6 +11,7 @@ except ImportError:
     Qwen3Model = None
 
 from lightx2v_platform.base.global_var import AI_DEVICE
+
 torch_device_module = getattr(torch, AI_DEVICE)
 
 try:
@@ -28,21 +29,14 @@ class Qwen3Model_TextEncoder:
         self.load()
 
     def load(self):
-        self.text_encoder = Qwen3Model.from_pretrained(
-            os.path.join(self.config["model_path"], "text_encoder"), 
-            torch_dtype=torch.bfloat16
-        )
+        self.text_encoder = Qwen3Model.from_pretrained(os.path.join(self.config["model_path"], "text_encoder"), torch_dtype=torch.bfloat16)
         if not self.cpu_offload:
             self.text_encoder = self.text_encoder.to(AI_DEVICE)
 
-        self.tokenizer = Qwen2Tokenizer.from_pretrained(
-            os.path.join(self.config["model_path"], "tokenizer")
-        )
-        
+        self.tokenizer = Qwen2Tokenizer.from_pretrained(os.path.join(self.config["model_path"], "tokenizer"))
+
         if self.config["task"] == "i2i":
-            self.image_processor = VaeImageProcessor(
-                vae_scale_factor=self.config.get("vae_scale_factor", 8) * 2
-            )
+            self.image_processor = VaeImageProcessor(vae_scale_factor=self.config.get("vae_scale_factor", 8) * 2)
 
     def preprocess_image(self, image):
         if isinstance(image, Image.Image):
@@ -53,7 +47,7 @@ class Qwen3Model_TextEncoder:
             preprocessed_image = image
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")
-        
+
         return preprocessed_image
 
     @torch.no_grad()
@@ -66,23 +60,12 @@ class Qwen3Model_TextEncoder:
 
         for i, prompt_item in enumerate(prompt):
             messages = [{"role": "user", "content": prompt_item}]
-            prompt_tokens = self.tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True, 
-                enable_thinking=True
-            )
+            prompt_tokens = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=True)
             prompt[i] = prompt_tokens
 
-        text_inputs = self.tokenizer(
-            prompt, 
-            max_length=self.tokenizer_max_length, 
-            padding="max_length", 
-            truncation=True, 
-            return_tensors="pt"
-        ).to(AI_DEVICE)
+        text_inputs = self.tokenizer(prompt, max_length=self.tokenizer_max_length, padding="max_length", truncation=True, return_tensors="pt").to(AI_DEVICE)
         prompt_masks = text_inputs.attention_mask.bool().to(AI_DEVICE)
-        
+
         prompt_embeds = self.text_encoder(
             input_ids=text_inputs.input_ids,
             attention_mask=prompt_masks,
@@ -98,15 +81,14 @@ class Qwen3Model_TextEncoder:
             for image in image_list:
                 preprocessed_image = self.preprocess_image(image)
                 vae_image_list.append(preprocessed_image)
-            
+
             image_info = {
                 "vae_image_list": vae_image_list,
             }
-            
+
         if self.cpu_offload:
             self.text_encoder.to(torch.device("cpu"))
             torch_device_module.empty_cache()
             gc.collect()
-        
-        return embedding_list, image_info
 
+        return embedding_list, image_info

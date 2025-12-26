@@ -331,7 +331,7 @@ class ZImageTransformerModel:
                     noise_pred = self._infer_cond_uncond(latents_input, inputs["text_encoder_output"]["prompt_embeds"], infer_condition=True)
                 else:
                     noise_pred = self._infer_cond_uncond(latents_input, inputs["text_encoder_output"]["negative_prompt_embeds"], infer_condition=False)
-                
+
                 # post_infer already extracts image part, so noise_pred is already [B, T_img, out_dim]
                 # No need to extract again
                 noise_pred_list = [torch.zeros_like(noise_pred) for _ in range(2)]
@@ -342,7 +342,7 @@ class ZImageTransformerModel:
                 # ==================== CFG Processing ====================
                 noise_pred_cond = self._infer_cond_uncond(latents_input, inputs["text_encoder_output"]["prompt_embeds"], infer_condition=True)
                 noise_pred_uncond = self._infer_cond_uncond(latents_input, inputs["text_encoder_output"]["negative_prompt_embeds"], infer_condition=False)
-                
+
                 # post_infer already extracts image part, so noise_pred is already [B, T_img, out_dim]
                 # Just ensure both have the same sequence length (should be same, but double-check)
                 min_seq_len = min(noise_pred_cond.shape[1], noise_pred_uncond.shape[1])
@@ -356,10 +356,10 @@ class ZImageTransformerModel:
         else:
             # ==================== No CFG Processing ====================
             noise_pred = self._infer_cond_uncond(latents_input, inputs["text_encoder_output"]["prompt_embeds"], infer_condition=True)
-            
-                # post_infer already extracts image part, so noise_pred is already [B, T_img, out_dim]
-                # No need to extract again
-            
+
+            # post_infer already extracts image part, so noise_pred is already [B, T_img, out_dim]
+            # No need to extract again
+
             self.scheduler.noise_pred = noise_pred
 
     @torch.no_grad()
@@ -368,6 +368,7 @@ class ZImageTransformerModel:
 
         # Debug: log latents_input shape before passing to pre_infer
         from loguru import logger
+
         logger.debug(f"model._infer_cond_uncond: latents_input shape = {latents_input.shape}, dim = {latents_input.dim()}")
 
         pre_infer_out = self.pre_infer.infer(
@@ -384,10 +385,10 @@ class ZImageTransformerModel:
             pre_infer_out=pre_infer_out,
         )
         noise_pred = self.post_infer.infer(
-            self.post_weight, 
-            hidden_states, 
+            self.post_weight,
+            hidden_states,
             pre_infer_out.temb_img_silu,  # Use timestep embedding (t), not text embedding!
-            image_tokens_len=pre_infer_out.image_tokens_len
+            image_tokens_len=pre_infer_out.image_tokens_len,
         )
 
         if self.config["seq_parallel"]:

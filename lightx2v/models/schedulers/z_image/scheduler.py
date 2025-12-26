@@ -346,7 +346,7 @@ class ZImageScheduler(BaseScheduler):
         else:
             self.seq_p_group = None
         self.pos_embed = ZEmbedRope(theta=10000, axes_dim=[16, 56, 56], scale_rope=True)
-        
+
         # Initialize RopeEmbedder for generating freqs_cis from position IDs (used in pre_infer)
         rope_theta = config.get("rope_theta", 256.0)
         axes_dims = config.get("axes_dims", [32, 48, 48])
@@ -407,12 +407,13 @@ class ZImageScheduler(BaseScheduler):
 
         if len(shape) != 4:
             raise ValueError(f"target_shape must be 4D [B, C, H, W], got {len(shape)}D: {shape}")
-        
+
         batch_size, num_channels, height, width = shape
 
         latents = randn_tensor(shape, generator=self.generator, device=AI_DEVICE, dtype=self.dtype)
         # Log initial latents statistics
         from loguru import logger
+
         stats = {
             "min": latents.min().item(),
             "max": latents.max().item(),
@@ -425,22 +426,22 @@ class ZImageScheduler(BaseScheduler):
             f"min={stats['min']:.6f}, max={stats['max']:.6f}, mean={stats['mean']:.6f}, "
             f"std={stats['std']:.6f}, abs_max={stats['abs_max']:.6f}, dtype={latents.dtype}"
         )
-        
+
         latent_image_ids = self._prepare_latent_image_ids(1, height // 2, width // 2, AI_DEVICE, self.dtype)
 
         self.latents = latents
         self.latent_image_ids = latent_image_ids
         self.noise_pred = None
-    
+
     def generate_freqs_cis_from_position_ids(self, position_ids: torch.Tensor, device: torch.device = None) -> torch.Tensor:
         if device is None:
             device = position_ids.device
-        
+
         freqs_cis = self.rope_embedder(position_ids.to(device))
         rope_type = self.config.get("rope_type", "flashinfer")
         if rope_type == "flashinfer":
             freqs_cis = torch.cat([freqs_cis.real, freqs_cis.imag], dim=-1).float()
-        
+
         return freqs_cis
 
     def set_timesteps(self):
@@ -531,14 +532,14 @@ class ZImageScheduler(BaseScheduler):
         timestep_input = torch.tensor([1000.0 - timestep_value], device=AI_DEVICE, dtype=torch.float32)
         if self.zero_cond_t:
             timestep_input = torch.cat([timestep_input, timestep_input * 0], dim=0)
-        
+
         timesteps_proj_float32 = get_timestep_embedding(timestep_input, scale=1.0)
         self.timesteps_proj = timesteps_proj_float32.to(torch.bfloat16)
-        
+
     def step_post(self):
         noise_pred = -self.noise_pred
         noise_pred = noise_pred.to(torch.float32)
-        
+
         latents = self.latents
         t = self.timesteps[self.step_index]
         latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]

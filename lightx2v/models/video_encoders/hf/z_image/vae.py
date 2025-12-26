@@ -39,7 +39,7 @@ class AutoencoderKLZImageVAE:
 
     def load(self):
         self.model = AutoencoderKL.from_pretrained(os.path.join(self.config["model_path"], "vae")).to(self.device).to(torch.bfloat16)
-        if hasattr(self.model.config, 'block_out_channels') and self.model.config.block_out_channels is not None:
+        if hasattr(self.model.config, "block_out_channels") and self.model.config.block_out_channels is not None:
             self.vae_scale_factor = 2 ** (len(self.model.config.block_out_channels) - 1)
         else:
             self.vae_scale_factor = self.config.get("vae_scale_factor", 8)
@@ -63,14 +63,14 @@ class AutoencoderKLZImageVAE:
     def decode(self, latents, input_info):
         if self.cpu_offload:
             self.model.to(torch.device("cuda"))
-        
+
         latents = latents.to(next(self.model.parameters()).dtype)
-        if hasattr(self.model.config, 'scaling_factor') and hasattr(self.model.config, 'shift_factor'):
+        if hasattr(self.model.config, "scaling_factor") and hasattr(self.model.config, "shift_factor"):
             scaling_factor = self.model.config.scaling_factor
             shift_factor = self.model.config.shift_factor
             latents = (latents / scaling_factor) + shift_factor
         images = self.model.decode(latents, return_dict=False)[0]
-        
+
         images_postprocessed = self.image_processor.postprocess(images, output_type="pil")
         images = images_postprocessed
         if self.cpu_offload:
@@ -108,4 +108,3 @@ class AutoencoderKLZImageVAE:
             torch.cuda.empty_cache()
             gc.collect()
         return image_latents
-

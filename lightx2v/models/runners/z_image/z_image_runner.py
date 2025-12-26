@@ -142,7 +142,7 @@ class ZImageRunner(DefaultRunner):
         if GET_RECORDER_MODE():
             monitor_cli.lightx2v_input_prompt_len.observe(len(text))
         text_encoder_output = {}
-        
+
         if self.config["task"] == "t2i":
             # T2I task: only text encoding
             # qwen3_model.infer always returns (embedding_list, image_info)
@@ -193,7 +193,7 @@ class ZImageRunner(DefaultRunner):
                 neg_prompt_embeds = neg_prompt_embeds_list[0]
                 self.input_info.txt_seq_lens.append(neg_prompt_embeds.shape[0])
                 text_encoder_output["negative_prompt_embeds"] = neg_prompt_embeds
-        
+
         return text_encoder_output
 
     @ProfilingContext4DebugL1("Run VAE Encoder", recorder_mode=GET_RECORDER_MODE(), metrics_func=monitor_cli.lightx2v_run_vae_encoder_image_duration, metrics_labels=["ZImageRunner"])
@@ -240,6 +240,7 @@ class ZImageRunner(DefaultRunner):
         # Official pipeline: prepare_latents returns [B, C, H, W], then unsqueeze(2) -> [B, C, F, H, W]
         num_channels_latents = self.model.in_channels
         from loguru import logger
+
         logger.info(f"Setting target_shape: num_channels_latents={num_channels_latents}, height={height}, width={width}")
         logger.info(f"model.in_channels={self.model.in_channels}")
         # Official format: [B, C, H, W] (frame dimension is added later via unsqueeze)
@@ -260,14 +261,14 @@ class ZImageRunner(DefaultRunner):
             vae_scale_factor = self.config.get("vae_scale_factor", 8)
             latent_height = 2 * (int(height) // (vae_scale_factor * 2))
             latent_width = 2 * (int(width) // (vae_scale_factor * 2))
-        
+
         patch_size = self.config.get("patch_size", 2)
         patch_height = latent_height // patch_size
         patch_width = latent_width // patch_size
-        
+
         image_shapes = [(1, patch_height, patch_width)] * self.config["batchsize"]
         self.input_info.image_shapes = image_shapes
-        
+
     def init_scheduler(self):
         self.scheduler = ZImageScheduler(self.config)
 

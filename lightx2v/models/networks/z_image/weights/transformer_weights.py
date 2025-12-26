@@ -1,11 +1,12 @@
 import os
 from typing import Optional
 
-from safetensors import safe_open
 import torch.nn.functional as F
 from loguru import logger
+from safetensors import safe_open
+
 from lightx2v.common.modules.weight_module import WeightModule, WeightModuleList
-from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER, LN_WEIGHT_REGISTER, MM_WEIGHT_REGISTER, RMS_WEIGHT_REGISTER
+from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER, MM_WEIGHT_REGISTER, RMS_WEIGHT_REGISTER
 
 
 def log_tensor_stats(tensor, prefix: str, layer_id: Optional[int] = None):
@@ -19,10 +20,7 @@ def log_tensor_stats(tensor, prefix: str, layer_id: Optional[int] = None):
         "std": tensor.std().item(),
         "abs_max": tensor.abs().max().item(),
     }
-    logger.debug(
-        f"{prefix}: shape={tensor.shape}, min={stats['min']:.6f}, max={stats['max']:.6f}, "
-        f"mean={stats['mean']:.6f}, std={stats['std']:.6f}, abs_max={stats['abs_max']:.6f}"
-    )
+    logger.debug(f"{prefix}: shape={tensor.shape}, min={stats['min']:.6f}, max={stats['max']:.6f}, mean={stats['mean']:.6f}, std={stats['std']:.6f}, abs_max={stats['abs_max']:.6f}")
 
 
 class ZImageTransformerWeights(WeightModule):
@@ -30,6 +28,7 @@ class ZImageTransformerWeights(WeightModule):
     Z-Image single stream transformer weights.
     Based on ZImageTransformer2DModel structure.
     """
+
     def __init__(self, config):
         super().__init__()
         self.blocks_num = config["num_layers"]
@@ -38,14 +37,11 @@ class ZImageTransformerWeights(WeightModule):
         self.mm_type = config.get("dit_quant_scheme", "Default")
         if self.mm_type != "Default":
             assert config.get("dit_quantized") is True
-        
+
         # Main transformer blocks
-        blocks = WeightModuleList(
-            ZImageTransformerBlock(i, self.task, self.mm_type, self.config, False, False, "layers")
-            for i in range(self.blocks_num)
-        )
+        blocks = WeightModuleList(ZImageTransformerBlock(i, self.task, self.mm_type, self.config, False, False, "layers") for i in range(self.blocks_num))
         self.add_module("blocks", blocks)
-        
+
         # Noise refiner (if exists)
         n_refiner_layers = config.get("n_refiner_layers", 0)
         if n_refiner_layers > 0:
@@ -65,7 +61,7 @@ class ZImageTransformerWeights(WeightModule):
             self.add_module("noise_refiner", noise_refiner)
         else:
             self.noise_refiner = None
-        
+
         # Context refiner (if exists)
         if n_refiner_layers > 0:
             context_refiner = WeightModuleList(
@@ -84,16 +80,14 @@ class ZImageTransformerWeights(WeightModule):
             self.add_module("context_refiner", context_refiner)
         else:
             self.context_refiner = None
-        
+
         self.register_offload_buffers(config)
 
     def register_offload_buffers(self, config):
         if config["cpu_offload"]:
             if config["offload_granularity"] == "block":
                 self.offload_blocks_num = 2
-                self.offload_block_cuda_buffers = WeightModuleList(
-                    [ZImageTransformerBlock(i, self.task, self.mm_type, self.config, True, False, "layers") for i in range(self.offload_blocks_num)]
-                )
+                self.offload_block_cuda_buffers = WeightModuleList([ZImageTransformerBlock(i, self.task, self.mm_type, self.config, True, False, "layers") for i in range(self.offload_blocks_num)])
                 self.add_module("offload_block_cuda_buffers", self.offload_block_cuda_buffers)
                 self.offload_phase_cuda_buffers = None
 
@@ -103,6 +97,7 @@ class ZImageTransformerBlock(WeightModule):
     Z-Image single stream transformer block.
     Based on ZImageTransformerBlock with attention_norm1, attention_norm2, ffn_norm1, ffn_norm2.
     """
+
     def __init__(
         self,
         layer_id,
@@ -219,6 +214,7 @@ class ZImageSingleStreamAttention(WeightModule):
     Single stream attention for Z-Image.
     Based on ZSingleStreamAttnProcessor.
     """
+
     def __init__(self, layer_id, block_prefix, task, mm_type, config, create_cuda_buffer, create_cpu_buffer, lazy_load, lazy_load_file):
         super().__init__()
         self.layer_id = layer_id
@@ -291,16 +287,18 @@ class ZImageSingleStreamAttention(WeightModule):
         # Output projection
         self.add_module(
             "to_out",
-            WeightModuleList([
-                MM_WEIGHT_REGISTER[self.mm_type](
-                    f"{block_prefix}.{layer_id}.attention.to_out.0.weight",
-                    None,  # No bias in Z-Image
-                    create_cuda_buffer,
-                    create_cpu_buffer,
-                    self.lazy_load,
-                    self.lazy_load_file,
-                ),
-            ]),
+            WeightModuleList(
+                [
+                    MM_WEIGHT_REGISTER[self.mm_type](
+                        f"{block_prefix}.{layer_id}.attention.to_out.0.weight",
+                        None,  # No bias in Z-Image
+                        create_cuda_buffer,
+                        create_cpu_buffer,
+                        self.lazy_load,
+                        self.lazy_load_file,
+                    ),
+                ]
+            ),
         )
 
         # Attention computation
@@ -328,6 +326,7 @@ class ZImageFeedForward(WeightModule):
     Feed forward network for Z-Image.
     Based on FeedForward with w1, w2, w3 and SiLU gating.
     """
+
     def __init__(self, layer_id, block_prefix, task, mm_type, config, create_cuda_buffer, create_cpu_buffer, lazy_load, lazy_load_file):
         super().__init__()
         self.layer_id = layer_id
@@ -379,14 +378,14 @@ class ZImageFeedForward(WeightModule):
 
     def forward(self, x):
         log_tensor_stats(x, "FeedForward.forward.input", self.layer_id)
-        
+
         w1_out = F.linear(x, self.w1.weight.t(), None)  # Z-Image FFN has no bias
         w3_out = F.linear(x, self.w3.weight.t(), None)
         silu_gated = F.silu(w1_out) * w3_out
         output = F.linear(silu_gated, self.w2.weight.t(), None)
-        
+
         log_tensor_stats(output, "FeedForward.forward.output", self.layer_id)
-        
+
         return output
 
     def to_cpu(self, non_blocking=True):
