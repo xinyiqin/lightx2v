@@ -11,7 +11,6 @@ import torch
 import torch.distributed as dist
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from torch import nn
-from torch.nn import functional as F
 
 from lightx2v.models.schedulers.scheduler import BaseScheduler
 from lightx2v_platform.base.global_var import AI_DEVICE
@@ -86,9 +85,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-def retrieve_latents(
-    encoder_output: torch.Tensor, generator: Optional[torch.Generator] = None, sample_mode: str = "sample"
-):
+def retrieve_latents(encoder_output: torch.Tensor, generator: Optional[torch.Generator] = None, sample_mode: str = "sample"):
     """Retrieve latents from VAE encoder output."""
     if hasattr(encoder_output, "latent_dist") and sample_mode == "sample":
         return encoder_output.latent_dist.sample(generator)
@@ -445,12 +442,12 @@ class ZImageScheduler(BaseScheduler):
 
     def get_timesteps(self, num_inference_steps, strength, device):
         init_timestep = min(num_inference_steps * strength, num_inference_steps)
-        
+
         t_start = int(max(num_inference_steps - init_timestep, 0))
         timesteps = self.timesteps[t_start * self.scheduler.order :]
         if hasattr(self.scheduler, "set_begin_index"):
             self.scheduler.set_begin_index(t_start * self.scheduler.order)
-        
+
         return timesteps, num_inference_steps - t_start
 
     def set_timesteps(self):
@@ -497,39 +494,38 @@ class ZImageScheduler(BaseScheduler):
         self.generator = torch.Generator(device=AI_DEVICE).manual_seed(input_info.seed)
         self.prepare_latents(input_info)
         self.set_timesteps()
-        
+
         if self.config["task"] == "i2i" and hasattr(input_info, "image_encoder_output") and input_info.image_encoder_output is not None:
             strength = getattr(input_info, "strength", 0.6)
             if strength > 0.0:
                 image_latents_list = [item["image_latents"] for item in input_info.image_encoder_output]
                 if len(image_latents_list) > 0:
                     image_latents = torch.cat(image_latents_list, dim=0) if len(image_latents_list) > 1 else image_latents_list[0]
-                    
+
                     batch_size = self.latents.shape[0]
                     if batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] == 0:
                         additional_image_per_prompt = batch_size // image_latents.shape[0]
                         image_latents = torch.cat([image_latents] * additional_image_per_prompt, dim=0)
                     elif batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] != 0:
-                        raise ValueError(
-                            f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts."
-                        )
-                    
+                        raise ValueError(f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts.")
+
                     _, _, height, width = self.latents.shape
                     if image_latents.shape[2:] != (height, width):
                         from torch.nn import functional as F
+
                         image_latents = F.interpolate(image_latents, size=(height, width), mode="bilinear", align_corners=False)
-                    
+
                     latent_timestep = self.timesteps[:1].repeat(self.latents.shape[0])
-                    
+
                     noise = randn_tensor(self.latents.shape, generator=self.generator, device=AI_DEVICE, dtype=self.dtype)
                     if image_latents.shape[1] != self.latents.shape[1]:
                         repeat_factor = self.latents.shape[1] // image_latents.shape[1]  # 64 // 16 = 4
                         image_latents = image_latents.repeat(1, repeat_factor, 1, 1)
-                    
+
                     self.latents = self.scheduler.scale_noise(image_latents, latent_timestep, noise)
-                    
+
         self.image_rotary_emb = self.pos_embed(self.input_info.image_shapes, input_info.txt_seq_lens[0], device=AI_DEVICE)
-        
+
         if self.config.get("rope_type", "flashinfer") == "flashinfer":
             cos_half_img = self.image_rotary_emb[0].real.contiguous()
             sin_half_img = self.image_rotary_emb[0].imag.contiguous()

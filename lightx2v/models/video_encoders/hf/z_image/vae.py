@@ -1,5 +1,6 @@
 import gc
 import os
+
 import torch
 
 from lightx2v.utils.envs import *
@@ -93,7 +94,7 @@ class AutoencoderKLZImageVAE:
             image_latents = encoder_output.latents
         else:
             raise AttributeError("Could not access latents from VAE encoder output")
-            
+
         return image_latents
 
     @torch.no_grad()

@@ -108,20 +108,17 @@ class ZImageRunner(DefaultRunner):
             img_ori = img_path
         else:
             img_ori = Image.open(img_path).convert("RGB")
-        
+
         # Get image dimensions
         width, height = img_ori.size
-        
+
         if GET_RECORDER_MODE():
             monitor_cli.lightx2v_input_image_len.observe(width * height)
-        
+
         vae_scale_factor = self.config.get("vae_scale_factor", 8)
         vae_scale = vae_scale_factor * 2
         if height % vae_scale != 0 or width % vae_scale != 0:
-            logger.warning(
-                f"Image dimensions ({height}, {width}) are not divisible by {vae_scale}. "
-                f"Resizing to nearest valid dimensions."
-            )
+            logger.warning(f"Image dimensions ({height}, {width}) are not divisible by {vae_scale}. Resizing to nearest valid dimensions.")
             # Resize to nearest valid dimensions
             new_height = (height // vae_scale) * vae_scale
             new_width = (width // vae_scale) * vae_scale
@@ -131,7 +128,7 @@ class ZImageRunner(DefaultRunner):
                 new_width = vae_scale
             img_ori = img_ori.resize((new_width, new_height), Image.Resampling.LANCZOS)
             logger.info(f"Resized image to ({new_height}, {new_width})")
-        
+
         img = TF.to_tensor(img_ori).sub_(0.5).div_(0.5).unsqueeze(0).to(AI_DEVICE)
         self.input_info.original_size.append(img_ori.size)
         return img, img_ori
@@ -323,7 +320,7 @@ class ZImageRunner(DefaultRunner):
         # Store image_encoder_output in input_info for scheduler to access
         if self.config["task"] == "i2i" and "image_encoder_output" in self.inputs:
             self.input_info.image_encoder_output = self.inputs["image_encoder_output"]
-        
+
         self.set_target_shape()
         self.set_img_shapes()
         logger.info(f"input_info: {self.input_info}")

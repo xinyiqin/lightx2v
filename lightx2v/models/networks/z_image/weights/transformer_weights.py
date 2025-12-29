@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 
 import torch.nn.functional as F
 from safetensors import safe_open

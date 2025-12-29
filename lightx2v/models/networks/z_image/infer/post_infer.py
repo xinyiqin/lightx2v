@@ -31,7 +31,7 @@ class ZImagePostInfer:
         f_patch_size = 1
         transformer_out_channels = out_dim // (patch_size * patch_size * f_patch_size)
         expected_out_dim = patch_size * patch_size * f_patch_size * transformer_out_channels
-        
+
         if out_dim != expected_out_dim:
             raise ValueError(f"out_dim mismatch: {out_dim} != {expected_out_dim} (transformer_out_channels={transformer_out_channels})")
 
