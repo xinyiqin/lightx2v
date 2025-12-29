@@ -21,7 +21,7 @@ from lightx2v.utils.input_info import set_input_info
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import print_config, set_config, set_parallel_config
-from lightx2v.utils.utils import seed_all
+from lightx2v.utils.utils import seed_all, validate_task_arguments
 from lightx2v_platform.base.global_var import AI_DEVICE
 from lightx2v_platform.registry_factory import PLATFORM_DEVICE_REGISTER
 
@@ -137,6 +137,7 @@ def main():
     )
     parser.add_argument("--strength", type=float, default=0.6, help="The strength for image-to-image generation")
     args = parser.parse_args()
+    validate_task_arguments(args)
 
     seed_all(args.seed)
 

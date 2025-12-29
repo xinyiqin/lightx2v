@@ -56,6 +56,7 @@ class WanModel(CompiledMethodsMixin):
         else:
             self.seq_p_group = None
 
+        self.padding_multiple = self.config.get("padding_multiple", 1)
         self.clean_cuda_cache = self.config.get("clean_cuda_cache", False)
         self.dit_quantized = self.config.get("dit_quantized", False)
         if self.dit_quantized:
@@ -89,6 +90,7 @@ class WanModel(CompiledMethodsMixin):
                 "gguf-Q4_1",
                 "gguf-Q3_K_S",
                 "gguf-Q3_K_M",
+                "int8-npu",
             ]
         self.device = device
         self._init_infer_class()
@@ -255,10 +257,11 @@ class WanModel(CompiledMethodsMixin):
 
         if self.config.get("dit_quant_scheme", "Default") == "nvfp4":
             calib_path = os.path.join(safetensors_path, "calib.pt")
-            logger.info(f"[CALIB] Loaded calibration data from: {calib_path}")
-            calib_data = torch.load(calib_path, map_location="cpu")
-            for k, v in calib_data["absmax"].items():
-                weight_dict[k.replace(".weight", ".input_absmax")] = v.to(self.device)
+            if os.path.exists(calib_path):
+                logger.info(f"[CALIB] Loaded calibration data from: {calib_path}")
+                calib_data = torch.load(calib_path, map_location="cpu")
+                for k, v in calib_data["absmax"].items():
+                    weight_dict[k.replace(".weight", ".input_absmax")] = v.to(self.device)
 
         return weight_dict
 
@@ -480,7 +483,8 @@ class WanModel(CompiledMethodsMixin):
         world_size = dist.get_world_size(self.seq_p_group)
         cur_rank = dist.get_rank(self.seq_p_group)
 
-        padding_size = (world_size - (x.shape[0] % world_size)) % world_size
+        multiple = world_size * self.padding_multiple
+        padding_size = (multiple - (x.shape[0] % multiple)) % multiple
         if padding_size > 0:
             x = F.pad(x, (0, 0, 0, padding_size))
 

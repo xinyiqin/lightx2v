@@ -14,13 +14,7 @@ except ImportError:
     AutoencoderKLQwenImage = None
     VaeImageProcessor = None
 
-ASPECT_RATIO_MAP = {
-    "16:9": [1664, 928],
-    "9:16": [928, 1664],
-    "1:1": [1328, 1328],
-    "4:3": [1472, 1140],
-    "3:4": [768, 1024],
-}
+torch_device_module = getattr(torch, AI_DEVICE)
 
 
 class AutoencoderKLQwenImageVAE:
@@ -64,16 +58,8 @@ class AutoencoderKLQwenImageVAE:
     @torch.no_grad()
     def decode(self, latents, input_info):
         if self.cpu_offload:
-            self.model.to(torch.device("cuda"))
-        if hasattr(input_info, "custom_shape") and isinstance(input_info.custom_shape, list) and len(input_info.custom_shape) == 2:
-            height, width = input_info.custom_shape
-        elif hasattr(input_info, "aspect_ratio") and isinstance(input_info.aspect_ratio, str):
-            width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[input_info.aspect_ratio]
-        else:
-            if self.config["task"] == "t2i":
-                width, height = self.config.get("aspect_ratios", ASPECT_RATIO_MAP)[self.config["aspect_ratio"]]
-            elif self.config["task"] == "i2i":
-                width, height = input_info.auto_width, input_info.auto_height
+            self.model.to(AI_DEVICE)
+        width, height = input_info.auto_width, input_info.auto_height
         latents = self._unpack_latents(latents, height, width, self.config["vae_scale_factor"])
         latents = latents.to(self.dtype)
         latents_mean = torch.tensor(self.vae_latents_mean).view(1, self.latent_channels, 1, 1, 1).to(latents.device, latents.dtype)
@@ -83,7 +69,7 @@ class AutoencoderKLQwenImageVAE:
         images = self.image_processor.postprocess(images, output_type="pil")
         if self.cpu_offload:
             self.model.to(torch.device("cpu"))
-            torch.cuda.empty_cache()
+            torch_device_module.empty_cache()
             gc.collect()
         return images
 
@@ -106,7 +92,7 @@ class AutoencoderKLQwenImageVAE:
     @torch.no_grad()
     def encode_vae_image(self, image):
         if self.cpu_offload:
-            self.model.to(torch.device("cuda"))
+            self.model.to(AI_DEVICE)
 
         num_channels_latents = self.config["transformer_in_channels"] // 4
         image = image.to(self.model.device)
