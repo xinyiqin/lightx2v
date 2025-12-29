@@ -2,25 +2,10 @@ import os
 from typing import Optional
 
 import torch.nn.functional as F
-from loguru import logger
 from safetensors import safe_open
 
 from lightx2v.common.modules.weight_module import WeightModule, WeightModuleList
 from lightx2v.utils.registry_factory import ATTN_WEIGHT_REGISTER, MM_WEIGHT_REGISTER, RMS_WEIGHT_REGISTER
-
-
-def log_tensor_stats(tensor, prefix: str, layer_id: Optional[int] = None):
-    """Log tensor statistics for debugging."""
-    if layer_id is not None:
-        prefix = f"{prefix}[layer_{layer_id}]"
-    stats = {
-        "min": tensor.min().item(),
-        "max": tensor.max().item(),
-        "mean": tensor.mean().item(),
-        "std": tensor.std().item(),
-        "abs_max": tensor.abs().max().item(),
-    }
-    logger.debug(f"{prefix}: shape={tensor.shape}, min={stats['min']:.6f}, max={stats['max']:.6f}, mean={stats['mean']:.6f}, std={stats['std']:.6f}, abs_max={stats['abs_max']:.6f}")
 
 
 class ZImageTransformerWeights(WeightModule):
@@ -377,15 +362,10 @@ class ZImageFeedForward(WeightModule):
         )
 
     def forward(self, x):
-        log_tensor_stats(x, "FeedForward.forward.input", self.layer_id)
-
         w1_out = F.linear(x, self.w1.weight.t(), None)  # Z-Image FFN has no bias
         w3_out = F.linear(x, self.w3.weight.t(), None)
         silu_gated = F.silu(w1_out) * w3_out
         output = F.linear(silu_gated, self.w2.weight.t(), None)
-
-        log_tensor_stats(output, "FeedForward.forward.output", self.layer_id)
-
         return output
 
     def to_cpu(self, non_blocking=True):

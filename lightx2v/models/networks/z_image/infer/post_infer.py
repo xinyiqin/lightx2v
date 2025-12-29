@@ -29,13 +29,15 @@ class ZImagePostInfer:
 
         patch_size = self.config.get("patch_size", 2)
         f_patch_size = 1
-        out_channels = self.config.get("num_channels_latents", 16)
-        expected_out_dim = patch_size * patch_size * f_patch_size * out_channels  # = 2 * 2 * 1 * 16 = 64
-
+        transformer_out_channels = out_dim // (patch_size * patch_size * f_patch_size)
+        expected_out_dim = patch_size * patch_size * f_patch_size * transformer_out_channels
+        
         if out_dim != expected_out_dim:
-            raise ValueError(f"out_dim mismatch: {out_dim} != {expected_out_dim}")
+            raise ValueError(f"out_dim mismatch: {out_dim} != {expected_out_dim} (transformer_out_channels={transformer_out_channels})")
 
+        out_channels = transformer_out_channels
         target_shape = self.scheduler.input_info.target_shape
+
         _, _, height, width = target_shape
         num_frames = 1
         pH = pW = patch_size

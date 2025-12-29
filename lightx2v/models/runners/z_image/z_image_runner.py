@@ -108,9 +108,30 @@ class ZImageRunner(DefaultRunner):
             img_ori = img_path
         else:
             img_ori = Image.open(img_path).convert("RGB")
+        
+        # Get image dimensions
+        width, height = img_ori.size
+        
         if GET_RECORDER_MODE():
-            width, height = img_ori.size
             monitor_cli.lightx2v_input_image_len.observe(width * height)
+        
+        vae_scale_factor = self.config.get("vae_scale_factor", 8)
+        vae_scale = vae_scale_factor * 2
+        if height % vae_scale != 0 or width % vae_scale != 0:
+            logger.warning(
+                f"Image dimensions ({height}, {width}) are not divisible by {vae_scale}. "
+                f"Resizing to nearest valid dimensions."
+            )
+            # Resize to nearest valid dimensions
+            new_height = (height // vae_scale) * vae_scale
+            new_width = (width // vae_scale) * vae_scale
+            if new_height == 0:
+                new_height = vae_scale
+            if new_width == 0:
+                new_width = vae_scale
+            img_ori = img_ori.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            logger.info(f"Resized image to ({new_height}, {new_width})")
+        
         img = TF.to_tensor(img_ori).sub_(0.5).div_(0.5).unsqueeze(0).to(AI_DEVICE)
         self.input_info.original_size.append(img_ori.size)
         return img, img_ori
@@ -234,16 +255,11 @@ class ZImageRunner(DefaultRunner):
         vae_scale_factor = self.config.get("vae_scale_factor", 8)
         height = 2 * (int(height) // (vae_scale_factor * 2))
         width = 2 * (int(width) // (vae_scale_factor * 2))
-        # For Z-Image: in_channels=16, num_channels_latents=16 (not in_channels//4)
-        # The patchify step will convert 16 channels to 64 (16*4) before Linear projection
-        # NOTE: target_shape should be [B, C, H, W] format, NOT [B, F, C, H, W]
-        # Official pipeline: prepare_latents returns [B, C, H, W], then unsqueeze(2) -> [B, C, F, H, W]
-        num_channels_latents = self.model.in_channels
-        from loguru import logger
 
-        logger.info(f"Setting target_shape: num_channels_latents={num_channels_latents}, height={height}, width={width}")
-        logger.info(f"model.in_channels={self.model.in_channels}")
-        # Official format: [B, C, H, W] (frame dimension is added later via unsqueeze)
+        if self.config["task"] == "i2i":
+            num_channels_latents = self.model.in_channels
+        else:
+            num_channels_latents = self.config.get("num_channels_latents", 16)
         self.input_info.target_shape = (1, num_channels_latents, height, width)
 
     def set_img_shapes(self):
@@ -304,6 +320,10 @@ class ZImageRunner(DefaultRunner):
         self.input_info = input_info
 
         self.inputs = self.run_input_encoder()
+        # Store image_encoder_output in input_info for scheduler to access
+        if self.config["task"] == "i2i" and "image_encoder_output" in self.inputs:
+            self.input_info.image_encoder_output = self.inputs["image_encoder_output"]
+        
         self.set_target_shape()
         self.set_img_shapes()
         logger.info(f"input_info: {self.input_info}")

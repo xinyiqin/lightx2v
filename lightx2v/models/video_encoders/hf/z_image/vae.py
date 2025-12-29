@@ -1,6 +1,5 @@
 import gc
 import os
-
 import torch
 
 from lightx2v.utils.envs import *
@@ -87,7 +86,14 @@ class AutoencoderKLZImageVAE:
         return latents
 
     def _encode_vae_image(self, image: torch.Tensor):
-        image_latents = self.model.encode(image).latent_dist.mode()
+        encoder_output = self.model.encode(image)
+        if hasattr(encoder_output, "latent_dist"):
+            image_latents = encoder_output.latent_dist.mode()
+        elif hasattr(encoder_output, "latents"):
+            image_latents = encoder_output.latents
+        else:
+            raise AttributeError("Could not access latents from VAE encoder output")
+            
         return image_latents
 
     @torch.no_grad()
@@ -100,6 +106,9 @@ class AutoencoderKLZImageVAE:
 
         if image.shape[1] != self.latent_channels:
             image_latents = self._encode_vae_image(image=image)
+            # Apply scaling (inverse of decoding: decode does latents/scaling_factor + shift_factor)
+            if hasattr(self.model.config, "scaling_factor") and hasattr(self.model.config, "shift_factor"):
+                image_latents = (image_latents - self.model.config.shift_factor) * self.model.config.scaling_factor
         else:
             image_latents = image
         image_latents = torch.cat([image_latents], dim=0)

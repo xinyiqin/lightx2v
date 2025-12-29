@@ -15,8 +15,6 @@ class ZImagePostWeights(WeightModule):
             assert NotImplementedError
         self.lazy_load_file = False
 
-        # norm_out_linear -> all_final_layer.2-1.adaLN_modulation.1 (Z-Image uses adaLN_modulation for norm_out)
-        # This is used to generate scale and shift for AdaLN normalization
         self.add_module(
             "norm_out_linear",
             MM_WEIGHT_REGISTER["Default"](
@@ -26,10 +24,8 @@ class ZImagePostWeights(WeightModule):
                 self.lazy_load_file,
             ),
         )
-        # norm_out is a LayerNorm (no weights to load, computed at runtime)
         self.add_module("norm_out", LN_WEIGHT_REGISTER["Default"](eps=1e-6))
 
-        # proj_out -> all_final_layer.2-1.linear (Z-Image final output projection)
         self.add_module(
             "proj_out_linear",
             MM_WEIGHT_REGISTER["Default"](

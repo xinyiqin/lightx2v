@@ -135,6 +135,7 @@ def main():
         default=None,
         help="Custom shape for image generation in format 'height,width' (e.g., '928,1664'). Only used for t2i and i2i tasks. Takes precedence over aspect_ratio.",
     )
+    parser.add_argument("--strength", type=float, default=0.6, help="The strength for image-to-image generation")
     args = parser.parse_args()
 
     seed_all(args.seed)

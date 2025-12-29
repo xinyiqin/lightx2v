@@ -312,13 +312,7 @@ class ZImageTransformerModel:
                 self.post_weight.to_cuda()
 
         latents = self.scheduler.latents
-        # Latents are now in unpacked format: (batch_size, num_channels_latents, height, width)
-        if self.config["task"] == "i2i":
-            # For i2i, image_latents are also in unpacked format
-            image_latents = torch.cat([item["image_latents"] for item in inputs["image_encoder_output"]], dim=1)
-            latents_input = torch.cat([latents, image_latents], dim=1)  # (batch_size, num_channels_latents + image_channels, height, width)
-        else:
-            latents_input = latents
+        latents_input = latents
 
         if self.config["enable_cfg"]:
             if self.config["cfg_parallel"]:
@@ -365,12 +359,6 @@ class ZImageTransformerModel:
     @torch.no_grad()
     def _infer_cond_uncond(self, latents_input, prompt_embeds, infer_condition=True):
         self.scheduler.infer_condition = infer_condition
-
-        # Debug: log latents_input shape before passing to pre_infer
-        from loguru import logger
-
-        logger.debug(f"model._infer_cond_uncond: latents_input shape = {latents_input.shape}, dim = {latents_input.dim()}")
-
         pre_infer_out = self.pre_infer.infer(
             weights=self.pre_weight,
             hidden_states=latents_input,
