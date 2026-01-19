@@ -31,6 +31,29 @@ def calculate_dimensions(target_area, ratio):
     return width, height, None
 
 
+def build_qwen_image_model_with_lora(qwen_module, config, model_kwargs, lora_configs):
+    lora_dynamic_apply = config.get("lora_dynamic_apply", False)
+
+    if lora_dynamic_apply:
+        lora_path = lora_configs[0]["path"]
+        lora_strength = lora_configs[0]["strength"]
+        model_kwargs["lora_path"] = lora_path
+        model_kwargs["lora_strength"] = lora_strength
+        model = qwen_module(**model_kwargs)
+    else:
+        assert not config.get("dit_quantized", False), "Online LoRA only for quantized models; merging LoRA is unsupported."
+        assert not config.get("lazy_load", False), "Lazy load mode does not support LoRA merging."
+        model = qwen_module(**model_kwargs)
+        lora_wrapper = QwenImageLoraWrapper(model)
+        for lora_config in lora_configs:
+            lora_path = lora_config["path"]
+            strength = lora_config.get("strength", 1.0)
+            lora_name = lora_wrapper.load_lora(lora_path)
+            lora_wrapper.apply_lora(lora_name, strength)
+            logger.info(f"Loaded LoRA: {lora_name} with strength: {strength}")
+    return model
+
+
 @RUNNER_REGISTER("qwen_image")
 class QwenImageRunner(DefaultRunner):
     model_cpu_offload_seq = "text_encoder->transformer->vae"
@@ -50,15 +73,14 @@ class QwenImageRunner(DefaultRunner):
         self.vae = self.load_vae()
 
     def load_transformer(self):
-        model = QwenImageTransformerModel(self.config)
-        if self.config.get("lora_configs") and self.config.lora_configs:
-            lora_wrapper = QwenImageLoraWrapper(model)
-            for lora_config in self.config.lora_configs:
-                lora_path = lora_config["path"]
-                strength = lora_config.get("strength", 1.0)
-                lora_name = lora_wrapper.load_lora(lora_path)
-                lora_wrapper.apply_lora(lora_name, strength)
-                logger.info(f"Loaded LoRA: {lora_name} with strength: {strength}")
+        qwen_image_model_kwargs = {
+            "config": self.config,
+        }
+        lora_configs = self.config.get("lora_configs")
+        if not lora_configs:
+            model = QwenImageTransformerModel(**qwen_image_model_kwargs)
+        else:
+            model = build_qwen_image_model_with_lora(QwenImageTransformerModel, self.config, qwen_image_model_kwargs, lora_configs)
         return model
 
     def load_text_encoder(self):
@@ -180,7 +202,6 @@ class QwenImageRunner(DefaultRunner):
     def run_vae_encoder(self, image):
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             self.vae = self.load_vae()
-            self.vae_scale_factor = self.vae.vae_scale_factor
         image_latents = self.vae.encode_vae_image(image.to(GET_DTYPE()))
         if self.config.get("lazy_load", False) or self.config.get("unload_modules", False):
             del self.vae
@@ -225,6 +246,8 @@ class QwenImageRunner(DefaultRunner):
         return self.model.scheduler.latents, self.model.scheduler.generator
 
     def get_custom_shape(self):
+        if self.config["task"] == "i2i":
+            return None
         default_aspect_ratios = {
             "16:9": [1664, 928],
             "9:16": [928, 1664],
@@ -237,8 +260,9 @@ class QwenImageRunner(DefaultRunner):
         max_size = self.config.get("max_custom_size", 1664)
         min_size = self.config.get("min_custom_size", 256)
 
-        if len(self.input_info.custom_shape) == 2:
-            height, width = self.input_info.custom_shape
+        if len(self.input_info.target_shape) == 2:
+            height, width = self.input_info.target_shape
+            height, width = int(height), int(width)
             if width > max_size or height > max_size:
                 scale = max_size / max(width, height)
                 width, height = int(width * scale), int(height * scale)
@@ -247,27 +271,22 @@ class QwenImageRunner(DefaultRunner):
             logger.info(f"Qwen Image Runner got custom shape: {width}x{height}")
             return (width, height)
 
-        if self.input_info.aspect_ratio and not self.config["_auto_resize"]:
-            if self.input_info.aspect_ratio in as_maps:
-                logger.info(f"Qwen Image Runner got aspect ratio: {self.input_info.aspect_ratio}")
-                width, height = as_maps[self.input_info.aspect_ratio]
-                return (width, height)
-            logger.warning(f"Invalid aspect ratio: {self.input_info.aspect_ratio}, not in {as_maps.keys()}")
-
-        if self.config["task"] == "t2i" or not self.config.get("resize_mode", None) == "adaptive":
-            width, height = as_maps[self.config.get("aspect_ratio", "16:9")]
+        if self.input_info.aspect_ratio in as_maps:
+            logger.info(f"Qwen Image Runner got aspect ratio: {self.input_info.aspect_ratio}")
+            width, height = as_maps[self.input_info.aspect_ratio]
             return (width, height)
+        logger.warning(f"Invalid aspect ratio: {self.input_info.aspect_ratio}, not in {as_maps.keys()}")
+
         return None
 
     def set_target_shape(self):
-        vae_scale_factor = self.config["vae_scale_factor"]
         custom_shape = self.get_custom_shape()
         if custom_shape is not None:
             width, height = custom_shape
         else:
             width, height = self.input_info.original_size[-1]
             calculated_width, calculated_height, _ = calculate_dimensions(self.resolution * self.resolution, width / height)
-            multiple_of = vae_scale_factor * 2
+            multiple_of = self.config["vae_scale_factor"] * 2
             width = calculated_width // multiple_of * multiple_of
             height = calculated_height // multiple_of * multiple_of
         logger.info(f"Qwen Image Runner set target shape: {width}x{height}")
@@ -276,8 +295,8 @@ class QwenImageRunner(DefaultRunner):
 
         # VAE applies 8x compression on images but we must also account for packing which requires
         # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (vae_scale_factor * 2))
-        width = 2 * (int(width) // (vae_scale_factor * 2))
+        height = 2 * (int(height) // (self.config["vae_scale_factor"] * 2))
+        width = 2 * (int(width) // (self.config["vae_scale_factor"] * 2))
         num_channels_latents = self.config["in_channels"] // 4
         if not self.is_layered:
             self.input_info.target_shape = (1, 1, num_channels_latents, height, width)

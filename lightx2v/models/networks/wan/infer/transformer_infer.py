@@ -4,6 +4,7 @@ import torch
 
 from lightx2v.common.transformer_infer.transformer_infer import BaseTransformerInfer
 from lightx2v.utils.envs import *
+from lightx2v.utils.registry_factory import *
 
 from .triton_ops import fuse_scale_shift_kernel
 from .utils import apply_wan_rope_with_chunk, apply_wan_rope_with_flashinfer, apply_wan_rope_with_torch, apply_wan_rope_with_torch_naive
@@ -38,7 +39,19 @@ class WanTransformerInfer(BaseTransformerInfer):
             "torch_naive": apply_wan_rope_with_torch_naive,
         }
         rope_type = self.config.get("rope_type", "flashinfer")
-        rope_func = rope_funcs.get(rope_type, apply_wan_rope_with_torch)
+        # Try to get rope function from registry first (for platform-specific implementations)
+        if rope_type in ROPE_REGISTER:
+            rope_class = ROPE_REGISTER[rope_type]
+            self.rope_instance = rope_class()
+
+            # Create a wrapper function that matches the expected signature
+            def rope_wrapper(xq, xk, cos_sin_cache):
+                return self.rope_instance.apply(xq, xk, cos_sin_cache)
+
+            rope_func = rope_wrapper
+        else:
+            # Fallback to hardcoded functions
+            rope_func = rope_funcs.get(rope_type, apply_wan_rope_with_torch)
         if self.config.get("rope_chunk", False):
             self.apply_rope_func = partial(apply_wan_rope_with_chunk, chunk_size=self.config.get("rope_chunk_size", 100), rope_func=rope_func)
         else:
@@ -182,7 +195,7 @@ class WanTransformerInfer(BaseTransformerInfer):
 
         img_qkv_len = q.shape[0]
         if self.self_attn_cu_seqlens_qkv is None:
-            if self.self_attn_1_type in ["flash_attn2", "flash_attn3", "draft_attn"]:
+            if self.self_attn_1_type in ["flash_attn2", "flash_attn3"]:
                 self.self_attn_cu_seqlens_qkv = torch.tensor([0, q.shape[0]]).cumsum(0, dtype=torch.int32).to(q.device, non_blocking=True)
             else:
                 self.self_attn_cu_seqlens_qkv = torch.tensor([0, q.shape[0]]).cumsum(0, dtype=torch.int32)
@@ -190,6 +203,11 @@ class WanTransformerInfer(BaseTransformerInfer):
         if self.clean_cuda_cache:
             del norm1_out, shift_msa, scale_msa
             torch.cuda.empty_cache()
+
+        attn_running_args = {
+            "block_idx": self.block_idx,
+            "scheduler": self.scheduler,
+        }
 
         if self.config["seq_parallel"]:
             attn_out = phase.self_attn_1_parallel.apply(
@@ -203,33 +221,19 @@ class WanTransformerInfer(BaseTransformerInfer):
                 seq_p_group=self.seq_p_group,
                 use_fp8_comm=self.seq_p_fp8_comm,
                 enable_head_parallel=self.enable_head_parallel,
-                model_cls=self.config["model_cls"],
+                **attn_running_args,
             )
         else:
-            if self.config["self_attn_1_type"] == "draft_attn":
-                attn_out = phase.self_attn_1.apply(
-                    q=q,
-                    k=k,
-                    v=v,
-                    cu_seqlens_q=self.self_attn_cu_seqlens_qkv,
-                    cu_seqlens_kv=self.self_attn_cu_seqlens_qkv,
-                    max_seqlen_q=img_qkv_len,
-                    max_seqlen_kv=img_qkv_len,
-                    frame_h=self.scheduler.latents.shape[2] // self.scheduler.patch_size[1],
-                    frame_w=self.scheduler.latents.shape[3] // self.scheduler.patch_size[2],
-                    block_idx=self.block_idx,
-                )
-            else:
-                attn_out = phase.self_attn_1.apply(
-                    q=q,
-                    k=k,
-                    v=v,
-                    cu_seqlens_q=self.self_attn_cu_seqlens_qkv,
-                    cu_seqlens_kv=self.self_attn_cu_seqlens_qkv,
-                    max_seqlen_q=img_qkv_len,
-                    max_seqlen_kv=img_qkv_len,
-                    model_cls=self.config["model_cls"],
-                )
+            attn_out = phase.self_attn_1.apply(
+                q=q,
+                k=k,
+                v=v,
+                cu_seqlens_q=self.self_attn_cu_seqlens_qkv,
+                cu_seqlens_kv=self.self_attn_cu_seqlens_qkv,
+                max_seqlen_q=img_qkv_len,
+                max_seqlen_kv=img_qkv_len,
+                **attn_running_args,
+            )
 
         y = phase.self_attn_o.apply(attn_out)
 
@@ -281,7 +285,6 @@ class WanTransformerInfer(BaseTransformerInfer):
             cu_seqlens_kv=self.cross_attn_cu_seqlens_kv,
             max_seqlen_q=q.size(0),
             max_seqlen_kv=k.size(0),
-            model_cls=self.config["model_cls"],
         )
 
         if self.task in ["i2v", "flf2v", "animate", "s2v"] and self.config.get("use_image_encoder", True) and context_img is not None:
@@ -302,7 +305,6 @@ class WanTransformerInfer(BaseTransformerInfer):
                 cu_seqlens_kv=self.cross_attn_cu_seqlens_kv_img,
                 max_seqlen_q=q.size(0),
                 max_seqlen_kv=k_img.size(0),
-                model_cls=self.config["model_cls"],
             )
             attn_out.add_(img_attn_out)
 
