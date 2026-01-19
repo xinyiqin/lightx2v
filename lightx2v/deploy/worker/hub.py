@@ -16,7 +16,7 @@ import lightx2v
 from lightx2v.deploy.common.utils import class_try_catch_async
 from lightx2v.deploy.worker.parallel_model_runner import ParallelModelRunner
 from lightx2v.infer import init_runner  # noqa
-from lightx2v.utils.input_info import set_input_info
+from lightx2v.utils.input_info import init_empty_input_info
 from lightx2v.utils.profiler import *
 from lightx2v.utils.registry_factory import RUNNER_REGISTER
 from lightx2v.utils.set_config import set_config, set_parallel_config
@@ -46,7 +46,7 @@ class BaseWorker:
         # same as va_recorder rank
         self.out_video_rank = int(os.getenv("RECORDER_RANK", "0")) % self.world_size
         self.runner = runner
-        self.input_info = set_input_info(args)
+        self.input_info = init_empty_input_info(args.task)
 
     def init_parallel_model(self, args):
         runner = ParallelModelRunner(args)
