@@ -1675,6 +1675,36 @@ assets_dir = os.path.join(os.path.dirname(__file__), "static", "assets")
 if os.path.exists(assets_dir):
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+# 添加 Canvas 子应用的 assets 目录的静态文件服务
+canvas_assets_dir = os.path.join(static_dir, "canvas", "assets")
+if os.path.exists(canvas_assets_dir):
+    app.mount("/canvas/assets", StaticFiles(directory=canvas_assets_dir), name="canvas-assets")
+
+
+# Canvas 子应用路由处理（必须在 vue_fallback 之前）
+@app.get("/canvas/{full_path:path}", response_class=HTMLResponse)
+async def canvas_fallback(full_path: str):
+    # 跳过 assets 路径，由上面的 mount 处理
+    if full_path.startswith("assets/"):
+        return HTMLResponse("<h1>Asset not found</h1>", status_code=404)
+    
+    # 从 static 目录读取 Canvas 文件
+    canvas_dir = os.path.join(static_dir, "canvas")
+    
+    # 处理 /canvas/index.html 或 /canvas/ 路径
+    if not full_path or full_path == "index.html":
+        canvas_index_path = os.path.join(canvas_dir, "index.html")
+        if os.path.exists(canvas_index_path):
+            return FileResponse(canvas_index_path)
+    # 对于其他 canvas 路径下的文件，尝试直接返回文件
+    canvas_file_path = os.path.join(canvas_dir, full_path)
+    if os.path.exists(canvas_file_path) and os.path.isfile(canvas_file_path):
+        return FileResponse(canvas_file_path)
+    # 如果文件不存在，返回 canvas/index.html
+    canvas_index_path = os.path.join(canvas_dir, "index.html")
+    if os.path.exists(canvas_index_path):
+        return FileResponse(canvas_index_path)
+    return HTMLResponse("<h1>Canvas app not found</h1>", status_code=404)
 
 # 所有未知路由 fallback 到 index.html (必须在所有API路由之后)
 @app.get("/{full_path:path}", response_class=HTMLResponse)
