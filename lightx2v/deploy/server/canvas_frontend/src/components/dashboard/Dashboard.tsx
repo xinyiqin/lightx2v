@@ -16,6 +16,8 @@ interface DashboardProps {
   onOpenWorkflow: (workflow: WorkflowState) => void;
   onDeleteWorkflow: (id: string, e: React.MouseEvent) => void;
   onSetActiveTab: (tab: 'MY' | 'PRESET') => void;
+  isLoading?: boolean;
+  onRefresh?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -27,7 +29,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onAIGenerate,
   onOpenWorkflow,
   onDeleteWorkflow,
-  onSetActiveTab
+  onSetActiveTab,
+  isLoading = false,
+  onRefresh
 }) => {
   const { t } = useTranslation(lang);
 

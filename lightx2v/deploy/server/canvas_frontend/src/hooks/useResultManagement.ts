@@ -38,6 +38,24 @@ export const useResultManagement = ({
     const tool = TOOLS.find(t => t.id === node.toolId);
     let content = outputs[node.id];
     
+    // Handle reference types (from optimized history outputs)
+    if (content && typeof content === 'object' && content.type === 'reference' && content.data_id) {
+      // This is a reference, we need to load the actual data
+      // For now, return the reference info (actual loading can be done on demand)
+      content = {
+        _type: 'reference',
+        data_id: content.data_id,
+        file_id: content.file_id,
+        _note: 'Data will be loaded on demand'
+      };
+    } else if (content && typeof content === 'object' && content.type === 'text' && content.data_id) {
+      // Text with data_id - use the text data directly
+      content = content.data;
+    } else if (content && typeof content === 'object' && content.type === 'json' && content.data_id) {
+      // JSON with data_id - use the JSON data directly
+      content = content.data;
+    }
+    
     if (!content && tool?.category === 'Input') {
       content = node.data.value;
     }
@@ -120,4 +138,3 @@ export const useResultManagement = ({
     handleManualResultEdit
   };
 };
-

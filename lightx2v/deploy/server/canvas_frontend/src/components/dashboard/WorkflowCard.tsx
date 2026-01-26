@@ -21,7 +21,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   const { t } = useTranslation(lang);
 
   // Extract preview content from workflow for preset cards
-  const textInputNode = workflow.nodes.find(n => n.toolId === 'text-prompt' && n.data?.value);
+  const textInputNode = workflow.nodes.find(n => n.toolId === 'text-input' && n.data?.value);
   const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && n.data?.value && Array.isArray(n.data.value) && n.data.value.length > 0);
   
   const previewText = textInputNode?.data?.value || null;

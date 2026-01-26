@@ -47,6 +47,16 @@ export async function mount(props: any) {
   
   // 初始化 LIGHTX2V_TOKEN：如果用户已登录，使用用户的 accessToken
   initLightX2VToken();
+  
+  // 检查环境变量（用于调试）
+  console.log('[Canvas App] 环境变量检查:', {
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : '未设置',
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 10)}...` : '未设置',
+    PPCHAT_API_KEY: process.env.PPCHAT_API_KEY ? `${process.env.PPCHAT_API_KEY.substring(0, 10)}...` : '未设置',
+    LIGHTX2V_URL: process.env.LIGHTX2V_URL || '未设置',
+    LIGHTX2V_CLOUD_URL: process.env.LIGHTX2V_CLOUD_URL || '未设置',
+    LIGHTX2V_CLOUD_TOKEN: process.env.LIGHTX2V_CLOUD_TOKEN ? `${process.env.LIGHTX2V_CLOUD_TOKEN.substring(0, 10)}...` : '未设置',
+  });
 
   const rootElement = props?.container 
     ? props.container.querySelector('#root') 
@@ -210,6 +220,14 @@ if (typeof window !== 'undefined') {
 if (!window.__POWERED_BY_QIANKUN__) {
   // 初始化 LIGHTX2V_TOKEN：如果用户已登录，使用用户的 accessToken
   initLightX2VToken();
+  
+  // 检查环境变量（用于调试）
+  console.log('[Canvas App] 环境变量检查（独立运行）:', {
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : '未设置',
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 10)}...` : '未设置',
+    PPCHAT_API_KEY: process.env.PPCHAT_API_KEY ? `${process.env.PPCHAT_API_KEY.substring(0, 10)}...` : '未设置',
+    LIGHTX2V_URL: process.env.LIGHTX2V_URL || '未设置',
+  });
   
   const rootElement = document.getElementById('root');
   if (!rootElement) {

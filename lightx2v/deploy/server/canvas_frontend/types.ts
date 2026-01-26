@@ -1,3 +1,4 @@
+import { ChatMessage } from './src/hooks/useAIChatWorkflow';
 
 export enum DataType {
   TEXT = 'TEXT',
@@ -86,6 +87,7 @@ export interface WorkflowState {
     lightx2v_token: string;
   };
   history: GenerationRun[];
+  chatHistory?: ChatMessage[]; // AI 对话历史
   updatedAt: number;
   showIntermediateResults: boolean;
 }

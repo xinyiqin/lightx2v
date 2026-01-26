@@ -70,13 +70,26 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
         return;
       }
       
-      // Get config from env vars only
+      // Get config from env vars or apiClient
       const config = getLightX2VConfig(workflow);
       
-      // Check if we have required env vars
-      if (!config.url || !config.token) {
+      // Check if we have required config
+      // When using apiClient, url can be empty (relative path) and token can be empty (uses main app's JWT)
+      const apiClient = (window as any).__API_CLIENT__;
+      const hasApiClient = !!apiClient;
+      
+      // If not using apiClient, we need both url and token
+      // If using apiClient, we can proceed with empty url (relative path)
+      if (!hasApiClient && (!config.url || !config.token)) {
         console.warn('[LightX2V] Missing URL or token for voice list');
         return;
+      }
+      
+      // If using apiClient but no url, that's fine (will use relative path)
+      // But we still need to check if we have a way to authenticate
+      if (hasApiClient && !config.url && !config.token) {
+        // This is OK - apiClient will use main app's JWT token
+        // But we should still have some way to identify the request
       }
 
       // Create a key to track if we've loaded for this URL+token combination
@@ -115,7 +128,15 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
       }
       
       const config = getLightX2VConfig(workflow);
-      if (!config.url || !config.token) {
+      
+      // Check if we have required config
+      // When using apiClient, url can be empty (relative path) and token can be empty (uses main app's JWT)
+      const apiClient = (window as any).__API_CLIENT__;
+      const hasApiClient = !!apiClient;
+      
+      // If not using apiClient, we need both url and token
+      // If using apiClient, we can proceed with empty url (relative path)
+      if (!hasApiClient && (!config.url || !config.token)) {
         console.warn('[LightX2V] Missing URL or token for clone voice list');
         return;
       }

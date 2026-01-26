@@ -97,7 +97,7 @@ Please generate a workflow in JSON format with the following structure:
   "nodes": [
     {
       "id": "node-1",
-      "toolId": "text-prompt",
+      "toolId": "text-input",
       "x": 100,
       "y": 200,
       "data": { "value": "..." }
@@ -129,7 +129,7 @@ Requirements:
 
 IMPORTANT - Smart Default Values:
 Based on the user's description, intelligently fill in default values for nodes to reduce user editing work:
-- For text-prompt nodes: Set data.value to appropriate text based on user requirements
+- For text-input nodes: Set data.value to appropriate text based on user requirements
 - For image-to-image nodes: Set data.value (prompt field) to transformation instructions based on user description (e.g., if user wants "cartoon style", use prompt like "Transform the image into cartoon style, maintaining character consistency")
 - For text-to-image nodes: Set data.value to image generation prompts based on user requirements
 - For video nodes: Set data.value to appropriate motion/camera prompts based on user description
@@ -207,8 +207,8 @@ Output ONLY the JSON, no additional text or markdown.`;
             defaultData.aspectRatio = "16:9";
           }
           
-          // Set default value for text-prompt
-          if (tool?.id === 'text-prompt' && defaultData.value === undefined) {
+          // Set default value for text-input
+          if (tool?.id === 'text-input' && defaultData.value === undefined) {
             defaultData.value = "";
           }
           

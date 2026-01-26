@@ -17,7 +17,9 @@ import {
   Redo,
   LayoutGrid,
   LogOut,
-  LogIn
+  LogIn,
+  Hash,
+  Square
 } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
@@ -36,6 +38,7 @@ interface EditorHeaderProps {
   selectedRunId: string | null;
   isPaused: boolean;
   isRunning: boolean;
+  isSaving?: boolean;
   canvasRef: React.RefObject<HTMLDivElement>;
   onBack: () => void;
   onWorkflowNameChange: (name: string) => void;
@@ -47,6 +50,7 @@ interface EditorHeaderProps {
   onSave: () => void;
   onPause: () => void;
   onRun: () => void;
+  onStop: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -60,6 +64,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   selectedRunId,
   isPaused,
   isRunning,
+  isSaving = false,
   canvasRef,
   onBack,
   onWorkflowNameChange,
@@ -71,6 +76,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onSave,
   onPause,
   onRun,
+  onStop,
   canUndo,
   canRedo,
   onUndo,
@@ -174,9 +180,17 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
             }}
             className="bg-transparent border-none text-base font-bold focus:ring-0 p-0 hover:bg-slate-800/20 rounded px-1 transition-colors w-64"
           />
-          <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
-            {t('editing_logic')}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+              {t('editing_logic')}
+            </span>
+            {workflow.id && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) && (
+              <span className="text-[9px] text-slate-600 font-mono">
+                <Hash size={8} className="inline mr-0.5" />
+                {workflow.id.substring(0, 8)}...
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-4">
@@ -258,8 +272,11 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         )}
         <button
           onClick={onSave}
+          disabled={isSaving}
           className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold border transition-all ${
-            workflow.isDirty
+            isSaving
+              ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed'
+              : workflow.isDirty
               ? 'bg-[#90dce1]/10 border-[#90dce1] text-[#90dce1] hover:bg-[#90dce1]/20'
               : 'bg-slate-800 border-slate-700 text-slate-500'
           }`}
@@ -267,17 +284,22 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           <Save size={16} /> {t('save_flow')}
         </button>
         <div className="w-px h-6 bg-slate-800"></div>
-        {isRunning && (
+        {isRunning && !isPaused && (
+          <button
+            onClick={onStop}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-2xl text-sm font-bold shadow-xl transition-all bg-red-600 hover:bg-red-500 text-white shadow-red-500/20 active:scale-95"
+          >
+            <Square size={16} />
+            {lang === 'zh' ? '停止' : 'Stop'}
+          </button>
+        )}
+        {isRunning && isPaused && (
           <button
             onClick={onPause}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-sm font-bold shadow-xl transition-all ${
-              isPaused
-                ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-yellow-500/20'
-                : 'bg-orange-600 hover:bg-orange-500 text-white shadow-orange-500/20'
-            } active:scale-95`}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-2xl text-sm font-bold shadow-xl transition-all bg-yellow-600 hover:bg-yellow-500 text-white shadow-yellow-500/20 active:scale-95"
           >
-            {isPaused ? <Play size={16} /> : <Pause size={16} />}
-            {isPaused ? (lang === 'zh' ? '继续' : 'Resume') : (lang === 'zh' ? '暂停' : 'Pause')}
+            <Play size={16} />
+            {lang === 'zh' ? '继续' : 'Resume'}
           </button>
         )}
         <button

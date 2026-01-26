@@ -1,7 +1,3 @@
-/**
- * API 客户端工具
- * 使用主应用传递的 apiClient，或回退到直接 fetch
- */
 
 /**
  * 初始化 LIGHTX2V_TOKEN
@@ -182,4 +178,3 @@ export function getAccessToken(): string {
   
   return token;
 }
-

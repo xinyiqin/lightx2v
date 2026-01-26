@@ -452,7 +452,6 @@
     "editAudio": "Edit Audio",
     "start": "Start",
     "end": "End",
-    "duration": "Duration",
     "startCloning": "Start Cloning",
     "audioText": "Audio Text",
     "audioTextPlaceholder": "Enter the text content of the audio (optional, will auto-recognize if not provided)",

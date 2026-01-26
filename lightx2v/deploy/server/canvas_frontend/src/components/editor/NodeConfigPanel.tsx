@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Settings,
   Trash2,
@@ -17,6 +17,7 @@ import {
 import { WorkflowState, WorkflowNode, Port, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
+import { uploadNodeInputFile } from '../../utils/workflowFileManager';
 
 interface NodeConfigPanelProps {
   lang: Language;
@@ -78,6 +79,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   style
 }) => {
   const { t } = useTranslation(lang);
+  const [uploadingNodes, setUploadingNodes] = useState<Set<string>>(new Set());
   const selectedNode = selectedNodeId ? workflow.nodes.find(n => n.id === selectedNodeId) : null;
 
   if (selectedNodeId && selectedNode) {
@@ -666,35 +668,88 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                           type="file"
                           accept={item.dataType === DataType.IMAGE ? "image/*" : item.dataType === DataType.AUDIO ? "audio/*" : "video/*"}
                           className="hidden"
+                          disabled={uploadingNodes.has(item.nodeId)}
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
-                            if (file) {
-                              const base64 = await new Promise<string>((resolve) => {
-                                const reader = new FileReader();
-                                reader.onloadend = () => resolve(reader.result as string);
-                                reader.readAsDataURL(file);
-                              });
+                            if (!file) return;
+                            
+                            // 需要 workflow.id 才能上传
+                            if (!workflow.id || (!workflow.id.startsWith('workflow-') && !workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+                              console.error('[NodeConfigPanel] Cannot upload file: workflow ID is not available');
+                              return;
+                            }
+                            
+                            setUploadingNodes(prev => new Set(prev).add(item.nodeId));
+                            
+                            try {
                               if (item.isSourceNode) {
-                                onUpdateNodeData(item.nodeId, 'value', item.dataType === DataType.IMAGE ? [base64] : base64);
+                                const node = workflow.nodes.find(n => n.id === item.nodeId);
+                                if (!node) return;
+                                
+                                const tool = TOOLS.find(t => t.id === node.toolId);
+                                if (!tool || tool.category !== 'Input') {
+                                  console.error('[NodeConfigPanel] Cannot upload file: node is not an input node');
+                                  return;
+                                }
+                                
+                                const outputPort = tool.outputs[0];
+                                if (!outputPort) {
+                                  console.error('[NodeConfigPanel] Cannot upload file: output port not found');
+                                  return;
+                                }
+                                
+                                const result = await uploadNodeInputFile(workflow.id!, item.nodeId, outputPort.id, file);
+                                if (result) {
+                                  // 更新 node.data.value，始终使用数组格式
+                                  const currentValue = node.data.value || [];
+                                  const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
+                                  const newValue = item.dataType === DataType.IMAGE 
+                                    ? [...existingUrls, result.file_url]
+                                    : [result.file_url];
+                                  onUpdateNodeData(item.nodeId, 'value', newValue);
+                                }
                               } else {
+                                // 对于非源节点的全局输入，暂时保持原逻辑（base64）
+                                const base64 = await new Promise<string>((resolve) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => resolve(reader.result as string);
+                                  reader.readAsDataURL(file);
+                                });
                                 onGlobalInputChange(item.nodeId, item.port.id, base64);
                               }
+                            } catch (err) {
+                              console.error('[NodeConfigPanel] Error uploading file:', err);
+                            } finally {
+                              setUploadingNodes(prev => {
+                                const next = new Set(prev);
+                                next.delete(item.nodeId);
+                                return next;
+                              });
                             }
                           }}
                         />
                       </label>
-                      {item.isSourceNode ? (
-                        workflow.nodes.find(n => n.id === item.nodeId)?.data.value && (
-                          <div className="text-[9px] text-slate-400">
-                            {lang === 'zh' ? '已上传文件' : 'File uploaded'}
-                          </div>
-                        )
+                      {uploadingNodes.has(item.nodeId) ? (
+                        <div className="flex items-center gap-1 text-[9px] text-[#90dce1]">
+                          <RefreshCw size={8} className="animate-spin" />
+                          <span>{lang === 'zh' ? '上传中...' : 'Uploading...'}</span>
+                        </div>
                       ) : (
-                        workflow.globalInputs[`${item.nodeId}-${item.port.id}`] && (
-                          <div className="text-[9px] text-slate-400">
-                            {lang === 'zh' ? '已上传文件' : 'File uploaded'}
-                          </div>
-                        )
+                        <>
+                          {item.isSourceNode ? (
+                            workflow.nodes.find(n => n.id === item.nodeId)?.data.value && (
+                              <div className="text-[9px] text-slate-400">
+                                {lang === 'zh' ? '已上传文件' : 'File uploaded'}
+                              </div>
+                            )
+                          ) : (
+                            workflow.globalInputs[`${item.nodeId}-${item.port.id}`] && (
+                              <div className="text-[9px] text-slate-400">
+                                {lang === 'zh' ? '已上传文件' : 'File uploaded'}
+                              </div>
+                            )
+                          )}
+                        </>
                       )}
                     </div>
                   )}
@@ -707,5 +762,3 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     </aside>
   );
 };
-
-

@@ -272,7 +272,7 @@ export const useNodeManagement = ({
   const quickAddInput = useCallback((node: WorkflowNode, port: Port) => {
     if (selectedRunId) return;
     const toolIdMap: Record<DataType, string> = { 
-      [DataType.TEXT]: 'text-prompt', 
+      [DataType.TEXT]: 'text-input', 
       [DataType.IMAGE]: 'image-input', 
       [DataType.AUDIO]: 'audio-input', 
       [DataType.VIDEO]: 'video-input' 
@@ -285,7 +285,7 @@ export const useNodeManagement = ({
     
     const defaultData: Record<string, any> = {};
     if (tool.models && tool.models.length > 0) defaultData.model = tool.models[0].id;
-    if (tool.id === 'text-prompt') defaultData.value = "";
+    if (tool.id === 'text-input') defaultData.value = "";
     
     const newNode: WorkflowNode = { 
       id: newNodeId, 
@@ -365,7 +365,7 @@ export const useNodeManagement = ({
 
   const pinOutputToCanvas = useCallback((value: any, type: DataType) => {
     const toolIdMap: Record<DataType, string> = { 
-      [DataType.TEXT]: 'text-prompt', 
+      [DataType.TEXT]: 'text-input', 
       [DataType.IMAGE]: 'image-input', 
       [DataType.AUDIO]: 'audio-input', 
       [DataType.VIDEO]: 'video-input' 

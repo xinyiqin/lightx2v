@@ -11,10 +11,66 @@ import { ToolDefinition, DataType, ModelDefinition } from './types';
 const hasEnvVar = (key: string): boolean => {
   try {
     // @ts-ignore - process.env is defined by Vite's define config
-    const value = process.env[key];
+    // Vite only replaces static access like process.env.DEEPSEEK_API_KEY
+    // So we need to check each key directly
+    let value: string | undefined;
+    switch (key) {
+      case 'DEEPSEEK_API_KEY':
+        value = process.env.DEEPSEEK_API_KEY;
+        break;
+      case 'GEMINI_API_KEY':
+        value = process.env.GEMINI_API_KEY;
+        break;
+      case 'API_KEY':
+        value = process.env.API_KEY;
+        break;
+      case 'PPCHAT_API_KEY':
+        value = process.env.PPCHAT_API_KEY;
+        break;
+      case 'LIGHTX2V_URL':
+        value = process.env.LIGHTX2V_URL;
+        break;
+      case 'LIGHTX2V_TOKEN':
+        value = process.env.LIGHTX2V_TOKEN;
+        break;
+      case 'LIGHTX2V_CLOUD_URL':
+        value = process.env.LIGHTX2V_CLOUD_URL;
+        break;
+      case 'LIGHTX2V_CLOUD_TOKEN':
+        value = process.env.LIGHTX2V_CLOUD_TOKEN;
+        break;
+      default:
+        // For unknown keys, try dynamic access (may not work with Vite)
+        value = (process.env as any)[key];
+    }
+    
     // Check if value exists, is not empty, and is not the string "undefined"
-    return typeof value === 'string' && value.trim() !== '' && value !== 'undefined';
-  } catch {
+    const result = typeof value === 'string' && value.trim() !== '' && value !== 'undefined';
+    
+    // Debug log for troubleshooting
+    if (key === 'DEEPSEEK_API_KEY') {
+      console.log('[hasEnvVar] DEEPSEEK_API_KEY check:', {
+        key,
+        valueType: typeof value,
+        valueLength: value?.length || 0,
+        valuePreview: value ? `${value.substring(0, 10)}...` : 'empty',
+        result
+      });
+    }
+
+    if (key === 'LIGHTX2V_CLOUD_TOKEN') {
+      console.log('[hasEnvVar] LIGHTX2V_CLOUD_TOKEN check:', {
+        key,
+        valueType: typeof value,
+        valueLength: value?.length || 0,
+        valuePreview: value ? `${value.substring(0, 10)}...` : 'empty',
+        result
+      });
+    }
+    
+    return result;
+  } catch (error) {
+    console.warn(`[hasEnvVar] Error checking ${key}:`, error);
     return false;
   }
 };
@@ -54,8 +110,13 @@ const UPDATE_DEBOUNCE_MS = 1000; // 1秒内的重复调用会被忽略
 
 /**
  * Update LightX2V models dynamically based on API response
+ * @param models Local models from API
+ * @param cloudModels Optional cloud models from API (will be added with -cloud suffix)
  */
-export const updateLightX2VModels = (models: Array<{ task: string; model_cls: string; stage: string }>) => {
+export const updateLightX2VModels = (
+  models: Array<{ task: string; model_cls: string; stage: string }>,
+  cloudModels?: Array<{ task: string; model_cls: string; stage: string }>
+) => {
   // 防抖：如果1秒内被多次调用，只处理最后一次
   const now = Date.now();
   if (now - lastUpdateTime < UPDATE_DEBOUNCE_MS) {
@@ -65,7 +126,9 @@ export const updateLightX2VModels = (models: Array<{ task: string; model_cls: st
   lastUpdateTime = now;
 
   // Group models by task and deduplicate by model_cls
-  const modelsByTask: Record<string, Map<string, { model_cls: string; stage: string }>> = {};
+  const modelsByTask: Record<string, Map<string, { model_cls: string; stage: string; isCloud?: boolean }>> = {};
+  
+  // Add local models
   models.forEach(model => {
     if (!modelsByTask[model.task]) {
       modelsByTask[model.task] = new Map();
@@ -73,9 +136,24 @@ export const updateLightX2VModels = (models: Array<{ task: string; model_cls: st
     // Use model_cls as key to deduplicate (case-insensitive)
     const key = model.model_cls.toLowerCase();
     if (!modelsByTask[model.task].has(key)) {
-      modelsByTask[model.task].set(key, { model_cls: model.model_cls, stage: model.stage });
+      modelsByTask[model.task].set(key, { model_cls: model.model_cls, stage: model.stage, isCloud: false });
     }
   });
+  
+  // Add cloud models with -cloud suffix
+  if (cloudModels && cloudModels.length > 0) {
+    cloudModels.forEach(model => {
+      if (!modelsByTask[model.task]) {
+        modelsByTask[model.task] = new Map();
+      }
+      // For cloud models, add -cloud suffix and use as key
+      const cloudModelCls = `${model.model_cls}-cloud`;
+      const key = cloudModelCls.toLowerCase();
+      if (!modelsByTask[model.task].has(key)) {
+        modelsByTask[model.task].set(key, { model_cls: cloudModelCls, stage: model.stage, isCloud: true });
+      }
+    });
+  }
 
   // Helper function to identify LightX2V models
   const modelIdLower = (id: string) => id.toLowerCase();
@@ -119,9 +197,12 @@ export const updateLightX2VModels = (models: Array<{ task: string; model_cls: st
       const key = modelId.toLowerCase();
       // Only add if not already in map
       if (!modelMap.has(key)) {
+        const displayName = model.isCloud 
+          ? `LightX2V Cloud (${model.model_cls.replace(/-cloud$/, '')})`
+          : `LightX2V (${modelId})`;
         modelMap.set(key, {
-          id: modelId, // 保持原始大小写
-          name: `LightX2V (${modelId})`,
+          id: modelId, // 保持原始大小写（包括 -cloud 后缀）
+          name: displayName,
           defaultParams: getDefaultParamsForTask(task)
         });
       }
@@ -163,11 +244,13 @@ const getFilteredModels = (models: ModelDefinition[]): ModelDefinition[] => {
       'gemini-3-flash-preview': ['GEMINI_API_KEY', 'API_KEY'],
       'gemini-2.5-flash-image': ['GEMINI_API_KEY', 'API_KEY'],
       'gemini-2.5-flash-preview-tts': ['GEMINI_API_KEY', 'API_KEY'],
+      'doubao-seed-1-6-vision-250815': ['DEEPSEEK_API_KEY'],
       'deepseek-v3-2-251201': ['DEEPSEEK_API_KEY'],
       'doubao-1-5-vision-pro-32k-250115': ['DEEPSEEK_API_KEY'],
       'ppchat-gemini-2.5-pro': ['PPCHAT_API_KEY'],
       'ppchat-gemini-3-pro-preview': ['PPCHAT_API_KEY'],
-      'lightx2v': ['LIGHTX2V_TOKEN'],
+      'ppchat-gemini-2.5-flash': ['PPCHAT_API_KEY'],
+      'lightx2v': ['LIGHTX2V_TOKEN', 'LIGHTX2V_CLOUD_TOKEN'],
     };
 
     const requiredEnvVars = modelEnvMap[model.id];
@@ -183,7 +266,7 @@ const getFilteredModels = (models: ModelDefinition[]): ModelDefinition[] => {
 
 export const TOOLS: ToolDefinition[] = [
   {
-    id: 'text-prompt',
+    id: 'text-input',
     name: 'Text Input',
     name_zh: '文本输入',
     category: 'Input',

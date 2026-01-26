@@ -25,6 +25,7 @@ import { getIcon } from '../../utils/icons';
 import { formatTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath } from '../../utils/assetPath';
+import { uploadNodeInputFile } from '../../utils/workflowFileManager';
 
 interface NodeProps {
   node: WorkflowNode;
@@ -149,7 +150,13 @@ export const Node: React.FC<NodeProps> = ({
       }
     }
   }, [node.id, onNodeHeightChange, node.data, outputs.length, activeOutputs[node.id], node.status]);
-  const nodeResult = sourceOutputs[node.id] || (tool.category === 'Input' ? node.data.value : null);
+  const nodeResultRaw = sourceOutputs[node.id] || (tool.category === 'Input' ? node.data.value : null);
+  // Extract actual value from reference objects (for history outputs or saved outputs)
+  const nodeResult = nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw) && nodeResultRaw.type === 'url'
+    ? nodeResultRaw.data  // Extract URL from { type: 'url', data: '...' }
+    : nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw) && nodeResultRaw.type === 'text'
+    ? nodeResultRaw.data  // Extract text from { type: 'text', data: '...' }
+    : nodeResultRaw;  // Use as-is for strings, arrays, or other types
   const firstOutputType = outputs[0]?.type || DataType.TEXT;
 
   const durationText =
@@ -161,7 +168,7 @@ export const Node: React.FC<NodeProps> = ({
   const hasData =
     (isInputNode && node.data.value && (Array.isArray(node.data.value) ? node.data.value.length > 0 : true)) ||
     (!isInputNode && sourceOutputs[node.id]);
-  const shouldShowPreview = hasData && node.toolId !== 'text-prompt';
+  const shouldShowPreview = hasData && node.toolId !== 'text-input';
 
   const handleNodeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -243,30 +250,62 @@ export const Node: React.FC<NodeProps> = ({
     }
   };
 
+  const [isUploading, setIsUploading] = React.useState(false);
+  
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, isMultiple: boolean = false) => {
     const files = Array.from(e.target.files || []);
-    if (isMultiple) {
-      const base64s = await Promise.all(
-        files.map(
-          (file: File) =>
-            new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.readAsDataURL(file);
-            })
-        )
-      );
-      onUpdateNodeData(node.id, 'value', [...(node.data.value || []), ...base64s]);
-    } else {
-      const file = files[0] as File;
-      if (file) {
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
-        onUpdateNodeData(node.id, 'value', base64);
+    if (files.length === 0) return;
+    
+    // 需要 workflow.id 才能上传
+    if (!workflow.id || (!workflow.id.startsWith('workflow-') && !workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+      console.error('[Node] Cannot upload file: workflow ID is not available');
+      return;
+    }
+    
+    setIsUploading(true);
+    
+    try {
+      const tool = TOOLS.find(t => t.id === node.toolId);
+      if (!tool || tool.category !== 'Input') {
+        console.error('[Node] Cannot upload file: node is not an input node');
+        return;
       }
+      
+      const outputPort = tool.outputs[0];
+      if (!outputPort) {
+        console.error('[Node] Cannot upload file: output port not found');
+        return;
+      }
+      
+      // 上传所有文件
+      const uploadPromises = files.map((file: File) =>
+        uploadNodeInputFile(workflow.id!, node.id, outputPort.id, file)
+          .then(result => {
+            if (result) {
+              return result.file_url;
+            }
+            return null;
+          })
+          .catch(err => {
+            console.error(`[Node] Error uploading file:`, err);
+            return null;
+          })
+      );
+      
+      const fileUrls = await Promise.all(uploadPromises);
+      const validUrls = fileUrls.filter((url: string | null) => url !== null);
+      
+      if (validUrls.length > 0) {
+        // 更新 node.data.value，始终使用数组格式
+        const currentValue = node.data.value || [];
+        const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
+        const newValue = isMultiple ? [...existingUrls, ...validUrls] : validUrls;
+        onUpdateNodeData(node.id, 'value', newValue);
+      }
+    } catch (err) {
+      console.error('[Node] Error uploading files:', err);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -399,7 +438,7 @@ export const Node: React.FC<NodeProps> = ({
         {/* Input Node Content */}
         {isInputNode && (
           <div onMouseDown={(e) => e.stopPropagation()} className="space-y-3">
-            {node.toolId === 'text-prompt' && (
+            {node.toolId === 'text-input' && (
               <textarea
                 value={node.data.value || ''}
                 onChange={(e) => onUpdateNodeData(node.id, 'value', e.target.value)}
@@ -410,20 +449,56 @@ export const Node: React.FC<NodeProps> = ({
             {node.toolId === 'image-input' && (
               <div className="space-y-2">
                 <div className="flex flex-wrap gap-1.5">
-                  {(node.data.value || []).map((img: string, i: number) => (
-                    <div key={i} className="relative w-8 h-8 group/img">
-                      <img src={getAssetPath(img)} className="w-full h-full object-cover rounded border border-slate-700" alt={`Image ${i + 1}`} />
-                      <button
-                        onClick={() => {
-                          const next = node.data.value.filter((_: any, idx: number) => idx !== i);
-                          onUpdateNodeData(node.id, 'value', next);
-                        }}
-                        className="absolute -top-1 -right-1 p-0.5 bg-red-500 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
-                      >
-                        <X size={6} />
-                      </button>
-                    </div>
-                  ))}
+                  {/* Use activeOutputs if available (loaded from URL as data URL), otherwise use node.data.value */}
+                  {((activeOutputs[node.id] || node.data.value) || []).map((img: string, i: number) => {
+                    // activeOutputs should contain data URLs (loaded via getWorkflowFileByFileId)
+                    // node.data.value may contain file paths (like /api/v1/workflow/...)
+                    // If it's a file path, we should have already loaded it to activeOutputs
+                    // But if not, we need to handle it
+                    const imgSrc = img.startsWith('/api/v1/workflow/') 
+                      ? img  // This shouldn't happen if loading worked correctly, but handle it
+                      : getAssetPath(img);
+                    return (
+                      <div key={i} className="relative w-8 h-8 group/img">
+                        <img 
+                          src={imgSrc} 
+                          className="w-full h-full object-cover rounded border border-slate-700" 
+                          alt={`Image ${i + 1}`}
+                          onError={(e) => {
+                            // If image fails to load and it's a workflow file path, try loading it
+                            const target = e.target as HTMLImageElement;
+                            if (img.startsWith('/api/v1/workflow/')) {
+                              // Extract file_id and load via API
+                              const match = img.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
+                              if (match) {
+                                const [, workflowId, fileId] = match;
+                                // Import getWorkflowFileByFileId dynamically
+                                import('../../utils/workflowFileManager').then(({ getWorkflowFileByFileId }) => {
+                                  getWorkflowFileByFileId(workflowId, fileId).then(dataUrl => {
+                                    if (dataUrl) {
+                                      target.src = dataUrl;
+                                    }
+                                  });
+                                });
+                              }
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => {
+                            const currentValue = activeOutputs[node.id] || node.data.value || [];
+                            const next = Array.isArray(currentValue) 
+                              ? currentValue.filter((_: any, idx: number) => idx !== i)
+                              : [];
+                            onUpdateNodeData(node.id, 'value', next);
+                          }}
+                          className="absolute -top-1 -right-1 p-0.5 bg-red-500 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
+                        >
+                          <X size={6} />
+                        </button>
+                      </div>
+                    );
+                  })}
                   <label className="w-8 h-8 flex items-center justify-center border border-dashed border-slate-700 rounded cursor-pointer hover:border-[#90dce1] transition-colors">
                     <Plus size={10} className="text-slate-500" />
                     <input
@@ -468,15 +543,27 @@ export const Node: React.FC<NodeProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <label className="flex items-center justify-center gap-2 w-full py-3 border border-dashed border-slate-700 rounded-xl cursor-pointer hover:border-[#90dce1] hover:bg-[#90dce1]/5 transition-all">
-                    <Upload size={12} className="text-slate-500" />
-                    <span className="text-[9px] font-black text-slate-500 uppercase">
-                      {lang === 'zh' ? '上传' : 'Upload'}
-                    </span>
+                  <label className="flex items-center justify-center gap-2 w-full py-3 border border-dashed border-slate-700 rounded-xl cursor-pointer hover:border-[#90dce1] hover:bg-[#90dce1]/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                    {isUploading ? (
+                      <>
+                        <RefreshCw size={12} className="text-[#90dce1] animate-spin" />
+                        <span className="text-[9px] font-black text-[#90dce1] uppercase">
+                          {lang === 'zh' ? '上传中...' : 'Uploading...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={12} className="text-slate-500" />
+                        <span className="text-[9px] font-black text-slate-500 uppercase">
+                          {lang === 'zh' ? '上传' : 'Upload'}
+                        </span>
+                      </>
+                    )}
                     <input
                       type="file"
                       accept={node.toolId === 'audio-input' ? 'audio/*' : 'video/*'}
                       className="hidden"
+                      disabled={isUploading}
                       onChange={(e) => handleFileUpload(e, false)}
                     />
                   </label>
@@ -591,9 +678,23 @@ export const Node: React.FC<NodeProps> = ({
         >
           {firstOutputType === DataType.IMAGE ? (
             <img
-              src={getAssetPath(Array.isArray(nodeResult) ? nodeResult[0] : nodeResult)}
+              src={getAssetPath(
+                Array.isArray(nodeResult) 
+                  ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                  : (nodeResult || '')
+              )}
               className="max-w-full max-h-full w-auto h-auto object-contain"
               alt="Preview"
+              onError={(e) => {
+                // 如果图片加载失败，尝试使用原始值（可能是 base64）
+                const target = e.currentTarget;
+                const originalSrc = Array.isArray(nodeResult) 
+                  ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                  : (nodeResult || '');
+                if (target.src !== originalSrc) {
+                  target.src = originalSrc;
+                }
+              }}
             />
           ) : firstOutputType === DataType.TEXT ? (
             <div className="p-3 text-[8px] text-slate-300 overflow-hidden leading-snug font-medium selection:bg-transparent w-full h-full">
@@ -612,7 +713,11 @@ export const Node: React.FC<NodeProps> = ({
           ) : (
             <div className="w-full h-full relative bg-black group/video min-w-32 min-h-24 flex items-center justify-center">
               <video
-                src={getAssetPath(Array.isArray(nodeResult) ? nodeResult[0] : nodeResult)}
+                src={getAssetPath(
+                  Array.isArray(nodeResult) 
+                    ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                    : (nodeResult || '')
+                )}
                 className="max-w-full max-h-full w-auto h-auto object-contain opacity-60 group-hover/thumb:opacity-100 transition-opacity"
                 muted
                 preload="none"

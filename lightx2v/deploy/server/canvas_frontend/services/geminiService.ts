@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { apiRequest } from '../src/utils/apiClient';
 
 export interface OutputField {
   id: string;
@@ -259,7 +260,6 @@ async function lightX2VRequest(config: LightX2VRequestConfig): Promise<Response>
   
   // 执行请求
   if (useApiClient) {
-    const { apiRequest } = await import('../src/utils/apiClient');
     return await apiRequest(url, {
       method: options.method || 'GET',
       headers,
@@ -327,7 +327,22 @@ export const lightX2VTask = async (
   onTaskId?: (taskId: string) => void,
   abortSignal?: AbortSignal
 ): Promise<string> => {
-  console.log('[LightX2V] baseUrl:', baseUrl);
+  // Check if this is a cloud model (ends with -cloud)
+  // If so, use cloud config instead of provided baseUrl/token
+  let actualBaseUrl = baseUrl;
+  let actualToken = token;
+  
+  if (modelCls.endsWith('-cloud')) {
+    // Cloud model - use cloud config
+    const cloudConfig = getLightX2VConfigForModel(modelCls);
+    actualBaseUrl = cloudConfig.url;
+    actualToken = cloudConfig.token;
+    // Remove -cloud suffix for actual API call
+    modelCls = modelCls.replace(/-cloud$/, '');
+    console.log('[LightX2V] Using cloud backend for model:', modelCls);
+  }
+  
+  console.log('[LightX2V] baseUrl:', actualBaseUrl);
 
   const formatMediaPayload = (val: string | string[] | undefined, isAudio = false) => {
     if (!val) return undefined;
@@ -340,7 +355,8 @@ export const lightX2VTask = async (
       // Process each image: extract base64 from data URLs, keep URLs as-is
       const processedImages = val.map(img => {
         if (typeof img !== 'string') return img;
-        if (img.startsWith('http')) {
+        // Check if it's a URL (absolute http/https, or relative path starting with ./ or /)
+        if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/')) {
           // URL - server will fetch it via fetch_resource
           return img;
         } else {
@@ -360,11 +376,11 @@ export const lightX2VTask = async (
       
       // Server expects: { type: "base64", data: ["base64string1", "base64string2", ...] }
       // OR { type: "url", data: ["url1", "url2", ...] }
-      // Note: Server's preload_data handles list by checking if first item starts with "data:image"
-      // For consistency, if any item is a URL, we should use type "url" for all
-      // But server code suggests it expects base64 list, so we'll use base64 for mixed arrays
-      // and let server handle URL fetching if needed
-      const hasUrl = processedImages.some(img => typeof img === 'string' && img.startsWith('http'));
+      // Check if any item is a URL (absolute or relative)
+      const hasUrl = processedImages.some(img => 
+        typeof img === 'string' && 
+        (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/'))
+      );
       const type = hasUrl ? "url" : "base64";
       
       return { type: type, data: processedImages };
@@ -372,7 +388,11 @@ export const lightX2VTask = async (
     
     // Single value handling (original logic)
     const singleVal = val as string;
-    const isUrl = singleVal.startsWith('http');
+    // Check if it's a URL (absolute http/https, or relative path starting with ./ or /)
+    const isUrl = singleVal.startsWith('http://') || 
+                  singleVal.startsWith('https://') || 
+                  singleVal.startsWith('./') || 
+                  singleVal.startsWith('/');
     const type = isUrl ? "url" : "base64";
     
     // Process the data content
@@ -413,7 +433,7 @@ export const lightX2VTask = async (
   if (lastFrame) payload.input_last_frame = formatMediaPayload(lastFrame);
   // Support for input video (used in character swap/animate task)
   if (inputVideo) payload.input_video = formatMediaPayload(inputVideo);
-  
+
   // 对于 s2v 任务，如果使用多人模式，可能需要添加 negative_prompt
   // 主应用中 s2v 任务也会添加 negative_prompt（但内容略有不同）
   if (task === 's2v') {
@@ -422,12 +442,12 @@ export const lightX2VTask = async (
 
   // 1. Submit Task (POST /api/v1/task/submit)
   const submitRes = await lightX2VRequest({
-    baseUrl,
-    token,
+    baseUrl: actualBaseUrl,
+    token: actualToken,
     endpoint: '/api/v1/task/submit',
     options: {
-      method: 'POST',
-      body: JSON.stringify(payload)
+    method: 'POST',
+    body: JSON.stringify(payload)
     }
   });
 
@@ -438,6 +458,11 @@ export const lightX2VTask = async (
   const submitData = await submitRes.json();
   const taskId = submitData.task_id;
   if (!taskId) throw new Error("No task_id returned from LightX2V submission");
+  
+  // Call onTaskId callback if provided (for tracking task IDs for cancellation)
+  if (onTaskId) {
+    onTaskId(taskId);
+  }
 
   // 2. Poll Task Status
   let status = "PENDING";
@@ -446,8 +471,8 @@ export const lightX2VTask = async (
   while (status !== "SUCCEED" && status !== "FAILED" && status !== "CANCELLED" && maxAttempts > 0) {
     await new Promise(res => setTimeout(res, 5000));
     const queryRes = await lightX2VRequest({
-      baseUrl,
-      token,
+      baseUrl: actualBaseUrl,
+      token: actualToken,
       endpoint: `/api/v1/task/query?task_id=${taskId}`,
       options: {
         method: 'GET'
@@ -472,8 +497,8 @@ export const lightX2VTask = async (
 
   // 3. Get Result URL
   const resultRes = await lightX2VRequest({
-    baseUrl,
-    token,
+    baseUrl: actualBaseUrl,
+    token: actualToken,
     endpoint: `/api/v1/task/result_url?task_id=${taskId}&name=${outputName}`,
     options: {
       method: 'GET'
@@ -507,7 +532,7 @@ export const lightX2VGetModelList = async (
     options: {
       method: 'GET'
     },
-    requireToken: false // 使用 apiClient 时不需要 token
+    requireToken: true // 使用 apiClient 时不需要 token
   });
   
   if (!response.ok) {
@@ -516,6 +541,51 @@ export const lightX2VGetModelList = async (
   
   const data = await response.json();
   return data.models || [];
+};
+
+/**
+ * Get LightX2V config for a specific model
+ * Returns local or cloud config based on model ID
+ */
+export const getLightX2VConfigForModel = (modelId: string): { url: string; token: string; isCloud: boolean } => {
+  const isCloud = modelId.endsWith('-cloud');
+  
+  if (isCloud) {
+    // Cloud model - use cloud config
+    const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+    const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+    
+    if (!cloudToken) {
+      throw new Error('LIGHTX2V_CLOUD_TOKEN 未设置。请设置 LIGHTX2V_CLOUD_TOKEN 环境变量以使用云端模型。');
+    }
+    
+    return {
+      url: cloudUrl,
+      token: cloudToken,
+      isCloud: true
+    };
+  } else {
+    // Local model - use local config
+    const envUrl = (process.env.LIGHTX2V_URL || '').trim();
+    const apiClient = (window as any).__API_CLIENT__;
+    
+    // Get token from apiClient or environment
+    let token: string;
+    if (!envUrl && apiClient) {
+      // Use apiClient (relative path) - token will be handled by apiClient
+      token = '';
+    } else {
+      // Use direct URL - need token
+      const localToken = localStorage.getItem('accessToken');
+      token = localToken || (process.env.LIGHTX2V_TOKEN || '').trim();
+    }
+    
+    return {
+      url: envUrl || '',
+      token: token,
+      isCloud: false
+    };
+  }
 };
 
 /**
@@ -537,7 +607,7 @@ export const lightX2VGetVoiceList = async (
     },
     requireToken: false // 使用 apiClient 时不需要 token
   });
-  
+
   if (!response.ok) {
     await handleLightX2VError(response, 'Voice List');
   }
@@ -630,7 +700,7 @@ export const lightX2VTTS = async (
     token,
     endpoint: '/api/v1/tts/generate',
     options: {
-      method: 'POST',
+    method: 'POST',
       body: JSON.stringify(payload),
       accept: 'application/json, audio/*'
     },
@@ -695,7 +765,7 @@ export const lightX2VVoiceClone = async (
   text?: string
 ): Promise<string> => {
   if (!audioBase64) throw new Error("Audio file is required for voice cloning");
-
+  
   // Convert base64 to blob
   const base64Data = audioBase64.includes(',') ? audioBase64.split(',')[1] : audioBase64;
   const byteCharacters = atob(base64Data);
@@ -717,9 +787,10 @@ export const lightX2VVoiceClone = async (
     token,
     endpoint: '/api/v1/voice/clone',
     options: {
-      method: 'POST',
-      body: formData
-    }
+    method: 'POST',
+    body: formData
+    },
+    requireToken: false // 使用 apiClient 时不需要 token
   });
 
   if (!response.ok) {
@@ -774,10 +845,11 @@ export const lightX2VVoiceCloneTTS = async (
     token,
     endpoint: '/api/v1/voice/clone/tts',
     options: {
-      method: 'POST',
+    method: 'POST',
       body: JSON.stringify(payload),
       accept: 'application/json, audio/*'
-    }
+    },
+    requireToken: false // 使用 apiClient 时不需要 token
   });
 
   if (!response.ok) {
@@ -820,7 +892,8 @@ export const lightX2VGetCloneVoiceList = async (
     endpoint: '/api/v1/voice/clone/list',
     options: {
       method: 'GET'
-    }
+    },
+    requireToken: false // 使用 apiClient 时不需要 token
   });
 
   if (!response.ok) {
@@ -1516,21 +1589,118 @@ export const deepseekChat = async (
   responseFormat: 'json_object' | 'text' = 'json_object'
 ): Promise<string> => {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
+  
+  if (!apiKey || !apiKey.trim()) {
     throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  }
+
+  console.log('deepseekChat messages:', messages);
+  
+  // 转换为 Responses API 格式
+  // 根据文档：
+  // - 当使用 text 参数时，input 中的 content 应该是字符串
+  // - 当不使用 text 参数时，input 中的 content 应该是数组 [{ type: "input_text", text: "..." }]
+  const inputList: any[] = [];
+  const useTextParam = responseFormat === 'json_object';
+  
+  for (const msg of messages) {
+    const role = msg.role;
+    const content = msg.content;
+    
+    // 跳过空内容的消息
+    if (!content || (typeof content === 'string' && content.trim() === '') || 
+        (Array.isArray(content) && content.length === 0)) {
+      continue;
+    }
+    
+    if (useTextParam) {
+      // 使用 text 参数时，content 直接是字符串
+      let textContent: string;
+      if (typeof content === 'string') {
+        textContent = content.trim();
+      } else if (Array.isArray(content)) {
+        // 从数组中提取文本内容（忽略图片等其他类型）
+        const textItems = (content as any[]).filter((item: any) => item.type === 'input_text');
+        textContent = textItems.map((item: any) => item.text || '').join(' ').trim();
+        // 如果没有文本内容，跳过这条消息
+        if (!textContent) {
+          continue;
+        }
+      } else {
+        textContent = String(content).trim();
+      }
+      
+      // 确保 content 不为空
+      if (!textContent) {
+        continue;
+      }
+      
+      inputList.push({
+        role: role,
+        content: textContent
+      });
+    } else {
+      // 不使用 text 参数时，使用数组格式
+      let contentList: any[];
+      if (typeof content === 'string') {
+        const trimmedContent = content.trim();
+        if (!trimmedContent) {
+          continue;
+        }
+        contentList = [{ type: 'input_text', text: trimmedContent }];
+      } else if (Array.isArray(content)) {
+        // 过滤掉空内容
+        contentList = (content as any[]).filter((item: any) => {
+          if (item.type === 'input_text') {
+            return item.text && item.text.trim();
+          }
+          return true; // 保留非文本类型（如图片）
+        });
+        if (contentList.length === 0) {
+          continue;
+        }
+      } else {
+        const strContent = String(content).trim();
+        if (!strContent) {
+          continue;
+        }
+        contentList = [{ type: 'input_text', text: strContent }];
+      }
+      
+      inputList.push({
+        role: role,
+        content: contentList
+      });
+    }
+  }
+  
+  // 确保至少有一条消息
+  if (inputList.length === 0) {
+    throw new Error('No valid messages to send');
   }
 
   const requestBody: any = {
     model: model,
-    messages: messages
+    stream: false
   };
 
-  // Add response format for JSON mode
-  if (responseFormat === 'json_object') {
-    requestBody.response_format = { type: 'json_object' };
+  // 根据文档，如果只有一条 user 消息且没有 system 消息，可以直接使用字符串
+  // 否则使用数组格式
+  if (inputList.length === 1 && inputList[0].role === 'user' && useTextParam) {
+    requestBody.input = inputList[0].content; // 直接使用字符串
+  } else {
+    requestBody.input = inputList; // 使用数组格式
   }
 
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+  // 结构化输出通过顶层的 text 参数传递
+  if (useTextParam) {
+    requestBody.text = { format: { type: 'json_object' } };
+  }
+  
+  // 调试日志
+  console.log('[DeepSeek Chat] Request body:', JSON.stringify(requestBody, null, 2));
+
+  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1540,7 +1710,7 @@ export const deepseekChat = async (
   });
 
   if (!response.ok) {
-    let errorMessage = `DeepSeek Chat API failed (${response.status})`;
+    let errorMessage = `DeepSeek Responses API failed (${response.status})`;
     try {
       const errorData = await response.json();
       errorMessage = errorData.error?.message || errorData.error || errorMessage;
@@ -1552,13 +1722,414 @@ export const deepseekChat = async (
   }
 
   const data = await response.json();
+  console.log('deepseekChat data:', data);
   
-  // Extract content from response
-  const content = data.choices?.[0]?.message?.content || '';
+  // Extract content from Responses API format
+  let text = '';
+  if (data.output && Array.isArray(data.output)) {
+    // 查找所有 message 类型的输出
+    const messageOutputs = data.output.filter((item: any) => item.type === 'message');
+    
+    // 使用最后一个 message 输出（通常是最终答案）
+    if (messageOutputs.length > 0) {
+      const messageOutput = messageOutputs[messageOutputs.length - 1];
+      const content = messageOutput.content || [];
+      
+      if (Array.isArray(content)) {
+        // 查找所有 output_text 类型的内容
+        const textContents = content.filter((item: any) => item.type === 'output_text');
+        if (textContents.length > 0) {
+          // 拼接所有文本内容
+          text = textContents.map((item: any) => item.text || '').join('');
+        }
+      }
+    }
+  }
   
-  if (!content) {
-    throw new Error('Empty response from DeepSeek Chat API');
+  // 向后兼容：尝试旧格式
+  if (!text) {
+    text = data.output?.[0]?.content?.[0]?.text || data.choices?.[0]?.message?.content || '';
+  }
+  
+  if (!text) {
+    throw new Error('Empty response from DeepSeek Responses API');
   }
 
-  return content;
+  return text;
 };
+
+/**
+ * DeepSeek Chat Completions API with streaming support
+ * Returns an async generator that yields chunks of the response
+ */
+export async function* deepseekChatStream(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  model = 'deepseek-v3-2-251201',
+  responseFormat: 'json_object' | 'text' = 'json_object'
+): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  }
+
+  // 转换为 Responses API 格式
+  // 根据文档：
+  // - 当使用 text 参数时，input 中的 content 应该是字符串
+  // - 当不使用 text 参数时，input 中的 content 应该是数组 [{ type: "input_text", text: "..." }]
+  const inputList: any[] = [];
+  const useTextParam = responseFormat === 'json_object';
+  
+  for (const msg of messages) {
+    const role = msg.role;
+    const content = msg.content;
+    
+    // 跳过空内容的消息
+    if (!content || (typeof content === 'string' && content.trim() === '') || 
+        (Array.isArray(content) && content.length === 0)) {
+      continue;
+    }
+    
+    if (useTextParam) {
+      // 使用 text 参数时，content 直接是字符串
+      let textContent: string;
+      if (typeof content === 'string') {
+        textContent = content.trim();
+      } else if (Array.isArray(content)) {
+        // 从数组中提取文本内容（忽略图片等其他类型）
+        const textItems = (content as any[]).filter((item: any) => item.type === 'input_text');
+        textContent = textItems.map((item: any) => item.text || '').join(' ').trim();
+        // 如果没有文本内容，跳过这条消息
+        if (!textContent) {
+          continue;
+        }
+      } else {
+        textContent = String(content).trim();
+      }
+      
+      // 确保 content 不为空
+      if (!textContent) {
+        continue;
+      }
+      
+      inputList.push({
+        role: role,
+        content: textContent
+      });
+    } else {
+      // 不使用 text 参数时，使用数组格式
+      let contentList: any[];
+      if (typeof content === 'string') {
+        const trimmedContent = content.trim();
+        if (!trimmedContent) {
+          continue;
+        }
+        contentList = [{ type: 'input_text', text: trimmedContent }];
+      } else if (Array.isArray(content)) {
+        // 过滤掉空内容
+        contentList = (content as any[]).filter((item: any) => {
+          if (item.type === 'input_text') {
+            return item.text && item.text.trim();
+          }
+          return true; // 保留非文本类型（如图片）
+        });
+        if (contentList.length === 0) {
+          continue;
+        }
+      } else {
+        const strContent = String(content).trim();
+        if (!strContent) {
+          continue;
+        }
+        contentList = [{ type: 'input_text', text: strContent }];
+      }
+      
+      inputList.push({
+        role: role,
+        content: contentList
+      });
+    }
+  }
+  
+  // 确保至少有一条消息
+  if (inputList.length === 0) {
+    throw new Error('No valid messages to send');
+  }
+
+  const requestBody: any = {
+    model: model,
+    stream: true,
+    thinking: { type: 'enabled' } // 启用思考过程
+  };
+
+  // 根据文档，如果只有一条 user 消息且没有 system 消息，可以直接使用字符串
+  // 否则使用数组格式
+  if (inputList.length === 1 && inputList[0].role === 'user' && useTextParam) {
+    requestBody.input = inputList[0].content; // 直接使用字符串
+  } else {
+    requestBody.input = inputList; // 使用数组格式
+  }
+
+  // 结构化输出通过顶层的 text 参数传递
+  if (useTextParam) {
+    requestBody.text = { format: { type: 'json_object' } };
+  }
+  
+  // 调试日志
+  console.log('[DeepSeek Chat Stream] Request body:', JSON.stringify(requestBody, null, 2));
+
+  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    let errorMessage = `DeepSeek Responses API failed (${response.status})`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error?.message || errorData.error || errorMessage;
+    } catch (e) {
+      const errorText = await response.text();
+      errorMessage = errorText || errorMessage;
+    }
+    throw new Error(errorMessage);
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    throw new Error('Failed to get response reader');
+  }
+
+  let buffer = '';
+  let currentEvent: string | null = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine === '') {
+          // 空行表示一个事件结束，重置 currentEvent
+          currentEvent = null;
+          continue;
+        }
+        
+        // 解析 SSE 格式：event: xxx 和 data: {...}
+        if (trimmedLine.startsWith('event: ')) {
+          currentEvent = trimmedLine.slice(7).trim();
+          continue;
+        }
+        
+        if (trimmedLine.startsWith('data: ')) {
+          const dataStr = trimmedLine.slice(6);
+          if (dataStr === '[DONE]') {
+            return;
+          }
+
+          try {
+            const data = JSON.parse(dataStr);
+            
+            // 根据事件类型处理（优先使用 currentEvent，如果没有则使用 data.type）
+            const eventType = currentEvent || data.type;
+            
+            // 处理思考过程的增量文本
+            if (eventType === 'response.reasoning_summary_text.delta') {
+              if (data.delta) {
+                yield { type: 'thinking', text: data.delta };
+              }
+            }
+            // 处理消息内容的增量文本
+            else if (eventType === 'response.message_text.delta') {
+              if (data.delta) {
+                yield { type: 'content', text: data.delta };
+              }
+            }
+            // 处理其他可能包含文本的事件
+            else if (data.delta && typeof data.delta === 'string') {
+              // 如果有 delta 字段，尝试根据上下文判断类型
+              if (eventType?.includes('reasoning') || eventType?.includes('thinking')) {
+                yield { type: 'thinking', text: data.delta };
+              } else {
+                yield { type: 'content', text: data.delta };
+              }
+            }
+            // 向后兼容：尝试解析 output 数组格式
+            else if (data.output && Array.isArray(data.output)) {
+              for (const outputItem of data.output) {
+                if (outputItem.type === 'reasoning' || outputItem.type === 'thinking') {
+                  const content = outputItem.content || [];
+                  if (Array.isArray(content)) {
+                    const textContents = content.filter((item: any) => item.type === 'output_text');
+                    for (const textItem of textContents) {
+                      if (textItem.text) {
+                        yield { type: 'thinking', text: textItem.text };
+                      }
+                    }
+                  }
+                } else if (outputItem.type === 'message') {
+                  const content = outputItem.content || [];
+                  if (Array.isArray(content)) {
+                    const textContents = content.filter((item: any) => item.type === 'output_text');
+                    for (const textItem of textContents) {
+                      if (textItem.text) {
+                        yield { type: 'content', text: textItem.text };
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            // 向后兼容：尝试旧格式（chat/completions 格式）
+            else {
+              const choice = data.choices?.[0];
+              const delta = choice?.delta;
+              
+              if (delta) {
+                const isThinkingChunk = choice?.type === 'thinking' || delta.type === 'thinking';
+                
+                if (isThinkingChunk) {
+                  const thinkingContent = delta.content || delta.text || delta.thinking || '';
+                  if (thinkingContent) {
+                    yield { type: 'thinking', text: thinkingContent };
+                  }
+                } else if (delta.thinking !== undefined && delta.thinking !== null && delta.thinking !== '') {
+                  yield { type: 'thinking', text: delta.thinking };
+                }
+                
+                if (!isThinkingChunk) {
+                  const content = delta.content || '';
+                  if (content) {
+                    yield { type: 'content', text: content };
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            // Skip invalid JSON
+            console.warn('Failed to parse SSE data:', dataStr, e);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * PP Chat Completions API with streaming support
+ */
+export async function* ppchatChatCompletionsStream(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  model = 'gemini-3-pro-preview',
+  responseFormat: 'json_object' | 'text' = 'json_object'
+): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
+  const apiKey = process.env.PPCHAT_API_KEY;
+  if (!apiKey) {
+    throw new Error("PP Chat API key is required. Please set PPCHAT_API_KEY environment variable.");
+  }
+
+  const formattedMessages = messages.map(msg => ({
+    role: msg.role,
+    content: msg.content
+  }));
+
+  const requestBody: any = {
+    model: model,
+    stream: true,
+    messages: formattedMessages
+  };
+
+  if (responseFormat === 'json_object') {
+    requestBody.response_format = { type: 'json_object' };
+  }
+
+  const cookieValue = process.env.PPCHAT_COOKIE || '';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`
+  };
+  
+  if (cookieValue) {
+    headers['Cookie'] = cookieValue;
+  }
+
+  const response = await fetch('https://api.ppchat.vip/v1/chat/completions', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    let errorMessage = `PP Chat API failed (${response.status})`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error?.message || errorData.error || errorMessage;
+    } catch (e) {
+      const errorText = await response.text();
+      errorMessage = errorText || errorMessage;
+    }
+    throw new Error(errorMessage);
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    throw new Error('Failed to get response reader');
+  }
+
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6);
+          if (dataStr === '[DONE]') {
+            return;
+          }
+
+          try {
+            const data = JSON.parse(dataStr);
+            const delta = data.choices?.[0]?.delta;
+            if (delta) {
+              const content = delta.content || '';
+              if (content) {
+                yield { type: 'content', text: content };
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to parse SSE data:', dataStr);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

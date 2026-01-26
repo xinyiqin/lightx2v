@@ -44,10 +44,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动到底部
+  // 自动滚动到底部（只滚动容器内部，不影响页面）
   useEffect(() => {
     if (messagesEndRef.current && scrollContainerRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      // 使用 requestAnimationFrame 确保 DOM 更新完成后再滚动
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current && messagesEndRef.current) {
+          // 直接设置 scrollTop，避免 scrollIntoView 导致页面整体滚动
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      });
     }
   }, [chatHistory, isProcessing]);
 
@@ -130,9 +136,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 custom-scrollbar"
+            style={{ minHeight: 0 }}
           >
             {chatHistory.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center px-4">
+              <div className="flex flex-col items-center justify-center min-h-full text-center px-4">
                 <Bot size={32} className="text-[#90dce1] mb-3" />
                 <p className="text-sm text-slate-400 mb-1">
                   {lang === 'zh' ? '你好！我可以帮你修改工作流' : 'Hello! I can help you modify the workflow'}
@@ -150,6 +157,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     lang={lang}
                     onUndo={onUndo ? () => onUndo(message.id) : undefined}
                     onRetry={onRetry ? () => onRetry(message.id) : undefined}
+                    thinking={message.thinking}
+                    isStreaming={message.isStreaming}
                   />
                 ))}
                 {isProcessing && (

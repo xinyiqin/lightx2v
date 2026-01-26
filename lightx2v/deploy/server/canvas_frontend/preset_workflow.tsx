@@ -12,7 +12,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
     nodes: [
       {
         id: 'node-scene-text',
-        toolId: 'text-prompt',
+        toolId: 'text-input',
         x: 100,
         y: 200,
         data: {
@@ -36,7 +36,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       },
       {
         id: 'node-motion-text',
-        toolId: 'text-prompt',
+        toolId: 'text-input',
         x: 500,
         y: 400,
         data: {
@@ -114,7 +114,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       { id: 'c7', sourceNodeId: 'ip-node-ai', sourcePortId: 's2v_prompt', targetNodeId: 'ip-node-avatar', targetPortId: 'in-text' }
     ],
     nodes: [
-      { id: 'ip-node-url', toolId: 'text-prompt', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "https://github.com/ModelTC/LightX2V/blob/main/README_zh.md" } },
+      { id: 'ip-node-url', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "https://github.com/ModelTC/LightX2V/blob/main/README_zh.md" } },
       { id: 'ip-node-image-ref', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/programmer.png'] } },
       { id: 'ip-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
           model: 'doubao-seed-1-6-vision-250815',
@@ -211,7 +211,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         // Input nodes
         { id: 'prod-node-person', toolId: 'image-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: ['/assets/model_girl.png'] } },
         { id: 'prod-node-product', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/product_glass.png'] } },
-        { id: 'prod-node-text', toolId: 'text-prompt', x: 50, y: 600, status: NodeStatus.IDLE, data: { value: "" } },
+        { id: 'prod-node-text', toolId: 'text-input', x: 50, y: 600, status: NodeStatus.IDLE, data: { value: "" } },
         // AI Chat Planner (Doubao Vision)
         { id: 'prod-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
             model: 'doubao-seed-1-6-vision-250815',
@@ -308,7 +308,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       ],
       nodes: [
         { id: 'node-img-in', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/girl.jpg'] } },
-        { id: 'node-text-in', toolId: 'text-prompt', x: 50, y: 350, status: NodeStatus.IDLE, data: { value: "女孩改为穿着性感纯欲的睡衣坐在床上，用性感迷人的声音说着勾人的话" } },
+        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 350, status: NodeStatus.IDLE, data: { value: "女孩改为穿着性感纯欲的睡衣坐在床上，用性感迷人的声音说着勾人的话" } },
         { id: 'node-logic', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: { 
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
@@ -411,7 +411,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       nodes: [
         // Input nodes
         { id: 'node-char-img', toolId: 'image-input', x: 50, y: 500, status: NodeStatus.IDLE, data: { value: ['/assets/princess.png'] } },
-        { id: 'node-desc', toolId: 'text-prompt', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主早晨醒来，在温馨的房间里梳妆打扮，然后望向窗外，窗外是很漂亮的阿伦黛尔小镇风光，然后镜头转向远景能够看到艾莎公主在窗边伸了个懒腰" } },
+        { id: 'node-desc', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主早晨醒来，在温馨的房间里梳妆打扮，然后望向窗外，窗外是很漂亮的阿伦黛尔小镇风光，然后镜头转向远景能够看到艾莎公主在窗边伸了个懒腰" } },
         // Planner node
         { id: 'node-planner', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: { 
             model: 'doubao-seed-1-6-vision-250815',
@@ -589,7 +589,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         // Input nodes
         { id: 'node-char-img', toolId: 'image-input', x: 50, y: 500, status: NodeStatus.IDLE, data: { value: ['/assets/singing_princess.png'] } },
         { id: 'node-audio-in', toolId: 'audio-input', x: 50, y: 700, status: NodeStatus.IDLE, data: { value: '/assets/let_it_go_part.wav' } },
-        { id: 'node-text-in', toolId: 'text-prompt', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主正在演唱《Let It Go》，动作优雅，表情充满自信和力量" } },
+        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主正在演唱《Let It Go》，动作优雅，表情充满自信和力量" } },
         // AI Chat Planner (Doubao Vision)
         { id: 'node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
             model: 'doubao-seed-1-6-vision-250815',
@@ -710,7 +710,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       nodes: [
         { id: 'chibi-node-person', toolId: 'image-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: [] } },
         { id: 'chibi-node-doll-ref', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/doll.jpg'] } },
-        { id: 'chibi-node-input', toolId: 'text-prompt', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "角色说的话和角色背景描述" } },
+        { id: 'chibi-node-input', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "角色说的话和角色背景描述" } },
         { id: 'chibi-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
@@ -809,7 +809,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'oner-c20', sourceNodeId: 'oner-node-planner', sourcePortId: 'shot5_video_motion', targetNodeId: 'oner-node-video-5', targetPortId: 'in-text' }
       ],
       nodes: [
-        { id: 'oner-node-desc', toolId: 'text-prompt', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市的宏大全景，从高空俯瞰整座城市，镜头逐渐下降穿过云雾，掠过摩天大楼的玻璃幕墙，最终聚焦到繁华街道上的人群和霓虹灯" } },
+        { id: 'oner-node-desc', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市的宏大全景，从高空俯瞰整座城市，镜头逐渐下降穿过云雾，掠过摩天大楼的玻璃幕墙，最终聚焦到繁华街道上的人群和霓虹灯" } },
         { id: 'oner-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
             model: 'deepseek-v3-2-251201',
             mode: 'custom',
@@ -915,7 +915,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
           { id: 'c7', sourceNodeId: 'node-planner', sourcePortId: 'video_motion_prompt', targetNodeId: 'node-video', targetPortId: 'in-text' }
         ],
         nodes: [
-          { id: 'node-input', toolId: 'text-prompt', x: 50, y: 300, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市，从白天逐渐过渡到雨夜。" } },
+          { id: 'node-input', toolId: 'text-input', x: 50, y: 300, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市，从白天逐渐过渡到雨夜。" } },
           { id: 'node-planner', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
               model: 'deepseek-v3-2-251201',
               mode: 'custom',
@@ -961,7 +961,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
           { id: 'c7', sourceNodeId: 'node-chat', sourcePortId: 'avatar_video_prompt', targetNodeId: 'node-avatar', targetPortId: 'in-text' }
         ],
         nodes: [
-          { id: 'node-prompt', toolId: 'text-prompt', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "一只哈士奇程序员狗，戴着耳机和工卡在办公，吐槽自己的程序员日常。用一些网络热梗。" } },
+          { id: 'node-prompt', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "一只哈士奇程序员狗，戴着耳机和工卡在办公，吐槽自己的程序员日常。用一些网络热梗。" } },
           { id: 'node-chat', toolId: 'text-generation', x: 450, y: 200, status: NodeStatus.IDLE, data: { 
               model: 'deepseek-v3-2-251201',
               mode: 'custom',

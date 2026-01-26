@@ -795,7 +795,7 @@ const App: React.FC = () => {
               let result: any;
               const model = node.data.model;
               switch (node.toolId) {
-                case 'text-prompt': result = node.data.value || ""; break;
+                case 'text-input': result = node.data.value || ""; break;
                 case 'image-input': 
                   const imageValue = node.data.value || [];
                   // Convert file paths to base64 data URLs if needed

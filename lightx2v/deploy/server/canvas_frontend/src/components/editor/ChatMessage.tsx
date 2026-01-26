@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Bot, User, CheckCircle2, XCircle } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Bot, User, CheckCircle2, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Language } from '../../i18n/useTranslation';
 
 interface ChatMessageProps {
@@ -13,6 +13,8 @@ interface ChatMessageProps {
   lang: Language;
   onUndo?: () => void;
   onRetry?: () => void;
+  thinking?: string;
+  isStreaming?: boolean;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -24,12 +26,28 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   error,
   lang,
   onUndo,
-  onRetry
+  onRetry,
+  thinking,
+  isStreaming
 }) => {
   const isUser = role === 'user';
   const hasOperations = operations && operations.length > 0;
   const hasError = !!error;
   const allSuccess = operationResults?.every(r => r.success) ?? false;
+  const hasThinking = !!thinking && thinking.trim().length > 0;
+  
+  // 当有最终答案时，自动折叠思考过程
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  
+  useEffect(() => {
+    // 如果有思考过程且有最终答案（不是流式输出中），默认折叠
+    if (hasThinking && !isStreaming && content.trim().length > 0) {
+      setIsThinkingExpanded(false);
+    } else if (hasThinking && isStreaming) {
+      // 流式输出中，展开思考过程
+      setIsThinkingExpanded(true);
+    }
+  }, [hasThinking, isStreaming, content]);
 
   // 统计操作类型和数量
   const operationSummary = useMemo(() => {
@@ -105,7 +123,54 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               : 'bg-slate-800/50 border border-slate-700 text-slate-200'
           }`}
         >
-          <p className="text-sm whitespace-pre-wrap break-words">{content}</p>
+          {/* 思考过程（可折叠） */}
+          {hasThinking && !isUser && (
+            <div className="mb-3">
+              <button
+                onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
+                className="flex items-center gap-2 w-full text-left text-xs text-slate-400 hover:text-slate-300 transition-colors"
+              >
+                {isThinkingExpanded ? (
+                  <ChevronUp size={14} />
+                ) : (
+                  <ChevronDown size={14} />
+                )}
+                <span>{lang === 'zh' ? '思考过程' : 'Thinking Process'}</span>
+                {isStreaming && (
+                  <span className="ml-2 text-[#90dce1] animate-pulse">
+                    {lang === 'zh' ? '思考中...' : 'Thinking...'}
+                  </span>
+                )}
+              </button>
+              {isThinkingExpanded && (
+                <div className="mt-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                  <p className="text-xs text-slate-400 whitespace-pre-wrap break-words font-mono">
+                    {thinking}
+                    {isStreaming && (
+                      <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* 最终答案 */}
+          <div>
+            {content.trim().length > 0 ? (
+              <p className="text-sm whitespace-pre-wrap break-words">
+                {content}
+                {isStreaming && (
+                  <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
+                )}
+              </p>
+            ) : isStreaming ? (
+              <p className="text-sm text-slate-400">
+                {lang === 'zh' ? '正在生成...' : 'Generating...'}
+                <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
+              </p>
+            ) : null}
+          </div>
 
           {/* Operation Status */}
           {hasOperations && (
@@ -168,4 +233,3 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     </div>
   );
 };
-

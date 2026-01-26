@@ -38,7 +38,9 @@ import { useAIGenerateWorkflow } from './src/hooks/useAIGenerateWorkflow';
 import { useWorkflowExecution } from './src/hooks/useWorkflowExecution';
 import { useUndoRedo } from './src/hooks/useUndoRedo';
 import { useAIChatWorkflow } from './src/hooks/useAIChatWorkflow';
-import { getAccessToken, initLightX2VToken } from './src/utils/apiClient';
+import { useWorkflowAutoSave } from './src/hooks/useWorkflowAutoSave';
+import { getAccessToken, initLightX2VToken, apiRequest } from './src/utils/apiClient';
+import { checkWorkflowOwnership, getCurrentUserId } from './src/utils/workflowUtils';
 
 // --- Main App ---
 
@@ -57,7 +59,12 @@ const App: React.FC = () => {
     setWorkflow,
     setMyWorkflows,
     saveWorkflowToLocal,
-    deleteWorkflow: deleteWorkflowFromHook
+    saveWorkflowToDatabase,
+    loadWorkflow,
+    loadWorkflows,
+    deleteWorkflow: deleteWorkflowFromHook,
+    isLoading: isLoadingWorkflows,
+    isSaving: isSavingWorkflow
   } = useWorkflow();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -183,30 +190,64 @@ const App: React.FC = () => {
   }, []);
 
   // 获取并更新 LightX2V 模型列表（只在配置真正变化时调用，而不是每次 workflow 变化时）
+  // 同时加载本地和云端模型列表
   useEffect(() => {
     const loadLightX2VModels = async () => {
       try {
         const config = getLightX2VConfig(workflow);
         const configKey = `${config.url || 'empty'}:${config.token ? 'hasToken' : 'noToken'}`;
         
-        // 如果配置没有变化，跳过（这是主要的优化点）
-        if (configKeyRef.current === configKey && lightX2VConfigRef.current) {
-          return;
-        }
+        // 检查云端配置
+        const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+        const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+        const cloudConfigKey = `${cloudUrl}:${cloudToken ? 'hasToken' : 'noToken'}`;
+        const fullConfigKey = `${configKey}:${cloudConfigKey}`;
         
-        if (!config.url && !config.token) {
-          // 如果没有配置，跳过
+        // 如果配置没有变化，跳过（这是主要的优化点）
+        if (configKeyRef.current === fullConfigKey && lightX2VConfigRef.current) {
           return;
         }
         
         // 更新缓存的配置
         lightX2VConfigRef.current = config;
-        configKeyRef.current = configKey;
+        configKeyRef.current = fullConfigKey;
         
-        const models = await lightX2VGetModelList(config.url, config.token);
-        if (models && models.length > 0) {
-          updateLightX2VModels(models);
-          console.log('[LightX2V] 模型列表已更新:', models);
+        // 并行加载本地和云端模型列表
+        const loadPromises: Promise<Array<{ task: string; model_cls: string; stage: string }>>[] = [];
+        
+        // 加载本地模型列表
+        if (config.url || config.token) {
+          loadPromises.push(
+            lightX2VGetModelList(config.url, config.token).catch(err => {
+              console.warn('[LightX2V] 获取本地模型列表失败:', err);
+              return [];
+            })
+          );
+        } else {
+          loadPromises.push(Promise.resolve([]));
+        }
+        
+        // 加载云端模型列表
+        if (cloudUrl && cloudToken) {
+          loadPromises.push(
+            lightX2VGetModelList(cloudUrl, cloudToken).catch(err => {
+              console.warn('[LightX2V] 获取云端模型列表失败:', err);
+              return [];
+            })
+          );
+        } else {
+          loadPromises.push(Promise.resolve([]));
+        }
+        
+        const [localModels, cloudModels] = await Promise.all(loadPromises);
+        
+        // 更新模型列表（本地模型 + 云端模型带 -cloud 后缀）
+        if (localModels.length > 0 || cloudModels.length > 0) {
+          updateLightX2VModels(localModels, cloudModels);
+          console.log('[LightX2V] 模型列表已更新:', {
+            local: localModels.length,
+            cloud: cloudModels.length
+          });
         }
       } catch (error) {
         console.error('[LightX2V] 获取模型列表失败:', error);
@@ -221,6 +262,15 @@ const App: React.FC = () => {
 
   // Use useVoiceList Hook (after getLightX2VConfig is defined)
   const voiceList = useVoiceList(workflow, selectedNodeId, getLightX2VConfig);
+  
+  // Use useWorkflowAutoSave Hook
+  const autoSaveHook = useWorkflowAutoSave({
+    workflow,
+    onSave: async (w) => {
+      // Auto-save callback (optional)
+      console.log('[App] Auto-save completed for workflow:', w.id);
+    }
+  });
 
   // Helper function to get node outputs (needed by hooks)
   const getNodeOutputs = (node: WorkflowNode): Port[] => {
@@ -339,8 +389,9 @@ const App: React.FC = () => {
   // Destructure updateNodeData from nodeManagement (for use in other places)
   const updateNodeData = nodeManagement.updateNodeData;
 
-  // runWorkflow, validateWorkflow, and getDescendants are now provided by useWorkflowExecution Hook
+  // runWorkflow, validateWorkflow, stopWorkflow, and getDescendants are now provided by useWorkflowExecution Hook
   const runWorkflow = workflowExecution.runWorkflow;
+  const stopWorkflow = workflowExecution.stopWorkflow;
   const validateWorkflow = workflowExecution.validateWorkflow;
   const getDescendants = workflowExecution.getDescendants;
 
@@ -366,6 +417,160 @@ const App: React.FC = () => {
   };
 
   // Workflow loading is handled by useWorkflow Hook
+
+  // Load workflow from URL hash on mount
+  useEffect(() => {
+    const loadWorkflowFromHash = async () => {
+      // Check if URL hash contains workflow ID
+      const hash = window.location.hash;
+      const workflowMatch = hash.match(/^#?workflow\/([a-f0-9-]+)$/i);
+      
+      if (workflowMatch) {
+        const workflowId = workflowMatch[1];
+        console.log('[App] Loading workflow from URL hash:', workflowId);
+        
+        try {
+          // Check if workflow belongs to current user
+          const currentUserId = getCurrentUserId();
+          const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
+          
+          if (existingWorkflow) {
+            if (isPreset) {
+              // Preset workflow - copy it to user's workflows
+              console.log('[App] Workflow is a preset, copying to create user-owned version');
+              
+              // Generate new UUID for copied workflow
+              const generateUUID = () => {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                  const r = Math.random() * 16 | 0;
+                  const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                  return v.toString(16);
+                });
+              };
+              const newWorkflowId = generateUUID();
+              
+              // Copy workflow via API
+              const copyResponse = await apiRequest(`/api/v1/workflow/${workflowId}/copy`, {
+                method: 'POST',
+                body: JSON.stringify({
+                  workflow_id: newWorkflowId
+                })
+              });
+              
+              if (copyResponse.ok) {
+                const copyData = await copyResponse.json();
+                const copiedWorkflowId = copyData.workflow_id;
+                console.log('[App] Workflow copied successfully, new ID:', copiedWorkflowId);
+                
+                // Load the copied workflow
+                const loaded = await loadWorkflow(copiedWorkflowId);
+                if (loaded) {
+                  const config = getLightX2VConfig(null);
+                  const newWorkflow = {
+                    ...loaded.workflow,
+                    env: {
+                      lightx2v_url: config.url,
+                      lightx2v_token: config.token
+                    }
+                  };
+                  setWorkflow(newWorkflow);
+                  setActiveOutputs(loaded.activeOutputs);
+                  setCurrentView('EDITOR');
+                  
+                  // Update URL with new workflow ID
+                  if (window.history && window.history.replaceState) {
+                    window.history.replaceState(null, '', `#workflow/${copiedWorkflowId}`);
+                  }
+                }
+              } else {
+                console.error('[App] Failed to copy preset workflow from URL');
+              }
+            } else {
+              // User's own workflow - load it directly
+              const loaded = await loadWorkflow(workflowId);
+              if (loaded) {
+                const config = getLightX2VConfig(null);
+                const newWorkflow = {
+                  ...loaded.workflow,
+                  env: {
+                    lightx2v_url: config.url,
+                    lightx2v_token: config.token
+                  }
+                };
+                setWorkflow(newWorkflow);
+                setActiveOutputs(loaded.activeOutputs);
+                setCurrentView('EDITOR');
+              }
+            }
+          } else {
+            console.warn('[App] Workflow not found in database:', workflowId);
+          }
+        } catch (error) {
+          console.error('[App] Failed to load workflow from URL hash:', error);
+        }
+      }
+    };
+    
+    // Load workflow from hash on mount
+    loadWorkflowFromHash();
+  }, []); // Only run on mount - eslint-disable-line react-hooks/exhaustive-deps
+
+  // Also listen for hash changes (when user navigates via browser back/forward)
+  useEffect(() => {
+    const handleHashChange = async () => {
+      const hash = window.location.hash;
+      const workflowMatch = hash.match(/^#?workflow\/([a-f0-9-]+)$/i);
+      
+      if (workflowMatch) {
+        const workflowId = workflowMatch[1];
+        
+        // Only load if it's a different workflow
+        if (!workflow || workflow.id !== workflowId) {
+          console.log('[App] Hash changed, loading workflow:', workflowId);
+          
+          try {
+            const currentUserId = getCurrentUserId();
+            const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
+            
+            if (existingWorkflow && !isPreset) {
+              // Only load user's own workflows on hash change (preset workflows should be copied first)
+              const loaded = await loadWorkflow(workflowId);
+              if (loaded) {
+                const config = getLightX2VConfig(null);
+                const newWorkflow = {
+                  ...loaded.workflow,
+                  env: {
+                    lightx2v_url: config.url,
+                    lightx2v_token: config.token
+                  }
+                };
+                setWorkflow(newWorkflow);
+                setActiveOutputs(loaded.activeOutputs);
+                setCurrentView('EDITOR');
+              }
+            } else if (isPreset) {
+              // For preset workflows, redirect to dashboard
+              setCurrentView('DASHBOARD');
+              // Clear hash or set to empty
+              if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', '#');
+              }
+            }
+          } catch (error) {
+            console.error('[App] Failed to load workflow from hash change:', error);
+          }
+        }
+      } else if (hash === '' || hash === '#') {
+        // Hash cleared - go back to dashboard
+        if (currentView === 'EDITOR') {
+          setCurrentView('DASHBOARD');
+        }
+      }
+    };
+    
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [workflow, currentView, loadWorkflow, getLightX2VConfig, setWorkflow, setActiveOutputs, setCurrentView]);
 
   useEffect(() => {
     let interval: any;
@@ -406,7 +611,7 @@ const App: React.FC = () => {
     deleteWorkflowFromHook(id);
   }, [t, deleteWorkflowFromHook]);
 
-  const openWorkflow = (w: WorkflowState) => {
+  const openWorkflow = useCallback(async (w: WorkflowState) => {
     setSelectedRunId(null);
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
@@ -415,12 +620,75 @@ const App: React.FC = () => {
     voiceList.resetVoiceList(); // Reset voice list when switching workflows
     voiceList.resetCloneVoiceList(); // Reset clone voice list
     
+    // Try to load from database if workflow has a database ID
+    let workflowToOpen = w;
+    let activeOutputsToRestore: Record<string, any> = {};
+    let workflowIdToOpen = w.id;
+    
+    if (w.id && (w.id.startsWith('workflow-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+      try {
+        // Check if workflow belongs to current user
+        const currentUserId = getCurrentUserId();
+        const { isPreset } = await checkWorkflowOwnership(w.id, currentUserId);
+        
+        if (isPreset) {
+          // Workflow belongs to different user (preset workflow), copy it
+          console.log('[App] Opening preset workflow, copying to create user-owned version');
+          
+          // Generate new UUID for copied workflow
+          const generateUUID = () => {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+              const r = Math.random() * 16 | 0;
+              const v = c === 'x' ? r : (r & 0x3 | 0x8);
+              return v.toString(16);
+            });
+          };
+          const newWorkflowId = generateUUID();
+          
+          // Copy workflow via API
+          const copyResponse = await apiRequest(`/api/v1/workflow/${w.id}/copy`, {
+            method: 'POST',
+            body: JSON.stringify({
+              workflow_id: newWorkflowId
+            })
+          });
+          
+          if (copyResponse.ok) {
+            const copyData = await copyResponse.json();
+            workflowIdToOpen = copyData.workflow_id;
+            console.log('[App] Workflow copied successfully, new ID:', workflowIdToOpen);
+            
+            // Load the copied workflow
+            const loaded = await loadWorkflow(workflowIdToOpen);
+            if (loaded) {
+              workflowToOpen = loaded.workflow;
+              activeOutputsToRestore = loaded.activeOutputs;
+            }
+          } else {
+            const errorText = await copyResponse.text();
+            console.error('[App] Failed to copy preset workflow:', errorText);
+            throw new Error(`Failed to copy preset workflow: ${errorText}`);
+          }
+        } else {
+          // Workflow belongs to current user, load it normally
+          const loaded = await loadWorkflow(w.id);
+          if (loaded) {
+            workflowToOpen = loaded.workflow;
+            activeOutputsToRestore = loaded.activeOutputs;
+          }
+        }
+      } catch (error) {
+        console.warn('[App] Failed to load workflow from database, using cached version:', error);
+      }
+    }
+    
     // 获取当前的 LightX2V 配置（从主应用或环境变量）
     const config = getLightX2VConfig(null);
     
     // 更新工作流的 env 配置，使用动态获取的配置
     const newWorkflow = { 
-      ...w, 
+      ...workflowToOpen, 
+      id: workflowIdToOpen, // Use the correct workflow ID (original or copied)
       isDirty: false, 
       isRunning: false, 
       env: {
@@ -429,11 +697,18 @@ const App: React.FC = () => {
       }
     };
     setWorkflow(newWorkflow);
+    setActiveOutputs(activeOutputsToRestore);
     setCurrentView('EDITOR');
+    
+    // Update URL to show workflow_id
+    if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', `#workflow/${workflowIdToOpen}`);
+    }
+    
     // History will be automatically initialized by useUndoRedo when workflow changes
-  };
+  }, [loadWorkflow, getLightX2VConfig, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
 
-  const createNewWorkflow = () => {
+  const createNewWorkflow = useCallback(async () => {
     setSelectedRunId(null);
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
@@ -442,30 +717,70 @@ const App: React.FC = () => {
     voiceList.resetVoiceList(); // Reset voice list when creating new workflow
     voiceList.resetCloneVoiceList(); // Reset clone voice list
     
-    const newFlow: WorkflowState = {
-      id: `flow-${Date.now()}`,
-      name: t('untitled'),
-      nodes: [],
-      connections: [],
-      isDirty: true,
-      isRunning: false,
-      globalInputs: {},
-      env: (() => {
-        // 获取当前的 LightX2V 配置（从主应用或环境变量）
-        const config = getLightX2VConfig(null);
-        return {
+    // 获取当前的 LightX2V 配置（从主应用或环境变量）
+    const config = getLightX2VConfig(null);
+    
+    // Use temporary ID for new workflow (backend will generate the real workflow_id)
+    const tempWorkflowId = `temp-${Date.now()}`;
+    
+    // Create workflow in database
+    try {
+      const tempFlow: WorkflowState = {
+        id: tempWorkflowId, // Temporary ID, will be replaced by backend
+        name: t('untitled'),
+        nodes: [],
+        connections: [],
+        isDirty: false,
+        isRunning: false,
+        globalInputs: {},
+        env: {
           lightx2v_url: config.url,
           lightx2v_token: config.token
-        };
-      })(),
-      history: [],
-      updatedAt: Date.now(),
-      showIntermediateResults: true
-    };
-    setWorkflow(newFlow);
-    setCurrentView('EDITOR');
+        },
+        history: [],
+        updatedAt: Date.now(),
+        showIntermediateResults: true
+      };
+      
+      // Create workflow in database (backend will generate workflow_id)
+      const finalWorkflowId = await saveWorkflowToDatabase(tempFlow, { name: t('untitled') });
+      
+      // Update workflow with backend-generated ID
+      const finalFlow = { ...tempFlow, id: finalWorkflowId, isDirty: false };
+      setWorkflow(finalFlow);
+      setActiveOutputs({});
+      setCurrentView('EDITOR');
+      // Update URL to show workflow_id
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', `#workflow/${finalWorkflowId}`);
+      }
+    } catch (error) {
+      console.error('[App] Failed to create workflow in database, creating local workflow:', error);
+      // Fallback to local workflow (keep temp ID)
+      const newFlow: WorkflowState = {
+        id: tempWorkflowId,
+        name: t('untitled'),
+        nodes: [],
+        connections: [],
+        isDirty: true,
+        isRunning: false,
+        globalInputs: {},
+        env: {
+          lightx2v_url: config.url,
+          lightx2v_token: config.token
+        },
+        history: [],
+        updatedAt: Date.now(),
+        showIntermediateResults: true
+      };
+      setWorkflow(newFlow);
+      setCurrentView('EDITOR');
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', `#workflow/${tempWorkflowId}`);
+      }
+    }
     // History will be automatically initialized by useUndoRedo when workflow changes
-  };
+  }, [saveWorkflowToDatabase, loadWorkflow, getLightX2VConfig, t, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
 
   const selectedNode = useMemo(() => workflow?.nodes.find(n => n.id === selectedNodeId), [workflow, selectedNodeId]);
 
@@ -899,6 +1214,7 @@ const App: React.FC = () => {
         sourceOutputs={sourceOutputs}
         isPaused={isPaused}
         isRunning={workflow.isRunning}
+        isSaving={isSavingWorkflow}
         sidebarCollapsed={modalState.sidebarCollapsed}
         validationErrors={validationErrors}
         globalError={globalError}
@@ -913,13 +1229,34 @@ const App: React.FC = () => {
         onResetView={resetView}
         onToggleLang={toggleLang}
         onClearSnapshot={clearSnapshot}
-        onSave={() => saveWorkflowToLocal(workflow)}
+        onSave={async () => {
+          if (!workflow || isSavingWorkflow) return; // Prevent multiple saves
+          try {
+            await saveWorkflowToDatabase(workflow, { name: workflow.name });
+            // Also save to localStorage as backup
+            saveWorkflowToLocal(workflow);
+            setWorkflow(prev => prev ? { ...prev, isDirty: false } : null);
+            // 手动保存后重置自动保存计时器
+            if (autoSaveHook) {
+              autoSaveHook.resetAutoSaveTimer();
+            }
+          } catch (error) {
+            console.error('[App] Failed to save workflow to database:', error);
+            // Fallback to localStorage
+            saveWorkflowToLocal(workflow);
+          }
+        }}
         onPause={() => {
                 const newPausedState = !isPaused;
                 setIsPaused(newPausedState);
                 isPausedRef.current = newPausedState;
               }} 
         onRun={() => runWorkflow()}
+        onStop={async () => {
+          if (stopWorkflow) {
+            await stopWorkflow();
+          }
+        }}
           onToggleSidebar={() => modalState.setSidebarCollapsed(!modalState.sidebarCollapsed)}
         canUndo={undoRedo.canUndo}
         canRedo={undoRedo.canRedo}
