@@ -20,10 +20,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.table_shares = "shares"
         self.table_podcasts = "podcasts"
         self.table_voice_clones = "voice_clones"
+        self.table_workflows = "workflows"
         self.pool = None
         self.metrics_monitor = metrics_monitor
-        self.time_keys = ["create_t", "update_t", "ping_t", "valid_t"]
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles"]
+        self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t"]
+        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles",
+                         "nodes", "connections", "history_metadata", "data_store", "chat_history"]
 
     async def init(self):
         await self.upgrade_db()
@@ -77,6 +79,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             (2, "Add shares table", self.upgrade_v2),
             (3, "Add podcasts table", self.upgrade_v3),
             (4, "Add voice clones table", self.upgrade_v4),
+            (5, "Add workflows table with data_store", self.upgrade_v5),
         ]
         logger.info(f"upgrade_db: {self.db_url}")
         cur_ver = await self.query_version()
@@ -265,6 +268,44 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return True
         except:  # noqa
             logger.error(f"upgrade_v4 error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    async def upgrade_v5(self, version, description):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                # create workflows table with data_store and chat_history (merged v5 and v6)
+                default_data_store = '{"outputs": {}}'
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.table_workflows} (
+                        workflow_id VARCHAR(128) PRIMARY KEY,
+                        user_id VARCHAR(256) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        create_t TIMESTAMPTZ NOT NULL,
+                        update_t TIMESTAMPTZ NOT NULL,
+                        last_run_t TIMESTAMPTZ,
+                        nodes JSONB NOT NULL,
+                        connections JSONB NOT NULL,
+                        history_metadata JSONB,
+                        extra_info JSONB,
+                        data_store JSONB DEFAULT $1::jsonb,
+                        chat_history JSONB DEFAULT '[]'::jsonb,
+                        FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
+                    )
+                """, default_data_store)
+                # create indexes
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_user_id ON {self.table_workflows}(user_id)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_update_t ON {self.table_workflows}(update_t)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_tag ON {self.table_workflows}(tag)")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_name ON {self.table_workflows}(name)")
+                # update version
+                await conn.execute(f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)", version, description, datetime.now())
+                return True
+        except:  # noqa
+            logger.error(f"upgrade_v5 error: {traceback.format_exc()}")
             return False
         finally:
             await self.release_conn(conn)
@@ -1180,6 +1221,214 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return voice_clones
         except:  # noqa
             logger.error(f"list_voice_clones error: {traceback.format_exc()}")
+            return []
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def insert_workflow(self, workflow_data):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                self.fmt_dict(workflow_data)
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.table_workflows}
+                    (workflow_id, user_id, name, description, create_t, update_t, last_run_t,
+                     nodes, connections, history_metadata, extra_info, data_store, chat_history)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    """,
+                    workflow_data["workflow_id"],
+                    workflow_data["user_id"],
+                    workflow_data["name"],
+                    workflow_data.get("description", ""),
+                    workflow_data["create_t"],
+                    workflow_data["update_t"],
+                    workflow_data.get("last_run_t"),
+                    workflow_data.get("nodes", []),
+                    workflow_data.get("connections", []),
+                    workflow_data.get("history_metadata", []),
+                    workflow_data.get("extra_info", {}),
+                    workflow_data.get("data_store", {"outputs": {}}),
+                    workflow_data.get("chat_history", []),
+                )
+                return True
+        except:  # noqa
+            logger.error(f"insert_workflow error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def query_workflow(self, workflow_id, user_id=None):
+        conn = await self.get_conn()
+        try:
+            query = f"SELECT * FROM {self.table_workflows} WHERE workflow_id = $1 AND tag != 'delete'"
+            params = [workflow_id]
+            if user_id is not None:
+                query += " AND user_id = $2"
+                params.append(user_id)
+            row = await conn.fetchrow(query, *params)
+            if not row:
+                return None
+            workflow = dict(row)
+            self.parse_dict(workflow)
+            return workflow
+        except:  # noqa
+            logger.error(f"query_workflow error: {traceback.format_exc()}")
+            return None
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def update_workflow(self, workflow_id, updates, user_id=None):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                # Check if workflow exists and belongs to user
+                query = f"SELECT workflow_id FROM {self.table_workflows} WHERE workflow_id = $1 AND tag != 'delete'"
+                params = [workflow_id]
+                if user_id is not None:
+                    query += " AND user_id = $2"
+                    params.append(user_id)
+                row = await conn.fetchrow(query, *params)
+                if not row:
+                    return False
+
+                # Build update query
+                set_clauses = []
+                update_params = []
+                param_idx = 1
+                
+                for key, value in updates.items():
+                    if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
+                        # JSON fields
+                        self.fmt_dict({key: value})
+                        set_clauses.append(f"{key} = ${param_idx}")
+                        update_params.append(json.dumps(value, ensure_ascii=False))
+                    elif key in ["name", "description", "tag"]:
+                        set_clauses.append(f"{key} = ${param_idx}")
+                        update_params.append(value)
+                    elif key == "last_run_t":
+                        if value is not None:
+                            self.fmt_dict({key: value})
+                            set_clauses.append(f"{key} = ${param_idx}")
+                            update_params.append(datetime.fromtimestamp(value) if isinstance(value, (int, float)) else value)
+                        else:
+                            set_clauses.append(f"{key} = NULL")
+                    param_idx += 1
+
+                # Always update update_t
+                set_clauses.append(f"update_t = ${param_idx}")
+                update_params.append(datetime.now())
+                param_idx += 1
+
+                # Build WHERE clause with workflow_id and user_id check
+                where_params = []
+                where_clause = f"workflow_id = ${param_idx}"
+                where_params.append(workflow_id)
+                param_idx += 1
+                
+                if user_id is not None:
+                    where_clause += f" AND user_id = ${param_idx}"
+                    where_params.append(user_id)
+                    param_idx += 1
+                
+                all_params = update_params + where_params
+                
+                query = f"UPDATE {self.table_workflows} SET {', '.join(set_clauses)} WHERE {where_clause}"
+                ret = await conn.execute(query, *all_params)
+
+                try:
+                    count = self.check_update_valid(ret, "update_workflow", query, all_params)
+                    return count > 0
+                except AssertionError:
+                    logger.warning(f"update_workflow: no rows updated for workflow_id={workflow_id}, user_id={user_id}")
+                    return False
+        except:  # noqa
+            logger.error(f"update_workflow error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def delete_workflow(self, workflow_id, user_id=None):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                query = f"DELETE FROM {self.table_workflows} WHERE workflow_id = $1"
+                params = [workflow_id]
+                if user_id is not None:
+                    query += " AND user_id = $2"
+                    params.append(user_id)
+                ret = await conn.execute(query, *params)
+                if ret == "DELETE 0":
+                    return False
+                return True
+        except:  # noqa
+            logger.error(f"delete_workflow error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def list_workflows(self, **kwargs):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                count = kwargs.get("count", False)
+                query = "SELECT * FROM " if not count else "SELECT COUNT(*) FROM "
+                param_idx = 1
+                params = []
+
+                conds = []
+                if "user_id" in kwargs:
+                    conds.append(f"user_id = ${param_idx}")
+                    params.append(kwargs["user_id"])
+                    param_idx += 1
+                
+                if "search" in kwargs:
+                    search_term = kwargs["search"]
+                    conds.append(f"(LOWER(name) LIKE ${param_idx} OR LOWER(description) LIKE ${param_idx + 1})")
+                    params.extend([f"%{search_term.lower()}%", f"%{search_term.lower()}%"])
+                    param_idx += 2
+                
+                query += self.table_workflows + " WHERE " + " AND ".join(conds)
+                
+                if not count:
+                    sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
+                    query += f" ORDER BY {sort_key} DESC"
+                    
+                    # Pagination
+                    page = kwargs.get("page", 1)
+                    page_size = kwargs.get("page_size", 10)
+                    offset = (page - 1) * page_size
+                    if "offset" in kwargs:
+                        offset = kwargs["offset"]
+                    if "limit" in kwargs:
+                        query += f" LIMIT ${param_idx}"
+                        params.append(kwargs["limit"])
+                    else:
+                        query += f" LIMIT ${param_idx}"
+                        params.append(page_size)
+                    param_idx += 1
+                    
+                    if offset > 0:
+                        query += f" OFFSET ${param_idx}"
+                        params.append(offset)
+                
+                rows = await conn.fetch(query, *params)
+                if count:
+                    return rows[0]["count"]
+                
+                workflows = []
+                for row in rows:
+                    workflow = dict(row)
+                    self.parse_dict(workflow)
+                    workflows.append(workflow)
+                return workflows
+        except:  # noqa
+            logger.error(f"list_workflows error: {traceback.format_exc()}")
             return []
         finally:
             await self.release_conn(conn)

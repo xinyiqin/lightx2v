@@ -30,6 +30,10 @@ class LocalDataManager(BaseDataManager):
         self.podcast_output_dir = os.path.join(self.local_dir, "podcast_output")
         os.makedirs(self.podcast_temp_session_dir, exist_ok=True)
         os.makedirs(self.podcast_output_dir, exist_ok=True)
+        
+        # workflow files directory
+        self.workflow_dir = os.path.join(self.local_dir, "workflows")
+        os.makedirs(self.workflow_dir, exist_ok=True)
 
     @class_try_catch_async
     async def save_bytes(self, bytes_data, filename, abs_path=None):

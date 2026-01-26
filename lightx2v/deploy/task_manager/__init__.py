@@ -95,6 +95,21 @@ class BaseTaskManager:
 
     async def list_voice_clones(self, user_id):
         raise NotImplementedError
+        
+    async def insert_workflow(self, workflow_data):
+        raise NotImplementedError
+
+    async def query_workflow(self, workflow_id, user_id=None):
+        raise NotImplementedError
+
+    async def update_workflow(self, workflow_id, updates, user_id=None):
+        raise NotImplementedError
+
+    async def delete_workflow(self, workflow_id, user_id=None):
+        raise NotImplementedError
+
+    async def list_workflows(self, **kwargs):
+        raise NotImplementedError
 
     def fmt_dict(self, data):
         for k in ["status"]:
@@ -239,6 +254,37 @@ class BaseTaskManager:
         }
         assert await self.insert_voice_clone_if_not_exists(voice_clone), f"create voice clone {voice_clone} failed"
         return True
+
+    async def create_workflow(self, user_id, name, description="", nodes=None, connections=None, workflow_id=None):
+        if workflow_id is None:
+            workflow_id = str(uuid.uuid4())
+        else:
+            import re
+            if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', workflow_id, re.IGNORECASE):
+                raise ValueError(f"Invalid workflow_id format: {workflow_id}. Must be a valid UUID.")
+            
+            existing = await self.query_workflow(workflow_id, user_id=None)
+            if existing:
+                raise ValueError(f"Workflow {workflow_id} already exists. Use update_workflow instead.")
+        
+        cur_t = current_time()
+        workflow_data = {
+            "workflow_id": workflow_id,
+            "user_id": user_id,
+            "name": name,
+            "description": description or "",
+            "create_t": cur_t,
+            "update_t": cur_t,
+            "last_run_t": None,
+            "nodes": nodes or [],
+            "connections": connections or [],
+            "history_metadata": [],
+            "data_store": {"outputs": {}},
+            "chat_history": [],
+            "extra_info": "",
+        }
+        assert await self.insert_workflow(workflow_data), f"create workflow {workflow_data} failed"
+        return workflow_id
 
     async def mark_server_restart(self):
         pass

@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 
+from loguru import logger
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time, str2time, time2str
 from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
@@ -413,6 +414,9 @@ class LocalTaskManager(BaseTaskManager):
             sessions = sessions[: kwargs["limit"]]
         return sessions
 
+    def get_workflow_filename(self, workflow_id):
+        return os.path.join(self.local_dir, f"workflow_{workflow_id}.json")
+
     def get_voice_clone_filename(self, user_id, speaker_id):
         return os.path.join(self.local_dir, f"voice_clone_{user_id}_{speaker_id}.json")
 
@@ -475,6 +479,116 @@ class LocalTaskManager(BaseTaskManager):
         if "limit" in kwargs:
             voice_clones = voice_clones[: kwargs["limit"]]
         return voice_clones
+
+    def save_workflow(self, workflow, with_fmt=True):
+        if with_fmt:
+            self.fmt_dict(workflow)
+        out_name = self.get_workflow_filename(workflow["workflow_id"])
+        with open(out_name, "w") as fout:
+            fout.write(json.dumps(workflow, indent=4, ensure_ascii=False))
+
+    def load_workflow(self, workflow_id, user_id=None):
+        fpath = self.get_workflow_filename(workflow_id)
+        if not os.path.exists(fpath):
+            return None
+        data = json.load(open(fpath))
+        if user_id is not None and data.get("user_id") != user_id:
+            raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
+        if data.get("tag") == "delete":
+            raise Exception(f"Workflow {workflow_id} is deleted")
+        self.parse_dict(data)
+        return data
+
+    @class_try_catch_async
+    async def insert_workflow(self, workflow_data):
+        self.save_workflow(workflow_data)
+        return True
+
+    @class_try_catch_async
+    async def query_workflow(self, workflow_id, user_id=None):
+        return self.load_workflow(workflow_id, user_id)
+
+    @class_try_catch_async
+    async def update_workflow(self, workflow_id, updates, user_id=None):
+        workflow = self.load_workflow(workflow_id, user_id)
+        if not workflow:
+            return False
+        
+        for key, value in updates.items():
+            if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
+                workflow[key] = value
+            elif key in ["name", "description"]:
+                workflow[key] = value
+            elif key == "last_run_t":
+                workflow["last_run_t"] = value
+        
+        workflow["update_t"] = current_time()
+        self.save_workflow(workflow)
+        return True
+
+    @class_try_catch_async
+    async def delete_workflow(self, workflow_id, user_id=None):
+        workflow = self.load_workflow(workflow_id, user_id)
+        if not workflow:
+            return False
+        # Actually delete the workflow file instead of just marking it
+        workflow_filename = os.path.join(self.local_dir, f"workflow_{workflow_id}.json")
+        try:
+            if os.path.exists(workflow_filename):
+                os.remove(workflow_filename)
+                return True
+            else:
+                return False
+        except Exception as e:
+            logger.error(f"Failed to delete workflow file {workflow_filename}: {e}")
+            return False
+
+    @class_try_catch_async
+    async def list_workflows(self, **kwargs):
+        workflows = []
+        for f in os.listdir(self.local_dir):
+            if not f.startswith("workflow_"):
+                continue
+            fpath = os.path.join(self.local_dir, f)
+            workflow = json.load(open(fpath))
+            self.parse_dict(workflow)
+            
+            # Filter by user_id
+            if "user_id" in kwargs and workflow["user_id"] != kwargs["user_id"]:
+                continue
+            
+            # Filter by search (name or description)
+            if "search" in kwargs:
+                search_term = kwargs["search"].lower()
+                if search_term not in workflow.get("name", "").lower() and \
+                   search_term not in workflow.get("description", "").lower():
+                    continue
+            
+            # Filter deleted
+            if not kwargs.get("include_delete", False) and workflow.get("tag", "") == "delete":
+                continue
+            
+            workflows.append(workflow)
+        
+        if "count" in kwargs:
+            return len(workflows)
+        
+        # Sort
+        sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
+        workflows = sorted(workflows, key=lambda x: x.get(sort_key, 0), reverse=True)
+        
+        # Pagination
+        page = kwargs.get("page", 1)
+        page_size = kwargs.get("page_size", 10)
+        offset = (page - 1) * page_size
+        if "offset" in kwargs:
+            offset = kwargs["offset"]
+        if "limit" in kwargs:
+            workflows = workflows[offset:offset + kwargs["limit"]]
+        else:
+            workflows = workflows[offset:offset + page_size]
+        
+        return workflows
 
 
 async def test():
