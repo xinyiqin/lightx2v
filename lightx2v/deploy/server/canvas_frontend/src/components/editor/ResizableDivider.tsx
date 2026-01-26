@@ -14,7 +14,7 @@ export const ResizableDivider: React.FC<ResizableDividerProps> = ({ onResize, la
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDraggingRef.current) return;
-    
+
     const deltaY = e.clientY - startYRef.current;
     if (Math.abs(deltaY) > 0) {
       onResize(deltaY);
@@ -24,7 +24,7 @@ export const ResizableDivider: React.FC<ResizableDividerProps> = ({ onResize, la
 
   const handleMouseUp = useCallback(() => {
     if (!isDraggingRef.current) return;
-    
+
     isDraggingRef.current = false;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
@@ -51,12 +51,11 @@ export const ResizableDivider: React.FC<ResizableDividerProps> = ({ onResize, la
       title={lang === 'zh' ? '拖拽调整高度' : 'Drag to resize'}
     >
       <div className="absolute inset-0 flex items-center justify-center">
-        <GripVertical 
-          size={12} 
+        <GripVertical
+          size={12}
           className="text-slate-500 group-hover:text-slate-300 transition-colors"
         />
       </div>
     </div>
   );
 };
-

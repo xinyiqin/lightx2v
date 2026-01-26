@@ -27,10 +27,10 @@ export async function bootstrap() {
  */
 export async function mount(props: any) {
   console.log('[React] Canvas app mounted', props);
-  
+
   // 设置资源基础路径
   (window as any).__ASSET_BASE_PATH__ = '/canvas';
-  
+
   // 将共享的状态和方法挂载到 window，供 App 组件使用
   if (props?.sharedStore) {
     (window as any).__SHARED_STORE__ = props.sharedStore;
@@ -44,10 +44,10 @@ export async function mount(props: any) {
   if (props?.onGlobalStateChange) {
     (window as any).__ON_GLOBAL_STATE_CHANGE__ = props.onGlobalStateChange;
   }
-  
+
   // 初始化 LIGHTX2V_TOKEN：如果用户已登录，使用用户的 accessToken
   initLightX2VToken();
-  
+
   // 检查环境变量（用于调试）
   console.log('[Canvas App] 环境变量检查:', {
     DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : '未设置',
@@ -58,8 +58,8 @@ export async function mount(props: any) {
     LIGHTX2V_CLOUD_TOKEN: process.env.LIGHTX2V_CLOUD_TOKEN ? `${process.env.LIGHTX2V_CLOUD_TOKEN.substring(0, 10)}...` : '未设置',
   });
 
-  const rootElement = props?.container 
-    ? props.container.querySelector('#root') 
+  const rootElement = props?.container
+    ? props.container.querySelector('#root')
     : document.getElementById('root');
 
   if (!rootElement) {
@@ -85,7 +85,7 @@ export async function unmount(props: any) {
     root.unmount();
     root = null;
   }
-  
+
   // 清理全局变量
   delete (window as any).__SHARED_STORE__;
   delete (window as any).__API_CLIENT__;
@@ -204,7 +204,7 @@ if (typeof window !== 'undefined') {
   // 设置资源基础路径
   // 在 qiankun 环境中为 /canvas，独立运行时为空字符串（因为 base 是 /）
   (window as any).__ASSET_BASE_PATH__ = (window as any).__POWERED_BY_QIANKUN__ ? '/canvas' : '';
-  
+
   if (!window.moudleQiankunAppLifeCycles) {
     (window as any).moudleQiankunAppLifeCycles = {};
   }
@@ -220,7 +220,7 @@ if (typeof window !== 'undefined') {
 if (!window.__POWERED_BY_QIANKUN__) {
   // 初始化 LIGHTX2V_TOKEN：如果用户已登录，使用用户的 accessToken
   initLightX2VToken();
-  
+
   // 检查环境变量（用于调试）
   console.log('[Canvas App] 环境变量检查（独立运行）:', {
     DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : '未设置',
@@ -228,7 +228,7 @@ if (!window.__POWERED_BY_QIANKUN__) {
     PPCHAT_API_KEY: process.env.PPCHAT_API_KEY ? `${process.env.PPCHAT_API_KEY.substring(0, 10)}...` : '未设置',
     LIGHTX2V_URL: process.env.LIGHTX2V_URL || '未设置',
   });
-  
+
   const rootElement = document.getElementById('root');
   if (!rootElement) {
     throw new Error("Could not find root element to mount to");

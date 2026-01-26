@@ -61,7 +61,7 @@ export async function saveNodeOutputData(
   try {
     let outputData: string | object;
     let fileInfo: any = null;
-    
+
     if (typeof data === 'string') {
       if (data.startsWith('data:')) {
         // Base64 data URL
@@ -90,7 +90,7 @@ export async function saveNodeOutputData(
 
     const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output/${portId}/save`, {
       method: 'POST',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         output_data: outputData,
         file_info: fileInfo,  // 可选，后端会自动生成
         run_id: runId  // 可选，用于关联工作流历史记录
@@ -101,7 +101,7 @@ export async function saveNodeOutputData(
       // 检查响应内容类型
       const contentType = response.headers.get('content-type') || '';
       let errorMessage = `Failed to save node output: ${response.status} ${response.statusText}`;
-      
+
       if (contentType.includes('application/json')) {
         try {
           const errorData = await response.json();
@@ -122,27 +122,27 @@ export async function saveNodeOutputData(
           // 如果读取失败，使用默认错误消息
         }
       }
-      
+
       console.error(`[WorkflowFileManager] Error saving node output data for ${nodeId}/${portId}:`, errorMessage);
-      
+
       // 抛出错误，让调用者可以处理（如显示错误提示）
       throw new Error(errorMessage);
     }
-    
+
     // 检查响应内容类型
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await response.text();
       throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
     }
-    
+
     const result = await response.json();
     // 返回保存成功的信息（后端会返回 data_id，如果是文件还会返回 file_id）
     return { data_id: result.data_id, file_id: result.file_id };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[WorkflowFileManager] Error saving node output data for ${nodeId}/${portId}:`, errorMessage);
-    
+
     // 重新抛出错误，让调用者可以处理（如显示错误提示）
     throw error;
   }
@@ -158,12 +158,12 @@ export async function getNodeOutputData(
 ): Promise<any | null> {
   try {
     const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output/${portId}`);
-    
+
     if (!response.ok) {
       // 检查响应内容类型
       const contentType = response.headers.get('content-type') || '';
       let errorMessage = `Failed to get node output: ${response.status} ${response.statusText}`;
-      
+
       if (contentType.includes('application/json')) {
         try {
           const errorData = await response.json();
@@ -184,32 +184,32 @@ export async function getNodeOutputData(
           // 如果读取失败，使用默认错误消息
         }
       }
-      
+
       console.error(`[WorkflowFileManager] Error getting node output data for ${nodeId}/${portId}:`, errorMessage);
-      
+
       // 如果是 404，可能是节点输出还不存在，这是正常的，不抛出错误
       if (response.status === 404) {
         return null;
       }
-      
+
       // 对于其他错误，抛出异常以便上层处理
       throw new Error(errorMessage);
     }
-    
+
     // 检查响应内容类型
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await response.text();
       throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
     }
-    
+
     const result = await response.json();
     const dataRef = result.data;
-    
+
     if (!dataRef) {
       return null;
     }
-    
+
     // Handle different data types
     if (dataRef.data_type === 'url') {
       // Task result URL (local path or CDN URL) - return directly
@@ -218,10 +218,10 @@ export async function getNodeOutputData(
       // File type - use file_path directly
       // file_path 现在是数组格式（即使是单个文件）
       const filePath = dataRef.file_path;
-      
+
       // 确保是数组格式
       const filePaths = Array.isArray(filePath) ? filePath : [filePath];
-      
+
       // 返回数组格式的 data URLs
       const filePromises = filePaths.map(async (path: string) => {
         const match = path.match(/workflows\/[^_]+_(.+)\.(.+)$/);
@@ -233,7 +233,7 @@ export async function getNodeOutputData(
       });
       const results = await Promise.all(filePromises);
       const validResults = results.filter(r => r !== null);
-      
+
       // 如果只有一个文件，返回单个值（兼容旧代码）；否则返回数组
       return validResults.length === 1 ? validResults[0] : validResults;
     } else if (dataRef.data_type === 'text') {
@@ -243,12 +243,12 @@ export async function getNodeOutputData(
       // JSON output
       return dataRef.json_value;
     }
-    
+
     return dataRef;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[WorkflowFileManager] Error getting node output data for ${nodeId}/${portId}:`, errorMessage);
-    
+
     // 重新抛出错误，让调用者可以处理（如显示错误提示）
     throw error;
   }
@@ -264,12 +264,12 @@ export async function getNodeOutputHistory(
 ): Promise<any[]> {
   try {
     const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output/${portId}/history`);
-    
+
     if (response.ok) {
       const result = await response.json();
       return result.history || [];
     }
-    
+
     return [];
   } catch (error) {
     console.error('[WorkflowFileManager] Error getting node output history:', error);
@@ -291,12 +291,12 @@ export async function reuseNodeOutputHistory(
       method: 'POST',
       body: JSON.stringify({ history_index: historyIndex })
     });
-    
+
     if (response.ok) {
       const result = await response.json();
       return result.data;
     }
-    
+
     return null;
   } catch (error) {
     console.error('[WorkflowFileManager] Error reusing node output history:', error);
@@ -317,10 +317,10 @@ export async function uploadNodeInputFile(
   try {
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const token = localStorage.getItem('accessToken');
     const url = `/api/v1/workflow/${workflowId}/node/${nodeId}/output/${portId}/upload${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-    
+
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
@@ -328,11 +328,11 @@ export async function uploadNodeInputFile(
         'Authorization': `Bearer ${token}`
       } : {}
     });
-    
+
     if (!response.ok) {
       const contentType = response.headers.get('content-type') || '';
       let errorMessage = `Failed to upload file: ${response.status} ${response.statusText}`;
-      
+
       if (contentType.includes('application/json')) {
         try {
           const errorData = await response.json();
@@ -341,11 +341,11 @@ export async function uploadNodeInputFile(
           // Ignore
         }
       }
-      
+
       console.error(`[WorkflowFileManager] Error uploading file for ${nodeId}/${portId}:`, errorMessage);
       throw new Error(errorMessage);
     }
-    
+
     const result = await response.json();
     return {
       file_id: result.file_id,
@@ -369,25 +369,25 @@ export async function getWorkflowFileByFileId(
   try {
     // Use apiRequest to ensure Authorization header is set
     const url = `/api/v1/workflow/${workflowId}/file/${fileId}`;
-    
+
     // Get token for Authorization header
     const sharedStore = (window as any).__SHARED_STORE__;
     const token = sharedStore ? sharedStore.getState('token') : localStorage.getItem('accessToken');
-    
+
     const headers: Record<string, string> = {};
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    
+
     const response = await fetch(url, {
       headers
     });
-    
+
     if (!response.ok) {
       console.error(`[WorkflowFileManager] Failed to fetch file: ${response.status}`);
       return null;
     }
-    
+
     const blob = await response.blob();
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -411,9 +411,6 @@ export function getWorkflowFileUrl(
 ): string {
   const token = localStorage.getItem('accessToken');
   const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  
+
   return `/api/v1/workflow/${workflowId}/file/${fileId}${tokenParam}`;
 }
-
-
-

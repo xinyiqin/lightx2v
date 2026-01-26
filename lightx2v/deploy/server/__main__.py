@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import base64
 import copy
-import hashlib
 import json
 import mimetypes
 import os
@@ -15,7 +14,7 @@ from contextlib import asynccontextmanager
 
 import aiofiles
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -383,7 +382,7 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]  # Remove "Bearer " prefix
-        
+
         # Pass data_manager, task_manager, user_id, and token to load_inputs
         inputs_data = await load_inputs(params, inputs, types, data_manager=data_manager, task_manager=task_manager, user_id=user["user_id"], token=token)
 
@@ -488,20 +487,16 @@ async def api_v1_task_result_url(request: Request, user=Depends(verify_user_acce
 
 
 @app.get("/api/v1/workflow/{workflow_id}/input")
-async def api_v1_workflow_input(
-    workflow_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_input(workflow_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         filename = request.query_params.get("filename")
         if not filename:
             return error_response("filename is required", 400)
-        
+
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         try:
             if not filename.startswith("workflows/"):
                 filename = f"workflows/{workflow_id}/{filename}"
@@ -509,7 +504,7 @@ async def api_v1_workflow_input(
         except Exception as e:
             logger.error(f"Failed to load workflow input file {filename}: {e}")
             return error_response("File not found", 404)
-        
+
         ext = os.path.splitext(filename)[1].lower()
         mime_map = {
             ".png": "image/png",
@@ -521,10 +516,10 @@ async def api_v1_workflow_input(
             ".webm": "video/webm",
             ".mp3": "audio/mpeg",
             ".wav": "audio/wav",
-            ".ogg": "audio/ogg"
+            ".ogg": "audio/ogg",
         }
         mime_type = mime_map.get(ext, "application/octet-stream")
-        
+
         headers = {"Cache-Control": "public, max-age=3600"}
         return Response(content=data, media_type=mime_type, headers=headers)
     except Exception as e:
@@ -1747,16 +1742,16 @@ async def canvas_fallback(full_path: str):
     # 跳过 assets 路径，由上面的 mount 处理
     if full_path.startswith("assets/"):
         return HTMLResponse("<h1>Asset not found</h1>", status_code=404)
-    
+
     # 从 static 目录读取 Canvas 文件
     canvas_dir = os.path.join(static_dir, "canvas")
-    
+
     # 处理 /canvas/index.html 或 /canvas/ 路径
     if not full_path or full_path == "index.html":
         canvas_index_path = os.path.join(canvas_dir, "index.html")
         if os.path.exists(canvas_index_path):
             return FileResponse(canvas_index_path, media_type="text/html")
-    
+
     # 对于其他 canvas 路径下的文件，尝试直接返回文件
     canvas_file_path = os.path.join(canvas_dir, full_path)
     if os.path.exists(canvas_file_path) and os.path.isfile(canvas_file_path):
@@ -1789,17 +1784,19 @@ async def canvas_fallback(full_path: str):
             # 使用 mimetypes 模块推断 MIME 类型
             guessed_type, _ = mimetypes.guess_type(canvas_file_path)
             return FileResponse(canvas_file_path, media_type=guessed_type or "application/octet-stream")
-    
+
     # 如果文件不存在，返回 canvas/index.html
     canvas_index_path = os.path.join(canvas_dir, "index.html")
     if os.path.exists(canvas_index_path):
         return FileResponse(canvas_index_path, media_type="text/html")
     return HTMLResponse("<h1>Canvas app not found</h1>", status_code=404)
 
+
 # 所有未知路由 fallback 到 index.html (必须在所有API路由之后)
 # =========================
 # Workflow API Endpoints
 # =========================
+
 
 @app.post("/api/v1/workflow/create")
 async def api_v1_workflow_create(request: Request, user=Depends(verify_user_access)):
@@ -1816,7 +1813,7 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
             logger.info(f"Using provided workflow_id: {workflow_id}")
         else:
             logger.warning(f"No workflow_id provided, backend will generate new UUID")
-        
+
         try:
             workflow_id = await task_manager.create_workflow(
                 user_id=user["user_id"],
@@ -1824,9 +1821,9 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
                 description=description,
                 nodes=nodes,
                 connections=connections,
-                workflow_id=workflow_id  # Pass optional workflow_id
+                workflow_id=workflow_id,  # Pass optional workflow_id
             )
-            
+
             logger.info(f"Workflow {workflow_id} created by user {user['user_id']}")
             return {"workflow_id": workflow_id, "message": "Workflow created successfully"}
         except ValueError as ve:
@@ -1842,16 +1839,8 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
     """Save workflow input files using task_submit logic (reuse load_inputs and data_name).
     This is an internal helper function, not an API endpoint."""
     # Process inputs using load_inputs (reuse existing logic from task_submit)
-    inputs_data = await load_inputs(
-        params_dict,
-        list(params_dict.keys()),
-        types,
-        data_manager=data_manager,
-        task_manager=task_manager,
-        user_id=user_id,
-        token=token
-    )
-    
+    inputs_data = await load_inputs(params_dict, list(params_dict.keys()), types, data_manager=data_manager, task_manager=task_manager, user_id=user_id, token=token)
+
     saved_paths = []
     for inp, data in inputs_data.items():
         # Generate filename using data_name (format: {workflow_id}-{input_name}.{ext})
@@ -1860,7 +1849,7 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
         filename = f"workflows/{workflow_id}/{base_filename}"
         await data_manager.save_bytes(data, filename)
         saved_paths.append(filename)
-    
+
     # Return paths (local path or S3 URL)
     result_paths = []
     for path in saved_paths:
@@ -1869,11 +1858,8 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
             result_paths.append(url)
         else:
             result_paths.append(f"./assets/workflow/input?workflow_id={workflow_id}&filename={path}")
-    
-    return {
-        "paths": result_paths,
-        "filenames": saved_paths
-    }
+
+    return {"paths": result_paths, "filenames": saved_paths}
 
 
 @app.get("/api/v1/workflow/list")
@@ -1883,11 +1869,11 @@ async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         search = request.query_params.get("search", None)
-        
+
         if page < 1 or page_size < 1:
             return error_response("page and page_size must be greater than 0", 400)
         page_size = min(page_size, 100)
-        
+
         kwargs = {
             "user_id": user["user_id"],
             "page": page,
@@ -1895,37 +1881,31 @@ async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access
         }
         if search:
             kwargs["search"] = search
-        
+
         workflows = await task_manager.list_workflows(**kwargs)
-        
+
         # Get total count for pagination
         count_kwargs = {"user_id": user["user_id"], "count": True}
         if search:
             count_kwargs["search"] = search
         total = await task_manager.list_workflows(**count_kwargs)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-        
+
         # Return only metadata for list view
         workflow_list = []
         for wf in workflows:
-            workflow_list.append({
-                "workflow_id": wf["workflow_id"],
-                "name": wf["name"],
-                "description": wf.get("description", ""),
-                "create_t": wf["create_t"],
-                "update_t": wf["update_t"],
-                "last_run_t": wf.get("last_run_t"),
-            })
-        
-        return {
-            "workflows": workflow_list,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-                "total_pages": total_pages
-            }
-        }
+            workflow_list.append(
+                {
+                    "workflow_id": wf["workflow_id"],
+                    "name": wf["name"],
+                    "description": wf.get("description", ""),
+                    "create_t": wf["create_t"],
+                    "update_t": wf["update_t"],
+                    "last_run_t": wf.get("last_run_t"),
+                }
+            )
+
+        return {"workflows": workflow_list, "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages}}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -1950,7 +1930,7 @@ async def api_v1_workflow_update(workflow_id: str, request: Request, user=Depend
     try:
         params = await request.json()
         updates = {}
-        
+
         if "name" in params:
             updates["name"] = params["name"]
         if "description" in params:
@@ -1967,13 +1947,13 @@ async def api_v1_workflow_update(workflow_id: str, request: Request, user=Depend
             updates["extra_info"] = params["extra_info"]
         if "last_run_t" in params:
             updates["last_run_t"] = params["last_run_t"]
-        
+
         # Check if workflow exists first
         existing_workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not existing_workflow:
             logger.warning(f"Workflow {workflow_id} not found for user {user['user_id']}")
             return error_response(f"Workflow {workflow_id} not found", 404)
-        
+
         success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
         if success:
             logger.info(f"Workflow {workflow_id} updated by user {user['user_id']}")
@@ -1992,13 +1972,13 @@ async def api_v1_workflow_copy(workflow_id: str, request: Request, user=Depends(
     try:
         params = await request.json()
         new_workflow_id = params.get("workflow_id")  # Optional: allow frontend to specify new workflow_id
-        
+
         # Get the original workflow
         original_workflow = await task_manager.query_workflow(workflow_id, user_id=None)  # Allow querying any user's workflow for copying
         if not original_workflow:
             logger.warning(f"Workflow {workflow_id} not found for copying")
             return error_response(f"Workflow {workflow_id} not found", 404)
-        
+
         # Create new workflow with copied data
         # Copy all workflow data except workflow_id and user_id
         copied_workflow_id = await task_manager.create_workflow(
@@ -2007,9 +1987,9 @@ async def api_v1_workflow_copy(workflow_id: str, request: Request, user=Depends(
             description=original_workflow.get("description", ""),
             nodes=original_workflow.get("nodes", []),
             connections=original_workflow.get("connections", []),
-            workflow_id=new_workflow_id  # Use provided workflow_id or generate new one
+            workflow_id=new_workflow_id,  # Use provided workflow_id or generate new one
         )
-        
+
         # Copy additional data: history_metadata, chat_history, extra_info
         updates = {}
         if "history_metadata" in original_workflow:
@@ -2020,10 +2000,10 @@ async def api_v1_workflow_copy(workflow_id: str, request: Request, user=Depends(
             updates["extra_info"] = original_workflow["extra_info"]
         if "data_store" in original_workflow:
             updates["data_store"] = original_workflow["data_store"]
-        
+
         if updates:
             await task_manager.update_workflow(copied_workflow_id, updates, user["user_id"])
-        
+
         logger.info(f"Workflow {workflow_id} copied to {copied_workflow_id} by user {user['user_id']}")
         return {"workflow_id": copied_workflow_id, "message": "Workflow copied successfully"}
     except Exception as e:
@@ -2037,15 +2017,16 @@ async def api_v1_workflow_copy(workflow_id: str, request: Request, user=Depends(
 # Workflow Data Management Functions
 # =========================
 
+
 def find_file_path_in_outputs(workflow: dict, file_id: str) -> str | None:
     """从 outputs 中查找文件路径（通过 file_id）"""
     if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
         return None
-    
+
     # 匹配模式：_{file_id}. 或路径以 _{file_id} 结尾
     file_id_pattern = f"_{file_id}."
     file_id_pattern_end = f"_{file_id}"
-    
+
     def check_file_path(file_path) -> str | None:
         """检查 file_path 是否包含指定的 file_id，返回匹配的路径"""
         if isinstance(file_path, list):
@@ -2059,7 +2040,7 @@ def find_file_path_in_outputs(workflow: dict, file_id: str) -> str | None:
             if file_id_pattern in file_path or file_path.endswith(file_id_pattern_end):
                 return file_path
         return None
-    
+
     for node_outputs in workflow["data_store"]["outputs"].values():
         for port_data in node_outputs.values():
             # 检查当前输出
@@ -2068,7 +2049,7 @@ def find_file_path_in_outputs(workflow: dict, file_id: str) -> str | None:
                 matched_path = check_file_path(file_path)
                 if matched_path:
                     return matched_path
-            
+
             # 检查历史记录
             if "history" in port_data:
                 for history_ref in port_data["history"]:
@@ -2077,7 +2058,7 @@ def find_file_path_in_outputs(workflow: dict, file_id: str) -> str | None:
                         matched_path = check_file_path(file_path)
                         if matched_path:
                             return matched_path
-    
+
     return None
 
 
@@ -2085,13 +2066,13 @@ def count_file_references(workflow: dict, file_id: str) -> int:
     """计算文件在 outputs 中的引用次数（通过 file_path 中的 file_id）"""
     if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
         return 0
-    
+
     count = 0
     # 路径格式：workflows/{workflow_id}_{file_id}.{ext}
     # 匹配模式：_{file_id}. 或 _{file_id}（如果路径末尾没有扩展名）
     file_id_pattern = f"_{file_id}."
     file_id_pattern_end = f"_{file_id}"
-    
+
     def check_file_path(file_path):
         """检查 file_path 是否包含指定的 file_id"""
         if isinstance(file_path, list):
@@ -2103,30 +2084,25 @@ def count_file_references(workflow: dict, file_id: str) -> int:
         else:
             # 字符串格式
             return file_id_pattern in file_path or file_path.endswith(file_id_pattern_end)
-    
+
     for node_outputs in workflow["data_store"]["outputs"].values():
         for port_data in node_outputs.values():
             # 检查当前输出
             if "current" in port_data and "file_path" in port_data["current"]:
                 if check_file_path(port_data["current"]["file_path"]):
                     count += 1
-            
+
             # 检查历史记录
             if "history" in port_data:
                 for history_ref in port_data["history"]:
                     if "file_path" in history_ref:
                         if check_file_path(history_ref["file_path"]):
                             count += 1
-    
+
     return count
 
 
-async def cleanup_history_files(
-    history_data_refs: list,
-    workflow_id: str,
-    workflow: dict,
-    data_manager: BaseDataManager
-) -> None:
+async def cleanup_history_files(history_data_refs: list, workflow_id: str, workflow: dict, data_manager: BaseDataManager) -> None:
     """清理历史记录中的文件（仅清理文件类型，URL 类型不需要清理）"""
     for data_ref in history_data_refs:
         # Skip URL type data (task result URLs) - they are just references, not actual files
@@ -2134,7 +2110,7 @@ async def cleanup_history_files(
             continue
         if "file_path" in data_ref:
             file_path = data_ref["file_path"]
-            
+
             # 从路径中提取 file_id 用于计算引用计数
             # 路径格式：workflows/{workflow_id}_{file_id}.{ext}
             # 提取方式：去掉 workflows/ 前缀，然后用 _ 分割，取最后一部分（去掉扩展名）
@@ -2142,7 +2118,7 @@ async def cleanup_history_files(
                 # 提取 file_id: workflows/{workflow_id}_{file_id}.{ext} -> {file_id}.{ext} -> {file_id}
                 file_id_with_ext = file_path.replace(f"workflows/{workflow_id}_", "")
                 file_id = file_id_with_ext.rsplit(".", 1)[0] if "." in file_id_with_ext else file_id_with_ext
-                
+
                 # 计算引用计数（直接从 outputs 计算）
                 # 由于历史记录已经被移除了，所以当前引用计数应该是 0
                 # 但为了安全，我们检查一下
@@ -2156,24 +2132,18 @@ async def cleanup_history_files(
                         logger.error(f"Failed to delete history file {file_path}: {e}")
 
 
-async def cleanup_node_data(
-    workflow_id: str,
-    node_id: str,
-    workflow: dict,
-    data_manager: BaseDataManager,
-    task_manager: BaseTaskManager
-) -> None:
+async def cleanup_node_data(workflow_id: str, node_id: str, workflow: dict, data_manager: BaseDataManager, task_manager: BaseTaskManager) -> None:
     """清理节点删除时的数据，包括文件引用计数和实际文件"""
     if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
         return
-    
+
     node_outputs = workflow["data_store"]["outputs"].get(node_id)
     if not node_outputs:
         return
-    
+
     # 收集所有需要清理的文件路径
     files_to_cleanup = []
-    
+
     for port_id, port_data in node_outputs.items():
         # 清理当前输出
         if "current" in port_data and "file_path" in port_data["current"]:
@@ -2183,7 +2153,7 @@ async def cleanup_node_data(
                 files_to_cleanup.extend(file_path)
             else:
                 files_to_cleanup.append(file_path)
-        
+
         # 清理历史记录
         if "history" in port_data:
             for history_ref in port_data["history"]:
@@ -2194,10 +2164,10 @@ async def cleanup_node_data(
                         files_to_cleanup.extend(file_path)
                     else:
                         files_to_cleanup.append(file_path)
-    
+
     # 删除节点数据（先删除节点数据，再计算引用计数）
     del workflow["data_store"]["outputs"][node_id]
-    
+
     # 计算引用计数并清理文件（直接从 outputs 计算）
     for file_path in files_to_cleanup:
         # 从路径中提取 file_id: workflows/{workflow_id}_{file_id}.{ext}
@@ -2205,10 +2175,10 @@ async def cleanup_node_data(
             # 提取 file_id: workflows/{workflow_id}_{file_id}.{ext} -> {file_id}.{ext} -> {file_id}
             file_id_with_ext = file_path.replace(f"workflows/{workflow_id}_", "")
             file_id = file_id_with_ext.rsplit(".", 1)[0] if "." in file_id_with_ext else file_id_with_ext
-            
+
             # 计算引用计数（节点数据已删除，所以这里计算的是其他节点对该文件的引用）
             ref_count = count_file_references(workflow, file_id)
-            
+
             # 如果引用计数为0，删除文件
             if ref_count == 0:
                 try:
@@ -2216,25 +2186,19 @@ async def cleanup_node_data(
                     logger.info(f"Deleted file {file_path} for node {node_id}")
                 except Exception as e:
                     logger.error(f"Failed to delete file {file_path}: {e}")
-    
+
     # 保存工作流数据（节点数据已在上面删除）
-    await task_manager.update_workflow(workflow_id, {
-        "data_store": workflow["data_store"]
-    }, user_id=None)
+    await task_manager.update_workflow(workflow_id, {"data_store": workflow["data_store"]}, user_id=None)
 
 
-async def cleanup_workflow_files(
-    workflow_id: str,
-    workflow: dict,
-    data_manager: BaseDataManager
-) -> None:
+async def cleanup_workflow_files(workflow_id: str, workflow: dict, data_manager: BaseDataManager) -> None:
     """清理工作流的所有文件"""
     if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
         return
-    
+
     # 收集所有需要清理的文件路径
     files_to_cleanup = set()
-    
+
     for node_outputs in workflow["data_store"]["outputs"].values():
         for port_data in node_outputs.values():
             # 当前输出
@@ -2245,7 +2209,7 @@ async def cleanup_workflow_files(
                     files_to_cleanup.update(file_path)
                 else:
                     files_to_cleanup.add(file_path)
-            
+
             # 历史记录
             if "history" in port_data:
                 for history_ref in port_data["history"]:
@@ -2256,7 +2220,7 @@ async def cleanup_workflow_files(
                             files_to_cleanup.update(file_path)
                         else:
                             files_to_cleanup.add(file_path)
-    
+
     # 删除所有文件（工作流删除时，不需要检查引用计数）
     for file_path in files_to_cleanup:
         try:
@@ -2277,33 +2241,33 @@ async def save_node_output_data_with_rollback(
     data_manager: BaseDataManager,
     task_manager: BaseTaskManager,
     run_id: str | None = None,
-    file_ext: str = ".bin"
+    file_ext: str = ".bin",
 ) -> None:
     """保存节点输出数据，带回滚机制"""
-    
+
     saved_file_id = None
     saved_file_path = None
     old_port_data = None
-    
+
     try:
         # 1. 保存文件（如果是文件类型）
         if file_info and isinstance(output_data, bytes):
             file_id = file_info["file_id"]
-            
+
             # 统一使用 workflows/{workflow_id}_{file_id}.{ext} 格式
             storage_path = f"workflows/{workflow_id}_{file_id}{file_ext}"
-            
+
             # 保存文件
             await data_manager.save_bytes(output_data, storage_path)
             saved_file_id = file_id
             saved_file_path = storage_path
-        
+
         # 2. 备份旧的端口数据（用于回滚）
         if "data_store" in workflow and "outputs" in workflow["data_store"]:
             if node_id in workflow["data_store"]["outputs"]:
                 if port_id in workflow["data_store"]["outputs"][node_id]:
                     old_port_data = copy.deepcopy(workflow["data_store"]["outputs"][node_id][port_id])
-        
+
         # 3. 更新工作流数据（在内存中）
         if "data_store" not in workflow:
             workflow["data_store"] = {}
@@ -2311,23 +2275,20 @@ async def save_node_output_data_with_rollback(
             workflow["data_store"]["outputs"] = {}
         if node_id not in workflow["data_store"]["outputs"]:
             workflow["data_store"]["outputs"][node_id] = {}
-        
+
         # 创建新的 DataReference
         # 判断是否是任务结果 URL（本地路径或 CDN URL）
-        is_task_result_url = isinstance(output_data, str) and (
-            output_data.startswith("./assets/task/result") or 
-            (output_data.startswith("http://") or output_data.startswith("https://"))
-        )
-        
+        is_task_result_url = isinstance(output_data, str) and (output_data.startswith("./assets/task/result") or (output_data.startswith("http://") or output_data.startswith("https://")))
+
         data_ref = {
             "data_id": str(uuid.uuid4()),
             "data_type": "url" if is_task_result_url else ("file" if file_info else ("text" if isinstance(output_data, str) else "json")),
             "metadata": {
                 "created_at": int(time.time()),
-                "run_id": run_id  # Associate with workflow history run_id if provided
-            }
+                "run_id": run_id,  # Associate with workflow history run_id if provided
+            },
         }
-        
+
         if is_task_result_url:
             # Store task result URL directly (local path or CDN URL)
             # For URL type, we don't need file_info - the URL itself is sufficient
@@ -2337,11 +2298,11 @@ async def save_node_output_data_with_rollback(
             # file_path 始终是数组格式（即使是单个文件）
             file_id = file_info["file_id"]
             file_path = f"workflows/{workflow_id}_{file_id}{file_ext}"
-            
+
             # 检查是否已有 file_path（可能是数组），如果是数组，追加；如果是字符串，转为数组
             existing_port_data = workflow.get("data_store", {}).get("outputs", {}).get(node_id, {}).get(port_id, {})
             existing_file_path = existing_port_data.get("current", {}).get("file_path")
-            
+
             if existing_file_path:
                 if isinstance(existing_file_path, list):
                     # 已有数组，追加新路径
@@ -2356,11 +2317,11 @@ async def save_node_output_data_with_rollback(
             data_ref["text_value"] = output_data
         else:
             data_ref["json_value"] = output_data
-        
+
         # 更新端口数据
         max_history = 20
         port_data = workflow["data_store"]["outputs"][node_id].get(port_id)
-        
+
         if not port_data:
             # 首次执行
             port_data = {
@@ -2369,25 +2330,23 @@ async def save_node_output_data_with_rollback(
             }
         else:
             port_data["history"].insert(0, port_data["current"])
-            
+
             if len(port_data["history"]) > max_history:
                 removed_history = port_data["history"][max_history:]
                 await cleanup_history_files(removed_history, workflow_id, workflow, data_manager)
                 port_data["history"] = port_data["history"][:max_history]
-            
+
             port_data["current"] = data_ref
-        
+
         workflow["data_store"]["outputs"][node_id][port_id] = port_data
-        
-        update_data = {
-            "data_store": workflow["data_store"]
-        }
-        
+
+        update_data = {"data_store": workflow["data_store"]}
+
         success = await task_manager.update_workflow(workflow_id, update_data, user_id=None)
-        
+
         if not success:
             raise Exception("Failed to update workflow in database")
-        
+
     except Exception as error:
         logger.error(f"Error saving node output data, rolling back: {error}")
         raise
@@ -2400,10 +2359,10 @@ async def api_v1_workflow_delete(workflow_id: str, request: Request, user=Depend
         success = await task_manager.delete_workflow(workflow_id, user["user_id"])
         if not success:
             return error_response("Failed to delete workflow", 400)
-        
+
         if workflow and "data_store" in workflow and "outputs" in workflow["data_store"]:
             await cleanup_workflow_files(workflow_id, workflow, data_manager)
-        
+
         logger.info(f"Workflow {workflow_id} deleted by user {user['user_id']}")
         return {"message": "Workflow deleted successfully"}
     except Exception as e:
@@ -2412,26 +2371,15 @@ async def api_v1_workflow_delete(workflow_id: str, request: Request, user=Depend
 
 
 @app.delete("/api/v1/workflow/{workflow_id}/node/{node_id}")
-async def api_v1_workflow_delete_node(
-    workflow_id: str,
-    node_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_delete_node(workflow_id: str, node_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         # 获取工作流
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
-        await cleanup_node_data(
-            workflow_id,
-            node_id,
-            workflow,
-            data_manager,
-            task_manager
-        )
-        
+
+        await cleanup_node_data(workflow_id, node_id, workflow, data_manager, task_manager)
+
         logger.info(f"Node {node_id} deleted from workflow {workflow_id}")
         return {"message": "Node deleted successfully"}
     except Exception as e:
@@ -2440,33 +2388,27 @@ async def api_v1_workflow_delete_node(
 
 
 @app.get("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}")
-async def api_v1_workflow_node_output(
-    workflow_id: str,
-    node_id: str,
-    port_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_node_output(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
             return error_response("Node output not found", 404)
-        
+
         node_outputs = workflow["data_store"]["outputs"].get(node_id)
         if not node_outputs:
             return error_response("Node output not found", 404)
-        
+
         port_data = node_outputs.get(port_id)
         if not port_data:
             return error_response("Port output not found", 404)
-        
+
         data_ref = port_data.get("current")
         if not data_ref:
             return error_response("Current output not found", 404)
-        
+
         data_type = data_ref.get("data_type")
         if data_type == "url":
             url_value = data_ref.get("url_value")
@@ -2490,29 +2432,23 @@ async def api_v1_workflow_node_output(
 
 
 @app.get("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/history")
-async def api_v1_workflow_node_output_history(
-    workflow_id: str,
-    node_id: str,
-    port_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_node_output_history(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         if "data_store" not in workflow or "outputs" not in workflow["data_store"]:
             return {"history": []}
-        
+
         node_outputs = workflow["data_store"]["outputs"].get(node_id)
         if not node_outputs:
             return {"history": []}
-        
+
         port_data = node_outputs.get(port_id)
         if not port_data:
             return {"history": []}
-        
+
         return {"history": port_data.get("history", [])}
     except Exception as e:
         traceback.print_exc()
@@ -2520,50 +2456,42 @@ async def api_v1_workflow_node_output_history(
 
 
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/reuse")
-async def api_v1_workflow_node_output_reuse(
-    workflow_id: str,
-    node_id: str,
-    port_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_node_output_reuse(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         params = await request.json()
         history_index = params.get("history_index")
-        
+
         if history_index is None or not isinstance(history_index, int):
             return error_response("history_index is required and must be an integer", 400)
-        
+
         if "data_store" not in workflow:
             workflow["data_store"] = {}
         if "outputs" not in workflow["data_store"]:
             workflow["data_store"]["outputs"] = {}
         if node_id not in workflow["data_store"]["outputs"]:
             return error_response("Node output not found", 404)
-        
+
         node_outputs = workflow["data_store"]["outputs"][node_id]
         if port_id not in node_outputs:
             return error_response("Port output not found", 404)
-        
+
         port_data = node_outputs[port_id]
         history = port_data.get("history", [])
-        
+
         if history_index < 0 or history_index >= len(history):
             return error_response(f"Invalid history_index: {history_index}. History length: {len(history)}", 400)
 
         history_data_ref = history[history_index]
         port_data["current"] = history_data_ref
-        success = await task_manager.update_workflow(workflow_id, {
-            "data_store": workflow["data_store"]
-        }, user["user_id"])
-        
+        success = await task_manager.update_workflow(workflow_id, {"data_store": workflow["data_store"]}, user["user_id"])
+
         if not success:
             return error_response("Failed to update workflow", 400)
-        
+
         logger.info(f"Reused history[{history_index}] for node {node_id}/{port_id} in workflow {workflow_id}")
         return {"message": "History output reused successfully", "data": history_data_ref}
     except Exception as e:
@@ -2572,47 +2500,25 @@ async def api_v1_workflow_node_output_reuse(
 
 
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/upload")
-async def api_v1_workflow_node_output_upload(
-    workflow_id: str,
-    node_id: str,
-    port_id: str,
-    file: UploadFile = File(...),
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_node_output_upload(workflow_id: str, node_id: str, port_id: str, file: UploadFile = File(...), user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         file_content = await file.read()
-        
+
         original_filename = file.filename or "file"
         ext = os.path.splitext(original_filename)[1].lower() or ".bin"
-        
+
         file_id = str(uuid.uuid4())
         file_info = {"file_id": file_id}
-        
-        await save_node_output_data_with_rollback(
-            workflow_id,
-            node_id,
-            port_id,
-            file_content,
-            file_info,
-            workflow,
-            data_manager,
-            task_manager,
-            run_id=None,
-            file_ext=ext
-        )
-        
+
+        await save_node_output_data_with_rollback(workflow_id, node_id, port_id, file_content, file_info, workflow, data_manager, task_manager, run_id=None, file_ext=ext)
+
         logger.info(f"Uploaded file for node {node_id}/{port_id} in workflow {workflow_id}")
         file_path = f"workflows/{workflow_id}_{file_id}{ext}"
-        return {
-            "message": "File uploaded successfully",
-            "file_id": file_id,
-            "file_path": file_path,
-            "file_url": f"/api/v1/workflow/{workflow_id}/file/{file_id}"
-        }
+        return {"message": "File uploaded successfully", "file_id": file_id, "file_path": file_path, "file_url": f"/api/v1/workflow/{workflow_id}/file/{file_id}"}
     except Exception as e:
         error_msg = f"Failed to upload file for {node_id}/{port_id} in workflow {workflow_id}: {str(e)}"
         logger.error(error_msg)
@@ -2621,27 +2527,22 @@ async def api_v1_workflow_node_output_upload(
 
 
 @app.get("/api/v1/workflow/{workflow_id}/file/{file_id}")
-async def api_v1_workflow_file(
-    workflow_id: str,
-    file_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_file(workflow_id: str, file_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         file_path = find_file_path_in_outputs(workflow, file_id)
         if not file_path:
             return error_response("File not found", 404)
-        
+
         try:
             data = await data_manager.load_bytes(file_path)
         except Exception as e:
             logger.error(f"Failed to load file {file_path}: {e}")
             return error_response("File not found", 404)
-        
+
         ext = os.path.splitext(file_path)[1].lower()
         mime_map = {
             ".png": "image/png",
@@ -2655,10 +2556,10 @@ async def api_v1_workflow_file(
             ".wav": "audio/wav",
             ".ogg": "audio/ogg",
             ".txt": "text/plain",
-            ".json": "application/json"
+            ".json": "application/json",
         }
         mime_type = mime_map.get(ext, "application/octet-stream")
-        
+
         headers = {"Cache-Control": "public, max-age=3600"}
         return Response(content=data, media_type=mime_type, headers=headers)
     except Exception as e:
@@ -2667,22 +2568,16 @@ async def api_v1_workflow_file(
 
 
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/save")
-async def api_v1_workflow_node_output_save(
-    workflow_id: str,
-    node_id: str,
-    port_id: str,
-    request: Request,
-    user=Depends(verify_user_access)
-):
+async def api_v1_workflow_node_output_save(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
-        
+
         params = await request.json()
         output_data_raw = params.get("output_data")
         file_info = params.get("file_info")
-        
+
         if output_data_raw is None:
             return error_response("output_data is required", 400)
         output_data: bytes | str | dict
@@ -2705,14 +2600,12 @@ async def api_v1_workflow_node_output_save(
                         "audio/wav": ".wav",
                         "audio/ogg": ".ogg",
                         "text/plain": ".txt",
-                        "application/json": ".json"
+                        "application/json": ".json",
                     }
                     file_ext = ext_map.get(mime_type, ".bin")
                     file_id = str(uuid.uuid4())
-                    
-                    file_info = {
-                        "file_id": file_id
-                    }
+
+                    file_info = {"file_id": file_id}
                 else:
                     mime_type = header.split(":")[1].split(";")[0] if ":" in header else "application/octet-stream"
                     ext_map = {
@@ -2727,12 +2620,10 @@ async def api_v1_workflow_node_output_save(
                         "audio/wav": ".wav",
                         "audio/ogg": ".ogg",
                         "text/plain": ".txt",
-                        "application/json": ".json"
+                        "application/json": ".json",
                     }
                     file_ext = ext_map.get(mime_type, ".bin")
-            elif output_data_raw.startswith("./assets/task/result") or (
-                output_data_raw.startswith("http://") or output_data_raw.startswith("https://")
-            ):
+            elif output_data_raw.startswith("./assets/task/result") or (output_data_raw.startswith("http://") or output_data_raw.startswith("https://")):
                 output_data = output_data_raw
                 file_info = None
             else:
@@ -2741,24 +2632,13 @@ async def api_v1_workflow_node_output_save(
             output_data = output_data_raw
         else:
             return error_response("Invalid output_data format", 400)
-        
+
         run_id = params.get("run_id")
-        
-        await save_node_output_data_with_rollback(
-            workflow_id,
-            node_id,
-            port_id,
-            output_data,
-            file_info,
-            workflow,
-            data_manager,
-            task_manager,
-            run_id=run_id,
-            file_ext=file_ext
-        )
-        
+
+        await save_node_output_data_with_rollback(workflow_id, node_id, port_id, output_data, file_info, workflow, data_manager, task_manager, run_id=run_id, file_ext=file_ext)
+
         logger.info(f"Saved output for node {node_id}/{port_id} in workflow {workflow_id}")
-        
+
         if "data_store" in workflow and "outputs" in workflow["data_store"]:
             if node_id in workflow["data_store"]["outputs"]:
                 if port_id in workflow["data_store"]["outputs"][node_id]:
@@ -2774,13 +2654,9 @@ async def api_v1_workflow_node_output_save(
                         elif isinstance(file_path, str) and file_path.startswith(f"workflows/{workflow_id}_"):
                             file_id_with_ext = file_path.replace(f"workflows/{workflow_id}_", "")
                             file_id = file_id_with_ext.rsplit(".", 1)[0] if "." in file_id_with_ext else file_id_with_ext
-                    
-                    return {
-                        "message": "Node output saved successfully",
-                        "data_id": current_data.get("data_id"),
-                        "file_id": file_id
-                    }
-        
+
+                    return {"message": "Node output saved successfully", "data_id": current_data.get("data_id"), "file_id": file_id}
+
         return {"message": "Node output saved successfully"}
     except Exception as e:
         error_msg = f"Failed to save node output for {node_id}/{port_id} in workflow {workflow_id}: {str(e)}"
@@ -2789,19 +2665,17 @@ async def api_v1_workflow_node_output_save(
         return error_response(error_msg, 500)
 
 
-
-
 @app.get("/api/v1/workflow/list")
 async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access)):
     try:
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         search = request.query_params.get("search", None)
-        
+
         if page < 1 or page_size < 1:
             return error_response("page and page_size must be greater than 0", 400)
         page_size = min(page_size, 100)
-        
+
         kwargs = {
             "user_id": user["user_id"],
             "page": page,
@@ -2809,35 +2683,29 @@ async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access
         }
         if search:
             kwargs["search"] = search
-        
+
         workflows = await task_manager.list_workflows(**kwargs)
-        
+
         count_kwargs = {"user_id": user["user_id"], "count": True}
         if search:
             count_kwargs["search"] = search
         total = await task_manager.list_workflows(**count_kwargs)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-        
+
         workflow_list = []
         for wf in workflows:
-            workflow_list.append({
-                "workflow_id": wf["workflow_id"],
-                "name": wf["name"],
-                "description": wf.get("description", ""),
-                "create_t": wf["create_t"],
-                "update_t": wf["update_t"],
-                "last_run_t": wf.get("last_run_t"),
-            })
-        
-        return {
-            "workflows": workflow_list,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-                "total_pages": total_pages
-            }
-        }
+            workflow_list.append(
+                {
+                    "workflow_id": wf["workflow_id"],
+                    "name": wf["name"],
+                    "description": wf.get("description", ""),
+                    "create_t": wf["create_t"],
+                    "update_t": wf["update_t"],
+                    "last_run_t": wf.get("last_run_t"),
+                }
+            )
+
+        return {"workflows": workflow_list, "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages}}
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -2847,23 +2715,23 @@ async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access
 async def api_v1_workflow_autosave(workflow_id: str, request: Request, user=Depends(verify_user_access)):
     try:
         params = await request.json()
-        
+
         request_workflow_id = params.get("workflow_id")
         if request_workflow_id and request_workflow_id != workflow_id:
             logger.warning(f"Workflow ID mismatch in autosave: URL={workflow_id}, body={request_workflow_id}")
             return error_response(f"Workflow ID mismatch: URL parameter {workflow_id} does not match request body {request_workflow_id}", 400)
-        
+
         updates = {}
-        
+
         if "nodes" in params:
             updates["nodes"] = params["nodes"]
         if "connections" in params:
             updates["connections"] = params["connections"]
-        
+
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response(f"Workflow {workflow_id} not found", 404)
-        
+
         success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
         if success:
             workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
@@ -2873,8 +2741,6 @@ async def api_v1_workflow_autosave(workflow_id: str, request: Request, user=Depe
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
-
-
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

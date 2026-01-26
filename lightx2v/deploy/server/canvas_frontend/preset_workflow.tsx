@@ -116,7 +116,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
     nodes: [
       { id: 'ip-node-url', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "https://github.com/ModelTC/LightX2V/blob/main/README_zh.md" } },
       { id: 'ip-node-image-ref', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/programmer.png'] } },
-      { id: 'ip-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
+      { id: 'ip-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: {
           model: 'doubao-seed-1-6-vision-250815',
           mode: 'custom',
           useSearch: true,
@@ -213,7 +213,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'prod-node-product', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/product_glass.png'] } },
         { id: 'prod-node-text', toolId: 'text-input', x: 50, y: 600, status: NodeStatus.IDLE, data: { value: "" } },
         // AI Chat Planner (Doubao Vision)
-        { id: 'prod-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
+        { id: 'prod-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的虚拟人产品展示创意总监。你的任务是根据输入的人物图片、产品图片和可选的文字描述，生成详细的图生图修改提示词和视频运镜提示词。
@@ -309,7 +309,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       nodes: [
         { id: 'node-img-in', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/girl.jpg'] } },
         { id: 'node-text-in', toolId: 'text-input', x: 50, y: 350, status: NodeStatus.IDLE, data: { value: "女孩改为穿着性感纯欲的睡衣坐在床上，用性感迷人的声音说着勾人的话" } },
-        { id: 'node-logic', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: { 
+        { id: 'node-logic', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的数字人视频创意总监。你的任务是根据输入的人物图片和文字描述，生成同步的数字人视频组件。
@@ -413,16 +413,16 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'node-char-img', toolId: 'image-input', x: 50, y: 500, status: NodeStatus.IDLE, data: { value: ['/assets/princess.png'] } },
         { id: 'node-desc', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主早晨醒来，在温馨的房间里梳妆打扮，然后望向窗外，窗外是很漂亮的阿伦黛尔小镇风光，然后镜头转向远景能够看到艾莎公主在窗边伸了个懒腰" } },
         // Planner node
-        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: { 
+        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的视频故事板规划师。你的任务是根据输入描述和人物图片，将其分解为恰好9个场景（分镜）用于顺序图像生成。
-  
+
   关键：人物和场景一致性对这个故事板至关重要。
-  
+
   重要原则：
   - 生成结果中的所有字段语言必须跟随用户输入的语言。如果用户使用中文输入，所有输出字段（sceneN_prompt、sceneN_video）都必须使用中文；如果用户使用英文输入，则所有输出字段都使用英文。
-  
+
   图生图修改提示词原则（绝对关键）：
   - 强调"改"和"一致性"，不需要描述图片本身的内容
   - Scene 1: 将输入的人物图片中的人物改为描述的场景中的样子，保持人物特征的一致性（面部特征、身材、年龄等）
@@ -432,14 +432,14 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - 描述需要改变的场景、姿势、表情等
   - 强调保持人物特征的一致性（面部特征、身材、年龄、体型等）
   - 不要描述光线、背景细节、氛围等图片细节
-  
+
   人物一致性（绝对关键）：
   - 所有场景中必须出现相同的人物
   - 保持完全相同的人物特征：面部特征（眼睛、鼻子、嘴巴、脸型）、身材、年龄、体型、独特特征
   - 发型一致性：如果人物在任何场景中改变了发型（例如从凌乱到整齐，或改变颜色/样式），后续所有场景都必须保持相同的发型/颜色。一旦发型改变，必须在所有后续场景中保持一致。
   - 服装一致性：如果人物在任何场景中改变了服装（例如从睡衣到礼服，或从休闲到正式），后续所有场景都必须保持相同的服装。一旦服装改变，必须在所有后续场景中保持一致。在改变后的场景提示词中明确说明"人物穿着与场景N相同的服装"。
   - 人物的外观、年龄、体型和视觉风格必须在所有场景中保持完全相同
-  
+
   场景一致性（绝对关键）：
   - 如果场景发生在同一地点（例如同一房间、同一户外区域），保持完全相同的背景元素、家具、道具、装饰、光线方向和空间布局
   - 如果两个连续场景在同一地点，描述完全相同的背景元素、家具布置和道具，避免视觉不一致
@@ -447,24 +447,24 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - 保持一致的光线方向、强度和配色方案在整个故事板中
   - 确保背景元素和设置在场景之间自然流动
   - 保持空间关系和视觉连续性
-  
+
   图像生成方法：
   - Scene 1: 基于人物图片生成（建立人物的外观和第一个场景）
   - Scene 2: 基于Scene 1图片 + 人物图片生成（保持前一场景的连续性，同时保持人物身份）
   - Scene 3: 基于Scene 2图片 + 人物图片生成
   - 以此类推... 每个场景使用前一场景图片 + 人物图片以保持连续性和人物一致性
-  
+
   视频生成：
   - 每个场景将使用图生视频（i2v）生成
   - sceneN_video应该描述该场景的运动/相机运动
-  
+
   对于每个场景，输出：
   - sceneN_prompt: 强调"改"和"一致性"的图生图修改提示词，明确说明如何修改输入图片（Scene 1）或前一场景图片（Scene 2+）中的人物，保持人物一致性（特别是服装/发型如果改变 - 明确说明是否穿着与前一场景相同的服装/发型）和场景一致性（如果在同一地点 - 说明保持相同的背景元素）
   - sceneN_video: 描述相机运动和动作的视频运动提示词
-  
+
   输出格式：JSON，包含以下字段：
   - scene1_prompt, scene1_video
-  - scene2_prompt, scene2_video  
+  - scene2_prompt, scene2_video
   - scene3_prompt, scene3_video
   - scene4_prompt, scene4_video
   - scene5_prompt, scene5_video
@@ -472,7 +472,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - scene7_prompt, scene7_video
   - scene8_prompt, scene8_video
   - scene9_prompt, scene9_video
-  
+
   重要：在每个提示词中，明确保持一致性：
   - 如果人物在场景N改变了服装，在scene(N+1)_prompt、scene(N+2)_prompt等中说明"人物穿着与场景N相同的[服装描述]"
   - 如果人物在场景N改变了发型，在后续提示词中说明"人物保持与场景N相同的发型/发色"
@@ -591,23 +591,23 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'node-audio-in', toolId: 'audio-input', x: 50, y: 700, status: NodeStatus.IDLE, data: { value: '/assets/let_it_go_part.wav' } },
         { id: 'node-text-in', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主正在演唱《Let It Go》，动作优雅，表情充满自信和力量" } },
         // AI Chat Planner (Doubao Vision)
-        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
+        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的音乐视频多机位导演。你的任务是根据输入的角色图片和可选的文字描述，为演唱表演生成9个不同机位的详细描述。
-  
+
   关键：人物一致性至关重要。相同的人物必须在所有机位中出现，具有完全相同的面部特征、身材、服装和外观。
-  
+
   重要原则：
   - 生成结果中的所有字段语言必须跟随用户输入的语言。如果用户使用中文输入，所有输出字段（shotN_image_prompt、shotN_video_prompt）都必须使用中文；如果用户使用英文输入，则所有输出字段都使用英文。
-  
+
   图生图修改提示词原则（绝对关键）：
   - 强调"改"和"一致性"，不需要描述图片本身的内容
   - 明确说明如何修改输入图片中的人物：例如"将输入图片中的人物改为特写角度，保持人物特征的一致性（面部特征、身材、服装等）"
   - 描述需要改变的机位、角度、构图、姿势等
   - 强调保持人物特征的一致性（面部特征、身材、服装、外观等）
   - 不要描述光线、背景细节、氛围等图片细节
-  
+
   生成9个不同的机位：
   1. Shot 1 - 特写: 以脸部为主的镜头，展示详细的面部表情、情感和口型同步
   2. Shot 2 - 中景: 上半身镜头，展示头部、肩膀和一些手臂动作。图生图提示词应强调人物的上半身姿势、手势和动态的手臂动作，匹配演唱表演。包括人物上半身服装的细节、肩膀位置以及手臂如何构成画面。
@@ -618,11 +618,11 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   7. Shot 7 - 极大景: 极宽镜头，在广阔环境中展示人物，强调规模和氛围
   8. Shot 8 - 过肩: 过肩镜头，从背后展示人物，营造亲密感
   9. Shot 9 - 极特写: 极特写，聚焦眼睛、嘴巴或特定面部特征
-  
+
   对于每个机位，生成：
   - shotN_image_prompt: 强调"改"和"一致性"的图生图修改提示词。明确说明如何将输入图片中的人物改为该特定机位和构图，保持完全相同的人物一致性（相同的面部、服装、外观）。描述需要改变的机位角度、构图、姿势/表情。对于机位2、3和6，提供特别详细的身体位置、姿势和空间构图描述。
   - shotN_video_prompt: 对于机位1、2、5、6、9（数字人机位）：详细的数字人视频动作描述，包括演唱手势、头部动作、肢体语言、面部表情和与歌曲节奏和能量匹配的动作。对于机位3、4、7、8（图生视频机位）：详细的视频运动描述，包括相机运动技巧（推、拉、摇、移、跟、缩放等）、转场效果和场景动态，以创建机位之间的平滑过渡并与歌曲的节奏和能量匹配。运动描述应专注于相机运动和视觉转场，以在不同机位角度之间创建无缝连接。
-  
+
   输出格式：JSON，包含以下字段：
   - shot1_image_prompt, shot1_video_prompt
   - shot2_image_prompt, shot2_video_prompt
@@ -633,8 +633,8 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - shot7_image_prompt, shot7_video_prompt
   - shot8_image_prompt, shot8_video_prompt
   - shot9_image_prompt, shot9_video_prompt
-  
-  重要： 
+
+  重要：
   - 在所有机位中保持完全相同的人物一致性（相同的面部、服装、外观）
   - 每个机位应该有独特的相机角度和构图
   - 对于数字人机位（1、2、5、6、9）：视频提示词应描述自然的演唱动作和表情
@@ -711,7 +711,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'chibi-node-person', toolId: 'image-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: [] } },
         { id: 'chibi-node-doll-ref', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/doll.jpg'] } },
         { id: 'chibi-node-input', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "角色说的话和角色背景描述" } },
-        { id: 'chibi-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
+        { id: 'chibi-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的Q版数字人视频创意总监。你的任务是根据输入的人物图片和用户描述（角色说的话和角色背景），生成完整的Q版数字人视频组件。
@@ -810,11 +810,11 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       ],
       nodes: [
         { id: 'oner-node-desc', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市的宏大全景，从高空俯瞰整座城市，镜头逐渐下降穿过云雾，掠过摩天大楼的玻璃幕墙，最终聚焦到繁华街道上的人群和霓虹灯" } },
-        { id: 'oner-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: { 
+        { id: 'oner-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
             model: 'deepseek-v3-2-251201',
             mode: 'custom',
             customInstruction: `你是一位专业的电影级视频分镜设计师。你的任务是根据用户的场景描述，设计一个"一镜到底"的连续运镜视频。
-  
+
   重要原则：
   - 生成结果中的所有字段语言必须跟随用户输入的语言。如果用户使用中文输入，所有输出字段（shotN_image_prompt、shotN_video_motion）都必须使用中文；如果用户使用英文输入，则所有输出字段都使用英文。
   - 这是"一镜到底"视频，所有镜头必须形成连续、流畅的视觉过渡
@@ -823,7 +823,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - 保持场景一致性和视觉连贯性（同一场景的不同视角）
   - 每个分镜的视觉风格、色调、氛围必须统一
   - 镜头运动要流畅自然，前后分镜要有逻辑连接
-  
+
   图生图修改提示词原则（对于分镜2-5）：
   - 强调"改"和"一致性"，不需要描述图片本身的内容
   - Shot 1: 使用文生图，详细描述画面内容、构图、光线、氛围
@@ -831,19 +831,19 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - 描述需要改变的构图、视角、镜头位置等
   - 强调保持场景元素的一致性（如果是同一个场景，要说明"保持与前一分镜相同的场景元素"）
   - 不要重复描述光线、背景细节、氛围等图片细节
-  
+
   输出要求：
   - 生成5个分镜，每个分镜包含：
     - shotN_image_prompt: Shot 1使用文生图提示词，详细描述画面内容、构图（构图规则，如三分法、对称等）、光线（自然光、人工光、色调、明暗对比）、氛围和情绪。Shot 2-5使用强调"改"和"一致性"的图生图修改提示词，明确说明如何修改前一张分镜图片，保持场景元素的连贯性。
     - shotN_video_motion: 详细的视频运动提示词，描述该分镜的相机运动、运镜方式、运动方向、速度
-  
+
   分镜设计思路（参考）：
   - 分镜1: 极远景/全景 - 建立宏大场景，可能是高空俯瞰或全景展示（文生图）
   - 分镜2: 中景/推拉 - 镜头逐渐接近，或从一侧移动到另一侧（图生图：基于分镜1）
   - 分镜3: 中景/跟随/环绕 - 镜头运动，展现场景的深度和细节（图生图：基于分镜2）
   - 分镜4: 近景/特写 - 聚焦到场景中的关键元素或细节（图生图：基于分镜3）
   - 分镜5: 全景/极远景收尾 - 回到宏大的视角，形成视觉闭环（图生图：基于分镜4）
-  
+
   每个video_motion应该（关键：这是首尾帧生视频，强调从当前镜头到下一个镜头的运镜切换）：
   - 使用电影式运镜语言，描述从当前分镜（首帧）到下一个分镜（尾帧）的相机运动
   - 重点描述运镜切换：如何从当前镜头的构图、角度、位置，通过相机运动过渡到下一个镜头的构图、角度、位置
@@ -860,7 +860,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
   - 描述运动轨迹和路径（直线、弧线、曲线等）
   - 强调视觉连贯性：确保从首帧到尾帧的过渡自然流畅，形成"一镜到底"的连续感
   - 对于最后一个分镜（shot5），可以描述一个收尾性的运镜，如缓慢拉远或环绕收尾
-  
+
   输出JSON格式，包含以下字段：
   - shot1_image_prompt, shot1_video_motion
   - shot2_image_prompt, shot2_video_motion
@@ -916,13 +916,13 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         ],
         nodes: [
           { id: 'node-input', toolId: 'text-input', x: 50, y: 300, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市，从白天逐渐过渡到雨夜。" } },
-          { id: 'node-planner', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: { 
+          { id: 'node-planner', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: {
               model: 'deepseek-v3-2-251201',
               mode: 'custom',
               customInstruction: `You are a video planning assistant. Analyze the input description and generate detailed prompts for the start frame, end frame, and video motion.
-  
+
   IMPORTANT: All output fields must use the same language as the user's input. If the user inputs in Chinese, all output fields (start_img_prompt, end_img_prompt, video_motion_prompt) must be in Chinese. If the user inputs in English, all output fields must be in English.
-  
+
   Generate:
   - start_img_prompt: Detailed prompt for the initial image
   - end_img_prompt: Detailed prompt for the target image, based on the start
@@ -962,15 +962,15 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         ],
         nodes: [
           { id: 'node-prompt', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "一只哈士奇程序员狗，戴着耳机和工卡在办公，吐槽自己的程序员日常。用一些网络热梗。" } },
-          { id: 'node-chat', toolId: 'text-generation', x: 450, y: 200, status: NodeStatus.IDLE, data: { 
+          { id: 'node-chat', toolId: 'text-generation', x: 450, y: 200, status: NodeStatus.IDLE, data: {
               model: 'deepseek-v3-2-251201',
               mode: 'custom',
               customInstruction: `你是一位专业的数字人视频脚本编写者。你的任务是根据用户的输入描述，为数字人视频创建完整的脚本包。
-    
+
     重要提示：
     - 生成结果中的所有字段语言必须跟随用户输入的语言。如果用户使用中文输入，所有输出字段（speech_text、tone、image_prompt、avatar_video_prompt）都必须使用中文；如果用户使用英文输入，则所有输出字段都使用英文。
     - 生成高质量、自然且引人入胜的数字人视频内容。
-    
+
     对于 speech_text（语音文本）：
     - 编写自然、对话式的脚本，听起来真实可信
     - 保持简洁（正常语速下约20-40秒）
@@ -979,21 +979,21 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
     - 重要：不要在语音文本中使用括号、方括号或任何标记来表示语气或情感
     - 所有语气、情感和声音指令都应放在 'tone' 字段中，而不是 speech_text 中
     - 编写纯对话文本，不包含任何舞台指示或语气标记
-    
+
     对于 tone（语调指令）：
     - 提供详细的配音指导，捕捉角色的个性
     - 包含情感提示、节奏、重音点和声音特征
     - 描述声音应该听起来如何（例如：温暖、权威、友好、严肃）
     - 包含语气应该转换或强调某些词语/短语的具体时刻
     - 使其对TTS系统具有可操作性，以产生自然的声音
-    
+
     对于 image_prompt（肖像提示）：
     - 创建与描述角色匹配的详细肖像描述
     - 包含面部特征、年龄、表情、服装、背景、光线
     - 确保描述适合肖像图像生成
     - 匹配用户输入中角色的个性和风格
     - 包含将使头像看起来专业且引人入胜的视觉细节
-    
+
     对于 avatar_video_prompt（数字人视频动作提示）：
     - 描述自然、真实的说话手势和动作
     - 包含头部动作（点头、倾斜、轻微转动）
@@ -1002,7 +1002,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
     - 指定眼神接触和视线方向
     - 确保动作与语音节奏同步
     - 足够详细，以指导数字人视频生成自然、逼真的效果
-    
+
     以JSON格式输出所有四个字段。`,
               customOutputs: [
                 { id: 'speech_text', label: '语音脚本', description: '人物对听众说的话。' },
@@ -1025,7 +1025,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
 export function getPresetWorkflows(): WorkflowState[] {
   // 使用统一的 getAccessToken 函数获取 token（已考虑用户登录状态）
   const token = getAccessToken();
-  
+
   // 返回更新了 token 的预设工作流副本
   return PRESET_WORKFLOWS.map(workflow => ({
     ...workflow,

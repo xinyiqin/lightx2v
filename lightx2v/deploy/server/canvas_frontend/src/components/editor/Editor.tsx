@@ -463,4 +463,3 @@ export const Editor: React.FC<EditorProps> = ({
     </div>
   );
 };
-

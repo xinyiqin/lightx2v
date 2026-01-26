@@ -75,5 +75,3 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({ error, lang, onClose }) 
     </div>
   );
 };
-
-

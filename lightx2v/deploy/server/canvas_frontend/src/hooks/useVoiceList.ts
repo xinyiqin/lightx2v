@@ -14,7 +14,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
   const [voiceSearchQuery, setVoiceSearchQuery] = useState('');
   const [showVoiceFilter, setShowVoiceFilter] = useState(false);
   const [voiceFilterGender, setVoiceFilterGender] = useState<string>('all');
-  
+
   const [cloneVoiceList, setCloneVoiceList] = useState<any[]>([]);
   const [loadingCloneVoiceList, setLoadingCloneVoiceList] = useState(false);
   const cloneVoiceListLoadedRef = useRef<string>('');
@@ -27,27 +27,27 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
   // Filter voices based on search and filters
   const filteredVoices = useMemo(() => {
     if (!lightX2VVoiceList?.voices) return [];
-    
+
     let filtered = lightX2VVoiceList.voices;
-    
+
     // Filter by search query
     if (voiceSearchQuery.trim()) {
       const query = voiceSearchQuery.toLowerCase();
-      filtered = filtered.filter((voice: any) => 
+      filtered = filtered.filter((voice: any) =>
         (voice.name || voice.voice_name || voice.voice_type || '').toLowerCase().includes(query) ||
         (voice.voice_type || '').toLowerCase().includes(query)
       );
     }
-    
+
     // Filter by gender
     if (voiceFilterGender !== 'all') {
-      filtered = filtered.filter((voice: any) => 
-        voice.gender === voiceFilterGender || 
+      filtered = filtered.filter((voice: any) =>
+        voice.gender === voiceFilterGender ||
         (voiceFilterGender === 'female' && isFemaleVoice(voice.voice_type)) ||
         (voiceFilterGender === 'male' && !isFemaleVoice(voice.voice_type))
       );
     }
-    
+
     return filtered;
   }, [lightX2VVoiceList, voiceSearchQuery, voiceFilterGender, isFemaleVoice]);
 
@@ -57,7 +57,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
       if (!selectedNodeId || !workflow) return;
       const node = workflow.nodes.find(n => n.id === selectedNodeId);
       if (!node || node.toolId !== 'tts') return;
-      
+
       // Only load voice list if model is lightx2v
       const isLightX2V = node.data.model === 'lightx2v' || node.data.model?.startsWith('lightx2v');
       if (!isLightX2V) {
@@ -69,22 +69,22 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
         voiceListLoadedRef.current = '';
         return;
       }
-      
+
       // Get config from env vars or apiClient
       const config = getLightX2VConfig(workflow);
-      
+
       // Check if we have required config
       // When using apiClient, url can be empty (relative path) and token can be empty (uses main app's JWT)
       const apiClient = (window as any).__API_CLIENT__;
       const hasApiClient = !!apiClient;
-      
+
       // If not using apiClient, we need both url and token
       // If using apiClient, we can proceed with empty url (relative path)
       if (!hasApiClient && (!config.url || !config.token)) {
         console.warn('[LightX2V] Missing URL or token for voice list');
         return;
       }
-      
+
       // If using apiClient but no url, that's fine (will use relative path)
       // But we still need to check if we have a way to authenticate
       if (hasApiClient && !config.url && !config.token) {
@@ -94,7 +94,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
 
       // Create a key to track if we've loaded for this URL+token combination
       const loadKey = `${config.url}:${config.token}`;
-      
+
       // Don't reload if already loaded for this combination and not currently loading
       if (voiceListLoadedRef.current === loadKey && !loadingVoiceList && voiceListLoadedRef.current !== '') return;
 
@@ -126,14 +126,14 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
         cloneVoiceListLoadedRef.current = '';
         return;
       }
-      
+
       const config = getLightX2VConfig(workflow);
-      
+
       // Check if we have required config
       // When using apiClient, url can be empty (relative path) and token can be empty (uses main app's JWT)
       const apiClient = (window as any).__API_CLIENT__;
       const hasApiClient = !!apiClient;
-      
+
       // If not using apiClient, we need both url and token
       // If using apiClient, we can proceed with empty url (relative path)
       if (!hasApiClient && (!config.url || !config.token)) {
@@ -188,5 +188,3 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
     }, [])
   };
 };
-
-

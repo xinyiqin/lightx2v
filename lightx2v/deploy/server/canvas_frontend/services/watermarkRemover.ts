@@ -126,10 +126,10 @@ async function loadWatermarkBackground(size: 48 | 96): Promise<ImageData> {
   const img = new Image();
   // 获取资源基础路径，确保在 qiankun 环境中路径正确
   const basePath = (window as any).__ASSET_BASE_PATH__ || '/canvas';
-  const bgPath = size === 48 
-    ? `${basePath}/assets/bg_48.png` 
+  const bgPath = size === 48
+    ? `${basePath}/assets/bg_48.png`
     : `${basePath}/assets/bg_96.png`;
-  
+
   return new Promise((resolve, reject) => {
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -157,7 +157,7 @@ async function loadWatermarkBackground(size: 48 | 96): Promise<ImageData> {
 export const removeGeminiWatermark = async (imageInput: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    
+
     img.onload = async () => {
       try {
         // Create canvas to process image
@@ -207,4 +207,3 @@ export const removeGeminiWatermark = async (imageInput: string): Promise<string>
     img.src = imageSrc;
   });
 };
-

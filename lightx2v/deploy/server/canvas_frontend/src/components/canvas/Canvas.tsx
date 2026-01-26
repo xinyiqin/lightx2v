@@ -252,4 +252,3 @@ export const Canvas: React.FC<CanvasProps> = ({
     </main>
   );
 };
-

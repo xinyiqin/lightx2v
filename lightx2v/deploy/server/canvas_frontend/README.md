@@ -48,7 +48,7 @@
 
 ### 环境要求
 
-- Node.js 18+ 
+- Node.js 18+
 - npm 或 yarn
 
 ### 安装步骤

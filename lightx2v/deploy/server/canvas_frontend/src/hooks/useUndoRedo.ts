@@ -59,19 +59,19 @@ export const useUndoRedo = ({
         // Exclude: isDirty, isRunning, history, updatedAt
       };
     };
-    
+
     const normalizedWorkflow = normalizeWorkflow(workflow);
     const workflowStr = JSON.stringify(normalizedWorkflow);
     const lastWorkflowStr = lastWorkflowRef.current ? JSON.stringify(normalizeWorkflow(lastWorkflowRef.current)) : null;
-    
+
     // Check if this is a new workflow (ID changed or history is empty)
     setHistory(prev => {
       const isNewWorkflow = prev.length === 0 || (prev.length > 0 && prev[0].id !== workflow.id);
-      
+
       // If new workflow or workflow structure changed, update history
       if (isNewWorkflow || workflowStr !== lastWorkflowStr) {
         const newState = JSON.parse(JSON.stringify(workflow)) as WorkflowState;
-        
+
         if (isNewWorkflow) {
           // Initialize history with current state as the first entry
           setHistoryIndex(0);
@@ -83,7 +83,7 @@ export const useUndoRedo = ({
           const currentIndex = historyIndexRef.current;
           const newHistory = prev.slice(0, currentIndex + 1);
           const updatedHistory = [...newHistory, newState];
-          
+
           // Limit history size
           if (updatedHistory.length > maxHistorySize) {
             const trimmed = updatedHistory.slice(-maxHistorySize);
@@ -92,7 +92,7 @@ export const useUndoRedo = ({
             lastWorkflowRef.current = workflow;
             return trimmed;
           }
-          
+
           const newIndex = newHistory.length;
           setHistoryIndex(newIndex);
           historyIndexRef.current = newIndex;
@@ -100,7 +100,7 @@ export const useUndoRedo = ({
           return updatedHistory;
         }
       }
-      
+
       // No change, return previous history
       return prev;
     });
@@ -111,7 +111,7 @@ export const useUndoRedo = ({
 
   const undo = useCallback(() => {
     if (!canUndo || history.length === 0) return;
-    
+
     isUndoRedoRef.current = true;
     const newIndex = historyIndex - 1;
     setHistoryIndex(newIndex);
@@ -121,7 +121,7 @@ export const useUndoRedo = ({
 
   const redo = useCallback(() => {
     if (!canRedo || history.length === 0) return;
-    
+
     isUndoRedoRef.current = true;
     const newIndex = historyIndex + 1;
     setHistoryIndex(newIndex);
@@ -138,7 +138,7 @@ export const useUndoRedo = ({
   const undoToIndex = useCallback((targetIndex: number) => {
     if (targetIndex < 0 || targetIndex >= history.length) return;
     if (targetIndex === historyIndexRef.current) return;
-    
+
     isUndoRedoRef.current = true;
     setHistoryIndex(targetIndex);
     historyIndexRef.current = targetIndex;

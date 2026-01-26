@@ -82,5 +82,3 @@ export const ValidationModal: React.FC<ValidationModalProps> = ({
     </div>
   );
 };
-
-

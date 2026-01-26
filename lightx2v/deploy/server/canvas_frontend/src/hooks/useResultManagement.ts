@@ -37,7 +37,7 @@ export const useResultManagement = ({
     if (!node) return null;
     const tool = TOOLS.find(t => t.id === node.toolId);
     let content = outputs[node.id];
-    
+
     // Handle reference types (from optimized history outputs)
     if (content && typeof content === 'object' && content.type === 'reference' && content.data_id) {
       // This is a reference, we need to load the actual data
@@ -55,7 +55,7 @@ export const useResultManagement = ({
       // JSON with data_id - use the JSON data directly
       content = content.data;
     }
-    
+
     if (!content && tool?.category === 'Input') {
       content = node.data.value;
     }
@@ -74,7 +74,7 @@ export const useResultManagement = ({
     const sourceRun = selectedRunId ? workflow.history.find(r => r.id === selectedRunId) : null;
     const data = sourceRun ? sourceRun.outputs : activeOutputs;
     const nodes = sourceRun ? sourceRun.nodesSnapshot : workflow.nodes;
-    
+
     return nodes.filter(n => {
       if (n.status === NodeStatus.ERROR) return true;
       if (!data[n.id]) {
@@ -93,9 +93,9 @@ export const useResultManagement = ({
 
   const handleManualResultEdit = useCallback(() => {
     if (!expandedResultData || !expandedOutput) return;
-    
+
     let finalValue: any = tempEditValue;
-    
+
     // Try to parse JSON if editing the entire object and it looks like JSON
     if (!expandedOutput.fieldId && (tempEditValue.trim().startsWith('{') || tempEditValue.trim().startsWith('['))) {
       try {
@@ -122,7 +122,7 @@ export const useResultManagement = ({
         [nodeId]: newNodeOutput
       };
     });
-    
+
     setWorkflow(prev => prev ? ({
       ...prev,
       isDirty: true,

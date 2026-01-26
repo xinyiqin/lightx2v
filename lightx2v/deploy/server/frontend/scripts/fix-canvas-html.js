@@ -17,7 +17,7 @@ const canvasHtmlPath = join(__dirname, '../public/canvas/index.html');
 try {
   let html = readFileSync(canvasHtmlPath, 'utf-8');
   let modified = false;
-  
+
   // 查找包含 import() 的脚本标签，修复路径和添加 type="module"
   let modifiedHtml = html.replace(
     /<script([^>]*?)>([\s\S]*?import\([^)]+\)[\s\S]*?)<\/script>/g,
@@ -34,7 +34,7 @@ try {
           return match;
         }
       );
-      
+
       // 如果已经有 type="module"，只修复路径
       if (attrs.includes('type="module"') || attrs.includes("type='module'")) {
         if (content !== fixedContent) {
@@ -48,7 +48,7 @@ try {
       return `<script type="module"${attrs}>${fixedContent}</script>`;
     }
   );
-  
+
   if (modified) {
     writeFileSync(canvasHtmlPath, modifiedHtml, 'utf-8');
     console.log('✅ 已修复 Canvas HTML 文件：添加 type="module" 并修复资源路径');
@@ -59,4 +59,3 @@ try {
   console.error('❌ 修复 HTML 文件失败:', error.message);
   process.exit(1);
 }
-

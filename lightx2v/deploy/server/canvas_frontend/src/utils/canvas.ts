@@ -46,4 +46,3 @@ export const calculateConnectionPath = (
 ): string => {
   return `M ${x1} ${y1} C ${x1 + 100} ${y1}, ${x2 - 100} ${y2}, ${x2} ${y2}`;
 };
-

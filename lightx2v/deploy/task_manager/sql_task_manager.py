@@ -24,8 +24,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.pool = None
         self.metrics_monitor = metrics_monitor
         self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t"]
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles",
-                         "nodes", "connections", "history_metadata", "data_store", "chat_history"]
+        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "history_metadata", "data_store", "chat_history"]
 
     async def init(self):
         await self.upgrade_db()
@@ -278,7 +277,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
             async with conn.transaction(isolation="read_uncommitted"):
                 # create workflows table with data_store and chat_history (merged v5 and v6)
                 default_data_store = '{"outputs": {}}'
-                await conn.execute(f"""
+                await conn.execute(
+                    f"""
                     CREATE TABLE IF NOT EXISTS {self.table_workflows} (
                         workflow_id VARCHAR(128) PRIMARY KEY,
                         user_id VARCHAR(256) NOT NULL,
@@ -295,7 +295,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         chat_history JSONB DEFAULT '[]'::jsonb,
                         FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
                     )
-                """, default_data_store)
+                """,
+                    default_data_store,
+                )
                 # create indexes
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_user_id ON {self.table_workflows}(user_id)")
                 await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_update_t ON {self.table_workflows}(update_t)")
@@ -1299,7 +1301,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 set_clauses = []
                 update_params = []
                 param_idx = 1
-                
+
                 for key, value in updates.items():
                     if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
                         # JSON fields
@@ -1328,14 +1330,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 where_clause = f"workflow_id = ${param_idx}"
                 where_params.append(workflow_id)
                 param_idx += 1
-                
+
                 if user_id is not None:
                     where_clause += f" AND user_id = ${param_idx}"
                     where_params.append(user_id)
                     param_idx += 1
-                
+
                 all_params = update_params + where_params
-                
+
                 query = f"UPDATE {self.table_workflows} SET {', '.join(set_clauses)} WHERE {where_clause}"
                 ret = await conn.execute(query, *all_params)
 
@@ -1386,19 +1388,19 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     conds.append(f"user_id = ${param_idx}")
                     params.append(kwargs["user_id"])
                     param_idx += 1
-                
+
                 if "search" in kwargs:
                     search_term = kwargs["search"]
                     conds.append(f"(LOWER(name) LIKE ${param_idx} OR LOWER(description) LIKE ${param_idx + 1})")
                     params.extend([f"%{search_term.lower()}%", f"%{search_term.lower()}%"])
                     param_idx += 2
-                
+
                 query += self.table_workflows + " WHERE " + " AND ".join(conds)
-                
+
                 if not count:
                     sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
                     query += f" ORDER BY {sort_key} DESC"
-                    
+
                     # Pagination
                     page = kwargs.get("page", 1)
                     page_size = kwargs.get("page_size", 10)
@@ -1412,15 +1414,15 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         query += f" LIMIT ${param_idx}"
                         params.append(page_size)
                     param_idx += 1
-                    
+
                     if offset > 0:
                         query += f" OFFSET ${param_idx}"
                         params.append(offset)
-                
+
                 rows = await conn.fetch(query, *params)
                 if count:
                     return rows[0]["count"]
-                
+
                 workflows = []
                 for row in rows:
                     workflow = dict(row)

@@ -172,5 +172,3 @@ export const CloneVoiceModal: React.FC<CloneVoiceModalProps> = ({
     </div>
   );
 };
-
-

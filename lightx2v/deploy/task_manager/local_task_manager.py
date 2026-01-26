@@ -3,6 +3,7 @@ import json
 import os
 
 from loguru import logger
+
 from lightx2v.deploy.common.utils import class_try_catch_async, current_time, str2time, time2str
 from lightx2v.deploy.task_manager import ActiveStatus, BaseTaskManager, FinishedStatus, TaskStatus
 
@@ -513,7 +514,7 @@ class LocalTaskManager(BaseTaskManager):
         workflow = self.load_workflow(workflow_id, user_id)
         if not workflow:
             return False
-        
+
         for key, value in updates.items():
             if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
                 workflow[key] = value
@@ -521,7 +522,7 @@ class LocalTaskManager(BaseTaskManager):
                 workflow[key] = value
             elif key == "last_run_t":
                 workflow["last_run_t"] = value
-        
+
         workflow["update_t"] = current_time()
         self.save_workflow(workflow)
         return True
@@ -552,31 +553,30 @@ class LocalTaskManager(BaseTaskManager):
             fpath = os.path.join(self.local_dir, f)
             workflow = json.load(open(fpath))
             self.parse_dict(workflow)
-            
+
             # Filter by user_id
             if "user_id" in kwargs and workflow["user_id"] != kwargs["user_id"]:
                 continue
-            
+
             # Filter by search (name or description)
             if "search" in kwargs:
                 search_term = kwargs["search"].lower()
-                if search_term not in workflow.get("name", "").lower() and \
-                   search_term not in workflow.get("description", "").lower():
+                if search_term not in workflow.get("name", "").lower() and search_term not in workflow.get("description", "").lower():
                     continue
-            
+
             # Filter deleted
             if not kwargs.get("include_delete", False) and workflow.get("tag", "") == "delete":
                 continue
-            
+
             workflows.append(workflow)
-        
+
         if "count" in kwargs:
             return len(workflows)
-        
+
         # Sort
         sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
         workflows = sorted(workflows, key=lambda x: x.get(sort_key, 0), reverse=True)
-        
+
         # Pagination
         page = kwargs.get("page", 1)
         page_size = kwargs.get("page_size", 10)
@@ -584,10 +584,10 @@ class LocalTaskManager(BaseTaskManager):
         if "offset" in kwargs:
             offset = kwargs["offset"]
         if "limit" in kwargs:
-            workflows = workflows[offset:offset + kwargs["limit"]]
+            workflows = workflows[offset : offset + kwargs["limit"]]
         else:
-            workflows = workflows[offset:offset + page_size]
-        
+            workflows = workflows[offset : offset + page_size]
+
         return workflows
 
 

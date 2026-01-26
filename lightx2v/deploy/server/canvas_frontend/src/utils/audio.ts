@@ -9,7 +9,7 @@ export const pcmToWavUrl = (base64Pcm: string, sampleRate = 24000): string => {
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-    
+
     const wavHeader = new ArrayBuffer(44);
     const view = new DataView(wavHeader);
     const writeString = (offset: number, string: string) => {
@@ -17,7 +17,7 @@ export const pcmToWavUrl = (base64Pcm: string, sampleRate = 24000): string => {
         view.setUint8(offset + i, string.charCodeAt(i));
       }
     };
-    
+
     writeString(0, 'RIFF');
     view.setUint32(4, 32 + len, true);
     writeString(8, 'WAVE');
@@ -31,12 +31,10 @@ export const pcmToWavUrl = (base64Pcm: string, sampleRate = 24000): string => {
     view.setUint16(34, 16, true);
     writeString(36, 'data');
     view.setUint32(40, len, true);
-    
+
     const blob = new Blob([wavHeader, bytes], { type: 'audio/wav' });
     return URL.createObjectURL(blob);
   } catch (e) {
     return "";
   }
 };
-
-

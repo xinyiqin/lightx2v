@@ -48,7 +48,7 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-  
+
   // 位置和大小状态
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     if (initialPosition) return initialPosition;
@@ -65,7 +65,7 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
     }
     return { x: 0, y: 0 };
   });
-  
+
   const [size, setSize] = useState<{ width: number; height: number }>(() => {
     if (initialSize) return initialSize;
     return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
@@ -121,13 +121,13 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
     if (isDraggingRef.current) {
       const newX = e.clientX - dragStartRef.current.x;
       const newY = e.clientY - dragStartRef.current.y;
-      
+
       // 限制在视口内（使用视口单位 vw 和 vh）
       const viewportWidth = window.innerWidth * 1.25; // 100vw 的像素值
       const viewportHeight = window.innerHeight * 1.25; // 100vh 的像素值
       const maxX = viewportWidth - size.width;
       const maxY = viewportHeight - size.height;
-      
+
       setPosition({
         x: Math.max(0, Math.min(newX, maxX)),
         y: Math.max(0, Math.min(newY, maxY))
@@ -136,12 +136,12 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
       const direction = resizeDirectionRef.current;
       const deltaX = e.clientX - resizeStartRef.current.x;
       const deltaY = e.clientY - resizeStartRef.current.y;
-      
+
       let newWidth = resizeStartRef.current.width;
       let newHeight = resizeStartRef.current.height;
       let newX = position.x;
       let newY = position.y;
-      
+
       if (direction.includes('e')) {
         newWidth = Math.max(MIN_WIDTH, resizeStartRef.current.width + deltaX);
       }
@@ -156,16 +156,16 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
         newHeight = Math.max(MIN_HEIGHT, resizeStartRef.current.height - deltaY);
         newY = position.y + (resizeStartRef.current.height - newHeight);
       }
-      
+
       // 限制在视口内（使用视口单位 vw 和 vh）
       const viewportWidth = window.innerWidth * 1.25; // 100vw 的像素值
       const viewportHeight = window.innerHeight * 1.25; // 100vh 的像素值
       const maxX = viewportWidth - newWidth;
       const maxY = viewportHeight - newHeight;
-      
+
       const clampedX = Math.max(0, Math.min(newX, maxX));
       const clampedY = Math.max(0, Math.min(newY, maxY));
-      
+
       setSize({ width: newWidth, height: newHeight });
       setPosition({ x: clampedX, y: clampedY });
     }
@@ -237,7 +237,7 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
           {onModelChange && (() => {
             const geminiTextTool = TOOLS.find(t => t.id === 'text-generation');
             const availableModels = geminiTextTool?.models || [];
-            
+
             return (
               <select
                 value={aiModel}
@@ -371,4 +371,3 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
     </div>
   );
 };
-

@@ -21,17 +21,17 @@ export const Header: React.FC<HeaderProps> = ({
   // 获取用户信息
   useEffect(() => {
     const sharedStore = (window as any).__SHARED_STORE__;
-    
+
     // 初始化用户信息
     if (sharedStore) {
       const currentUser = sharedStore.getState('user');
       setUser(currentUser);
-      
+
       // 订阅用户状态变化
       const unsubscribe = sharedStore.subscribe((state: any) => {
         setUser(state.user);
       });
-      
+
       return () => {
         if (unsubscribe) unsubscribe();
       };
@@ -148,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Plus size={18} /> {t('create_workflow')}
         </button>
-        
+
         {/* 用户信息卡片 */}
         <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-[20px] transition-all duration-200">
           {/* 用户头像 */}
@@ -196,5 +196,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-
-

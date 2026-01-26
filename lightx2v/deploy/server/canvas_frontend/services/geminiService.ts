@@ -64,15 +64,15 @@ const wrapPcmInWav = (base64Pcm: string, sampleRate = 24000): string => {
 };
 
 export const geminiText = async (
-  prompt: string, 
-  useSearch = false, 
-  mode = 'basic', 
-  customInstruction?: string, 
+  prompt: string,
+  useSearch = false,
+  mode = 'basic',
+  customInstruction?: string,
   model = 'gemini-3-pro-preview',
   outputFields?: OutputField[]
 ): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+
   const systemInstructions: Record<string, string> = {
     basic: "You are a helpful and versatile AI assistant. Provide clear, accurate, and direct answers.",
     enhance: "You are a Prompt Engineering Expert. Enhance the user's input into a detailed prompt. Output ONLY the enhanced prompt.",
@@ -83,14 +83,14 @@ export const geminiText = async (
     polish: "Refine text for clarity and tone.",
   };
 
-  const baseInstruction = mode === 'custom' && customInstruction 
-    ? customInstruction 
+  const baseInstruction = mode === 'custom' && customInstruction
+    ? customInstruction
     : (systemInstructions[mode] || systemInstructions.basic);
 
   const hasMultipleOutputs = outputFields && outputFields.length > 0;
   const outputKeys = outputFields?.map(f => f.id) || [];
-  
-  const finalInstruction = hasMultipleOutputs 
+
+  const finalInstruction = hasMultipleOutputs
     ? `${baseInstruction}\n\nIMPORTANT: You MUST generate content for each field: ${outputKeys.join(', ')}.`
     : baseInstruction;
 
@@ -130,7 +130,7 @@ export const geminiText = async (
 export const geminiImage = async (prompt: string, imageInput?: string | string[] | any[], aspectRatio = "1:1", model = 'gemini-2.5-flash-image'): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [{ text: prompt }];
-  
+
   if (imageInput) {
     const inputs = Array.isArray(imageInput) ? imageInput : [imageInput];
     const flatInputs = inputs.flat().filter(img => img && typeof img === 'string');
@@ -145,7 +145,7 @@ export const geminiImage = async (prompt: string, imageInput?: string | string[]
     contents: { parts: parts },
     config: { imageConfig: { aspectRatio: aspectRatio as any } }
   });
-  
+
   for (const part of response.candidates?.[0]?.content?.parts || []) {
     if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
   }
@@ -216,48 +216,48 @@ interface LightX2VRequestConfig {
  */
 async function lightX2VRequest(config: LightX2VRequestConfig): Promise<Response> {
   const { baseUrl, token, endpoint, options = {}, requireToken = true } = config;
-  
+
   // 验证 baseUrl 格式
   if (baseUrl && baseUrl.trim() && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
     throw new Error("Base URL must be a valid HTTP/HTTPS URL or empty string for relative path");
   }
-  
+
   // 判断是否使用 apiClient（baseUrl 为空时使用）
   const useApiClient = !baseUrl || !baseUrl.trim();
-  
+
   // 使用 apiClient 时，不需要检查 token（后端会使用环境变量中的 LIGHTX2V_TOKEN）
   if (!useApiClient && requireToken && (!token || !token.trim())) {
     throw new Error("Access Token is required for LightX2V");
   }
-  
+
   // 构建 URL
   const normalizedBaseUrl = useApiClient ? '' : baseUrl.replace(/\/$/, '');
-  const url = useApiClient 
+  const url = useApiClient
     ? endpoint.startsWith('/') ? endpoint : `/${endpoint}`
     : `${normalizedBaseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-  
+
   // 构建 headers
   const defaultHeaders: Record<string, string> = {
     'Accept': options.accept || 'application/json'
   };
-  
+
   if (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH') {
     if (!(options.body instanceof FormData)) {
       defaultHeaders['Content-Type'] = 'application/json; charset=utf-8';
     }
   }
-  
+
   const headers: Record<string, string> = {
     ...defaultHeaders,
     ...(options.headers || {})
   };
-  
+
   // 使用 apiClient 时，不传递 LightX2V token（apiRequest 会自动使用主应用的 JWT token）
   // 不使用 apiClient 时，传递 LightX2V token
   if (!useApiClient && requireToken) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
   // 执行请求
   if (useApiClient) {
     return await apiRequest(url, {
@@ -295,9 +295,9 @@ async function handleLightX2VError(response: Response, context: string): Promise
   } catch (e: any) {
     errorMessage = e.message || errorMessage;
   }
-  console.error(`[LightX2V] ${context} error: ${errorMessage}`, { 
+  console.error(`[LightX2V] ${context} error: ${errorMessage}`, {
     status: response.status,
-    url: response.url 
+    url: response.url
   });
   throw new Error(errorMessage);
 }
@@ -331,7 +331,7 @@ export const lightX2VTask = async (
   // If so, use cloud config instead of provided baseUrl/token
   let actualBaseUrl = baseUrl;
   let actualToken = token;
-  
+
   if (modelCls.endsWith('-cloud')) {
     // Cloud model - use cloud config
     const cloudConfig = getLightX2VConfigForModel(modelCls);
@@ -341,12 +341,12 @@ export const lightX2VTask = async (
     modelCls = modelCls.replace(/-cloud$/, '');
     console.log('[LightX2V] Using cloud backend for model:', modelCls);
   }
-  
+
   console.log('[LightX2V] baseUrl:', actualBaseUrl);
 
   const formatMediaPayload = (val: string | string[] | undefined, isAudio = false) => {
     if (!val) return undefined;
-    
+
     // Handle multiple images (array) - for i2i tasks with multiple input images
     // According to lightx2v server (utils.py:177-185), server expects:
     // - For base64: list of base64 strings (may include data:image prefix)
@@ -373,28 +373,28 @@ export const lightX2VTask = async (
           }
         }
       });
-      
+
       // Server expects: { type: "base64", data: ["base64string1", "base64string2", ...] }
       // OR { type: "url", data: ["url1", "url2", ...] }
       // Check if any item is a URL (absolute or relative)
-      const hasUrl = processedImages.some(img => 
-        typeof img === 'string' && 
+      const hasUrl = processedImages.some(img =>
+        typeof img === 'string' &&
         (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/'))
       );
       const type = hasUrl ? "url" : "base64";
-      
+
       return { type: type, data: processedImages };
     }
-    
+
     // Single value handling (original logic)
     const singleVal = val as string;
     // Check if it's a URL (absolute http/https, or relative path starting with ./ or /)
-    const isUrl = singleVal.startsWith('http://') || 
-                  singleVal.startsWith('https://') || 
-                  singleVal.startsWith('./') || 
+    const isUrl = singleVal.startsWith('http://') ||
+                  singleVal.startsWith('https://') ||
+                  singleVal.startsWith('./') ||
                   singleVal.startsWith('/');
     const type = isUrl ? "url" : "base64";
-    
+
     // Process the data content
     let dataContent = singleVal;
     if (!isUrl) {
@@ -404,7 +404,7 @@ export const lightX2VTask = async (
         dataContent = wrapPcmInWav(dataContent, 24000);
       }
     }
-    
+
     // Use 'data' as the field name for both types as the server error 'data'! suggests
     return { type: type, data: dataContent };
   };
@@ -458,7 +458,7 @@ export const lightX2VTask = async (
   const submitData = await submitRes.json();
   const taskId = submitData.task_id;
   if (!taskId) throw new Error("No task_id returned from LightX2V submission");
-  
+
   // Call onTaskId callback if provided (for tracking task IDs for cancellation)
   if (onTaskId) {
     onTaskId(taskId);
@@ -467,7 +467,7 @@ export const lightX2VTask = async (
   // 2. Poll Task Status
   let status = "PENDING";
   let maxAttempts = 120; // 10 minutes total
-  
+
   while (status !== "SUCCEED" && status !== "FAILED" && status !== "CANCELLED" && maxAttempts > 0) {
     await new Promise(res => setTimeout(res, 5000));
     const queryRes = await lightX2VRequest({
@@ -478,13 +478,13 @@ export const lightX2VTask = async (
         method: 'GET'
       }
     });
-    
+
     if (!queryRes.ok) {
       await handleLightX2VError(queryRes, `Polling (task_id: ${taskId})`);
     }
     const taskInfo = await queryRes.json();
     status = taskInfo.status;
-    
+
     if (status === "FAILED") {
       throw new Error(`LightX2V Task Failed: ${taskInfo.error || 'Server processing error'}`);
     }
@@ -534,11 +534,11 @@ export const lightX2VGetModelList = async (
     },
     requireToken: true // 使用 apiClient 时不需要 token
   });
-  
+
   if (!response.ok) {
     await handleLightX2VError(response, 'Model List');
   }
-  
+
   const data = await response.json();
   return data.models || [];
 };
@@ -549,16 +549,16 @@ export const lightX2VGetModelList = async (
  */
 export const getLightX2VConfigForModel = (modelId: string): { url: string; token: string; isCloud: boolean } => {
   const isCloud = modelId.endsWith('-cloud');
-  
+
   if (isCloud) {
     // Cloud model - use cloud config
     const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
     const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
-    
+
     if (!cloudToken) {
       throw new Error('LIGHTX2V_CLOUD_TOKEN 未设置。请设置 LIGHTX2V_CLOUD_TOKEN 环境变量以使用云端模型。');
     }
-    
+
     return {
       url: cloudUrl,
       token: cloudToken,
@@ -568,7 +568,7 @@ export const getLightX2VConfigForModel = (modelId: string): { url: string; token
     // Local model - use local config
     const envUrl = (process.env.LIGHTX2V_URL || '').trim();
     const apiClient = (window as any).__API_CLIENT__;
-    
+
     // Get token from apiClient or environment
     let token: string;
     if (!envUrl && apiClient) {
@@ -579,7 +579,7 @@ export const getLightX2VConfigForModel = (modelId: string): { url: string; token
       const localToken = localStorage.getItem('accessToken');
       token = localToken || (process.env.LIGHTX2V_TOKEN || '').trim();
     }
-    
+
     return {
       url: envUrl || '',
       token: token,
@@ -765,7 +765,7 @@ export const lightX2VVoiceClone = async (
   text?: string
 ): Promise<string> => {
   if (!audioBase64) throw new Error("Audio file is required for voice cloning");
-  
+
   // Convert base64 to blob
   const base64Data = audioBase64.includes(',') ? audioBase64.split(',')[1] : audioBase64;
   const byteCharacters = atob(base64Data);
@@ -775,7 +775,7 @@ export const lightX2VVoiceClone = async (
   }
   const byteArray = new Uint8Array(byteNumbers);
   const blob = new Blob([byteArray], { type: 'audio/wav' });
-  
+
   const formData = new FormData();
   formData.append('file', blob, 'audio.wav');
   if (text) {
@@ -903,7 +903,7 @@ export const lightX2VGetCloneVoiceList = async (
   const result = await response.json();
   try {
     let voices: any[] = [];
-    
+
     // Check different possible response structures
     if (Array.isArray(result)) {
       // Direct array response
@@ -918,15 +918,15 @@ export const lightX2VGetCloneVoiceList = async (
       // Response with data field (fallback)
       voices = result.data;
     }
-    
-    console.log(`[LightX2V] Clone voice list parsed:`, { 
-      resultType: Array.isArray(result) ? 'array' : typeof result, 
+
+    console.log(`[LightX2V] Clone voice list parsed:`, {
+      resultType: Array.isArray(result) ? 'array' : typeof result,
       hasVoiceClones: !!result.voice_clones,
       hasVoices: !!result.voices,
       voicesCount: voices.length,
-      voices 
+      voices
     });
-    
+
     return voices;
   } catch (typeError: any) {
     console.error(`[LightX2V] Type error processing clone voice list:`, typeError, result);
@@ -964,8 +964,8 @@ export const deepseekText = async (
     polish: "Refine text for clarity and tone.",
   };
 
-  const baseInstruction = mode === 'custom' && customInstruction 
-    ? customInstruction 
+  const baseInstruction = mode === 'custom' && customInstruction
+    ? customInstruction
     : (systemInstructions[mode] || systemInstructions.basic);
 
   const hasMultipleOutputs = outputFields && outputFields.length > 0;
@@ -973,12 +973,12 @@ export const deepseekText = async (
 
   // Build input array with user content
   const inputContent: any[] = [];
-  
+
   // Add text content
   const textContent = hasMultipleOutputs
     ? `${promptStr}\n\nIMPORTANT: You MUST generate content for each field as JSON: ${outputKeys.join(', ')}.`
     : promptStr;
-  
+
   inputContent.push({
     type: 'input_text',
     text: textContent
@@ -1047,7 +1047,7 @@ export const deepseekText = async (
   if (useSearch) {
     console.log('[DeepSeek] Full API response:', JSON.stringify(data, null, 2));
   }
-  
+
   // New API format: response.output is an array, find the message type item
   // The message item has content array with type: "output_text"
   let text = "";
@@ -1056,7 +1056,7 @@ export const deepseekText = async (
     const messageOutputs = data.output.filter((item: any) => item.type === "message");
     // Use the last message output (final answer)
     const messageOutput = messageOutputs.length > 0 ? messageOutputs[messageOutputs.length - 1] : null;
-    
+
     if (messageOutput && messageOutput.content && Array.isArray(messageOutput.content)) {
       // Find all output_text items and concatenate them
       const textContents = messageOutput.content.filter((item: any) => item.type === "output_text");
@@ -1068,7 +1068,7 @@ export const deepseekText = async (
         }
       }
     }
-    
+
     // Debug log if text is empty
     if (!text) {
       console.warn('[DeepSeek] Failed to extract text from response:', JSON.stringify(data, null, 2));
@@ -1156,8 +1156,8 @@ export const doubaoText = async (
     polish: "Refine text for clarity and tone.",
   };
 
-  const baseInstruction = mode === 'custom' && customInstruction 
-    ? customInstruction 
+  const baseInstruction = mode === 'custom' && customInstruction
+    ? customInstruction
     : (systemInstructions[mode] || systemInstructions.basic);
 
   const hasMultipleOutputs = outputFields && outputFields.length > 0;
@@ -1165,7 +1165,7 @@ export const doubaoText = async (
 
   // Build input content array - support both text and images
   const inputContent: any[] = [];
-  
+
   // Add images if provided
   if (imageInput) {
     const images = Array.isArray(imageInput) ? imageInput : [imageInput];
@@ -1174,7 +1174,7 @@ export const doubaoText = async (
       // Doubao API format: { "type": "input_image", "image_url": "https://..." or "data:image/..." }
       // For HTTP URLs, use directly; for base64/data URLs, use data URL format
       let imageUrl: string;
-      
+
       if (img.startsWith('http://') || img.startsWith('https://')) {
         // HTTP/HTTPS URLs: use directly
         imageUrl = img;
@@ -1197,17 +1197,17 @@ export const doubaoText = async (
       });
     }
   }
-  
+
   // Add text content
   const textContent = hasMultipleOutputs
     ? `${promptStr}\n\nIMPORTANT: You MUST generate content for each field as JSON: ${outputKeys.join(', ')}.`
     : promptStr;
-  
+
   inputContent.push({
     type: 'input_text',
     text: textContent
   });
-  
+
   // Build request body for new responses API
   const requestBody: any = {
     model: model,
@@ -1271,7 +1271,7 @@ export const doubaoText = async (
   if (useSearch) {
     console.log('[Doubao] Full API response:', JSON.stringify(data, null, 2));
   }
-  
+
   // New API format: response.output is an array, find the message type item
   // The message item has content array with type: "output_text"
   let text = "";
@@ -1280,7 +1280,7 @@ export const doubaoText = async (
     const messageOutputs = data.output.filter((item: any) => item.type === "message");
     // Use the last message output (final answer)
     const messageOutput = messageOutputs.length > 0 ? messageOutputs[messageOutputs.length - 1] : null;
-    
+
     if (messageOutput && messageOutput.content && Array.isArray(messageOutput.content)) {
       // Find all output_text items and concatenate them
       const textContents = messageOutput.content.filter((item: any) => item.type === "output_text");
@@ -1292,7 +1292,7 @@ export const doubaoText = async (
         }
       }
     }
-    
+
     // Debug log if text is empty
     if (!text) {
       console.warn('[Doubao] Failed to extract text from response:', JSON.stringify(data, null, 2));
@@ -1380,8 +1380,8 @@ export const ppchatGeminiText = async (
     polish: "Refine text for clarity and tone.",
   };
 
-  const baseInstruction = mode === 'custom' && customInstruction 
-    ? customInstruction 
+  const baseInstruction = mode === 'custom' && customInstruction
+    ? customInstruction
     : (systemInstructions[mode] || systemInstructions.basic);
 
   const hasMultipleOutputs = outputFields && outputFields.length > 0;
@@ -1543,7 +1543,7 @@ export const ppchatChatCompletions = async (
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`
   };
-  
+
   // 如果有 Cookie，添加到 headers
   if (cookieValue) {
     headers['Cookie'] = cookieValue;
@@ -1568,10 +1568,10 @@ export const ppchatChatCompletions = async (
   }
 
   const data = await response.json();
-  
+
   // 提取 content 从 OpenAI 格式的响应
   const content = data.choices?.[0]?.message?.content || '';
-  
+
   if (!content) {
     throw new Error('Empty response from PP Chat API');
   }
@@ -1589,30 +1589,30 @@ export const deepseekChat = async (
   responseFormat: 'json_object' | 'text' = 'json_object'
 ): Promise<string> => {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  
+
   if (!apiKey || !apiKey.trim()) {
     throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
   }
 
   console.log('deepseekChat messages:', messages);
-  
+
   // 转换为 Responses API 格式
   // 根据文档：
   // - 当使用 text 参数时，input 中的 content 应该是字符串
   // - 当不使用 text 参数时，input 中的 content 应该是数组 [{ type: "input_text", text: "..." }]
   const inputList: any[] = [];
   const useTextParam = responseFormat === 'json_object';
-  
+
   for (const msg of messages) {
     const role = msg.role;
     const content = msg.content;
-    
+
     // 跳过空内容的消息
-    if (!content || (typeof content === 'string' && content.trim() === '') || 
+    if (!content || (typeof content === 'string' && content.trim() === '') ||
         (Array.isArray(content) && content.length === 0)) {
       continue;
     }
-    
+
     if (useTextParam) {
       // 使用 text 参数时，content 直接是字符串
       let textContent: string;
@@ -1629,12 +1629,12 @@ export const deepseekChat = async (
       } else {
         textContent = String(content).trim();
       }
-      
+
       // 确保 content 不为空
       if (!textContent) {
         continue;
       }
-      
+
       inputList.push({
         role: role,
         content: textContent
@@ -1666,14 +1666,14 @@ export const deepseekChat = async (
         }
         contentList = [{ type: 'input_text', text: strContent }];
       }
-      
+
       inputList.push({
         role: role,
         content: contentList
       });
     }
   }
-  
+
   // 确保至少有一条消息
   if (inputList.length === 0) {
     throw new Error('No valid messages to send');
@@ -1696,7 +1696,7 @@ export const deepseekChat = async (
   if (useTextParam) {
     requestBody.text = { format: { type: 'json_object' } };
   }
-  
+
   // 调试日志
   console.log('[DeepSeek Chat] Request body:', JSON.stringify(requestBody, null, 2));
 
@@ -1723,18 +1723,18 @@ export const deepseekChat = async (
 
   const data = await response.json();
   console.log('deepseekChat data:', data);
-  
+
   // Extract content from Responses API format
   let text = '';
   if (data.output && Array.isArray(data.output)) {
     // 查找所有 message 类型的输出
     const messageOutputs = data.output.filter((item: any) => item.type === 'message');
-    
+
     // 使用最后一个 message 输出（通常是最终答案）
     if (messageOutputs.length > 0) {
       const messageOutput = messageOutputs[messageOutputs.length - 1];
       const content = messageOutput.content || [];
-      
+
       if (Array.isArray(content)) {
         // 查找所有 output_text 类型的内容
         const textContents = content.filter((item: any) => item.type === 'output_text');
@@ -1745,12 +1745,12 @@ export const deepseekChat = async (
       }
     }
   }
-  
+
   // 向后兼容：尝试旧格式
   if (!text) {
     text = data.output?.[0]?.content?.[0]?.text || data.choices?.[0]?.message?.content || '';
   }
-  
+
   if (!text) {
     throw new Error('Empty response from DeepSeek Responses API');
   }
@@ -1768,7 +1768,7 @@ export async function* deepseekChatStream(
   responseFormat: 'json_object' | 'text' = 'json_object'
 ): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  
+
   if (!apiKey || !apiKey.trim()) {
     throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
   }
@@ -1779,17 +1779,17 @@ export async function* deepseekChatStream(
   // - 当不使用 text 参数时，input 中的 content 应该是数组 [{ type: "input_text", text: "..." }]
   const inputList: any[] = [];
   const useTextParam = responseFormat === 'json_object';
-  
+
   for (const msg of messages) {
     const role = msg.role;
     const content = msg.content;
-    
+
     // 跳过空内容的消息
-    if (!content || (typeof content === 'string' && content.trim() === '') || 
+    if (!content || (typeof content === 'string' && content.trim() === '') ||
         (Array.isArray(content) && content.length === 0)) {
       continue;
     }
-    
+
     if (useTextParam) {
       // 使用 text 参数时，content 直接是字符串
       let textContent: string;
@@ -1806,12 +1806,12 @@ export async function* deepseekChatStream(
       } else {
         textContent = String(content).trim();
       }
-      
+
       // 确保 content 不为空
       if (!textContent) {
         continue;
       }
-      
+
       inputList.push({
         role: role,
         content: textContent
@@ -1843,14 +1843,14 @@ export async function* deepseekChatStream(
         }
         contentList = [{ type: 'input_text', text: strContent }];
       }
-      
+
       inputList.push({
         role: role,
         content: contentList
       });
     }
   }
-  
+
   // 确保至少有一条消息
   if (inputList.length === 0) {
     throw new Error('No valid messages to send');
@@ -1874,7 +1874,7 @@ export async function* deepseekChatStream(
   if (useTextParam) {
     requestBody.text = { format: { type: 'json_object' } };
   }
-  
+
   // 调试日志
   console.log('[DeepSeek Chat Stream] Request body:', JSON.stringify(requestBody, null, 2));
 
@@ -1912,7 +1912,7 @@ export async function* deepseekChatStream(
   try {
     while (true) {
       const { done, value } = await reader.read();
-      
+
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -1922,19 +1922,19 @@ export async function* deepseekChatStream(
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const trimmedLine = line.trim();
-        
+
         if (trimmedLine === '') {
           // 空行表示一个事件结束，重置 currentEvent
           currentEvent = null;
           continue;
         }
-        
+
         // 解析 SSE 格式：event: xxx 和 data: {...}
         if (trimmedLine.startsWith('event: ')) {
           currentEvent = trimmedLine.slice(7).trim();
           continue;
         }
-        
+
         if (trimmedLine.startsWith('data: ')) {
           const dataStr = trimmedLine.slice(6);
           if (dataStr === '[DONE]') {
@@ -1943,10 +1943,10 @@ export async function* deepseekChatStream(
 
           try {
             const data = JSON.parse(dataStr);
-            
+
             // 根据事件类型处理（优先使用 currentEvent，如果没有则使用 data.type）
             const eventType = currentEvent || data.type;
-            
+
             // 处理思考过程的增量文本
             if (eventType === 'response.reasoning_summary_text.delta') {
               if (data.delta) {
@@ -1998,10 +1998,10 @@ export async function* deepseekChatStream(
             else {
               const choice = data.choices?.[0];
               const delta = choice?.delta;
-              
+
               if (delta) {
                 const isThinkingChunk = choice?.type === 'thinking' || delta.type === 'thinking';
-                
+
                 if (isThinkingChunk) {
                   const thinkingContent = delta.content || delta.text || delta.thinking || '';
                   if (thinkingContent) {
@@ -2010,7 +2010,7 @@ export async function* deepseekChatStream(
                 } else if (delta.thinking !== undefined && delta.thinking !== null && delta.thinking !== '') {
                   yield { type: 'thinking', text: delta.thinking };
                 }
-                
+
                 if (!isThinkingChunk) {
                   const content = delta.content || '';
                   if (content) {
@@ -2064,7 +2064,7 @@ export async function* ppchatChatCompletionsStream(
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`
   };
-  
+
   if (cookieValue) {
     headers['Cookie'] = cookieValue;
   }
@@ -2099,7 +2099,7 @@ export async function* ppchatChatCompletionsStream(
   try {
     while (true) {
       const { done, value } = await reader.read();
-      
+
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });

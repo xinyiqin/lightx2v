@@ -132,4 +132,3 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     canvas_mode: '画布模式'
   }
 };
-

@@ -107,7 +107,7 @@ const subAppConfig = {
       }
       return false
     }
-    
+
     // 立即尝试添加
     if (!addWrapperClasses()) {
       // 如果包装器还未创建，使用 MutationObserver 监听
@@ -143,7 +143,7 @@ const subAppConfig = {
     // 处理 HTML，确保 entry 脚本被正确标记，模块脚本被忽略
     const closeScript = '</' + 'script>';
     const openScript = '<' + 'script';
-    
+
     // 1. 标记包含生命周期注册的脚本为 entry（应该已经有 entry 标记了）
     // 2. 标记所有包含 import() 的模块脚本为 ignore
     const modulePattern = new RegExp(
@@ -171,7 +171,7 @@ const subAppConfig = {
         return openScript + newAttrs + '>' + content + closeScript;
       }
     );
-    
+
     // 确保 body 中的生命周期脚本有 entry 标记
     const lifecyclePattern = new RegExp(
       openScript + '([^>]*?)>([\\s\\S]*?createDeffer[\\s\\S]*?global\\[\\\'react-canvas\\\'\\][\\s\\S]*?)' + closeScript,
@@ -186,7 +186,7 @@ const subAppConfig = {
         return match;
       }
     );
-    
+
     return processedHtml;
   },
   props: {
@@ -252,7 +252,7 @@ const loadSubApp = async () => {
             (window['react-canvas'] && typeof window['react-canvas'].bootstrap === 'function') ||
             (typeof window.bootstrap === 'function' && typeof window.mount === 'function' && typeof window.unmount === 'function')
           )
-          
+
           if (hasLifeCycle) {
             clearInterval(checkInterval)
             clearTimeout(timeout)
@@ -266,7 +266,7 @@ const loadSubApp = async () => {
       // 检查应用状态，如果已经挂载则不需要再次挂载
       const appStatus = microApp?.getStatus?.()
       console.log('[主应用] 应用当前状态:', appStatus)
-      
+
       // 添加包装器样式的函数
       const addWrapperClasses = () => {
         const wrapper = document.getElementById('__qiankun_microapp_wrapper_for_react_canvas__')
@@ -339,4 +339,3 @@ onUnmounted(() => {
   }
 })
 </script>
-

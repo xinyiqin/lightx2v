@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
       DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || env.DEEPSEEK_API_KEY || '',
       PPCHAT_API_KEY: process.env.PPCHAT_API_KEY || env.PPCHAT_API_KEY || '',
     };
-    
+
     // 构建时打印环境变量状态（用于调试）
     if (mode === 'production') {
       console.log('[Vite Build] 环境变量检查:');

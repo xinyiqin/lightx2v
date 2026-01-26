@@ -194,7 +194,7 @@ export const Node: React.FC<NodeProps> = ({
 
   const handlePortMouseDown = (port: Port, direction: 'in' | 'out') => (e: React.MouseEvent) => {
     e.stopPropagation();
-    
+
     if (direction === 'out') {
       // For output ports, calculate position from node bottom (same as Connection component)
       const outputPortIndex = outputs.findIndex((p) => p.id === port.id);
@@ -251,32 +251,32 @@ export const Node: React.FC<NodeProps> = ({
   };
 
   const [isUploading, setIsUploading] = React.useState(false);
-  
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, isMultiple: boolean = false) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    
+
     // 需要 workflow.id 才能上传
     if (!workflow.id || (!workflow.id.startsWith('workflow-') && !workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
       console.error('[Node] Cannot upload file: workflow ID is not available');
       return;
     }
-    
+
     setIsUploading(true);
-    
+
     try {
       const tool = TOOLS.find(t => t.id === node.toolId);
       if (!tool || tool.category !== 'Input') {
         console.error('[Node] Cannot upload file: node is not an input node');
         return;
       }
-      
+
       const outputPort = tool.outputs[0];
       if (!outputPort) {
         console.error('[Node] Cannot upload file: output port not found');
         return;
       }
-      
+
       // 上传所有文件
       const uploadPromises = files.map((file: File) =>
         uploadNodeInputFile(workflow.id!, node.id, outputPort.id, file)
@@ -291,10 +291,10 @@ export const Node: React.FC<NodeProps> = ({
             return null;
           })
       );
-      
+
       const fileUrls = await Promise.all(uploadPromises);
       const validUrls = fileUrls.filter((url: string | null) => url !== null);
-      
+
       if (validUrls.length > 0) {
         // 更新 node.data.value，始终使用数组格式
         const currentValue = node.data.value || [];
@@ -455,14 +455,14 @@ export const Node: React.FC<NodeProps> = ({
                     // node.data.value may contain file paths (like /api/v1/workflow/...)
                     // If it's a file path, we should have already loaded it to activeOutputs
                     // But if not, we need to handle it
-                    const imgSrc = img.startsWith('/api/v1/workflow/') 
+                    const imgSrc = img.startsWith('/api/v1/workflow/')
                       ? img  // This shouldn't happen if loading worked correctly, but handle it
                       : getAssetPath(img);
                     return (
                       <div key={i} className="relative w-8 h-8 group/img">
-                        <img 
-                          src={imgSrc} 
-                          className="w-full h-full object-cover rounded border border-slate-700" 
+                        <img
+                          src={imgSrc}
+                          className="w-full h-full object-cover rounded border border-slate-700"
                           alt={`Image ${i + 1}`}
                           onError={(e) => {
                             // If image fails to load and it's a workflow file path, try loading it
@@ -487,7 +487,7 @@ export const Node: React.FC<NodeProps> = ({
                         <button
                           onClick={() => {
                             const currentValue = activeOutputs[node.id] || node.data.value || [];
-                            const next = Array.isArray(currentValue) 
+                            const next = Array.isArray(currentValue)
                               ? currentValue.filter((_: any, idx: number) => idx !== i)
                               : [];
                             onUpdateNodeData(node.id, 'value', next);
@@ -679,8 +679,8 @@ export const Node: React.FC<NodeProps> = ({
           {firstOutputType === DataType.IMAGE ? (
             <img
               src={getAssetPath(
-                Array.isArray(nodeResult) 
-                  ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                Array.isArray(nodeResult)
+                  ? (nodeResult.length > 0 ? nodeResult[0] : '')
                   : (nodeResult || '')
               )}
               className="max-w-full max-h-full w-auto h-auto object-contain"
@@ -688,8 +688,8 @@ export const Node: React.FC<NodeProps> = ({
               onError={(e) => {
                 // 如果图片加载失败，尝试使用原始值（可能是 base64）
                 const target = e.currentTarget;
-                const originalSrc = Array.isArray(nodeResult) 
-                  ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                const originalSrc = Array.isArray(nodeResult)
+                  ? (nodeResult.length > 0 ? nodeResult[0] : '')
                   : (nodeResult || '');
                 if (target.src !== originalSrc) {
                   target.src = originalSrc;
@@ -714,8 +714,8 @@ export const Node: React.FC<NodeProps> = ({
             <div className="w-full h-full relative bg-black group/video min-w-32 min-h-24 flex items-center justify-center">
               <video
                 src={getAssetPath(
-                  Array.isArray(nodeResult) 
-                    ? (nodeResult.length > 0 ? nodeResult[0] : '') 
+                  Array.isArray(nodeResult)
+                    ? (nodeResult.length > 0 ? nodeResult[0] : '')
                     : (nodeResult || '')
                 )}
                 className="max-w-full max-h-full w-auto h-auto object-contain opacity-60 group-hover/thumb:opacity-100 transition-opacity"
@@ -796,7 +796,7 @@ export const Node: React.FC<NodeProps> = ({
         )}
 
         {/* Web search toggle for DeepSeek and Doubao models */}
-        {node.toolId === 'text-generation' && 
+        {node.toolId === 'text-generation' &&
           (node.data.model?.startsWith('deepseek-') || node.data.model?.startsWith('doubao-')) && (
           <button
             onMouseDown={(e) => e.stopPropagation()}
@@ -919,4 +919,3 @@ export const Node: React.FC<NodeProps> = ({
     </div>
   );
 };
-

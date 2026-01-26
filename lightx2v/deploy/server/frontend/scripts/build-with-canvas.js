@@ -39,25 +39,25 @@ try {
   if (!existsSync(canvasAppDir)) {
     throw new Error(`Canvas 应用目录不存在: ${canvasAppDir}`);
   }
-  
+
   // 进入 Canvas 目录并构建
   process.chdir(canvasAppDir);
   console.log(`   目录: ${canvasAppDir}`);
-  
+
   // 清理旧的构建产物，确保使用最新代码
   if (existsSync(canvasDistDir)) {
     console.log('   清理旧的构建产物...');
     rmSync(canvasDistDir, { recursive: true, force: true });
     console.log('   ✅ 已清理旧的构建产物');
   }
-  
+
   // 执行构建（使用 --force 确保不使用缓存）
   console.log('   执行 npm run build...');
-  execSync('npm run build', { 
+  execSync('npm run build', {
     stdio: 'inherit',
     env: { ...process.env }
   });
-  
+
   console.log('   ✅ Canvas 应用构建完成\n');
 } catch (error) {
   console.error('   ❌ Canvas 应用构建失败:', error.message);
@@ -67,9 +67,9 @@ try {
 // 2. 确保软链接存在
 console.log('🔗 步骤 2: 检查软链接...');
 try {
-  const isSymlink = existsSync(vuePublicCanvasDir) && 
+  const isSymlink = existsSync(vuePublicCanvasDir) &&
                     lstatSync(vuePublicCanvasDir).isSymbolicLink();
-  
+
   if (!isSymlink) {
     // 如果不是软链接，删除并创建软链接
     if (existsSync(vuePublicCanvasDir)) {
@@ -106,9 +106,9 @@ console.log('🔧 步骤 3.5: 修复 Canvas HTML 文件...');
 try {
   const canvasHtmlPath = join(canvasDistDir, 'index.html');
   let html = readFileSync(canvasHtmlPath, 'utf-8');
-  
+
   let modifiedHtml = html;
-  
+
   // 1. 确保 body 中的生命周期脚本有 entry 标记，并且直接导出生命周期函数到全局作用域
   // qiankun 需要找到这些函数，所以必须确保它们被正确导出
   modifiedHtml = modifiedHtml.replace(
@@ -142,7 +142,7 @@ try {
       return modified;
     }
   );
-  
+
   // 2. 确保在 head 中有初始化脚本（在所有其他脚本之前）
   if (!modifiedHtml.includes('global.qiankunName = \'react-canvas\';')) {
     // 在 head 标签开始后插入初始化脚本
@@ -153,7 +153,7 @@ try {
       }
     );
   }
-  
+
   // 3. 确保模块脚本有 type="module" 属性，并修复路径
   // 同时添加 data-qiankun-ignore 属性，防止 qiankun 将其作为 entry 脚本执行
   modifiedHtml = modifiedHtml.replace(
@@ -164,7 +164,7 @@ try {
         /import\(['"](\.\/assets\/[^'"]+)['"]\)/g,
         (match, path) => `import('/canvas${path.replace(/^\./, '')}')`
       );
-      
+
       // 确保所有 /assets/ 路径都是 /canvas/assets/
       fixedContent = fixedContent.replace(
         /import\(['"](\/assets\/[^'"]+)['"]\)/g,
@@ -175,7 +175,7 @@ try {
           return `import('/canvas${path}')`;
         }
       );
-      
+
       // 添加 type="module" 和数据属性
       let newAttrs = attrs;
       if (!newAttrs.includes('type="module"') && !newAttrs.includes("type='module'")) {
@@ -185,7 +185,7 @@ try {
       if (!newAttrs.includes('data-qiankun-ignore') && !newAttrs.includes("data-qiankun-ignore")) {
         newAttrs = `${newAttrs} data-qiankun-ignore`;
       }
-      
+
       // 如果有修改，返回新的脚本标签
       if (content !== fixedContent || attrs !== newAttrs) {
         return `<script${newAttrs}>${fixedContent}</script>`;
@@ -193,7 +193,7 @@ try {
       return match;
     }
   );
-  
+
   if (html !== modifiedHtml) {
     writeFileSync(canvasHtmlPath, modifiedHtml, 'utf-8');
     console.log('   ✅ 已修复 HTML 文件：添加 qiankun 初始化脚本和 type="module" 属性\n');
@@ -210,20 +210,20 @@ console.log('📦 步骤 4: 构建 Vue 主应用...');
 try {
   process.chdir(vueAppDir);
   console.log(`   目录: ${vueAppDir}`);
-  
+
   // 清理旧的构建产物，确保使用最新代码
   if (existsSync(vueDistDir)) {
     console.log('   清理旧的构建产物...');
     rmSync(vueDistDir, { recursive: true, force: true });
     console.log('   ✅ 已清理旧的构建产物');
   }
-  
+
   console.log('   执行 npm run build...');
-  execSync('npm run build', { 
+  execSync('npm run build', {
     stdio: 'inherit',
     env: { ...process.env }
   });
-  
+
   console.log('   ✅ Vue 应用构建完成\n');
 } catch (error) {
   console.error('   ❌ Vue 应用构建失败:', error.message);
@@ -282,4 +282,3 @@ console.log('🎉 统一构建完成！');
 console.log(`\n📁 构建产物位置: ${join(vueAppDir, 'dist')}`);
 console.log(`📁 static 目录已同步: ${staticDir}`);
 console.log('💡 现在可以通过 static 目录部署整个应用了\n');
-

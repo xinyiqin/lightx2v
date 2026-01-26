@@ -5,7 +5,7 @@ import { deepseekChat, deepseekChatStream, ppchatChatCompletions, ppchatChatComp
 import { useTranslation, Language } from '../i18n/useTranslation';
 
 interface Operation {
-  type: 'add_node' | 'delete_node' | 'update_node' | 'replace_node' | 
+  type: 'add_node' | 'delete_node' | 'update_node' | 'replace_node' |
         'add_connection' | 'delete_connection' | 'move_node';
   details: any;
 }
@@ -88,13 +88,13 @@ export const useAIChatWorkflow = ({
     nodeIds?: string[];
     connectionIds?: string[];
   }>({});
-  
+
   // 使用ref跟踪最新的workflow状态
   const workflowRef = useRef<WorkflowState | null>(workflow);
   useEffect(() => {
     workflowRef.current = workflow;
   }, [workflow]);
-  
+
   // 当工作流变化时，加载对话历史
   useEffect(() => {
     if (workflow?.chatHistory && workflow.chatHistory.length > 0) {
@@ -107,7 +107,7 @@ export const useAIChatWorkflow = ({
       console.log('[AI Chat] 工作流没有对话历史，初始化为空');
     }
   }, [workflow?.id]); // 当工作流 ID 变化时重新加载
-  
+
   // 添加消息到历史记录（同时更新 ref 和 state）
   const addMessageToHistory = useCallback((message: ChatMessage) => {
     chatHistoryRef.current = [...chatHistoryRef.current, message];
@@ -122,30 +122,30 @@ export const useAIChatWorkflow = ({
       return newHistory;
     });
   }, []);
-  
+
   // 当对话历史更新时，同步到工作流（使用 ref 中的完整历史）
   useEffect(() => {
     if (!workflow) {
       console.log('[AI Chat] 工作流不存在，跳过同步对话历史');
       return;
     }
-    
+
     // 使用 ref 中的完整历史记录
     const currentChatHistory = chatHistoryRef.current || [];
     const workflowChatHistory = workflow.chatHistory || [];
-    
+
     // 检查是否需要更新（长度不同或内容不同）
-    const needsUpdate = 
+    const needsUpdate =
       currentChatHistory.length !== workflowChatHistory.length ||
       JSON.stringify(currentChatHistory) !== JSON.stringify(workflowChatHistory);
-    
+
     if (needsUpdate) {
       console.log('[AI Chat] 同步对话历史到工作流:', {
         refHistoryLength: currentChatHistory.length,
         workflowLength: workflowChatHistory.length,
         willUpdate: true
       });
-      
+
       setWorkflow({
         ...workflow,
         chatHistory: currentChatHistory,
@@ -182,10 +182,10 @@ export const useAIChatWorkflow = ({
   Models: ${models}
   Category: ${lang === 'zh' ? tool.category_zh : tool.category}`;
     }).join('\n\n');
-    
+
     // 生成所有可用的toolId列表
     const allToolIds = TOOLS.map(t => t.id).join(', ');
-    
+
     return `Available Tools:\n\n${toolsInfo}\n\n**重要：可用的toolId列表（只能使用这些toolId，不能创建不存在的工具）：**
 ${allToolIds}
 
@@ -495,7 +495,7 @@ ${toolsDesc}${voicesInfo}
 
     let nodeX = details.x;
     let nodeY = details.y;
-    
+
     if (nodeX === undefined || nodeY === undefined) {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
@@ -503,8 +503,8 @@ ${toolsDesc}${voicesInfo}
         nodeX = center.x;
         nodeY = center.y;
       } else {
-        const maxX = workflow && workflow.nodes.length > 0 
-          ? Math.max(...workflow.nodes.map(n => n.x)) 
+        const maxX = workflow && workflow.nodes.length > 0
+          ? Math.max(...workflow.nodes.map(n => n.x))
           : 0;
         nodeX = maxX + 400;
         nodeY = 200;
@@ -513,29 +513,29 @@ ${toolsDesc}${voicesInfo}
 
     // 合并默认参数：工具级别 -> 模型级别 -> AI指定的值
     const nodeData: Record<string, any> = {};
-    
+
     // 1. 先应用工具级别的默认参数
     if (tool.defaultParams) {
       Object.assign(nodeData, tool.defaultParams);
     }
-    
+
     // 2. 确定使用的模型
     const selectedModel = details.model || (tool.models && tool.models.length > 0 ? tool.models[0].id : undefined);
     if (selectedModel) {
       nodeData.model = selectedModel;
-      
+
       // 3. 应用模型级别的默认参数（会覆盖工具级别的相同参数）
       const modelDef = tool.models?.find(m => m.id === selectedModel);
       if (modelDef?.defaultParams) {
         Object.assign(nodeData, modelDef.defaultParams);
       }
     }
-    
+
     // 4. 最后应用AI指定的参数（优先级最高，会覆盖所有默认值）
     if (details.data) {
       Object.assign(nodeData, details.data);
     }
-    
+
     // 如果AI在顶层指定了model，也要应用
     if (details.model) {
       nodeData.model = details.model;
@@ -557,8 +557,8 @@ ${toolsDesc}${voicesInfo}
     return {
       success: true,
       operation: { type: 'add_node', details },
-      result: { 
-        nodeId: newNode.id, 
+      result: {
+        nodeId: newNode.id,
         node: newNode,
         tempId: details.tempId // 返回临时ID，用于后续映射
       },
@@ -657,10 +657,10 @@ ${toolsDesc}${voicesInfo}
       const newToolId = details.updates.toolId;
       const otherUpdates = { ...details.updates };
       delete otherUpdates.toolId;
-      
+
       // 先替换 toolId
       originalReplaceNode(details.nodeId, newToolId);
-      
+
       // 然后更新其他字段
       if (Object.keys(otherUpdates).length > 0) {
         const tool = TOOLS.find(t => t.id === newToolId);
@@ -774,7 +774,7 @@ ${toolsDesc}${voicesInfo}
 
     const replaceableTools = getReplaceableTools(details.nodeId);
     const isCompatible = replaceableTools.some(t => t.id === details.newToolId);
-    
+
     if (!isCompatible) {
       return {
         success: false,
@@ -818,7 +818,7 @@ ${toolsDesc}${voicesInfo}
     // 将临时ID转换为实际节点ID
     let sourceNodeId = details.sourceNodeId;
     let targetNodeId = details.targetNodeId;
-    
+
     if (tempIdToNodeId) {
       // 如果sourceNodeId是临时ID，转换为实际ID
       if (tempIdToNodeId.has(sourceNodeId)) {
@@ -833,7 +833,7 @@ ${toolsDesc}${voicesInfo}
     // 先从workflow中查找节点，如果找不到，从刚创建的节点中查找
     let sourceNode = currentWorkflow.nodes.find(n => n.id === sourceNodeId);
     let targetNode = currentWorkflow.nodes.find(n => n.id === targetNodeId);
-    
+
     // 如果节点不在workflow中，尝试从刚创建的节点中获取
     if (!sourceNode && createdNodes) {
       sourceNode = createdNodes.get(sourceNodeId) || undefined;
@@ -841,7 +841,7 @@ ${toolsDesc}${voicesInfo}
     if (!targetNode && createdNodes) {
       targetNode = createdNodes.get(targetNodeId) || undefined;
     }
-    
+
     // 如果仍然找不到，尝试通过数字索引匹配（AI可能使用"0", "1"等作为索引）
     if (!sourceNode && createdNodesInOrder && createdNodesInOrder.length > 0) {
       const index = parseInt(sourceNodeId, 10);
@@ -857,7 +857,7 @@ ${toolsDesc}${voicesInfo}
         targetNodeId = targetNode.id;
       }
     }
-    
+
     // 如果节点仍然找不到，等待一小段时间让React状态更新
     if (!sourceNode || !targetNode) {
       // 最多等待10次，每次50ms，总共最多500ms
@@ -866,7 +866,7 @@ ${toolsDesc}${voicesInfo}
         // 重新获取最新的workflow状态
         currentWorkflow = workflowRef.current;
         if (!currentWorkflow) break;
-        
+
         if (!sourceNode) {
           sourceNode = currentWorkflow.nodes.find(n => n.id === details.sourceNodeId);
         }
@@ -898,23 +898,23 @@ ${toolsDesc}${voicesInfo}
       let targetTool = TOOLS.find(t => t.id === targetNode.toolId);
       let targetInputs = targetTool?.inputs || [];
       let targetPort = targetInputs.find(p => p.id === details.targetPortId);
-      
+
       // 如果找不到目标端口，可能是节点刚刚被替换，等待状态更新
       if (!targetPort) {
         for (let i = 0; i < 10; i++) {
           await new Promise(resolve => setTimeout(resolve, 50));
           currentWorkflow = workflowRef.current;
           if (!currentWorkflow) break;
-          
+
           // 重新获取目标节点
           targetNode = currentWorkflow.nodes.find(n => n.id === targetNodeId);
           if (!targetNode) break;
-          
+
           // 重新检查端口
           targetTool = TOOLS.find(t => t.id === targetNode.toolId);
           targetInputs = targetTool?.inputs || [];
           targetPort = targetInputs.find(p => p.id === details.targetPortId);
-          
+
           if (targetPort) {
             // 找到了端口，退出循环
             break;
@@ -1004,7 +1004,7 @@ ${toolsDesc}${voicesInfo}
         error: 'No workflow loaded'
       };
     }
-    
+
     const existingConnection = currentWorkflow.connections.find(
       c => c.sourceNodeId === sourceNodeId &&
           c.sourcePortId === sourcePortId &&
@@ -1155,7 +1155,7 @@ ${toolsDesc}${voicesInfo}
       nodeIds: new Set(),
       connectionIds: new Set()
     };
-    
+
     // 跟踪新创建的节点，用于后续连接操作
     const createdNodes = new Map<string, WorkflowNode>();
     // 临时ID到实际节点ID的映射（tempId -> actualNodeId）
@@ -1164,17 +1164,17 @@ ${toolsDesc}${voicesInfo}
     for (let i = 0; i < operations.length; i++) {
       const operation = operations[i];
       const result = await executeOperation(operation, createdNodes, tempIdToNodeId);
-      
+
       // 如果执行了 replace_node 或 update_node（包含 toolId），等待一小段时间让状态更新
       // 这样后续的 add_connection 操作可以获取到更新后的节点状态
-      if ((operation.type === 'replace_node' || 
+      if ((operation.type === 'replace_node' ||
            (operation.type === 'update_node' && operation.details.updates?.toolId)) &&
           i < operations.length - 1) {
         // 检查下一个操作是否是 add_connection，且目标节点是刚刚替换的节点
         const nextOp = operations[i + 1];
         if (nextOp && nextOp.type === 'add_connection') {
-          const replacedNodeId = operation.type === 'replace_node' 
-            ? operation.details.nodeId 
+          const replacedNodeId = operation.type === 'replace_node'
+            ? operation.details.nodeId
             : operation.details.nodeId;
           if (nextOp.details.targetNodeId === replacedNodeId) {
             // 等待状态更新
@@ -1237,29 +1237,29 @@ ${toolsDesc}${voicesInfo}
       content: userInput,
       timestamp: Date.now()
     };
-    
+
     // 先添加到历史记录（ref 和 state）
     addMessageToHistory(userMessage);
-    
+
     // 获取当前完整的历史记录（从 ref 获取，确保是最新的）
     const currentHistory = chatHistoryRef.current;
 
     try {
       // 构建AI Prompt
       const systemPrompt = buildAIPrompt(userInput);
-      
+
       // 构建消息历史（只保留最近的对话，避免token过多）
       // currentHistory 已经包含了刚添加的 userMessage，我们需要排除它，因为最后会单独添加
       const previousHistory = currentHistory.slice(0, -1); // 排除最后一条（刚添加的 userMessage）
       const recentHistory = previousHistory.slice(-30); // 保留最近50条历史消息
-      
+
       console.log('[AI Chat] 对话历史:', {
         totalHistory: currentHistory.length,
         previousHistory: previousHistory.length,
         recentHistory: recentHistory.length,
         recentHistoryMessages: recentHistory.map(m => ({ role: m.role, content: m.content.substring(0, 50) + '...' }))
       });
-      
+
       // 构建完整的消息列表（包含系统提示词、历史记录和当前用户消息）
       const messages = [
         {
@@ -1281,12 +1281,12 @@ ${toolsDesc}${voicesInfo}
         history: recentHistory.length,
         currentUser: 1
       });
-      
+
       // 判断模型类型
       const isDeepSeekModel = aiModel.startsWith('deepseek-');
       const isGeminiModel = aiModel.startsWith('ppchat-gemini-') || aiModel.startsWith('gemini-');
       const isDoubaoModel = aiModel.startsWith('doubao-');
-      
+
       // 创建初始的 assistant 消息用于流式更新
       const assistantMessageId = `msg-${Date.now()}-assistant`;
       let assistantMessage: ChatMessage = {
@@ -1298,12 +1298,12 @@ ${toolsDesc}${voicesInfo}
         timestamp: Date.now()
       };
       addMessageToHistory(assistantMessage);
-      
+
       // 使用流式 API
       let thinkingText = '';
       let contentText = '';
       let aiResponse = '';
-      
+
       try {
         if (isDeepSeekModel) {
           // DeepSeek 模型使用流式 API
@@ -1316,8 +1316,8 @@ ${toolsDesc}${voicesInfo}
               // 流式输出时，只显示思考过程，不显示 JSON 内容
               assistantMessage.content = '';
               setChatHistory(prev => {
-                const updated = prev.map(msg => 
-                  msg.id === assistantMessageId 
+                const updated = prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...assistantMessage }
                     : msg
                 );
@@ -1331,8 +1331,8 @@ ${toolsDesc}${voicesInfo}
               assistantMessage.isStreaming = true;
               // 暂时不更新 content，等流式输出完成后再解析
               setChatHistory(prev => {
-                const updated = prev.map(msg => 
-                  msg.id === assistantMessageId 
+                const updated = prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...assistantMessage }
                     : msg
                 );
@@ -1353,8 +1353,8 @@ ${toolsDesc}${voicesInfo}
                 assistantMessage.isStreaming = true;
                 // 暂时不更新 content，等流式输出完成后再解析
                 setChatHistory(prev => {
-                  const updated = prev.map(msg => 
-                    msg.id === assistantMessageId 
+                  const updated = prev.map(msg =>
+                    msg.id === assistantMessageId
                       ? { ...assistantMessage }
                       : msg
                   );
@@ -1381,7 +1381,7 @@ ${toolsDesc}${voicesInfo}
             }).join('\n\n');
             fullPrompt += conversationText;
             fullPrompt += '\n\n请以 JSON 格式返回，包含 "operations" 数组和 "explanation" 字段。';
-            
+
             const response = await ppchatGeminiText(
               fullPrompt,
               'basic',
@@ -1390,7 +1390,7 @@ ${toolsDesc}${voicesInfo}
               [{ id: 'operations', description: 'Array of operations' }, { id: 'explanation', description: 'Explanation of operations' }],
               undefined
             );
-            
+
             if (typeof response === 'string') {
               aiResponse = response;
             } else if (response && typeof response === 'object') {
@@ -1417,7 +1417,7 @@ ${toolsDesc}${voicesInfo}
       }).join('\n\n');
       fullPrompt += conversationText;
           fullPrompt += '\n\n请以 JSON 格式返回，包含 "operations" 数组和 "explanation" 字段。';
-          
+
           const response = await doubaoText(
             fullPrompt,
             'basic',
@@ -1427,7 +1427,7 @@ ${toolsDesc}${voicesInfo}
             undefined,
             false
           );
-          
+
           if (typeof response === 'string') {
             aiResponse = response;
           } else if (response && typeof response === 'object') {
@@ -1446,8 +1446,8 @@ ${toolsDesc}${voicesInfo}
               // 流式输出时，只显示思考过程，不显示 JSON 内容
               assistantMessage.content = '';
               setChatHistory(prev => {
-                const updated = prev.map(msg => 
-                  msg.id === assistantMessageId 
+                const updated = prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...assistantMessage }
                     : msg
                 );
@@ -1461,8 +1461,8 @@ ${toolsDesc}${voicesInfo}
               assistantMessage.isStreaming = true;
               // 暂时不更新 content，等流式输出完成后再解析
               setChatHistory(prev => {
-                const updated = prev.map(msg => 
-                  msg.id === assistantMessageId 
+                const updated = prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...assistantMessage }
                     : msg
                 );
@@ -1472,10 +1472,10 @@ ${toolsDesc}${voicesInfo}
             }
           }
         }
-        
+
         // 流式输出完成，更新最终状态
         assistantMessage.isStreaming = false;
-        
+
         // 解析流式输出的 JSON，提取 explanation 和 operations
         let parsed: any;
         try {
@@ -1506,7 +1506,7 @@ ${toolsDesc}${voicesInfo}
         } catch (error) {
           parsed = { content: aiResponse };
         }
-        
+
         // 如果是工作流操作，只显示 explanation，不显示 JSON
         const responseType = parsed.type || (parsed.operations ? 'workflow' : 'conversation');
         if (responseType === 'workflow' && parsed.operations) {
@@ -1519,14 +1519,14 @@ ${toolsDesc}${voicesInfo}
           // 其他情况，保持原内容
           assistantMessage.content = parsed.content || parsed.explanation || aiResponse;
         }
-        
+
         if (thinkingText) {
           assistantMessage.thinking = thinkingText;
         }
-        
+
         setChatHistory(prev => {
-          const updated = prev.map(msg => 
-            msg.id === assistantMessageId 
+          const updated = prev.map(msg =>
+            msg.id === assistantMessageId
               ? { ...assistantMessage }
               : msg
           );
@@ -1539,8 +1539,8 @@ ${toolsDesc}${voicesInfo}
         assistantMessage.error = streamError.message || String(streamError);
         assistantMessage.content = streamError.message || String(streamError);
         setChatHistory(prev => {
-          const updated = prev.map(msg => 
-            msg.id === assistantMessageId 
+          const updated = prev.map(msg =>
+            msg.id === assistantMessageId
               ? { ...assistantMessage }
               : msg
           );
@@ -1554,7 +1554,7 @@ ${toolsDesc}${voicesInfo}
       // 解析AI返回
       let parsed: any;
       let isWorkflowRelated = false;
-      
+
       try {
         // 尝试解析 JSON
         if (typeof aiResponse === 'string') {
@@ -1598,7 +1598,7 @@ ${toolsDesc}${voicesInfo}
 
       // 检查响应类型
       const responseType = parsed.type || (parsed.operations ? 'workflow' : 'conversation');
-      
+
       // 如果是普通对话类型，更新已存在的消息
       if (responseType === 'conversation') {
         assistantMessage.isStreaming = false;
@@ -1607,8 +1607,8 @@ ${toolsDesc}${voicesInfo}
           assistantMessage.thinking = thinkingText;
         }
         setChatHistory(prev => {
-          const updated = prev.map(msg => 
-            msg.id === assistantMessageId 
+          const updated = prev.map(msg =>
+            msg.id === assistantMessageId
               ? { ...assistantMessage }
               : msg
           );
@@ -1618,7 +1618,7 @@ ${toolsDesc}${voicesInfo}
         setIsProcessing(false);
         return;
       }
-      
+
       // 向后兼容：如果没有 type 字段，但有 error 字段，当作普通对话处理
       if (parsed.error && !parsed.operations) {
         assistantMessage.isStreaming = false;
@@ -1627,8 +1627,8 @@ ${toolsDesc}${voicesInfo}
           assistantMessage.thinking = thinkingText;
         }
         setChatHistory(prev => {
-          const updated = prev.map(msg => 
-            msg.id === assistantMessageId 
+          const updated = prev.map(msg =>
+            msg.id === assistantMessageId
               ? { ...assistantMessage }
               : msg
           );
@@ -1638,7 +1638,7 @@ ${toolsDesc}${voicesInfo}
         setIsProcessing(false);
         return;
       }
-      
+
       // 如果与工作流无关（没有 operations），当作普通对话处理
       if (!parsed.operations || (Array.isArray(parsed.operations) && parsed.operations.length === 0)) {
         assistantMessage.isStreaming = false;
@@ -1647,8 +1647,8 @@ ${toolsDesc}${voicesInfo}
           assistantMessage.thinking = thinkingText;
         }
         setChatHistory(prev => {
-          const updated = prev.map(msg => 
-            msg.id === assistantMessageId 
+          const updated = prev.map(msg =>
+            msg.id === assistantMessageId
               ? { ...assistantMessage }
               : msg
           );
@@ -1677,15 +1677,15 @@ ${toolsDesc}${voicesInfo}
       const executionResult = await executeOperations(operations);
 
       // 更新已存在的AI回复消息
-      const errorDetails = executionResult.errors.length > 0 
-        ? executionResult.errors.join('; ') 
+      const errorDetails = executionResult.errors.length > 0
+        ? executionResult.errors.join('; ')
         : executionResult.results
             .filter(r => !r.success)
             .map(r => r.error || 'Unknown error')
             .join('; ');
-      
+
       assistantMessage.isStreaming = false;
-      assistantMessage.content = parsed.explanation || (executionResult.success 
+      assistantMessage.content = parsed.explanation || (executionResult.success
         ? (lang === 'zh' ? '操作已执行' : 'Operations executed successfully')
         : (lang === 'zh' ? `操作执行失败: ${errorDetails}` : `Operation failed: ${errorDetails}`));
       assistantMessage.operations = operations;
@@ -1695,17 +1695,17 @@ ${toolsDesc}${voicesInfo}
       if (thinkingText) {
         assistantMessage.thinking = thinkingText;
       }
-      
+
       setChatHistory(prev => {
-        const updated = prev.map(msg => 
-          msg.id === assistantMessageId 
+        const updated = prev.map(msg =>
+          msg.id === assistantMessageId
             ? { ...assistantMessage }
             : msg
         );
         chatHistoryRef.current = updated;
         return updated;
       });
-      
+
       // 输出详细错误信息到控制台，方便调试
       if (!executionResult.success) {
         console.error('[AI Chat Workflow] Operation execution failed:', {

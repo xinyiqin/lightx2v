@@ -1,9 +1,9 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { 
-  Plus, Play, Pause, Save, Trash2, Search, Settings, 
+import {
+  Plus, Play, Pause, Save, Trash2, Search, Settings,
   Layers, ChevronRight, AlertCircle, CheckCircle2,
-  X, Type, Image as ImageIcon, Volume2, Video as VideoIcon, 
+  X, Type, Image as ImageIcon, Volume2, Video as VideoIcon,
   Cpu, Sparkles, AlignLeft, Download, RefreshCw,
   Terminal, MousePointer2, Wand2, Globe, Palette, Clapperboard, UserCircle, UserCog,
   Maximize, ZoomIn, ZoomOut, Zap, MessageSquare, PenTool, FileText, Star, Edit3, Boxes,
@@ -13,8 +13,8 @@ import {
   Key, Globe2, Upload, Languages, ShieldCheck, TriangleAlert, SaveAll, Eraser
 } from 'lucide-react';
 import { TOOLS, updateLightX2VModels } from './constants';
-import { 
-  WorkflowNode, Connection, WorkflowState, 
+import {
+  WorkflowNode, Connection, WorkflowState,
   NodeStatus, DataType, Port, ToolDefinition, GenerationRun
 } from './types';
 import { geminiText, geminiImage, geminiSpeech, geminiVideo, lightX2VTask, lightX2VTTS, lightX2VVoiceClone, lightX2VVoiceCloneTTS, lightX2VGetVoiceList, lightX2VGetCloneVoiceList, lightX2VGetModelList, deepseekText, doubaoText, ppchatGeminiText } from './services/geminiService';
@@ -51,7 +51,7 @@ const App: React.FC = () => {
   });
   const [currentView, setCurrentView] = useState<'DASHBOARD' | 'EDITOR'>('DASHBOARD');
   const [activeTab, setActiveTab] = useState<'MY' | 'PRESET'>('MY');
-  
+
   // Use useWorkflow Hook
   const {
     myWorkflows,
@@ -70,11 +70,11 @@ const App: React.FC = () => {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [activeOutputs, setActiveOutputs] = useState<Record<string, any>>({});
-  
+
   // Canvas ref
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeHeightsRef = useRef<Map<string, number>>(new Map());
-  
+
   // Use useCanvas Hook
   const {
     view,
@@ -99,16 +99,16 @@ const App: React.FC = () => {
     handleNodeDragEnd: canvasHandleNodeDragEnd,
     screenToWorldCoords
   } = useCanvas(workflow, canvasRef);
-  
+
   // Use useModalState Hook
   const modalState = useModalState();
-  
+
   // Use useUndoRedo Hook
   const undoRedo = useUndoRedo({
     workflow,
     setWorkflow
   });
-  
+
   const [ticker, setTicker] = useState(0);
   const [validationErrors, setValidationErrors] = useState<{ message: string; type: 'ENV' | 'INPUT' }[]>([]);
   const [globalError, setGlobalError] = useState<{ message: string; details?: string } | null>(null);
@@ -118,7 +118,7 @@ const App: React.FC = () => {
   const isPausedRef = useRef(false);
   const runningTaskIdsRef = useRef<Map<string, string>>(new Map()); // Map<nodeId, taskId> for tracking LightX2V tasks
   const abortControllerRef = useRef<AbortController | null>(null); // AbortController for cancelling tasks
-  
+
   // Use translation hook from components
   const { t } = useTranslation(lang);
 
@@ -131,31 +131,31 @@ const App: React.FC = () => {
   const configCacheRef = useRef<{ config: { url: string; token: string }; key: string } | null>(null);
   const lightX2VConfigRef = useRef<{ url: string; token: string } | null>(null);
   const configKeyRef = useRef<string>('');
-  
+
   // Helper function to get LightX2V config from shared store and API client
   // 优先使用环境变量 LIGHTX2V_URL，如果没有则根据是否有 apiClient 决定
   const getLightX2VConfig = useCallback((workflow: WorkflowState | null) => {
     // 从主应用获取 sharedStore 和 apiClient
     const sharedStore = (window as any).__SHARED_STORE__;
     const apiClient = (window as any).__API_CLIENT__;
-    
+
     // 优先检查环境变量 LIGHTX2V_URL
     const DEFAULT_LIGHTX2V_URL = 'https://x2v.light-ai.top';
     const envUrl = process.env.LIGHTX2V_URL;
-    
+
     // 创建缓存 key（基于配置的关键因素）
     const cacheKey = `${envUrl || 'empty'}:${!!apiClient}`;
-    
+
     // 如果配置没有变化，返回缓存的配置
     if (configCacheRef.current && configCacheRef.current.key === cacheKey) {
       return configCacheRef.current.config;
     }
-    
+
     // 获取 token（只在配置变化时调用）
     const token = getAccessToken();
-    
+
     let config: { url: string; token: string };
-    
+
     // 如果环境变量明确设置了（不为空且不等于空字符串），优先使用环境变量
     // 即使存在 apiClient，也应该使用环境变量的 URL，因为用户明确指定了要直接访问该 URL
     if (envUrl && envUrl.trim()) {
@@ -182,10 +182,10 @@ const App: React.FC = () => {
         token: token
       };
     }
-    
+
     // 缓存配置
     configCacheRef.current = { config, key: cacheKey };
-    
+
     return config;
   }, []);
 
@@ -196,25 +196,25 @@ const App: React.FC = () => {
       try {
         const config = getLightX2VConfig(workflow);
         const configKey = `${config.url || 'empty'}:${config.token ? 'hasToken' : 'noToken'}`;
-        
+
         // 检查云端配置
         const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
         const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
         const cloudConfigKey = `${cloudUrl}:${cloudToken ? 'hasToken' : 'noToken'}`;
         const fullConfigKey = `${configKey}:${cloudConfigKey}`;
-        
+
         // 如果配置没有变化，跳过（这是主要的优化点）
         if (configKeyRef.current === fullConfigKey && lightX2VConfigRef.current) {
           return;
         }
-        
+
         // 更新缓存的配置
         lightX2VConfigRef.current = config;
         configKeyRef.current = fullConfigKey;
-        
+
         // 并行加载本地和云端模型列表
         const loadPromises: Promise<Array<{ task: string; model_cls: string; stage: string }>>[] = [];
-        
+
         // 加载本地模型列表
         if (config.url || config.token) {
           loadPromises.push(
@@ -226,7 +226,7 @@ const App: React.FC = () => {
         } else {
           loadPromises.push(Promise.resolve([]));
         }
-        
+
         // 加载云端模型列表
         if (cloudUrl && cloudToken) {
           loadPromises.push(
@@ -238,9 +238,9 @@ const App: React.FC = () => {
         } else {
           loadPromises.push(Promise.resolve([]));
         }
-        
+
         const [localModels, cloudModels] = await Promise.all(loadPromises);
-        
+
         // 更新模型列表（本地模型 + 云端模型带 -cloud 后缀）
         if (localModels.length > 0 || cloudModels.length > 0) {
           updateLightX2VModels(localModels, cloudModels);
@@ -262,7 +262,7 @@ const App: React.FC = () => {
 
   // Use useVoiceList Hook (after getLightX2VConfig is defined)
   const voiceList = useVoiceList(workflow, selectedNodeId, getLightX2VConfig);
-  
+
   // Use useWorkflowAutoSave Hook
   const autoSaveHook = useWorkflowAutoSave({
     workflow,
@@ -338,9 +338,9 @@ const App: React.FC = () => {
       setAIWorkflowDescription('');
     } catch (error: any) {
       console.error('[AI Workflow] Generation failed:', error);
-      setGlobalError({ 
-        message: t('execution_failed'), 
-        details: error.message || String(error) 
+      setGlobalError({
+        message: t('execution_failed'),
+        details: error.message || String(error)
       });
     } finally {
       setIsGeneratingWorkflow(false);
@@ -424,21 +424,21 @@ const App: React.FC = () => {
       // Check if URL hash contains workflow ID
       const hash = window.location.hash;
       const workflowMatch = hash.match(/^#?workflow\/([a-f0-9-]+)$/i);
-      
+
       if (workflowMatch) {
         const workflowId = workflowMatch[1];
         console.log('[App] Loading workflow from URL hash:', workflowId);
-        
+
         try {
           // Check if workflow belongs to current user
           const currentUserId = getCurrentUserId();
           const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
-          
+
           if (existingWorkflow) {
             if (isPreset) {
               // Preset workflow - copy it to user's workflows
               console.log('[App] Workflow is a preset, copying to create user-owned version');
-              
+
               // Generate new UUID for copied workflow
               const generateUUID = () => {
                 return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -448,7 +448,7 @@ const App: React.FC = () => {
                 });
               };
               const newWorkflowId = generateUUID();
-              
+
               // Copy workflow via API
               const copyResponse = await apiRequest(`/api/v1/workflow/${workflowId}/copy`, {
                 method: 'POST',
@@ -456,12 +456,12 @@ const App: React.FC = () => {
                   workflow_id: newWorkflowId
                 })
               });
-              
+
               if (copyResponse.ok) {
                 const copyData = await copyResponse.json();
                 const copiedWorkflowId = copyData.workflow_id;
                 console.log('[App] Workflow copied successfully, new ID:', copiedWorkflowId);
-                
+
                 // Load the copied workflow
                 const loaded = await loadWorkflow(copiedWorkflowId);
                 if (loaded) {
@@ -476,7 +476,7 @@ const App: React.FC = () => {
                   setWorkflow(newWorkflow);
                   setActiveOutputs(loaded.activeOutputs);
                   setCurrentView('EDITOR');
-                  
+
                   // Update URL with new workflow ID
                   if (window.history && window.history.replaceState) {
                     window.history.replaceState(null, '', `#workflow/${copiedWorkflowId}`);
@@ -510,7 +510,7 @@ const App: React.FC = () => {
         }
       }
     };
-    
+
     // Load workflow from hash on mount
     loadWorkflowFromHash();
   }, []); // Only run on mount - eslint-disable-line react-hooks/exhaustive-deps
@@ -520,18 +520,18 @@ const App: React.FC = () => {
     const handleHashChange = async () => {
       const hash = window.location.hash;
       const workflowMatch = hash.match(/^#?workflow\/([a-f0-9-]+)$/i);
-      
+
       if (workflowMatch) {
         const workflowId = workflowMatch[1];
-        
+
         // Only load if it's a different workflow
         if (!workflow || workflow.id !== workflowId) {
           console.log('[App] Hash changed, loading workflow:', workflowId);
-          
+
           try {
             const currentUserId = getCurrentUserId();
             const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
-            
+
             if (existingWorkflow && !isPreset) {
               // Only load user's own workflows on hash change (preset workflows should be copied first)
               const loaded = await loadWorkflow(workflowId);
@@ -567,7 +567,7 @@ const App: React.FC = () => {
         }
       }
     };
-    
+
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [workflow, currentView, loadWorkflow, getLightX2VConfig, setWorkflow, setActiveOutputs, setCurrentView]);
@@ -584,7 +584,7 @@ const App: React.FC = () => {
   // Auto-match resource_id when voice list is loaded
   useEffect(() => {
     if (!voiceList.lightX2VVoiceList?.voices || !workflow) return;
-    
+
     const voiceData = voiceList.lightX2VVoiceList;
     if (voiceData.voices && voiceData.voices.length > 0) {
           workflow.nodes.forEach(node => {
@@ -619,22 +619,22 @@ const App: React.FC = () => {
     setActiveOutputs({});
     voiceList.resetVoiceList(); // Reset voice list when switching workflows
     voiceList.resetCloneVoiceList(); // Reset clone voice list
-    
+
     // Try to load from database if workflow has a database ID
     let workflowToOpen = w;
     let activeOutputsToRestore: Record<string, any> = {};
     let workflowIdToOpen = w.id;
-    
+
     if (w.id && (w.id.startsWith('workflow-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
       try {
         // Check if workflow belongs to current user
         const currentUserId = getCurrentUserId();
         const { isPreset } = await checkWorkflowOwnership(w.id, currentUserId);
-        
+
         if (isPreset) {
           // Workflow belongs to different user (preset workflow), copy it
           console.log('[App] Opening preset workflow, copying to create user-owned version');
-          
+
           // Generate new UUID for copied workflow
           const generateUUID = () => {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -644,7 +644,7 @@ const App: React.FC = () => {
             });
           };
           const newWorkflowId = generateUUID();
-          
+
           // Copy workflow via API
           const copyResponse = await apiRequest(`/api/v1/workflow/${w.id}/copy`, {
             method: 'POST',
@@ -652,12 +652,12 @@ const App: React.FC = () => {
               workflow_id: newWorkflowId
             })
           });
-          
+
           if (copyResponse.ok) {
             const copyData = await copyResponse.json();
             workflowIdToOpen = copyData.workflow_id;
             console.log('[App] Workflow copied successfully, new ID:', workflowIdToOpen);
-            
+
             // Load the copied workflow
             const loaded = await loadWorkflow(workflowIdToOpen);
             if (loaded) {
@@ -681,16 +681,16 @@ const App: React.FC = () => {
         console.warn('[App] Failed to load workflow from database, using cached version:', error);
       }
     }
-    
+
     // 获取当前的 LightX2V 配置（从主应用或环境变量）
     const config = getLightX2VConfig(null);
-    
+
     // 更新工作流的 env 配置，使用动态获取的配置
-    const newWorkflow = { 
-      ...workflowToOpen, 
+    const newWorkflow = {
+      ...workflowToOpen,
       id: workflowIdToOpen, // Use the correct workflow ID (original or copied)
-      isDirty: false, 
-      isRunning: false, 
+      isDirty: false,
+      isRunning: false,
       env: {
         lightx2v_url: config.url,
         lightx2v_token: config.token
@@ -699,12 +699,12 @@ const App: React.FC = () => {
     setWorkflow(newWorkflow);
     setActiveOutputs(activeOutputsToRestore);
     setCurrentView('EDITOR');
-    
+
     // Update URL to show workflow_id
     if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
       window.history.replaceState(null, '', `#workflow/${workflowIdToOpen}`);
     }
-    
+
     // History will be automatically initialized by useUndoRedo when workflow changes
   }, [loadWorkflow, getLightX2VConfig, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
 
@@ -716,13 +716,13 @@ const App: React.FC = () => {
     setActiveOutputs({});
     voiceList.resetVoiceList(); // Reset voice list when creating new workflow
     voiceList.resetCloneVoiceList(); // Reset clone voice list
-    
+
     // 获取当前的 LightX2V 配置（从主应用或环境变量）
     const config = getLightX2VConfig(null);
-    
+
     // Use temporary ID for new workflow (backend will generate the real workflow_id)
     const tempWorkflowId = `temp-${Date.now()}`;
-    
+
     // Create workflow in database
     try {
       const tempFlow: WorkflowState = {
@@ -741,10 +741,10 @@ const App: React.FC = () => {
         updatedAt: Date.now(),
         showIntermediateResults: true
       };
-      
+
       // Create workflow in database (backend will generate workflow_id)
       const finalWorkflowId = await saveWorkflowToDatabase(tempFlow, { name: t('untitled') });
-      
+
       // Update workflow with backend-generated ID
       const finalFlow = { ...tempFlow, id: finalWorkflowId, isDirty: false };
       setWorkflow(finalFlow);
@@ -817,7 +817,7 @@ const App: React.FC = () => {
         }
         return;
       }
-      
+
       // Delete/Backspace for nodes and connections
       if ((e.key === 'Delete' || e.key === 'Backspace') && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName || '')) {
         if (selectedNodeId) nodeManagement.deleteNode(selectedNodeId);
@@ -863,13 +863,13 @@ const App: React.FC = () => {
     if (!workflow) return;
     const node = workflow.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    
+
     const newTool = TOOLS.find(t => t.id === newToolId);
     if (!newTool) return;
-    
+
     // Get current node outputs
     const currentNodeOutputs = getNodeOutputs(node);
-    
+
     // Handle text-generation special case (dynamic outputs)
     let newToolOutputs: Port[] = [];
     let newCustomOutputs: any[] | undefined = undefined;
@@ -891,7 +891,7 @@ const App: React.FC = () => {
     } else {
       newToolOutputs = newTool.outputs;
     }
-    
+
     // Check if outputs are compatible (for text-generation, we've already created matching outputs)
     if (currentNodeOutputs.length !== newToolOutputs.length) return;
     const isCompatible = currentNodeOutputs.every((out, idx) => {
@@ -899,7 +899,7 @@ const App: React.FC = () => {
       return out.type === newToolOutputs[idx].type;
     });
     if (!isCompatible) return;
-    
+
     // Create a mapping of old output port IDs to new ones
     const outputPortMap: Record<string, string> = {};
     currentNodeOutputs.forEach((oldOut, idx) => {
@@ -907,11 +907,11 @@ const App: React.FC = () => {
         outputPortMap[oldOut.id] = newToolOutputs[idx].id;
       }
     });
-    
+
     // Update the node
     setWorkflow(prev => {
       if (!prev) return null;
-      
+
       // Create new node with new tool
       const newNode: WorkflowNode = {
         ...node,
@@ -928,11 +928,11 @@ const App: React.FC = () => {
         executionTime: undefined,
         startTime: undefined
       };
-      
+
       // Update connections: map old output port IDs to new ones
       // Special handling for TTS -> Voice Clone replacement
       const isTTSToVoiceClone = node.toolId === 'tts' && newToolId === 'lightx2v-voice-clone';
-      
+
       const updatedConnections = prev.connections.map(conn => {
         // Handle output connections (source is the replaced node)
         if (conn.sourceNodeId === nodeId) {
@@ -943,7 +943,7 @@ const App: React.FC = () => {
           // If no mapping found, remove the connection
           return null;
         }
-        
+
         // Handle input connections (target is the replaced node)
         if (conn.targetNodeId === nodeId) {
           // Special case: TTS -> Voice Clone
@@ -957,12 +957,12 @@ const App: React.FC = () => {
               return null;
             }
           }
-          
+
           // For other replacements, try to map input ports
           const oldTool = TOOLS.find(t => t.id === node.toolId);
           const oldInputs = oldTool?.inputs || [];
           const newInputs = newTool.inputs || [];
-          
+
           // Try to find matching input port by type and position
           const oldInputIndex = oldInputs.findIndex(inp => inp.id === conn.targetPortId);
           if (oldInputIndex >= 0 && oldInputIndex < newInputs.length) {
@@ -973,20 +973,20 @@ const App: React.FC = () => {
               return { ...conn, targetPortId: newInput.id };
             }
           }
-          
+
           // If no mapping found, check if port ID exists in new tool
           const portExists = newInputs.some(inp => inp.id === conn.targetPortId);
           if (portExists) {
             return conn; // Keep connection if port exists
           }
-          
+
           // Remove connection if port doesn't exist
           return null;
         }
-        
+
         return conn;
       }).filter((c): c is Connection => c !== null);
-      
+
       return {
         ...prev,
         nodes: prev.nodes.map(n => n.id === nodeId ? newNode : n),
@@ -994,7 +994,7 @@ const App: React.FC = () => {
         isDirty: true
       };
     });
-    
+
     modalState.setShowReplaceMenu(null);
   }, [workflow]);
 
@@ -1025,14 +1025,14 @@ const App: React.FC = () => {
   const disconnectedInputs = useMemo(() => {
     if (!workflow) return [];
     const list: { nodeId: string; port: Port; toolName: string; isSourceNode?: boolean; dataType: DataType }[] = [];
-    
+
     workflow.nodes.forEach(node => {
       const tool = TOOLS.find(t => t.id === node.toolId);
       if (!tool || tool.category === 'Input') return;
-      tool.inputs.forEach(port => { 
+      tool.inputs.forEach(port => {
         const isConnected = workflow.connections.some(c => c.targetNodeId === node.id && c.targetPortId === port.id);
         if (!isConnected) {
-           list.push({ nodeId: node.id, port, toolName: (lang === 'zh' ? tool.name_zh : tool.name), dataType: port.type }); 
+           list.push({ nodeId: node.id, port, toolName: (lang === 'zh' ? tool.name_zh : tool.name), dataType: port.type });
         }
       });
     });
@@ -1040,14 +1040,14 @@ const App: React.FC = () => {
     workflow.nodes.forEach(node => {
       const tool = TOOLS.find(t => t.id === node.toolId);
       if (!tool || tool.category !== 'Input') return;
-      
+
       const val = node.data.value;
       const isEmpty = (Array.isArray(val) && val.length === 0) || !val;
       if (isEmpty) {
-        list.push({ 
-          nodeId: node.id, 
-          port: tool.outputs[0], 
-          toolName: (lang === 'zh' ? tool.name_zh : tool.name), 
+        list.push({
+          nodeId: node.id,
+          port: tool.outputs[0],
+          toolName: (lang === 'zh' ? tool.name_zh : tool.name),
           isSourceNode: true,
           dataType: tool.outputs[0].type
         });
@@ -1066,27 +1066,27 @@ const App: React.FC = () => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    
+
     // Check if mouse is over a node or port
     const target = e.target as HTMLElement;
     const isOverNodeElement = target.closest('.node-element') || target.closest('.port') || target.closest('.connection-path');
     setIsOverNode(!!isOverNodeElement);
-    
+
     // Call canvas Hook's handleMouseMove for panning
     canvasHandleMouseMove(e);
-    
+
     // Handle node dragging with workflow update
     if (draggingNode) {
         if (selectedRunId) setSelectedRunId(null);
       const world = screenToWorldCoords(x, y);
-      setWorkflow(prev => prev ? ({ 
-        ...prev, 
-        nodes: prev.nodes.map(n => n.id === draggingNode.id ? { 
-          ...n, 
-          x: world.x - draggingNode.offsetX, 
-          y: world.y - draggingNode.offsetY 
-        } : n), 
-        isDirty: true 
+      setWorkflow(prev => prev ? ({
+        ...prev,
+        nodes: prev.nodes.map(n => n.id === draggingNode.id ? {
+          ...n,
+          x: world.x - draggingNode.offsetX,
+          y: world.y - draggingNode.offsetY
+        } : n),
+        isDirty: true
       }) : null);
     }
   }, [draggingNode, selectedRunId, canvasHandleMouseMove, screenToWorldCoords]);
@@ -1096,11 +1096,11 @@ const App: React.FC = () => {
     // Call canvas Hook's handleMouseDown for panning
     canvasHandleMouseDown(e);
     // Additional logic: clear selection when clicking on canvas
-    if (!(e.target as HTMLElement).closest('.node-element') && 
-        !(e.target as HTMLElement).closest('.port') && 
+    if (!(e.target as HTMLElement).closest('.node-element') &&
+        !(e.target as HTMLElement).closest('.port') &&
         !(e.target as HTMLElement).closest('.connection-path')) {
-      setSelectedNodeId(null); 
-      setSelectedConnectionId(null); 
+      setSelectedNodeId(null);
+      setSelectedConnectionId(null);
     }
   }, [canvasHandleMouseDown]);
 
@@ -1114,14 +1114,14 @@ const App: React.FC = () => {
     // Call canvas Hook's handleNodeDrag
     canvasHandleNodeDrag(nodeId, x, y);
     // Update workflow with new node position
-    setWorkflow(prev => prev ? ({ 
-      ...prev, 
-      nodes: prev.nodes.map(n => n.id === nodeId ? { 
-        ...n, 
-        x: x - draggingNode.offsetX, 
-        y: y - draggingNode.offsetY 
-      } : n), 
-      isDirty: true 
+    setWorkflow(prev => prev ? ({
+      ...prev,
+      nodes: prev.nodes.map(n => n.id === nodeId ? {
+        ...n,
+        x: x - draggingNode.offsetX,
+        y: y - draggingNode.offsetY
+      } : n),
+      isDirty: true
     }) : null);
   }, [draggingNode, canvasHandleNodeDrag]);
 
@@ -1165,12 +1165,12 @@ const App: React.FC = () => {
 
   if (!workflow) return null;
 
-  const sourceNodes = selectedRunId 
-    ? (workflow.history.find(r => r.id === selectedRunId)?.nodesSnapshot || []) 
+  const sourceNodes = selectedRunId
+    ? (workflow.history.find(r => r.id === selectedRunId)?.nodesSnapshot || [])
     : workflow.nodes;
-    
-  const sourceOutputs = selectedRunId 
-    ? (workflow.history.find(r => r.id === selectedRunId)?.outputs || {}) 
+
+  const sourceOutputs = selectedRunId
+    ? (workflow.history.find(r => r.id === selectedRunId)?.outputs || {})
     : activeOutputs;
 
   return (
@@ -1250,7 +1250,7 @@ const App: React.FC = () => {
                 const newPausedState = !isPaused;
                 setIsPaused(newPausedState);
                 isPausedRef.current = newPausedState;
-              }} 
+              }}
         onRun={() => runWorkflow()}
         onStop={async () => {
           if (stopWorkflow) {
@@ -1263,7 +1263,7 @@ const App: React.FC = () => {
         onUndo={undoRedo.undo}
         onRedo={undoRedo.redo}
         onAddNode={addNode}
-          onMouseMove={handleMouseMove} 
+          onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown}
         onMouseUp={canvasHandleMouseUp}
         onMouseLeave={canvasHandleMouseLeave}
@@ -1356,11 +1356,11 @@ const App: React.FC = () => {
               // 重试：找到对应的用户消息并重新发送
               const history = aiChatWorkflow.chatHistory;
               const assistantMessageIndex = history.findIndex(m => m.id === messageId);
-              
+
               if (assistantMessageIndex >= 0) {
                 // 找到当前 assistant 消息之前最近的一条用户消息
                 let userMessage = null;
-                
+
                 // 先检查前一条消息是否是用户消息（最常见的情况）
                 if (assistantMessageIndex > 0) {
                   const prevMessage = history[assistantMessageIndex - 1];
@@ -1368,7 +1368,7 @@ const App: React.FC = () => {
                     userMessage = prevMessage;
                   }
                 }
-                
+
                 // 如果前一条不是用户消息，向前查找最近的一条用户消息
                 if (!userMessage) {
                   for (let i = assistantMessageIndex - 1; i >= 0; i--) {
@@ -1378,7 +1378,7 @@ const App: React.FC = () => {
                     }
                   }
                 }
-                
+
                 // 如果找到了用户消息，重新发送
                 if (userMessage) {
                   aiChatWorkflow.handleUserInput(userMessage.content);

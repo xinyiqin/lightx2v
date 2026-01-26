@@ -131,17 +131,17 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     const isTrackpadPinch = e.ctrlKey || e.metaKey;
     const isTrackpadZoom = !isTrackpadPinch && Math.abs(e.deltaY) > 0 && (Math.abs(e.deltaX) < 5 || Math.abs(e.deltaY) / Math.abs(e.deltaX) > 2);
     const isZoom = isTrackpadPinch || isTrackpadZoom;
-    
+
     if (isZoom) {
       e.preventDefault();
-      
+
       // Get mouse position relative to canvas
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
-      
+
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      
+
       // Calculate zoom factor - adjust sensitivity for trackpad vs mouse
       let zoomFactor: number;
       if (e.deltaMode === 0) {
@@ -152,9 +152,9 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
         // Line/page scrolling (traditional mouse wheel)
         zoomFactor = 1 - (e.deltaY * 0.01);
       }
-      
+
       const newZoom = Math.min(Math.max(view.zoom * zoomFactor, 0.1), 5);
-      
+
       // Zoom towards mouse position (keep the point under cursor fixed)
       const zoomRatio = newZoom / view.zoom;
       setView(v => ({
@@ -207,4 +207,3 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     screenToWorldCoords
   };
 };
-

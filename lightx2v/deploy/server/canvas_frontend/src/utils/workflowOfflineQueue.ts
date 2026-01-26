@@ -65,7 +65,7 @@ class WorkflowOfflineQueue {
       const queue = this.getQueue();
       // 如果队列中已有相同工作流的任务，移除旧任务（保留最新的）
       const filteredQueue = queue.filter(task => task.workflowId !== workflowId);
-      
+
       // 压缩工作流数据以减小体积
       const compressedData = this.compressWorkflowData(workflowData);
       const newTask: OfflineSaveTask = {
@@ -74,11 +74,11 @@ class WorkflowOfflineQueue {
         timestamp: Date.now(),
         retryCount: 0
       };
-      
+
       // 检查队列大小限制
       const newQueue = [...filteredQueue, newTask];
       const queueSize = this.estimateSize(newQueue);
-      
+
       // 如果超出大小限制，移除最旧的任务
       let finalQueue = newQueue;
       if (queueSize > MAX_QUEUE_SIZE_BYTES || newQueue.length > MAX_QUEUE_SIZE) {
@@ -86,12 +86,12 @@ class WorkflowOfflineQueue {
         finalQueue = newQueue
           .sort((a, b) => b.timestamp - a.timestamp)
           .slice(0, MAX_QUEUE_SIZE);
-        
+
         // 如果仍然太大，继续移除直到满足大小限制
         while (this.estimateSize(finalQueue) > MAX_QUEUE_SIZE_BYTES && finalQueue.length > 1) {
           finalQueue.pop();
         }
-        
+
         const removedCount = newQueue.length - finalQueue.length;
         if (removedCount > 0) {
           console.warn(`[WorkflowOfflineQueue] Removed ${removedCount} old task(s) due to size limit`);
@@ -100,7 +100,7 @@ class WorkflowOfflineQueue {
 
       localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(finalQueue));
       console.log('[WorkflowOfflineQueue] Task added to offline queue:', workflowId, `(${finalQueue.length}/${MAX_QUEUE_SIZE} tasks)`);
-      
+
       // 启动同步检查
       this.startSync();
     } catch (error) {
@@ -132,7 +132,7 @@ class WorkflowOfflineQueue {
     try {
       const queue = this.getQueue();
       const filteredQueue = queue.filter(task => task.workflowId !== workflowId);
-      
+
       if (filteredQueue.length < queue.length) {
         this.saveQueue(filteredQueue);
         console.log(`[WorkflowOfflineQueue] Removed task for deleted workflow: ${workflowId}`);
@@ -183,7 +183,7 @@ class WorkflowOfflineQueue {
       const channel = new BroadcastChannel('workflow_offline_sync');
       const lockKey = 'workflow_offline_sync_lock';
       const lockTimeout = 30000; // 30秒超时
-      
+
       // 检查是否有其他标签页正在同步
       const existingLock = localStorage.getItem(lockKey);
       if (existingLock) {
@@ -195,11 +195,11 @@ class WorkflowOfflineQueue {
         // 锁已过期，清除
         localStorage.removeItem(lockKey);
       }
-      
+
       // 获取锁
       this.syncLock = `${Date.now()}-${Math.random()}`;
       localStorage.setItem(lockKey, Date.now().toString());
-      
+
       // 监听其他标签页的同步完成消息
       channel.onmessage = (event) => {
         if (event.data === 'sync_complete' && this.syncLock === event.data.lockId) {
@@ -207,7 +207,7 @@ class WorkflowOfflineQueue {
           localStorage.removeItem(lockKey);
         }
       };
-      
+
       return true;
     } catch (error) {
       // BroadcastChannel 不支持时，使用简单锁
@@ -226,7 +226,7 @@ class WorkflowOfflineQueue {
     try {
       const channel = new BroadcastChannel('workflow_offline_sync');
       const lockKey = 'workflow_offline_sync_lock';
-      
+
       if (this.syncLock) {
         channel.postMessage({ type: 'sync_complete', lockId: this.syncLock });
         this.syncLock = null;
@@ -260,7 +260,7 @@ class WorkflowOfflineQueue {
       }
 
       console.log(`[WorkflowOfflineQueue] Syncing ${queue.length} offline tasks...`);
-      
+
       // 触发同步开始事件（用于UI提示）
       this.notifySyncStart(queue.length);
 

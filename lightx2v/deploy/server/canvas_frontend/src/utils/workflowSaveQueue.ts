@@ -31,7 +31,7 @@ class WorkflowSaveQueue {
     return new Promise((resolve, reject) => {
       // 如果队列中已有相同工作流的任务，移除旧任务（保留最新的）
       this.queue = this.queue.filter(task => task.workflowId !== workflowId);
-      
+
       // 限制队列大小，防止内存泄漏
       if (this.queue.length >= MAX_QUEUE_SIZE) {
         const oldestTask = this.queue.shift();
@@ -39,7 +39,7 @@ class WorkflowSaveQueue {
           oldestTask.reject(new Error('Save queue is full, oldest task removed'));
         }
       }
-      
+
       this.queue.push({
         workflowId,
         saveFn,
@@ -82,12 +82,12 @@ class WorkflowSaveQueue {
 
       try {
         console.log(`[WorkflowSaveQueue] Processing save for workflow: ${task.workflowId}`);
-        
+
         // 使用 Promise.race 实现超时控制
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => reject(new Error(`Save operation timed out after ${SAVE_TIMEOUT}ms`)), SAVE_TIMEOUT);
         });
-        
+
         const result = await Promise.race([task.saveFn(), timeoutPromise]);
         task.resolve(result);
         console.log(`[WorkflowSaveQueue] Save completed for workflow: ${task.workflowId}`);
@@ -117,7 +117,7 @@ class WorkflowSaveQueue {
    * 检查指定工作流是否正在保存
    */
   isSaving(workflowId: string): boolean {
-    return this.currentWorkflowId === workflowId || 
+    return this.currentWorkflowId === workflowId ||
            this.queue.some(task => task.workflowId === workflowId);
   }
 
@@ -128,18 +128,18 @@ class WorkflowSaveQueue {
   removeTask(workflowId: string): void {
     const removedTasks = this.queue.filter(task => task.workflowId === workflowId);
     this.queue = this.queue.filter(task => task.workflowId !== workflowId);
-    
+
     // 如果正在处理的工作流被删除，取消当前任务
     if (this.currentWorkflowId === workflowId) {
       this.currentWorkflowId = null;
       // 注意：当前正在执行的任务无法取消，但会在执行时检查工作流是否存在
     }
-    
+
     // 拒绝被移除的任务
     removedTasks.forEach(task => {
       task.reject(new Error(`Workflow ${workflowId} was deleted, save task cancelled`));
     });
-    
+
     if (removedTasks.length > 0) {
       console.log(`[WorkflowSaveQueue] Removed ${removedTasks.length} save task(s) for deleted workflow: ${workflowId}`);
     }
@@ -164,7 +164,7 @@ class WorkflowSaveQueue {
   cleanupTimeoutTasks(): void {
     const now = Date.now();
     const timeoutTasks = this.queue.filter(task => now - task.createdAt > SAVE_TIMEOUT);
-    
+
     if (timeoutTasks.length > 0) {
       timeoutTasks.forEach(task => {
         task.reject(new Error(`Save task timed out after ${SAVE_TIMEOUT}ms`));

@@ -23,7 +23,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   // Extract preview content from workflow for preset cards
   const textInputNode = workflow.nodes.find(n => n.toolId === 'text-input' && n.data?.value);
   const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && n.data?.value && Array.isArray(n.data.value) && n.data.value.length > 0);
-  
+
   const previewText = textInputNode?.data?.value || null;
   const previewImage = imageInputNode?.data?.value?.[0] || null;
 
@@ -49,12 +49,12 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
             <div className="w-full aspect-[3/4] rounded-xl overflow-hidden bg-slate-800/50 flex items-center justify-center flex-shrink-0">
               <img
                 src={
-                  previewImage.startsWith('/') 
+                  previewImage.startsWith('/')
                     ? (previewImage.startsWith('/assets/') && !previewImage.startsWith('/canvas/')
                         ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${previewImage}`
                         : previewImage)
-                    : (previewImage.startsWith('data:') 
-                        ? previewImage 
+                    : (previewImage.startsWith('data:')
+                        ? previewImage
                         : `data:image/png;base64,${previewImage}`)
                 }
                 alt="Preview"
@@ -113,4 +113,3 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
     </div>
   );
 };
-

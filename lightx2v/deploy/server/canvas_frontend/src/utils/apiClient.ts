@@ -7,7 +7,7 @@
 export function initLightX2VToken(): void {
   const envUrl = process.env.LIGHTX2V_URL;
   const envToken = process.env.LIGHTX2V_TOKEN;
-  
+
   // 如果使用环境变量 URL，必须使用环境变量的 TOKEN
   if (envUrl && envUrl.trim()) {
     if (!envToken || !envToken.trim()) {
@@ -18,7 +18,7 @@ export function initLightX2VToken(): void {
     console.log('[LightX2V] process.env.LIGHTX2V_TOKEN:', envToken ? `${envToken.substring(0, 10)}...` : 'empty');
     return;
   }
-  
+
   // 不使用环境变量 URL 时，使用原来的逻辑
   const accessToken = localStorage.getItem('accessToken');
   if (accessToken) {
@@ -62,38 +62,38 @@ function getAuthHeaders(): Record<string, string> {
   // 优先从 sharedStore 获取 token，否则从 localStorage 获取
   const sharedStore = getSharedStore();
   const token = sharedStore ? sharedStore.getState('token') : localStorage.getItem('accessToken');
-  
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
     console.log('[apiRequest] 使用Token进行认证:', token.substring(0, 20) + '...');
   } else {
     console.warn('[apiRequest] 没有找到accessToken');
   }
-  
+
   return headers;
 }
 
 export async function apiRequest(url: string, options: RequestInit = {}): Promise<Response> {
   const apiClient = getApiClient();
-  
+
   // 参考主应用的做法：总是获取认证 headers，然后合并 options.headers
   // options.headers 会覆盖 getAuthHeaders() 中的 headers
   const authHeaders = getAuthHeaders();
   const incomingHeaders = (options.headers as Record<string, string>) || {};
-  
+
   // 合并 headers：先使用 authHeaders，然后 options.headers 会覆盖
   const headers: Record<string, string> = {
     ...authHeaders,
     ...incomingHeaders
   };
-  
+
   // 如果有 apiClient，使用它
   if (apiClient && typeof apiClient.request === 'function') {
     // apiClient 使用相对路径，但需要完整 URL
     // 获取 baseURL
     const baseURL = apiClient.baseURL || '';
     const fullUrl = url.startsWith('http') ? url : `${baseURL}${url}`;
-    
+
     // 使用 apiClient 的 request 方法
     // 但 apiClient.request 返回的是解析后的 JSON，我们需要 Response 对象
     // 所以需要直接使用 fetch，但使用 apiClient 的配置
@@ -102,7 +102,7 @@ export async function apiRequest(url: string, options: RequestInit = {}): Promis
       headers
     });
   }
-  
+
   // 回退到直接 fetch（使用相对路径，浏览器会自动使用当前域名）
   return fetch(url, {
     ...options,
@@ -119,7 +119,7 @@ export function getApiBaseUrl(): string {
     return apiClient.baseURL;
   }
   // 回退到当前域名
-  return typeof window !== 'undefined' 
+  return typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.host}`
     : 'http://localhost:8082';
 }
@@ -135,7 +135,7 @@ const TOKEN_CACHE_TTL = 1000; // 1秒缓存，避免频繁读取
 
 export function getAccessToken(): string {
   const envUrl = process.env.LIGHTX2V_URL;
-  
+
   // 如果使用环境变量 URL，只使用环境变量的 TOKEN
   if (envUrl && envUrl.trim()) {
     const envToken = (process.env.LIGHTX2V_TOKEN || '').trim();
@@ -148,21 +148,21 @@ export function getAccessToken(): string {
     }
     return envToken;
   }
-  
+
   // 检查缓存
   const now = Date.now();
   if (tokenCache && now - tokenCache.timestamp < TOKEN_CACHE_TTL) {
     return tokenCache.token;
   }
-  
+
   // 不使用环境变量 URL 时，使用原来的逻辑
   const localToken = localStorage.getItem('accessToken');
-  
+
   // 只在首次调用或缓存过期时打印日志
   if (!tokenCache || now - tokenCache.timestamp > TOKEN_CACHE_TTL) {
     // 减少日志输出，只在必要时打印
   }
-  
+
   let token: string;
   if (localToken) {
     // 如果获取到了 token，同时更新 process.env.LIGHTX2V_TOKEN
@@ -172,9 +172,9 @@ export function getAccessToken(): string {
     // 如果没有登录，使用环境变量
     token = (process.env.LIGHTX2V_TOKEN || '').trim();
   }
-  
+
   // 更新缓存
   tokenCache = { token, timestamp: now };
-  
+
   return token;
 }

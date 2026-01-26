@@ -24,5 +24,3 @@ const icons: Record<string, React.ComponentType<any>> = {
 export const getIcon = (iconName: string): React.ComponentType<any> => {
   return icons[iconName] || Cpu;
 };
-
-

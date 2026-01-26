@@ -90,4 +90,3 @@ export const Connection: React.FC<ConnectionProps> = ({
     </g>
   );
 };
-

@@ -240,6 +240,7 @@ class BaseDataManager:
         fpath = os.path.join(self.podcast_output_dir, filename)
         return await self.presign_url(None, abs_path=fpath)
 
+
 # Import data manager implementations
 from .local_data_manager import LocalDataManager  # noqa
 from .s3_data_manager import S3DataManager  # noqa

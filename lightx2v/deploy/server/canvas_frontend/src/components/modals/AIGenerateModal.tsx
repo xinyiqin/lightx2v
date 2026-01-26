@@ -94,4 +94,3 @@ export const AIGenerateModal: React.FC<AIGenerateModalProps> = ({
     </div>
   );
 };
-

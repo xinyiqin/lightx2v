@@ -19,7 +19,7 @@ class ApiClient {
       'Content-Type': 'application/json',
       ...options.headers
     }
-    
+
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
@@ -58,7 +58,7 @@ class ApiClient {
       if (contentType && contentType.includes('application/json')) {
         return await response.json()
       }
-      
+
       return await response.text()
     } catch (error) {
       console.error('API Request Error:', error)
@@ -115,4 +115,3 @@ class ApiClient {
 
 // 单例
 export const apiClient = new ApiClient()
-

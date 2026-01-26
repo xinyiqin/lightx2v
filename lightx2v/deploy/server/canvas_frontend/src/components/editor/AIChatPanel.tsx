@@ -79,7 +79,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           {onModelChange && (() => {
             const geminiTextTool = TOOLS.find(t => t.id === 'text-generation');
             const availableModels = geminiTextTool?.models || [];
-            
+
             return (
               <select
                 value={aiModel}
@@ -196,4 +196,3 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     </div>
   );
 };
-

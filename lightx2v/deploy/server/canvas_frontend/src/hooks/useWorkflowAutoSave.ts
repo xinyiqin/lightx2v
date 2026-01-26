@@ -82,7 +82,7 @@ export const useWorkflowAutoSave = ({
             const data = await response.json();
             lastSavedRef.current = now;
             console.log('[Workflow AutoSave] Workflow autosaved:', workflow.id, data);
-            
+
             // Call optional onSave callback
             if (onSave) {
               await onSave(workflow);

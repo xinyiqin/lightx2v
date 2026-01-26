@@ -34,7 +34,7 @@ export const useAIGenerateWorkflow = ({
   Models: ${models}
   Category: ${tool.category_zh || tool.category}`;
     }).join('\n\n');
-    
+
     return `Available Tools:\n\n${toolsInfo}`;
   }, []);
 
@@ -42,29 +42,29 @@ export const useAIGenerateWorkflow = ({
     const descLower = description.toLowerCase();
     const needsTTS = descLower.includes('tts') || descLower.includes('语音') || descLower.includes('音色') || descLower.includes('voice');
     const needsClone = descLower.includes('clone') || descLower.includes('克隆') || descLower.includes('音色克隆');
-    
+
     if (!needsTTS && !needsClone) return '';
-    
+
     const config = getLightX2VConfig(workflow);
     if (!config.url || !config.token) return '';
-    
+
     let voiceInfo = '';
-    
+
     try {
       // Get TTS voice list
       const voiceList = await lightX2VGetVoiceList(config.url, config.token);
       if (voiceList.voices && voiceList.voices.length > 0) {
-        const topVoices = voiceList.voices.slice(0, 10).map((v: any) => 
+        const topVoices = voiceList.voices.slice(0, 10).map((v: any) =>
           `- ${v.name || v.voice_name || v.voice_type} (${v.voice_type}): ${v.gender || 'unknown'}, version ${v.version || 'N/A'}, resource_id: ${v.resource_id || 'N/A'}`
         ).join('\n');
         voiceInfo += `\n\nAvailable TTS Voices (first 10):\n${topVoices}`;
       }
-      
+
       // Get clone voice list if needed
       if (needsClone) {
         const cloneList = await lightX2VGetCloneVoiceList(config.url, config.token);
         if (cloneList && cloneList.length > 0) {
-          const topClone = cloneList.slice(0, 10).map((v: any) => 
+          const topClone = cloneList.slice(0, 10).map((v: any) =>
             `- ${v.name || v.speaker_id} (speaker_id: ${v.speaker_id})`
           ).join('\n');
           voiceInfo += `\n\nAvailable Cloned Voices (first 10):\n${topClone}`;
@@ -73,7 +73,7 @@ export const useAIGenerateWorkflow = ({
     } catch (error: any) {
       console.warn('[AI Workflow] Failed to load voice list for AI:', error);
     }
-    
+
     return voiceInfo;
   }, [workflow, getLightX2VConfig]);
 
@@ -81,10 +81,10 @@ export const useAIGenerateWorkflow = ({
     try {
       // Get tools description
       const toolsDesc = generateToolsDescription();
-      
+
       // Get voice list if needed
       const voiceInfo = await getVoiceListForAI(description);
-      
+
       // Build AI prompt
       const prompt = `You are a workflow design assistant. The user wants to create a workflow based on this description:
 
@@ -157,38 +157,38 @@ Output ONLY the JSON, no additional text or markdown.`;
           content: prompt
         }
       ];
-      
+
       const workflowJsonStr = await deepseekChat(
         messages,
         'deepseek-v3-2-251201',
         'json_object'
       );
-      
+
       // Parse the JSON response
       let workflowData: any;
       try {
         // Ensure we have a string
         const jsonStr = typeof workflowJsonStr === 'string' ? workflowJsonStr : JSON.stringify(workflowJsonStr);
-        
+
         // Try to extract JSON from markdown code blocks if present (fallback)
         let parsedStr = jsonStr;
         const jsonMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || jsonStr.match(/(\{[\s\S]*\})/);
         if (jsonMatch) {
           parsedStr = jsonMatch[1];
         }
-        
+
         workflowData = JSON.parse(parsedStr);
       } catch (parseError: any) {
         console.error('[AI Workflow] JSON parse error:', parseError);
         console.error('[AI Workflow] Response was:', workflowJsonStr);
         throw new Error(`Failed to parse AI response as JSON: ${parseError.message || parseError}`);
       }
-      
+
       // Validate and create workflow
       if (!workflowData.nodes || !Array.isArray(workflowData.nodes)) {
         throw new Error('Invalid workflow: nodes array is required');
       }
-      
+
       // Create new workflow
       const newFlow: WorkflowState = {
         id: `flow-${Date.now()}`,
@@ -196,22 +196,22 @@ Output ONLY the JSON, no additional text or markdown.`;
         nodes: workflowData.nodes.map((n: any, idx: number) => {
           const tool = TOOLS.find(t => t.id === n.toolId);
           const defaultData: Record<string, any> = { ...(n.data || {}) };
-          
+
           // Set default model if tool has models
           if (tool?.models && tool.models.length > 0 && !defaultData.model) {
             defaultData.model = tool.models[0].id;
           }
-          
+
           // Set default aspectRatio for video tools
           if (tool?.id.includes('video-gen') && !defaultData.aspectRatio) {
             defaultData.aspectRatio = "16:9";
           }
-          
+
           // Set default value for text-input
           if (tool?.id === 'text-input' && defaultData.value === undefined) {
             defaultData.value = "";
           }
-          
+
           return {
             id: n.id || `node-${Date.now()}-${idx}`,
             toolId: n.toolId,
@@ -239,16 +239,16 @@ Output ONLY the JSON, no additional text or markdown.`;
         updatedAt: Date.now(),
         showIntermediateResults: true
       };
-      
+
       // Set workflow and open editor
       setWorkflow(newFlow);
       setCurrentView('EDITOR');
-      
+
       // Reset view to show all nodes
       setTimeout(() => {
         resetView();
       }, 100);
-      
+
       return newFlow;
     } catch (error: any) {
       console.error('[AI Workflow] Generation failed:', error);
@@ -260,4 +260,3 @@ Output ONLY the JSON, no additional text or markdown.`;
     generateWorkflowWithAI
   };
 };
-

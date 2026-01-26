@@ -83,7 +83,7 @@ def data_name(x, task_id):
 async def fetch_resource(url, timeout, token=None):
     logger.info(f"Begin to download resource from url: {url}")
     t0 = time.time()
-    
+
     if url.startswith("./") or (url.startswith("/") and not url.startswith("//")):
         base_url = os.getenv("BASE_URL", "")
         if url.startswith("./"):
@@ -93,14 +93,14 @@ async def fetch_resource(url, timeout, token=None):
         if token and "token=" not in url:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}token={token}"
-        
+
         url = base_url + url
         logger.info(f"Converted relative path to absolute URL: {url}")
-    
+
     headers = {}
     if token and not url.startswith("./") and not (url.startswith("/") and not url.startswith("//")):
         headers["Authorization"] = f"Bearer {token}"
-    
+
     async with httpx.AsyncClient() as client:
         async with client.stream("GET", url, timeout=timeout, headers=headers) as response:
             response.raise_for_status()
@@ -194,13 +194,14 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
             if val.startswith("./assets/task/") or val.startswith("/assets/task/"):
                 # Parse task_id and name from URL
                 import urllib.parse
+
                 if "?" in val:
                     path, query = val.split("?", 1)
                     params = urllib.parse.parse_qs(query)
                     task_id = params.get("task_id", [None])[0]
                     name = params.get("name", [None])[0]
                     filename = params.get("filename", [None])[0]
-                    
+
                     if task_id and name:
                         try:
                             # Use API interface to get file URL
@@ -213,22 +214,22 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
                                     api_url += f"&filename={urllib.parse.quote(filename)}"
                             else:
                                 raise ValueError(f"Unknown task file path type: {path}")
-                            
+
                             # Call API to get file URL
                             headers = {}
                             if token:
                                 headers["Authorization"] = f"Bearer {token}"
-                            
+
                             timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
                             async with httpx.AsyncClient() as client:
                                 api_response = await client.get(api_url, headers=headers, timeout=timeout)
                                 api_response.raise_for_status()
                                 api_data = api_response.json()
                                 file_url = api_data.get("url")
-                                
+
                                 if not file_url:
                                     raise ValueError(f"No URL returned from API for task {task_id}, name {name}")
-                                
+
                                 # Fetch the actual file using the URL from API
                                 data = await fetch_resource(file_url, timeout=timeout, token=token)
                         except Exception as e:
@@ -243,21 +244,22 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
             elif val.startswith("./assets/workflow/input") or val.startswith("/assets/workflow/input"):
                 # Parse workflow_id and filename from URL
                 import urllib.parse
+
                 if "?" in val:
                     path, query = val.split("?", 1)
                     params = urllib.parse.parse_qs(query)
                     workflow_id = params.get("workflow_id", [None])[0]
                     filename = params.get("filename", [None])[0]
-                    
+
                     if workflow_id and filename:
                         try:
                             base_url = os.getenv("BASE_URL", "")
                             api_url = f"{base_url}/api/v1/workflow/{workflow_id}/input?filename={urllib.parse.quote(filename)}"
-                            
+
                             headers = {}
                             if token:
                                 headers["Authorization"] = f"Bearer {token}"
-                            
+
                             timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
                             async with httpx.AsyncClient() as client:
                                 api_response = await client.get(api_url, headers=headers, timeout=timeout)
@@ -277,13 +279,14 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
             if isinstance(val, str):
                 if val.startswith("./assets/task/") or val.startswith("/assets/task/"):
                     import urllib.parse
+
                     if "?" in val:
                         path, query = val.split("?", 1)
                         params = urllib.parse.parse_qs(query)
                         task_id = params.get("task_id", [None])[0]
                         name = params.get("name", [None])[0]
                         filename = params.get("filename", [None])[0]
-                        
+
                         if task_id and name:
                             try:
                                 base_url = os.getenv("BASE_URL", "http://localhost:8082")
@@ -295,21 +298,21 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
                                         api_url += f"&filename={urllib.parse.quote(filename)}"
                                 else:
                                     raise ValueError(f"Unknown task file path type: {path}")
-                                
+
                                 headers = {}
                                 if token:
                                     headers["Authorization"] = f"Bearer {token}"
-                                
+
                                 timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
                                 async with httpx.AsyncClient() as client:
                                     api_response = await client.get(api_url, headers=headers, timeout=timeout)
                                     api_response.raise_for_status()
                                     api_data = api_response.json()
                                     file_url = api_data.get("url")
-                                    
+
                                     if not file_url:
                                         raise ValueError(f"No URL returned from API for task {task_id}, name {name}")
-                                    
+
                                     data = await fetch_resource(file_url, timeout=timeout, token=token)
                             except Exception as e:
                                 logger.error(f"Failed to load task file via API: {e}")
@@ -320,21 +323,22 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
                         raise ValueError(f"Invalid task URL format (missing query string): {val}")
                 elif val.startswith("./assets/workflow/input") or val.startswith("/assets/workflow/input"):
                     import urllib.parse
+
                     if "?" in val:
                         path, query = val.split("?", 1)
                         params = urllib.parse.parse_qs(query)
                         workflow_id = params.get("workflow_id", [None])[0]
                         filename = params.get("filename", [None])[0]
-                        
+
                         if workflow_id and filename:
                             try:
                                 base_url = os.getenv("BASE_URL", "http://localhost:8082")
                                 api_url = f"{base_url}/api/v1/workflow/{workflow_id}/input?filename={urllib.parse.quote(filename)}"
-                                
+
                                 headers = {}
                                 if token:
                                     headers["Authorization"] = f"Bearer {token}"
-                                
+
                                 timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
                                 async with httpx.AsyncClient() as client:
                                     api_response = await client.get(api_url, headers=headers, timeout=timeout)
@@ -366,13 +370,14 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
                     if isinstance(item, str) and item.startswith(("./", "/", "http://", "https://")):
                         if item.startswith("./assets/task/") or item.startswith("/assets/task/"):
                             import urllib.parse
+
                             if "?" in item:
                                 path, query = item.split("?", 1)
                                 params = urllib.parse.parse_qs(query)
                                 task_id = params.get("task_id", [None])[0]
                                 name = params.get("name", [None])[0]
                                 filename = params.get("filename", [None])[0]
-                                
+
                                 if task_id and name:
                                     try:
                                         base_url = os.getenv("BASE_URL", "http://localhost:8082")
@@ -384,21 +389,21 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
                                                 api_url += f"&filename={urllib.parse.quote(filename)}"
                                         else:
                                             raise ValueError(f"Unknown task file path type: {path}")
-                                        
+
                                         headers = {}
                                         if token:
                                             headers["Authorization"] = f"Bearer {token}"
-                                        
+
                                         timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
                                         async with httpx.AsyncClient() as client:
                                             api_response = await client.get(api_url, headers=headers, timeout=timeout)
                                             api_response.raise_for_status()
                                             api_data = api_response.json()
                                             file_url = api_data.get("url")
-                                            
+
                                             if not file_url:
                                                 raise ValueError(f"No URL returned from API for task {task_id}, name {name}")
-                                            
+
                                             data[f"{inp}_{idx + 1}"] = await fetch_resource(file_url, timeout=timeout, token=token)
                                     except Exception as e:
                                         logger.error(f"Failed to load task file via API: {e}")

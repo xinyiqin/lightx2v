@@ -43,10 +43,10 @@ const hasEnvVar = (key: string): boolean => {
         // For unknown keys, try dynamic access (may not work with Vite)
         value = (process.env as any)[key];
     }
-    
+
     // Check if value exists, is not empty, and is not the string "undefined"
     const result = typeof value === 'string' && value.trim() !== '' && value !== 'undefined';
-    
+
     // Debug log for troubleshooting
     if (key === 'DEEPSEEK_API_KEY') {
       console.log('[hasEnvVar] DEEPSEEK_API_KEY check:', {
@@ -67,7 +67,7 @@ const hasEnvVar = (key: string): boolean => {
         result
       });
     }
-    
+
     return result;
   } catch (error) {
     console.warn(`[hasEnvVar] Error checking ${key}:`, error);
@@ -127,7 +127,7 @@ export const updateLightX2VModels = (
 
   // Group models by task and deduplicate by model_cls
   const modelsByTask: Record<string, Map<string, { model_cls: string; stage: string; isCloud?: boolean }>> = {};
-  
+
   // Add local models
   models.forEach(model => {
     if (!modelsByTask[model.task]) {
@@ -139,7 +139,7 @@ export const updateLightX2VModels = (
       modelsByTask[model.task].set(key, { model_cls: model.model_cls, stage: model.stage, isCloud: false });
     }
   });
-  
+
   // Add cloud models with -cloud suffix
   if (cloudModels && cloudModels.length > 0) {
     cloudModels.forEach(model => {
@@ -159,8 +159,8 @@ export const updateLightX2VModels = (
   const modelIdLower = (id: string) => id.toLowerCase();
   const isLightX2VModel = (id: string) => {
     const lower = modelIdLower(id);
-    return lower.includes('qwen') || 
-           lower.includes('wan') || 
+    return lower.includes('qwen') ||
+           lower.includes('wan') ||
            lower.includes('sekotalk') ||
            lower.includes('lightx2v') ||
            lower.includes('z-image') ||
@@ -189,7 +189,7 @@ export const updateLightX2VModels = (
 
     // Get unique model_cls values from API response for this task
     const uniqueModels = Array.from(modelsByTask[task].values());
-    
+
     // Create LightX2V models from API response (deduplicated by model_cls, case-insensitive)
     const modelMap = new Map<string, ModelDefinition>();
     uniqueModels.forEach(model => {
@@ -197,7 +197,7 @@ export const updateLightX2VModels = (
       const key = modelId.toLowerCase();
       // Only add if not already in map
       if (!modelMap.has(key)) {
-        const displayName = model.isCloud 
+        const displayName = model.isCloud
           ? `LightX2V Cloud (${model.model_cls.replace(/-cloud$/, '')})`
           : `LightX2V (${modelId})`;
         modelMap.set(key, {
@@ -212,12 +212,12 @@ export const updateLightX2VModels = (
     // Combine models: LightX2V models first, then non-LightX2V models
     // Use Map to ensure no duplicates (case-insensitive)
     const finalModelMap = new Map<string, ModelDefinition>();
-    
+
     // Add LightX2V models first
     lightX2VModels.forEach(model => {
       finalModelMap.set(model.id.toLowerCase(), model);
     });
-    
+
     // Add non-LightX2V models (only if not already present)
     existingNonLightX2VModels.forEach(model => {
       const key = model.id.toLowerCase();
@@ -228,7 +228,7 @@ export const updateLightX2VModels = (
 
     // Update tool models
     tool.models = getFilteredModels(Array.from(finalModelMap.values()));
-    
+
     console.log(`[LightX2V] Updated models for ${toolId}:`, tool.models.map((m: ModelDefinition) => m.id));
   });
 };
@@ -332,48 +332,48 @@ export const TOOLS: ToolDefinition[] = [
       customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
     },
     models: getFilteredModels([
-      { 
-        id: 'deepseek-v3-2-251201', 
+      {
+        id: 'deepseek-v3-2-251201',
         name: 'DeepSeek V3.2',
         defaultParams: {
           mode: 'basic',
           customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
         }
       },
-      { 
-        id: 'doubao-seed-1-6-vision-250815', 
+      {
+        id: 'doubao-seed-1-6-vision-250815',
         name: 'Doubao Seed 1.6',
         defaultParams: {
           mode: 'basic',
           customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
         }
       },
-      { 
-        id: 'ppchat-gemini-2.5-flash', 
+      {
+        id: 'ppchat-gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
         defaultParams: {
           mode: 'basic',
           customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
         }
       },
-      { 
-        id: 'ppchat-gemini-3-pro-preview', 
+      {
+        id: 'ppchat-gemini-3-pro-preview',
         name: 'Gemini 3 Pro',
         defaultParams: {
           mode: 'basic',
           customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
         }
       },
-      { 
-        id: 'gemini-3-pro-preview', 
+      {
+        id: 'gemini-3-pro-preview',
         name: 'Gemini 3 Pro',
         defaultParams: {
           mode: 'basic',
           customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
         }
       },
-      { 
-        id: 'gemini-3-flash-preview', 
+      {
+        id: 'gemini-3-flash-preview',
         name: 'Gemini 3 Flash',
         defaultParams: {
           mode: 'basic',
@@ -397,8 +397,8 @@ export const TOOLS: ToolDefinition[] = [
       aspectRatio: '1:1'
     },
     models: getFilteredModels([
-      { 
-        id: 'gemini-2.5-flash-image', 
+      {
+        id: 'gemini-2.5-flash-image',
         name: 'Gemini (Flash Image)',
         defaultParams: {
           aspectRatio: '1:1'
@@ -425,8 +425,8 @@ export const TOOLS: ToolDefinition[] = [
       aspectRatio: '1:1'
     },
     models: getFilteredModels([
-      { 
-        id: 'gemini-2.5-flash-image', 
+      {
+        id: 'gemini-2.5-flash-image',
         name: 'Gemini (Flash Image)',
         defaultParams: {
           aspectRatio: '1:1'
@@ -453,8 +453,8 @@ export const TOOLS: ToolDefinition[] = [
       model: 'lightx2v'
     },
     models: getFilteredModels([
-      { 
-        id: 'lightx2v', 
+      {
+        id: 'lightx2v',
         name: 'LightX2V TTS',
         defaultParams: {
           voiceType: 'zh_female_vv_uranus_bigtts',
@@ -465,8 +465,8 @@ export const TOOLS: ToolDefinition[] = [
           resourceId: ''
         }
       },
-      { 
-        id: 'gemini-2.5-flash-preview-tts', 
+      {
+        id: 'gemini-2.5-flash-preview-tts',
         name: 'Gemini 2.5 TTS',
         defaultParams: {
           voice: 'Kore'

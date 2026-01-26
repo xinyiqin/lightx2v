@@ -95,7 +95,7 @@ class BaseTaskManager:
 
     async def list_voice_clones(self, user_id):
         raise NotImplementedError
-        
+
     async def insert_workflow(self, workflow_data):
         raise NotImplementedError
 
@@ -260,13 +260,14 @@ class BaseTaskManager:
             workflow_id = str(uuid.uuid4())
         else:
             import re
-            if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', workflow_id, re.IGNORECASE):
+
+            if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", workflow_id, re.IGNORECASE):
                 raise ValueError(f"Invalid workflow_id format: {workflow_id}. Must be a valid UUID.")
-            
+
             existing = await self.query_workflow(workflow_id, user_id=None)
             if existing:
                 raise ValueError(f"Workflow {workflow_id} already exists. Use update_workflow instead.")
-        
+
         cur_t = current_time()
         workflow_data = {
             "workflow_id": workflow_id,

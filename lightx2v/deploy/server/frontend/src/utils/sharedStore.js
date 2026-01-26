@@ -13,7 +13,7 @@ class SharedStore {
       language: this.getLocalStorageItem('app-lang', 'zh'),
       isLoggedIn: !!this.getLocalStorageItem('accessToken', null)
     }
-    
+
     // 监听 localStorage 变化（跨标签页同步）
     window.addEventListener('storage', (e) => {
       if (e.key === 'currentUser' || e.key === 'accessToken') {
@@ -57,7 +57,7 @@ class SharedStore {
   // 设置状态
   setState(key, value) {
     this.state[key] = value
-    
+
     // 同步到 localStorage
     if (key === 'token') {
       if (value) {
@@ -77,7 +77,7 @@ class SharedStore {
     } else if (key === 'language') {
       localStorage.setItem('app-lang', value)
     }
-    
+
     this.notify()
   }
 
@@ -130,4 +130,3 @@ export const sharedStore = new SharedStore()
 
 // 如果 localStorage 中有数据，同步一次
 sharedStore.syncFromLocalStorage()
-

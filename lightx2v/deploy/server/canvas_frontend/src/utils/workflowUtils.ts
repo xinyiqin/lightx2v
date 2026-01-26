@@ -16,7 +16,7 @@ export async function checkWorkflowOwnership(
 
   try {
     const checkResponse = await apiRequest(`/api/v1/workflow/${workflowId}`);
-    
+
     if (checkResponse.ok) {
       const existingWorkflow = await checkResponse.json();
       // 如果工作流存在但不属于当前用户，则是预设工作流
@@ -46,7 +46,7 @@ export function getCurrentUserId(): string | null {
       const user = sharedStore.getState('user');
       return user?.user_id || null;
     }
-    
+
     // Fallback to localStorage
     try {
       const userStr = localStorage.getItem('currentUser');
@@ -57,7 +57,7 @@ export function getCurrentUserId(): string | null {
     } catch (e) {
       // Ignore
     }
-    
+
     return null;
   } catch (error) {
     console.warn('[WorkflowUtils] Failed to get current user ID:', error);

@@ -90,4 +90,3 @@ export const ToolPalette: React.FC<ToolPaletteProps> = ({
     </>
   );
 };
-

@@ -12,7 +12,7 @@ export const useWorkflow = () => {
   const [workflow, setWorkflow] = useState<WorkflowState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  
+
   // 使用 ref 存储最新的工作流状态，用于保存时获取最新数据
   const workflowRef = useRef<WorkflowState | null>(null);
   useEffect(() => {
@@ -88,12 +88,12 @@ export const useWorkflow = () => {
         // Not an input node, return as-is
         return node;
       }
-      
+
       const nodeValue = node.data.value;
       if (!nodeValue) {
         return node;
       }
-      
+
       // Check if it's a base64 data URL
       const isDataURL = (val: any): boolean => {
         if (typeof val === 'string') {
@@ -104,11 +104,11 @@ export const useWorkflow = () => {
         }
         return false;
       };
-      
+
       // Check if it's already a saved path
       const isSavedPath = (val: any): boolean => {
         if (typeof val === 'string') {
-          return val.startsWith('./assets/workflow/input') || 
+          return val.startsWith('./assets/workflow/input') ||
                  val.startsWith('./assets/task/') ||
                  val.startsWith('/assets/workflow/input') ||
                  val.startsWith('/assets/task/') ||
@@ -128,7 +128,7 @@ export const useWorkflow = () => {
         }
         return false;
       };
-      
+
       // If it's base64 and not saved, remove it (don't save base64 to localStorage)
       if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
         // Remove base64 data - user will need to re-upload or it will be saved during execution
@@ -140,10 +140,10 @@ export const useWorkflow = () => {
           }
         };
       }
-      
+
       return node;
     });
-    
+
     // Clean history to remove base64 data but keep URLs before saving to avoid localStorage quota issues
     const cleanedHistory = current.history.map(run => {
       const cleanedOutputs: Record<string, any> = {};
@@ -175,7 +175,7 @@ export const useWorkflow = () => {
           delete cleanedOutputs[key];
         }
       });
-      
+
       return {
         id: run.id,
         timestamp: run.timestamp,
@@ -184,20 +184,20 @@ export const useWorkflow = () => {
         outputs: cleanedOutputs // Keep URLs, remove base64 data
       };
     });
-    
-    const updated = { 
-      ...current, 
+
+    const updated = {
+      ...current,
       nodes: cleanedNodes, // Use cleaned nodes (no base64 data)
-      updatedAt: Date.now(), 
+      updatedAt: Date.now(),
       isDirty: false,
       history: cleanedHistory
     };
-    
+
     setMyWorkflows(prev => {
-      const next = prev.find(w => w.id === updated.id) 
-        ? prev.map(w => w.id === updated.id ? updated : w) 
+      const next = prev.find(w => w.id === updated.id)
+        ? prev.map(w => w.id === updated.id ? updated : w)
         : [updated, ...prev];
-      
+
       try {
         localStorage.setItem('omniflow_user_data', JSON.stringify(next));
       } catch (e: any) {
@@ -263,20 +263,20 @@ export const useWorkflow = () => {
     return workflowSaveQueue.enqueue(workflowId, async () => {
       setIsSaving(true);
       let workflowData: any = null;
-      
+
       // 重新获取最新的工作流状态（从 ref 获取，确保是最新的）
       // 优先使用 ref 中的最新状态，如果 ref 中没有或 ID 不匹配，使用传入的 current
-      const latestWorkflow = (workflowRef.current && workflowRef.current.id === workflowId) 
-        ? workflowRef.current 
+      const latestWorkflow = (workflowRef.current && workflowRef.current.id === workflowId)
+        ? workflowRef.current
         : current;
-      
+
       try {
         // 检查工作流是否仍然存在（通过检查是否在 myWorkflows 中）
         // 如果工作流已被删除，跳过保存
         // 注意：对于新创建的工作流（UUID格式），可能不在 myWorkflows 中，这是正常的，不需要查询
         const workflows = myWorkflows;
         const workflowExists = workflows.some(w => w.id === workflowId);
-        
+
         // 只有在工作流已存在且不在列表中时才检查（可能是被删除了）
         // 对于新创建的工作流（UUID格式），即使不在列表中也是正常的，不需要查询
         if (!workflowExists && workflowId.match(/^workflow-/)) {
@@ -294,14 +294,14 @@ export const useWorkflow = () => {
             // 其他错误继续处理
           }
         }
-        
+
         // Extract execution state from nodes (status, error, executionTime)
         // Nodes already contain execution state, so we just save them as-is
-        
+
         // Clean input node values: save base64 data URLs as files and replace with file paths
         // This prevents storing large base64 data in workflow JSON
         const cleanedNodes = [...latestWorkflow.nodes];
-        
+
         for (let i = 0; i < cleanedNodes.length; i++) {
           const node = cleanedNodes[i];
           const tool = TOOLS.find(t => t.id === node.toolId);
@@ -309,12 +309,12 @@ export const useWorkflow = () => {
             // Not an input node, skip
             continue;
           }
-          
+
           const nodeValue = node.data.value;
           if (!nodeValue) {
             continue;
           }
-          
+
           // Check if it's a base64 data URL
           const isDataURL = (val: any): boolean => {
             if (typeof val === 'string') {
@@ -325,11 +325,11 @@ export const useWorkflow = () => {
             }
             return false;
           };
-          
+
           // Check if it's already a saved path
           const isSavedPath = (val: any): boolean => {
             if (typeof val === 'string') {
-              return val.startsWith('./assets/workflow/input') || 
+              return val.startsWith('./assets/workflow/input') ||
                      val.startsWith('./assets/task/') ||
                      val.startsWith('/assets/workflow/input') ||
                      val.startsWith('/assets/task/') ||
@@ -349,7 +349,7 @@ export const useWorkflow = () => {
             }
             return false;
           };
-          
+
           // Remove base64 data - it should not be saved to database
           // Input files are kept as base64 in memory and saved only during execution
           if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
@@ -363,7 +363,7 @@ export const useWorkflow = () => {
             };
           }
         }
-        
+
         // Store active_outputs in extra_info for resuming execution
         const extraInfo: Record<string, any> = {};
         if (options?.activeOutputs) {
@@ -379,21 +379,21 @@ export const useWorkflow = () => {
           }
           extraInfo.active_outputs = cleanedActiveOutputs;
         }
-        
+
         // Helper function to clean base64 data from node data.value
         const cleanNodeDataValue = (nodeData: any): any => {
           if (!nodeData || !nodeData.value) return nodeData;
-          
+
           const nodeValue = nodeData.value;
           const isDataURL = (val: any): boolean => {
             if (typeof val === 'string') return val.startsWith('data:');
             if (Array.isArray(val)) return val.some(item => typeof item === 'string' && item.startsWith('data:'));
             return false;
           };
-          
+
           const isSavedPath = (val: any): boolean => {
             if (typeof val === 'string') {
-              return val.startsWith('./assets/workflow/input') || 
+              return val.startsWith('./assets/workflow/input') ||
                      val.startsWith('./assets/task/') ||
                      val.startsWith('/assets/workflow/input') ||
                      val.startsWith('/assets/task/') ||
@@ -413,7 +413,7 @@ export const useWorkflow = () => {
             }
             return false;
           };
-          
+
           // If it's base64 and not saved, remove it
           if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
             return {
@@ -421,10 +421,10 @@ export const useWorkflow = () => {
               value: Array.isArray(nodeValue) ? [] : undefined
             };
           }
-          
+
           return nodeData;
         };
-        
+
         // Clean history_metadata outputs: remove base64 data URLs, keep only file paths/URLs
         // This prevents storing large base64 data in workflow JSON
         const cleanedHistoryMetadata = latestWorkflow.history.map(run => {
@@ -457,7 +457,7 @@ export const useWorkflow = () => {
               delete cleanedOutputs[key];
             }
           });
-          
+
           // Clean nodes_snapshot: remove base64 data from node.data.value
           const cleanedNodesSnapshot = (run.nodesSnapshot || []).map((node: any) => {
             if (node.data && node.data.value) {
@@ -468,7 +468,7 @@ export const useWorkflow = () => {
             }
             return node;
           });
-          
+
           return {
             run_id: run.id,
             timestamp: run.timestamp,
@@ -478,7 +478,7 @@ export const useWorkflow = () => {
             outputs: cleanedOutputs // Save cleaned outputs (no base64 data)
           };
         });
-        
+
         // 使用最新的工作流状态构建保存数据
         workflowData = {
           name: options?.name || latestWorkflow.name,
@@ -494,7 +494,7 @@ export const useWorkflow = () => {
         // UUID format (8-4-4-4-12) means it's a saved workflow, try to update first
         const isSavedWorkflow = workflowId && workflowId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
         const isTemporaryId = workflowId && (workflowId.startsWith('temp-') || workflowId.startsWith('flow-'));
-        
+
         // For saved workflows (UUID), try to update first
         if (isSavedWorkflow) {
           const updateResponse = await apiRequest(`/api/v1/workflow/${workflowId}`, {
@@ -516,7 +516,7 @@ export const useWorkflow = () => {
               // Ownership issue - check if it's a preset workflow
               const currentUserId = getCurrentUserId();
               const { isPreset } = await checkWorkflowOwnership(workflowId, currentUserId);
-              
+
               if (isPreset) {
                 console.log('[Workflow] Preset workflow detected, creating new one (backend will generate ID)');
                 // Don't set workflow_id, let backend generate it
@@ -528,14 +528,14 @@ export const useWorkflow = () => {
             }
           }
         }
-        
+
         // Create new workflow (backend will generate workflow_id)
         // Don't set workflow_id for temporary IDs or when update failed
         if (!isTemporaryId && !isSavedWorkflow) {
           // This shouldn't happen, but if it does, let backend generate ID
           console.warn('[Workflow] Unknown workflow ID format, letting backend generate ID');
         }
-        
+
         console.log('[Workflow] Creating new workflow (backend will generate workflow_id)');
         const response = await apiRequest('/api/v1/workflow/create', {
           method: 'POST',
@@ -546,29 +546,29 @@ export const useWorkflow = () => {
           const data = await response.json();
           const newWorkflowId = data.workflow_id;
           console.log('[Workflow] Workflow created in database with ID:', newWorkflowId);
-          
+
           // For new workflows, now save any remaining input files that weren't saved before
           // (because workflow_id didn't exist yet)
           const remainingInputSavePromises: Promise<void>[] = [];
           const finalCleanedNodes = [...cleanedNodes];
-          
+
           for (let i = 0; i < finalCleanedNodes.length; i++) {
             const node = finalCleanedNodes[i];
             const tool = TOOLS.find(t => t.id === node.toolId);
             if (!tool || tool.category !== 'Input') continue;
-            
+
             const nodeValue = node.data.value;
             if (!nodeValue) continue;
-            
+
             const isDataURL = (val: any): boolean => {
               if (typeof val === 'string') return val.startsWith('data:');
               if (Array.isArray(val)) return val.some(item => typeof item === 'string' && item.startsWith('data:'));
               return false;
             };
-            
+
             const isSavedPath = (val: any): boolean => {
               if (typeof val === 'string') {
-                return val.startsWith('./assets/workflow/input') || 
+                return val.startsWith('./assets/workflow/input') ||
                        val.startsWith('./assets/task/') ||
                        val.startsWith('/assets/workflow/input') ||
                        val.startsWith('/assets/task/') ||
@@ -586,7 +586,7 @@ export const useWorkflow = () => {
               }
               return false;
             };
-            
+
             if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
               // Save input file now that we have workflow_id
               const inputNameMap: Record<string, string> = {
@@ -596,9 +596,9 @@ export const useWorkflow = () => {
               };
               const inputName = inputNameMap[node.toolId];
               if (!inputName) continue;
-              
+
               const params: Record<string, { type: string; data: any }> = {};
-              
+
               if (node.toolId === 'image-input' && Array.isArray(nodeValue)) {
                 for (let idx = 0; idx < nodeValue.length; idx++) {
                   const dataUrl = nodeValue[idx];
@@ -612,9 +612,9 @@ export const useWorkflow = () => {
                   params[inputName] = { type: 'base64', data: dataUrl };
                 }
               }
-              
+
               if (Object.keys(params).length === 0) continue;
-              
+
               remainingInputSavePromises.push(
                 (async () => {
                   try {
@@ -628,17 +628,17 @@ export const useWorkflow = () => {
                         ...params
                       })
                     });
-                    
+
                     if (response.ok) {
                       const taskData = await response.json();
                       const taskId = taskData.task_id;
-                      
+
                       try {
                         await apiRequest(`/api/v1/task/cancel?task_id=${taskId}`, { method: 'GET' });
                       } catch (e) {
                         // Ignore cancel errors
                       }
-                      
+
                       const savedPaths: string[] = [];
                       Object.keys(params).forEach(inp => {
                         let baseName = inp;
@@ -649,7 +649,7 @@ export const useWorkflow = () => {
                         const workflowPath = `./assets/workflow/input?workflow_id=${newWorkflowId}&filename=${filename}`;
                         savedPaths.push(workflowPath);
                       });
-                      
+
                       if (node.toolId === 'image-input' && Array.isArray(nodeValue)) {
                         finalCleanedNodes[i] = {
                           ...finalCleanedNodes[i],
@@ -667,7 +667,7 @@ export const useWorkflow = () => {
                           }
                         };
                       }
-                      
+
                       // Update workflow in database with cleaned nodes
                       await apiRequest(`/api/v1/workflow/${newWorkflowId}`, {
                         method: 'PUT',
@@ -683,12 +683,12 @@ export const useWorkflow = () => {
               );
             }
           }
-          
+
           // Wait for remaining input files to be saved
           if (remainingInputSavePromises.length > 0) {
             await Promise.allSettled(remainingInputSavePromises);
           }
-          
+
           // Always update workflow with backend-generated ID and cleaned nodes
           const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: finalCleanedNodes };
           setWorkflow(updatedWorkflow);
@@ -705,18 +705,18 @@ export const useWorkflow = () => {
         }
       } catch (error) {
         console.error('[Workflow] Failed to save workflow to database:', error);
-        
+
         // Check if it's a network error
-        const isNetworkError = error instanceof TypeError || 
+        const isNetworkError = error instanceof TypeError ||
                                (error instanceof Error && error.message.includes('fetch')) ||
                                !navigator.onLine;
-        
+
         if (isNetworkError) {
           // Add to offline queue
           console.log('[Workflow] Network error detected, adding to offline queue');
           workflowOfflineQueue.addTask(workflowId, workflowData);
         }
-        
+
         // Fallback to localStorage
         saveWorkflowToLocal(latestWorkflow);
         throw error;
@@ -732,17 +732,17 @@ export const useWorkflow = () => {
       const response = await apiRequest(`/api/v1/workflow/${workflowId}`);
       if (response.ok) {
         const wf = await response.json();
-        
+
         // Restore execution state from nodes (status, error, executionTime are already in nodes)
         // Restore active_outputs from extra_info
         const extraInfo = wf.extra_info || {};
         let activeOutputs = extraInfo.active_outputs || {};
-        
+
         // Load node output data from data_store.outputs (new unified structure)
         const nodes = wf.nodes || [];
         const loadPromises: Promise<any>[] = [];
         const loadedOutputs: Record<string, any> = { ...activeOutputs };
-        
+
         for (const node of nodes) {
           // Skip Input nodes - their output is node.data.value, not stored in data_store
           const tool = TOOLS.find(t => t.id === node.toolId);
@@ -754,7 +754,7 @@ export const useWorkflow = () => {
               // Check if it's a file path/URL (not base64)
               const isFilePath = (val: any): boolean => {
                 if (typeof val === 'string') {
-                  return val.startsWith('/api/v1/workflow/') || 
+                  return val.startsWith('/api/v1/workflow/') ||
                          val.startsWith('./assets/') ||
                          val.startsWith('http://') ||
                          val.startsWith('https://');
@@ -769,7 +769,7 @@ export const useWorkflow = () => {
                 }
                 return false;
               };
-              
+
               if (isFilePath(nodeValue)) {
                 // Load file(s) through backend API (await to ensure files are loaded before returning)
                 if (Array.isArray(nodeValue)) {
@@ -834,7 +834,7 @@ export const useWorkflow = () => {
             }
             continue;
           }
-          
+
           // Only load output data for nodes that have been executed
           if (node.status === NodeStatus.SUCCESS || node.status === NodeStatus.ERROR) {
             if (tool && tool.outputs) {
@@ -873,16 +873,16 @@ export const useWorkflow = () => {
             }
           }
         }
-        
+
         // Wait for all output data to load (or timeout after 5 seconds)
         await Promise.race([
           Promise.all(loadPromises),
           new Promise(resolve => setTimeout(resolve, 5000))
         ]);
-        
+
         // Use loaded outputs, fallback to saved activeOutputs if loading failed
         activeOutputs = Object.keys(loadedOutputs).length > 0 ? loadedOutputs : activeOutputs;
-        
+
         const workflow: WorkflowState = {
           id: wf.workflow_id,
           name: wf.name,
@@ -932,10 +932,10 @@ export const useWorkflow = () => {
   const deleteWorkflow = useCallback(async (id: string) => {
     // 从保存队列中移除相关任务
     workflowSaveQueue.removeTask(id);
-    
+
     // 从离线队列中移除相关任务
     workflowOfflineQueue.removeTask(id);
-    
+
     try {
       // Try to delete from database first (check if it's a database ID)
       if (id.startsWith('workflow-') || id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
@@ -976,5 +976,3 @@ export const useWorkflow = () => {
     isLoading
   };
 };
-
-

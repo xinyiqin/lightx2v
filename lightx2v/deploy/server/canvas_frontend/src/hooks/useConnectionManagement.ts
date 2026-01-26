@@ -44,5 +44,3 @@ export const useConnectionManagement = ({
     deleteConnection
   };
 };
-
-

@@ -118,5 +118,3 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
     </div>
   );
 };
-
-

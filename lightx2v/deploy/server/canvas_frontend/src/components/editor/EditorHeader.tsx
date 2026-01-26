@@ -88,17 +88,17 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   // 获取用户信息
   useEffect(() => {
     const sharedStore = (window as any).__SHARED_STORE__;
-    
+
     // 初始化用户信息
     if (sharedStore) {
       const currentUser = sharedStore.getState('user');
       setUser(currentUser);
-      
+
       // 订阅用户状态变化
       const unsubscribe = sharedStore.subscribe((state: any) => {
         setUser(state.user);
       });
-      
+
       return () => {
         if (unsubscribe) unsubscribe();
       };
@@ -213,7 +213,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
             <Redo size={14} />
           </button>
         </div>
-        
+
         {/* Zoom Controls */}
         <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-800 rounded-xl p-1">
           <button
@@ -366,4 +366,3 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
     </header>
   );
 };
-

@@ -84,7 +84,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
   if (selectedNodeId && selectedNode) {
       return (
-        <aside 
+        <aside
           className={`flex flex-col z-30 transition-all ${collapsed ? 'h-0 overflow-hidden' : 'p-6 overflow-y-auto'}`}
           style={style}
       >
@@ -120,7 +120,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             )}
 
             {/* Web Search Toggle for DeepSeek and Doubao */}
-            {selectedNode.toolId === 'text-generation' && 
+            {selectedNode.toolId === 'text-generation' &&
               (selectedNode.data.model?.startsWith('deepseek-') || selectedNode.data.model?.startsWith('doubao-')) && (
               <div className="space-y-2">
                 <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
@@ -672,38 +672,38 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            
+
                             // 需要 workflow.id 才能上传
                             if (!workflow.id || (!workflow.id.startsWith('workflow-') && !workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
                               console.error('[NodeConfigPanel] Cannot upload file: workflow ID is not available');
                               return;
                             }
-                            
+
                             setUploadingNodes(prev => new Set(prev).add(item.nodeId));
-                            
+
                             try {
                               if (item.isSourceNode) {
                                 const node = workflow.nodes.find(n => n.id === item.nodeId);
                                 if (!node) return;
-                                
+
                                 const tool = TOOLS.find(t => t.id === node.toolId);
                                 if (!tool || tool.category !== 'Input') {
                                   console.error('[NodeConfigPanel] Cannot upload file: node is not an input node');
                                   return;
                                 }
-                                
+
                                 const outputPort = tool.outputs[0];
                                 if (!outputPort) {
                                   console.error('[NodeConfigPanel] Cannot upload file: output port not found');
                                   return;
                                 }
-                                
+
                                 const result = await uploadNodeInputFile(workflow.id!, item.nodeId, outputPort.id, file);
                                 if (result) {
                                   // 更新 node.data.value，始终使用数组格式
                                   const currentValue = node.data.value || [];
                                   const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
-                                  const newValue = item.dataType === DataType.IMAGE 
+                                  const newValue = item.dataType === DataType.IMAGE
                                     ? [...existingUrls, result.file_url]
                                     : [result.file_url];
                                   onUpdateNodeData(item.nodeId, 'value', newValue);

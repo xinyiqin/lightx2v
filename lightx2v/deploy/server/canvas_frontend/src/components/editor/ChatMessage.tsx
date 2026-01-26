@@ -35,10 +35,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const hasError = !!error;
   const allSuccess = operationResults?.every(r => r.success) ?? false;
   const hasThinking = !!thinking && thinking.trim().length > 0;
-  
+
   // 当有最终答案时，自动折叠思考过程
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
-  
+
   useEffect(() => {
     // 如果有思考过程且有最终答案（不是流式输出中），默认折叠
     if (hasThinking && !isStreaming && content.trim().length > 0) {
@@ -154,7 +154,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               )}
             </div>
           )}
-          
+
           {/* 最终答案 */}
           <div>
             {content.trim().length > 0 ? (

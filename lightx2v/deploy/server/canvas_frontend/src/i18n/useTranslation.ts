@@ -10,5 +10,3 @@ export const useTranslation = (lang: Language) => {
 
   return { t };
 };
-
-
