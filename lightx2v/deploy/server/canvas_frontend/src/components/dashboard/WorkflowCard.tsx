@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Trash2, Calendar, Sparkle } from 'lucide-react';
+import { Layers, Trash2, Calendar, Sparkle, Lock, Globe, Heart, Users, Boxes } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 
@@ -9,6 +9,10 @@ interface WorkflowCardProps {
   onOpen: (workflow: WorkflowState) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
   isPreset?: boolean;
+  onToggleVisibility?: (workflowId: string, visibility: 'private' | 'public') => void;
+  onToggleThumbsup?: (workflowId: string) => void;
+  mode?: 'MY' | 'COMMUNITY' | 'PRESET';
+  accentColor?: string;
 }
 
 export const WorkflowCard: React.FC<WorkflowCardProps> = ({
@@ -16,98 +20,174 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   lang,
   onOpen,
   onDelete,
-  isPreset = false
+  isPreset = false,
+  onToggleVisibility,
+  onToggleThumbsup,
+  mode = 'MY',
+  accentColor = '#90dce1'
 }) => {
   const { t } = useTranslation(lang);
 
-  // Extract preview content from workflow for preset cards
+  // Extract preview content from workflow (image first, then text)
   const textInputNode = workflow.nodes.find(n => n.toolId === 'text-input' && n.data?.value);
-  const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && n.data?.value && Array.isArray(n.data.value) && n.data.value.length > 0);
+  const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && n.data?.value);
+  const imageValue = imageInputNode?.data?.value;
 
-  const previewText = textInputNode?.data?.value || null;
-  const previewImage = imageInputNode?.data?.value?.[0] || null;
+  const previewText = typeof textInputNode?.data?.value === 'string' ? textInputNode?.data?.value : null;
+  const previewImage = Array.isArray(imageValue)
+    ? imageValue[0]
+    : (typeof imageValue === 'string' ? imageValue : null);
 
-  // Preset workflow card style (original style)
-  if (isPreset) {
-    return (
-      <div
-        onClick={() => onOpen(workflow)}
-        className="group bg-slate-900/50 border border-slate-800 hover:border-emerald-500/50 rounded-[32px] p-6 flex flex-col transition-all hover:shadow-2xl hover:shadow-emerald-500/10 cursor-pointer relative active:scale-95"
-      >
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-[32px]"></div>
-        <div className="flex justify-between items-start relative z-10 mb-3 flex-shrink-0">
-          <div className="p-3 bg-slate-800 group-hover:bg-emerald-600 rounded-2xl text-slate-500 group-hover:text-white transition-all shadow-inner">
-            <Sparkle size={20} />
-          </div>
-          <span className="text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded-full border border-emerald-500/20">
-            {t('system_preset')}
-          </span>
-        </div>
-        <div className="space-y-3 relative z-10 flex flex-col min-h-0">
-          {/* Preview content */}
-          {previewImage ? (
-            <div className="w-full aspect-[3/4] rounded-xl overflow-hidden bg-slate-800/50 flex items-center justify-center flex-shrink-0">
-              <img
-                src={
-                  previewImage.startsWith('/')
-                    ? (previewImage.startsWith('/assets/') && !previewImage.startsWith('/canvas/')
-                        ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${previewImage}`
-                        : previewImage)
-                    : (previewImage.startsWith('data:')
-                        ? previewImage
-                        : `data:image/png;base64,${previewImage}`)
-                }
-                alt="Preview"
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
-            </div>
-          ) : previewText ? (
-            <div className="w-full aspect-[3/4] rounded-xl overflow-hidden bg-slate-800/50 p-4 flex items-center justify-center flex-shrink-0">
-              <p className="text-xs text-slate-300 line-clamp-6 leading-relaxed text-center">{previewText}</p>
-            </div>
-          ) : (
-            <div className="w-full aspect-[3/4] rounded-xl bg-slate-800/50 flex-shrink-0"></div>
-          )}
-          {/* Title below preview */}
-          <div className="flex flex-col space-y-1 flex-shrink-0">
-            <h3 className="text-lg font-black text-slate-200 group-hover:text-white transition-colors truncate">
-              {workflow.name}
-            </h3>
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest line-clamp-1">
-              {lang === 'zh' ? '多模态自动化创作流水线' : 'Automated multi-modal pipeline'}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const cardMode = isPreset ? 'PRESET' : mode;
+  const visibility = workflow.visibility || (cardMode !== 'MY' ? 'public' : 'private');
+  const isPublic = visibility === 'public';
+  const nextVisibility = isPublic ? 'private' : 'public';
+  const thumsupCount = workflow.thumsupCount ?? 0;
+  const thumsupLiked = workflow.thumsupLiked ?? false;
+  const authorName = workflow.authorName || workflow.authorId || 'Anonymous';
+  const showThumbsup = visibility === 'public';
+  const categoryColor = cardMode === 'PRESET'
+    ? '#a78bfa'
+    : cardMode === 'COMMUNITY'
+    ? '#fbbf24'
+    : accentColor;
 
-  // My workflow card style
   return (
     <div
-      onClick={() => onOpen(workflow)}
-      className="group bg-slate-900/50 border border-slate-800 hover:border-[#90dce1]/50 rounded-[32px] p-6 flex flex-col justify-between h-56 transition-all hover:shadow-2xl hover:shadow-[#90dce1]/10 cursor-pointer relative overflow-hidden active:scale-95"
+      onClick={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest?.('[data-card-action="true"]')) return;
+        onOpen(workflow);
+      }}
+      className="group flex flex-col bg-slate-900/50 border rounded-[32px] overflow-hidden cursor-pointer transition-all hover:shadow-[0_30px_60px_rgba(0,0,0,0.6)] active:scale-[0.98] aspect-[9/16] relative w-full"
+      style={{ borderColor: `${categoryColor}22` }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-[#90dce1]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <div className="flex justify-between items-start relative z-10">
-        <div className="p-3 bg-slate-800 group-hover:bg-[#90dce1] rounded-2xl text-slate-500 group-hover:text-white transition-all shadow-inner">
-          <Layers size={20} />
-        </div>
-        <button
-          onClick={(e) => onDelete(workflow.id, e)}
-          className="p-2 text-slate-700 hover:text-red-400 transition-colors"
+      {cardMode === 'COMMUNITY' && (
+        <div className="absolute inset-0 bg-gradient-to-br from-violet-600/5 to-transparent pointer-events-none" />
+      )}
+
+      <div className="relative flex-1 bg-slate-950/50 flex items-center justify-center overflow-hidden">
+        {previewImage ? (
+          <img
+            src={
+              previewImage.startsWith('/')
+                ? (previewImage.startsWith('/assets/') && !previewImage.startsWith('/canvas/')
+                    ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${previewImage}`
+                    : previewImage)
+                : (previewImage.startsWith('data:')
+                    ? previewImage
+                    : `data:image/png;base64,${previewImage}`)
+            }
+            alt="Preview"
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : previewText ? (
+          <div className="px-10 py-8 text-[13px] text-slate-900 italic line-clamp-[10] leading-relaxed bg-white w-full h-full border-b border-slate-800/50 flex items-center justify-center text-center">
+            {previewText}
+          </div>
+        ) : (
+          <div className="p-8 text-[10px] text-slate-700 font-bold uppercase tracking-widest text-center opacity-30 flex flex-col items-center">
+            <Boxes size={48} className="mb-4" /> No Preview Data
+          </div>
+        )}
+        <div
+          className="absolute top-5 left-5 p-2.5 backdrop-blur-2xl rounded-2xl shadow-2xl flex items-center justify-center transition-all group-hover:scale-110 z-10"
+          style={{ backgroundColor: `${categoryColor}cc`, color: '#000' }}
         >
-          <Trash2 size={16} />
-        </button>
+          {cardMode === 'PRESET'
+            ? <Sparkle size={20} />
+            : cardMode === 'COMMUNITY'
+            ? <Users size={20} />
+            : (isPublic ? <Globe size={20} /> : <Lock size={20} />)}
+        </div>
       </div>
-      <div className="space-y-2 relative z-10">
-        <h3 className="text-lg font-black text-slate-200 group-hover:text-white transition-colors truncate">
-          {workflow.name}
-        </h3>
-        <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-          <Calendar size={10} />
-          {new Date(workflow.updatedAt).toLocaleDateString()}
+
+      <div className="p-7 space-y-4 shrink-0 bg-slate-900/80 backdrop-blur-md relative border-t border-white/5">
+        <div>
+          <div className="flex items-center justify-between mb-1 gap-3">
+            <h3 className="text-lg font-black text-slate-100 group-hover:text-white transition-colors truncate flex-1 tracking-tight">
+              {workflow.name}
+            </h3>
+            {cardMode === 'MY' && (
+              <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter ${
+                isPublic ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-500'
+              }`}>
+                {isPublic ? t('visibility_public') : t('visibility_private')}
+              </div>
+            )}
+          </div>
+
+          {cardMode === 'COMMUNITY' ? (
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
+                  <img
+                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${authorName}&backgroundColor=1e293b`}
+                    alt="Author"
+                    className="w-full h-full"
+                  />
+                </div>
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight">
+                  {authorName}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {showThumbsup && (
+                  <button
+                    data-card-action="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleThumbsup?.(workflow.id);
+                    }}
+                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-all duration-300 hover:bg-rose-500/10 active:scale-90 ${
+                      thumsupLiked ? 'text-rose-500' : 'text-slate-500 hover:text-rose-400'
+                    }`}
+                    title="Thumsup"
+                  >
+                    <Heart size={16} className={thumsupLiked ? 'fill-rose-500' : ''} />
+                    <span className="text-[11px] font-black">{thumsupCount}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between mt-2">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                <Calendar size={12} /> {new Date(workflow.updatedAt).toLocaleDateString()}
+              </div>
+              <div className="flex items-center gap-2">
+                {showThumbsup && (
+                  <button
+                    data-card-action="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleThumbsup?.(workflow.id);
+                    }}
+                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-all duration-300 hover:bg-rose-500/10 active:scale-90 ${
+                      thumsupLiked ? 'text-rose-500' : 'text-slate-500 hover:text-rose-400'
+                    }`}
+                    title="Thumsup"
+                  >
+                    <Heart size={16} className={thumsupLiked ? 'fill-rose-500' : ''} />
+                    <span className="text-[11px] font-black">{thumsupCount}</span>
+                  </button>
+                )}
+                {cardMode === 'MY' && (
+                  <button
+                    data-card-action="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(workflow.id, e);
+                    }}
+                    className="p-2.5 text-slate-700 hover:text-red-400 transition-all hover:bg-red-400/5 rounded-xl active:scale-90"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

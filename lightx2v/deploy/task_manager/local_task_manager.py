@@ -421,6 +421,23 @@ class LocalTaskManager(BaseTaskManager):
     def get_voice_clone_filename(self, user_id, speaker_id):
         return os.path.join(self.local_dir, f"voice_clone_{user_id}_{speaker_id}.json")
 
+    def get_workflow_thumsup_filename(self):
+        return os.path.join(self.local_dir, "workflow_thumsup.json")
+
+    def load_workflow_thumsup(self):
+        fpath = self.get_workflow_thumsup_filename()
+        if not os.path.exists(fpath):
+            return {}
+        try:
+            return json.load(open(fpath))
+        except Exception:
+            return {}
+
+    def save_workflow_thumsup(self, data):
+        fpath = self.get_workflow_thumsup_filename()
+        with open(fpath, "w") as fout:
+            fout.write(json.dumps(data, indent=2, ensure_ascii=False))
+
     def save_voice_clone(self, voice_clone, with_fmt=True):
         if with_fmt:
             self.fmt_dict(voice_clone)
@@ -493,6 +510,8 @@ class LocalTaskManager(BaseTaskManager):
         if not os.path.exists(fpath):
             return None
         data = json.load(open(fpath))
+        if "visibility" not in data:
+            data["visibility"] = "private"
         if user_id is not None and data.get("user_id") != user_id:
             raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
         if data.get("tag") == "delete":
@@ -518,7 +537,7 @@ class LocalTaskManager(BaseTaskManager):
         for key, value in updates.items():
             if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
                 workflow[key] = value
-            elif key in ["name", "description"]:
+            elif key in ["name", "description", "visibility"]:
                 workflow[key] = value
             elif key == "last_run_t":
                 workflow["last_run_t"] = value
@@ -553,6 +572,8 @@ class LocalTaskManager(BaseTaskManager):
             fpath = os.path.join(self.local_dir, f)
             workflow = json.load(open(fpath))
             self.parse_dict(workflow)
+            if "visibility" not in workflow:
+                workflow["visibility"] = "private"
 
             # Filter by user_id
             if "user_id" in kwargs and workflow["user_id"] != kwargs["user_id"]:
@@ -566,6 +587,10 @@ class LocalTaskManager(BaseTaskManager):
 
             # Filter deleted
             if not kwargs.get("include_delete", False) and workflow.get("tag", "") == "delete":
+                continue
+
+            # Filter by visibility
+            if "visibility" in kwargs and workflow.get("visibility", "private") != kwargs["visibility"]:
                 continue
 
             workflows.append(workflow)
@@ -589,6 +614,30 @@ class LocalTaskManager(BaseTaskManager):
             workflows = workflows[offset : offset + page_size]
 
         return workflows
+
+    @class_try_catch_async
+    async def get_workflow_thumsup(self, workflow_id, user_id=None):
+        store = self.load_workflow_thumsup()
+        entry = store.get(workflow_id, {"user_ids": []})
+        user_ids = entry.get("user_ids", [])
+        count = len(user_ids)
+        liked = user_id in user_ids if user_id is not None else False
+        return {"count": count, "liked": liked}
+
+    @class_try_catch_async
+    async def toggle_workflow_thumsup(self, workflow_id, user_id):
+        store = self.load_workflow_thumsup()
+        entry = store.get(workflow_id, {"user_ids": []})
+        user_ids = entry.get("user_ids", [])
+        if user_id in user_ids:
+            user_ids = [uid for uid in user_ids if uid != user_id]
+            liked = False
+        else:
+            user_ids.append(user_id)
+            liked = True
+        store[workflow_id] = {"user_ids": user_ids}
+        self.save_workflow_thumsup(store)
+        return {"count": len(user_ids), "liked": liked}
 
 
 async def test():

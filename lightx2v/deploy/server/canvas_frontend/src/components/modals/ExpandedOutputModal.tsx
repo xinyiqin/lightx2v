@@ -105,11 +105,50 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
           ) : expandedResultData.type === DataType.IMAGE ? (
             <img src={getAssetPath(expandedResultData.content)} className="max-h-full rounded-2xl shadow-2xl border border-slate-800" />
           ) : expandedResultData.type === DataType.AUDIO ? (
-            <audio
-              controls
-              autoPlay
-              src={expandedResultData.content.startsWith('data') ? expandedResultData.content : pcmToWavUrl(expandedResultData.content)}
-            />
+            (() => {
+              const getMediaValue = (value: any) => {
+                if (!value) return '';
+                if (typeof value === 'string') return value;
+                if (Array.isArray(value)) {
+                  return value.find(item => typeof item === 'string') || '';
+                }
+                if (typeof value === 'object') {
+                  return (
+                    (typeof value.url === 'string' && value.url) ||
+                    (typeof value.file_url === 'string' && value.file_url) ||
+                    (typeof value.path === 'string' && value.path) ||
+                    (typeof value.src === 'string' && value.src) ||
+                    (typeof value.data === 'string' && value.data) ||
+                    ''
+                  );
+                }
+                return '';
+              };
+
+              const audioValue = getMediaValue(expandedResultData.content);
+              if (!audioValue) {
+                return <div className="text-sm text-slate-500">No audio data</div>;
+              }
+
+              const isUrlLike = audioValue.startsWith('http://') ||
+                audioValue.startsWith('https://') ||
+                audioValue.startsWith('/') ||
+                audioValue.startsWith('./assets') ||
+                audioValue.startsWith('blob:') ||
+                audioValue.startsWith('data:');
+
+              const audioSrc = audioValue.startsWith('data:')
+                ? audioValue
+                : (isUrlLike ? getAssetPath(audioValue) : pcmToWavUrl(audioValue));
+
+              return (
+                <audio
+                  controls
+                  autoPlay
+                  src={audioSrc}
+                />
+              );
+            })()
           ) : (
             <video controls autoPlay src={getAssetPath(expandedResultData.content)} className="max-h-full rounded-2xl shadow-2xl" />
           )}

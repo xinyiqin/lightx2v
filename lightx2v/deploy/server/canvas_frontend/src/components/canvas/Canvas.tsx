@@ -34,6 +34,7 @@ interface CanvasProps {
   onWheel: (e: React.WheelEvent) => void;
   onNodeSelect: (nodeId: string) => void;
   onConnectionSelect: (connectionId: string) => void;
+  onDeleteConnection: (connectionId: string) => void;
   onNodeDragStart: (nodeId: string, offsetX: number, offsetY: number) => void;
   onNodeDrag: (nodeId: string, x: number, y: number) => void;
   onNodeDragEnd: () => void;
@@ -56,6 +57,7 @@ interface CanvasProps {
   onSetVoiceSelect?: (nodeId: string | null) => void;
   onSetExpandedOutput?: (value: { nodeId: string; fieldId?: string } | null) => void;
   onSetShowAudioEditor?: (nodeId: string | null) => void;
+  onSetShowVideoEditor?: (nodeId: string | null) => void;
   onSetConnecting?: (value: {
     nodeId: string;
     portId: string;
@@ -100,6 +102,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onWheel,
   onNodeSelect,
   onConnectionSelect,
+  onDeleteConnection,
   onNodeDragStart,
   onNodeDrag,
   onNodeDragEnd,
@@ -121,6 +124,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onSetVoiceSelect = () => {},
   onSetExpandedOutput = () => {},
   onSetShowAudioEditor = () => {},
+  onSetShowVideoEditor = () => {},
   onSetConnecting = () => {},
   onAddConnection = () => {},
   onClearSelectedRunId = () => {},
@@ -182,7 +186,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onNodeSelect('');
                 }}
                 onDelete={() => {
-                  // Delete connection logic will be handled by parent
+                  onDeleteConnection(c.id);
                 }}
               />
             );
@@ -237,6 +241,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             onSetVoiceSelect={onSetVoiceSelect}
             onSetExpandedOutput={onSetExpandedOutput}
             onSetShowAudioEditor={onSetShowAudioEditor}
+            onSetShowVideoEditor={onSetShowVideoEditor}
             onSetConnecting={onSetConnecting}
             onAddConnection={onAddConnection}
             onClearSelectedRunId={onClearSelectedRunId}

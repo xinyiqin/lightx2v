@@ -7,7 +7,9 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     create_workflow: 'Create Workflow',
     my_workflows: 'My Workflows',
     preset_library: 'Preset Workflows',
+    workflow_community: 'Community',
     no_workflows: 'No Workflows Saved',
+    no_community: 'No Public Workflows',
     system_preset: 'System Preset',
     editing_logic: 'Editing Logic',
     save_flow: 'Save Flow',
@@ -63,8 +65,17 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     select_cloned_voice: 'Please select a cloned voice',
     workflow_example_placeholder: 'e.g., Create a workflow that generates text with AI, converts it to speech, and then creates a digital avatar video...',
     workflow_description_hint: 'Describe your desired workflow in detail, including the tools, steps, and connections. AI will automatically generate the complete workflow based on your description.',
+    visit_github: 'Visit Github',
+    lite_free_label: 'LITE (FREE)',
+    pro_edition_label: 'PRO (PAID)',
     normal_mode: 'Normal Mode',
-    canvas_mode: 'Canvas Mode'
+    canvas_mode: 'Canvas Mode',
+    workflow_private: 'Private',
+    workflow_public: 'Public',
+    set_private: 'Set Private',
+    set_public: 'Set Public',
+    visibility_private: 'Private',
+    visibility_public: 'Public'
   },
   zh: {
     app_name: 'LightX2V OmniFlow',
@@ -72,7 +83,9 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     create_workflow: '新建工作流',
     my_workflows: '我的工作流',
     preset_library: '预设工作流',
+    workflow_community: '社区',
     no_workflows: '暂无保存的工作流',
+    no_community: '暂无公开工作流',
     system_preset: '系统预设',
     editing_logic: '逻辑编辑',
     save_flow: '保存工作流',
@@ -128,7 +141,16 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     select_cloned_voice: '请选择克隆音色',
     workflow_example_placeholder: '例如：创建一个工作流，首先用AI生成一段文字，然后转换为语音，最后生成一个数字人视频...',
     workflow_description_hint: '详细描述您想要创建的工作流，包括使用的工具、步骤和连接关系。AI会根据您的描述自动生成完整的工作流。',
+    visit_github: '访问 Github',
+    lite_free_label: '基础版 (FREE)',
+    pro_edition_label: '专业版 (PAID)',
     normal_mode: '普通模式',
-    canvas_mode: '画布模式'
+    canvas_mode: '画布模式',
+    workflow_private: '私有',
+    workflow_public: '公开',
+    set_private: '设为私有',
+    set_public: '设为公开',
+    visibility_private: '私有',
+    visibility_public: '公开'
   }
 };

@@ -57,7 +57,7 @@ export async function saveNodeOutputData(
   portId: string,
   data: string | Blob | object,
   runId?: string
-): Promise<{ file_id?: string; data_id: string } | null> {
+): Promise<{ file_id?: string; data_id: string; file_url?: string; url?: string } | null> {
   try {
     let outputData: string | object;
     let fileInfo: any = null;
@@ -137,8 +137,13 @@ export async function saveNodeOutputData(
     }
 
     const result = await response.json();
-    // 返回保存成功的信息（后端会返回 data_id，如果是文件还会返回 file_id）
-    return { data_id: result.data_id, file_id: result.file_id };
+    // 返回保存成功的信息（后端会返回 data_id，如果是文件还会返回 file_id / file_url）
+    return {
+      data_id: result.data_id,
+      file_id: result.file_id,
+      file_url: result.file_url,
+      url: result.url
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[WorkflowFileManager] Error saving node output data for ${nodeId}/${portId}:`, errorMessage);

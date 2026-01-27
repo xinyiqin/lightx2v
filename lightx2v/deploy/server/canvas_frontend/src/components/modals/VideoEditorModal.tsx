@@ -1,33 +1,32 @@
 import React from 'react';
-import { X, Volume2 } from 'lucide-react';
+import { X, Video } from 'lucide-react';
 import { Language } from '../../i18n/useTranslation';
-import { AudioNodePreview } from '../previews/AudioNodePreview';
+import { VideoNodePreview } from '../previews/VideoNodePreview';
 
-interface AudioEditorModalProps {
+interface VideoEditorModalProps {
   nodeId: string;
-  audioData: string;
-  audioRange?: { start: number; end: number };
-  onRangeChange?: (range: { start: number; end: number }) => void;
+  videoData: string;
+  trimStart?: number;
+  trimEnd?: number;
+  onRangeChange?: (start: number, end: number) => void;
   onClose: () => void;
-  onSave: (trimmedAudio: string) => void;
+  onUpdate: (start: number, end: number, trimmedUrl?: string) => void;
   lang: Language;
 }
 
-export const AudioEditorModal: React.FC<AudioEditorModalProps> = ({
-  audioData,
-  audioRange,
+export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
+  videoData,
+  trimStart,
+  trimEnd,
   onRangeChange,
   onClose,
-  onSave,
+  onUpdate,
   lang
 }) => {
-  const modalData = {
-    original: audioData,
-    trimmed: audioData,
-    range: audioRange || { start: 0, end: 100 }
-  };
-
-  const title = lang === 'zh' ? '音频输入' : 'Audio Input';
+  const normalizedVideo = videoData.startsWith('/assets/') && !videoData.startsWith('/canvas/')
+    ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${videoData}`
+    : videoData;
+  const title = lang === 'zh' ? '视频输入' : 'Video Input';
   const subtitle = lang === 'zh' ? '源输入 - 可编辑' : 'Source Input - Editable';
 
   return (
@@ -37,7 +36,7 @@ export const AudioEditorModal: React.FC<AudioEditorModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-[#90dce1]">
-                <Volume2 size={18} />
+                <Video size={18} />
               </div>
               <div className="flex flex-col">
                 <span className="text-xs font-black uppercase tracking-widest text-slate-300">{title}</span>
@@ -52,12 +51,11 @@ export const AudioEditorModal: React.FC<AudioEditorModalProps> = ({
 
         <div className="px-8 py-10">
           <div className="max-w-4xl mx-auto">
-            <AudioNodePreview
-              audioData={modalData}
-              onUpdate={(trimmed) => {
-                onSave(trimmed);
-                onClose();
-              }}
+            <VideoNodePreview
+              videoUrl={normalizedVideo}
+              initialStart={trimStart}
+              initialEnd={trimEnd}
+              onUpdate={onUpdate}
               onRangeChange={onRangeChange}
             />
           </div>

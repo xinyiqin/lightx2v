@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Wand2, Languages, Sparkle, Plus, LayoutGrid, LogOut, LogIn } from 'lucide-react';
+import { Wand2, Languages, Sparkle, Plus, LayoutGrid, Github, Gift, CreditCard } from 'lucide-react';
 import { useTranslation, Language } from '../../i18n/useTranslation';
+import { UserCard } from './UserCard';
 
 interface HeaderProps {
   lang: Language;
@@ -95,103 +96,73 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-20 border-b border-slate-800/60 flex items-center justify-between px-10 bg-slate-900/40 backdrop-blur-3xl z-40">
+    <header className="h-16 border-b border-slate-800/80 flex items-center justify-between px-8 bg-slate-950/70 backdrop-blur-3xl z-40">
       <div className="flex items-center gap-4">
-        <div className="w-12 h-12 bg-[#90dce1] rounded-2xl flex items-center justify-center shadow-xl shadow-[#90dce1]/20">
-          <Wand2 className="text-white" size={24} />
+        <div className="w-10 h-10 bg-[#90dce1] rounded-2xl flex items-center justify-center shadow-xl shadow-[#90dce1]/20 transition-all hover:shadow-[#90dce1]/40 hover:-translate-y-0.5">
+          <Wand2 className="text-slate-900" size={20} />
         </div>
-        <div className="flex flex-col">
-          <h1 className="text-xl font-black uppercase tracking-widest text-white">
-            {t('app_name')}
-          </h1>
-          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+        <div className="flex flex-col leading-none">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-black uppercase tracking-widest text-white">
+              {t('app_name')}
+            </h1>
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[#90dce1] transition-all hover:border-[#90dce1]/60 hover:shadow-[0_0_14px_rgba(144,220,225,0.35)]">
+              PRO
+            </span>
+          </div>
+          <span className="text-[9px] text-slate-500 font-bold uppercase tracking-[0.2em]">
             {t('app_subtitle')}
           </span>
         </div>
-        <button
-          onClick={handleSwitchToNormalMode}
-          className="flex items-center gap-3 ml-4 cursor-pointer transition-opacity duration-200 hover:opacity-80"
-          title={lang === 'zh' ? '切换到普通模式' : 'Switch to Normal Mode'}
-        >
-          {/* 切换开关 */}
-          <div className="relative w-12 h-6 bg-slate-600 dark:bg-slate-700 rounded-full transition-colors duration-200">
-            <div className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-200 transform translate-x-0"></div>
-            {/* 开关内的图标 */}
-            <div className="absolute top-1 left-1 w-4 h-4 flex items-center justify-center pointer-events-none">
-              <svg className="w-2.5 h-2.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-              </svg>
-            </div>
+        <div className="hidden md:flex items-center bg-slate-900/60 border border-slate-800/80 rounded-2xl p-1 ml-2">
+          <button
+            onClick={handleSwitchToNormalMode}
+            className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2 hover:text-slate-300 transition-all hover:bg-slate-900/80 rounded-xl"
+            title={lang === 'zh' ? '切换到普通模式' : 'Switch to Normal Mode'}
+          >
+            <Gift size={12} className="text-slate-600" />
+            {t('lite_free_label')}
+          </button>
+          <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-900 bg-[#90dce1] rounded-xl shadow-[0_0_20px_rgba(144,220,225,0.25)]">
+            <CreditCard size={12} className="text-slate-900 inline-block mr-2" />
+            {t('pro_edition_label')}
           </div>
-          {/* 文字标签 */}
-          <span className="text-sm font-medium text-white tracking-tight whitespace-nowrap">
-            {t('normal_mode')}
-          </span>
-        </button>
+        </div>
       </div>
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3">
+        <a
+          href="https://github.com/ModelTC/LightX2V"
+          target="_blank"
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900/60 text-slate-300 rounded-2xl text-[11px] font-bold uppercase tracking-widest transition-all border border-slate-800/80 group hover:border-[#90dce1]/60 hover:shadow-[0_0_18px_rgba(144,220,225,0.2)] hover:-translate-y-0.5"
+        >
+          <Github size={14} className="group-hover:text-[#90dce1]" />
+          <span className="hidden lg:inline">{t('visit_github')}</span>
+        </a>
         <button
           onClick={onToggleLang}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-800"
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900/60 text-slate-300 rounded-2xl text-[11px] font-bold uppercase tracking-widest transition-all border border-slate-800/80 hover:border-[#90dce1]/60 hover:shadow-[0_0_18px_rgba(144,220,225,0.2)] hover:-translate-y-0.5"
         >
           <Languages size={14} /> {t('lang_name')}
         </button>
         <button
           onClick={onAIGenerate}
-          className="flex items-center gap-2 px-8 py-3 bg-[#90dce1] hover:bg-[#7dd3da] text-white rounded-2xl font-black text-sm transition-all active:scale-95"
+          className="flex items-center gap-2 px-5 py-2 bg-slate-900/70 text-slate-200 rounded-2xl text-[11px] font-bold uppercase tracking-widest transition-all border-2 border-[#90dce1]/80 shadow-[0_8px_20px_rgba(15,23,42,0.35)] hover:shadow-[0_0_24px_rgba(144,220,225,0.35)] hover:-translate-y-0.5"
         >
           <Sparkle size={18} /> {t('ai_generate_workflow')}
         </button>
         <button
           onClick={onCreateWorkflow}
-          className="flex items-center gap-2 px-8 py-3 bg-[#90dce1] hover:bg-[#7dd3da] text-white rounded-2xl font-black text-sm transition-all active:scale-95"
+          className="flex items-center gap-2 px-7 py-2.5 bg-[#90dce1] text-slate-900 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-[0_10px_30px_rgba(144,220,225,0.35)] hover:bg-[#7dd3da] hover:shadow-[0_0_28px_rgba(144,220,225,0.5)] hover:-translate-y-0.5"
         >
           <Plus size={18} /> {t('create_workflow')}
         </button>
 
-        {/* 用户信息卡片 */}
-        <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-[20px] transition-all duration-200">
-          {/* 用户头像 */}
-          <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 rounded-full overflow-hidden bg-slate-700 border border-slate-600">
-            {user?.avatar_url ? (
-              <img
-                src={user.avatar_url}
-                alt={user.username || 'User'}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-600/50 to-slate-700/50">
-                <span className="text-xs text-slate-300 font-medium">
-                  {user?.username?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* 用户名 */}
-          <div className="text-sm font-medium text-slate-300 tracking-[-0.01em] whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]">
-            {user?.username || user?.email || (lang === 'zh' ? '未登录' : 'Not logged in')}
-          </div>
-
-          {/* 登录/登出按钮 */}
-          {user?.username || user?.email ? (
-            <button
-              onClick={handleLogout}
-              className="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-red-500/10 hover:scale-110 active:scale-100 flex-shrink-0 group"
-              title={lang === 'zh' ? '登出' : 'Logout'}
-            >
-              <LogOut size={14} className="text-slate-400 group-hover:text-red-400 transition-colors" />
-            </button>
-          ) : (
-            <button
-              onClick={handleLogin}
-              className="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-[#90dce1]/10 hover:scale-110 active:scale-100 flex-shrink-0 group"
-              title={lang === 'zh' ? '登录' : 'Login'}
-            >
-              <LogIn size={14} className="text-slate-400 group-hover:text-[#90dce1] transition-colors" />
-            </button>
-          )}
-        </div>
+        <UserCard
+          user={user}
+          lang={lang}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
       </div>
     </header>
   );

@@ -1,12 +1,75 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { Bot, User, CheckCircle2, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, Lightbulb, Globe, ExternalLink } from 'lucide-react';
 import { Language } from '../../i18n/useTranslation';
+
+const MarkdownRenderer: React.FC<{
+  text: string;
+  className?: string;
+  textClass?: string;
+  boldClass?: string;
+  codeClass?: string;
+  headerClass?: string;
+}> = ({
+  text,
+  className = 'space-y-2',
+  textClass = 'text-[13px] leading-relaxed text-slate-900',
+  boldClass = 'text-white font-black bg-[#90dce1]/5 px-0.5 rounded',
+  codeClass = 'bg-black/50 px-1 py-0.5 rounded text-[#90dce1] font-mono text-[11px]',
+  headerClass = 'text-[12px] font-black text-slate-200 mt-3 mb-2 first:mt-0'
+}) => {
+  const lines = text.split('\n');
+
+  return (
+    <div className={className}>
+      {lines.map((line, idx) => {
+        if (line.trim().startsWith('###') || line.trim().startsWith('##') || line.trim().startsWith('#')) {
+          const headerText = line.replace(/^#+\s*/, '');
+          return <h4 key={idx} className={headerClass}>{headerText}</h4>;
+        }
+
+        if (!line.trim()) return <div key={idx} className="h-1" />;
+
+        const parts = line.split(/(\*\*.*?\*\*|`.*?`)/g);
+
+        return (
+          <p key={idx} className={textClass}>
+            {parts.map((part, pIdx) => {
+              if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={pIdx} className={boldClass}>{part.slice(2, -2)}</strong>;
+              }
+              if (part.startsWith('`') && part.endsWith('`')) {
+                return (
+                  <code key={pIdx} className={codeClass}>
+                    {part.slice(1, -1)}
+                  </code>
+                );
+              }
+              return part;
+            })}
+          </p>
+        );
+      })}
+    </div>
+  );
+};
 
 interface ChatMessageProps {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  image?: {
+    data: string;
+    mimeType: string;
+  };
+  useSearch?: boolean;
+  sources?: {
+    title?: string;
+    url: string;
+    siteName?: string;
+  }[];
   timestamp: number;
+  modelLabel?: string;
+  latencyLabel?: string;
   operations?: any[];
   operationResults?: any[];
   error?: string;
@@ -20,7 +83,12 @@ interface ChatMessageProps {
 export const ChatMessage: React.FC<ChatMessageProps> = ({
   role,
   content,
+  image,
+  useSearch,
+  sources,
   timestamp,
+  modelLabel,
+  latencyLabel,
   operations,
   operationResults,
   error,
@@ -35,9 +103,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const hasError = !!error;
   const allSuccess = operationResults?.every(r => r.success) ?? false;
   const hasThinking = !!thinking && thinking.trim().length > 0;
+  const sourceLinks = useMemo(() => {
+    if (!useSearch) return [];
+    if (sources && sources.length > 0) return sources;
+    if (!content) return [];
+    const matches = content.match(/https?:\/\/[^\s)]+/g) || [];
+    return Array.from(new Set(matches)).map((url) => ({ url }));
+  }, [useSearch, sources, content]);
 
   // 当有最终答案时，自动折叠思考过程
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  const thinkingScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // 如果有思考过程且有最终答案（不是流式输出中），默认折叠
@@ -48,6 +124,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       setIsThinkingExpanded(true);
     }
   }, [hasThinking, isStreaming, content]);
+
+  useEffect(() => {
+    if (!isStreaming || !isThinkingExpanded || !thinkingScrollRef.current) return;
+    thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
+  }, [isStreaming, isThinkingExpanded, thinking]);
 
   // 统计操作类型和数量
   const operationSummary = useMemo(() => {
@@ -100,77 +181,69 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   }, [operations, lang]);
 
   return (
-    <div className={`flex gap-3 mb-4 ${isUser ? 'flex-row-reverse' : ''}`}>
-      {/* Avatar */}
+    <div className={`flex flex-col mb-3 ${isUser ? 'items-end' : 'items-start'}`}>
+      {!isUser && modelLabel && (
+        <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <span className="text-slate-400">{modelLabel}</span>
+          {latencyLabel && <span className="ml-2 text-slate-600">• {latencyLabel}</span>}
+        </div>
+      )}
+      {/* Message Bubble */}
       <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-          isUser ? 'bg-[#90dce1]' : 'bg-[#90dce1]'
+        className={`max-w-[90%] px-3.5 py-2.5 rounded-2xl text-[12px] leading-snug ${
+          isUser
+            ? 'bg-[#90dce1] text-slate-900 rounded-tr-md shadow-xl shadow-[#90dce1]/10'
+            : 'bg-slate-900/80 text-slate-200 rounded-tl-md border border-slate-800/70 shadow-sm'
         }`}
       >
-        {isUser ? (
-          <User size={16} className="text-white" />
-        ) : (
-          <Bot size={16} className="text-white" />
-        )}
-      </div>
-
-      {/* Message Content */}
-      <div className={`flex-1 ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
-        <div
-          className={`rounded-2xl px-4 py-3 max-w-[80%] ${
-            isUser
-              ? 'bg-[#90dce1]/20 border border-[#90dce1]/30 text-slate-100'
-              : 'bg-slate-800/50 border border-slate-700 text-slate-200'
-          }`}
-        >
-          {/* 思考过程（可折叠） */}
-          {hasThinking && !isUser && (
-            <div className="mb-3">
-              <button
-                onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-                className="flex items-center gap-2 w-full text-left text-xs text-slate-400 hover:text-slate-300 transition-colors"
-              >
-                {isThinkingExpanded ? (
-                  <ChevronUp size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
-                <span>{lang === 'zh' ? '思考过程' : 'Thinking Process'}</span>
-                {isStreaming && (
-                  <span className="ml-2 text-[#90dce1] animate-pulse">
-                    {lang === 'zh' ? '思考中...' : 'Thinking...'}
-                  </span>
-                )}
-              </button>
-              {isThinkingExpanded && (
-                <div className="mt-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 whitespace-pre-wrap break-words font-mono">
-                    {thinking}
-                    {isStreaming && (
-                      <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
-                    )}
-                  </p>
-                </div>
-              )}
+        <div className="max-h-80 overflow-y-auto custom-scrollbar pr-1">
+          {/* 图片预览 */}
+          {image && (
+            <div className="mb-3 overflow-hidden rounded-xl border border-black/10">
+              <img
+                src={`data:${image.mimeType};base64,${image.data}`}
+                alt="Sent"
+                className="max-w-full h-auto object-cover max-h-64"
+              />
             </div>
           )}
 
           {/* 最终答案 */}
           <div>
             {content.trim().length > 0 ? (
-              <p className="text-sm whitespace-pre-wrap break-words">
-                {content}
+              <>
+                <MarkdownRenderer text={content} />
                 {isStreaming && (
                   <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
                 )}
-              </p>
+              </>
             ) : isStreaming ? (
-              <p className="text-sm text-slate-400">
-                {lang === 'zh' ? '正在生成...' : 'Generating...'}
-                <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
-              </p>
+              <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
             ) : null}
           </div>
+
+          {/* Sources */}
+          {!isUser && useSearch && sourceLinks.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-800/50">
+              <span className="text-[9px] font-black uppercase text-[#90dce1] flex items-center gap-1 mb-2">
+                <Globe size={10} /> {lang === 'zh' ? '参考来源' : 'Sources'}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {sourceLinks.map((link: any) => (
+                  <a
+                    key={link.url}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-800/50 hover:bg-[#90dce1]/10 border border-slate-800 hover:border-[#90dce1]/30 rounded-lg text-[9px] text-slate-400 hover:text-[#90dce1] transition-all max-w-[220px]"
+                  >
+                    <ExternalLink size={8} />
+                    <span className="truncate">{link.title || link.siteName || link.url}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Operation Status */}
           {hasOperations && (
@@ -207,29 +280,59 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             </div>
           )}
         </div>
-
-        {/* Action Buttons (for assistant messages) */}
-        {!isUser && hasOperations && (
-          <div className="flex gap-2 mt-2">
-            {!hasError && onUndo && (
-              <button
-                onClick={onUndo}
-                className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-              >
-                {lang === 'zh' ? '撤销' : 'Undo'}
-              </button>
-            )}
-            {hasError && onRetry && (
-              <button
-                onClick={onRetry}
-                className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-              >
-                {lang === 'zh' ? '重试' : 'Retry'}
-              </button>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* 思考过程（外置块） */}
+      {hasThinking && !isUser && (
+        <div className="mt-4 w-full max-w-[92%]">
+          <div
+            onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
+            className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800/80 rounded-xl cursor-pointer hover:bg-slate-800 transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <Lightbulb size={14} className="text-slate-500 group-hover:text-[#90dce1] transition-colors" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-slate-200 transition-colors">
+                {lang === 'zh' ? '思考过程' : 'Thought Process'}
+              </span>
+              {isStreaming && (
+                <span className="text-[10px] font-black uppercase tracking-widest text-[#90dce1] animate-pulse">
+                  {lang === 'zh' ? '思考中...' : 'Thinking...'}
+                </span>
+              )}
+            </div>
+            {isThinkingExpanded ? <ChevronUp size={14} className="text-slate-600" /> : <ChevronDown size={14} className="text-slate-600" />}
+          </div>
+          {isThinkingExpanded && (
+            <div className="mt-2 p-4 bg-slate-900/30 border-l-2 border-slate-800/50 ml-3 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div ref={thinkingScrollRef} className="max-h-80 overflow-y-auto pr-2 custom-scrollbar">
+                <MarkdownRenderer text={thinking} textClass="text-[12px] leading-relaxed text-slate-400" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Action Buttons (for assistant messages) */}
+      {!isUser && hasOperations && (
+        <div className="flex gap-2 mt-2">
+          {!hasError && onUndo && (
+            <button
+              onClick={onUndo}
+              className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+            >
+              {lang === 'zh' ? '撤销' : 'Undo'}
+            </button>
+          )}
+          {hasError && onRetry && (
+            <button
+              onClick={onRetry}
+              className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+            >
+              {lang === 'zh' ? '重试' : 'Retry'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

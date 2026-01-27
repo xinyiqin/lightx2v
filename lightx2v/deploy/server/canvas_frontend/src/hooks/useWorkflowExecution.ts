@@ -163,6 +163,14 @@ export const useWorkflowExecution = ({
       nodesToRunIds = new Set(workflow.nodes.map(n => n.id));
     }
 
+    // Clear previous errors immediately on rerun
+    setWorkflow(prev => prev ? ({
+      ...prev,
+      nodes: prev.nodes.map(n => nodesToRunIds.has(n.id)
+        ? { ...n, status: NodeStatus.IDLE, error: undefined }
+        : n)
+    }) : null);
+
     const errors = validateWorkflow(nodesToRunIds);
     if (errors.length > 0) {
       setValidationErrors(errors);
@@ -811,7 +819,16 @@ export const useWorkflowExecution = ({
               if (err.message?.includes("Requested entity was not found")) {
                 await (window as any).aistudio.openSelectKey();
               }
-              setWorkflow(prev => prev ? ({ ...prev, nodes: prev.nodes.map(n => n.id === node.id ? { ...n, status: NodeStatus.ERROR, error: err.message || 'Unknown execution error', executionTime: nodeDuration } : n) }) : null);
+              setWorkflow(prev => prev ? ({
+                ...prev,
+                nodes: prev.nodes.map(n => n.id === node.id ? {
+                  ...n,
+                  status: NodeStatus.ERROR,
+                  error: err.message || 'Unknown execution error',
+                  executionTime: nodeDuration,
+                  completedAt: Date.now()
+                } : n)
+              }) : null);
             throw { nodeId: node.id, error: err, duration: nodeDuration };
           }
           });
@@ -836,7 +853,8 @@ export const useWorkflowExecution = ({
                   ...n,
                   status: NodeStatus.SUCCESS,
                   executionTime: duration,
-                  outputValue: result // Set outputValue so it can be saved
+                  outputValue: result, // Set outputValue so it can be saved
+                  completedAt: Date.now()
                 } : n)
               }) : null);
               executedInSession.add(nodeId);
@@ -900,7 +918,13 @@ export const useWorkflowExecution = ({
               failedNodes.forEach(({ nodeId, error, duration }) => {
                 const index = updatedNodes.findIndex(n => n.id === nodeId);
                 if (index >= 0) {
-                  updatedNodes[index] = { ...updatedNodes[index], status: NodeStatus.ERROR, error, executionTime: duration };
+                  updatedNodes[index] = {
+                    ...updatedNodes[index],
+                    status: NodeStatus.ERROR,
+                    error,
+                    executionTime: duration,
+                    completedAt: updatedNodes[index].completedAt ?? Date.now()
+                  };
                 }
               });
               return { ...prev, nodes: updatedNodes };
@@ -923,7 +947,8 @@ export const useWorkflowExecution = ({
         status: n.status,
         data: { ...n.data }, // Shallow copy of data
         error: n.error,
-        executionTime: n.executionTime
+        executionTime: n.executionTime,
+        completedAt: n.completedAt
       }));
 
       // Optimize history outputs: don't save full base64 data, save references instead
@@ -972,7 +997,8 @@ export const useWorkflowExecution = ({
           console.log(`[WorkflowExecution] Starting to save outputs for workflow ${workflow.id}, sessionOutputs keys:`, Object.keys(sessionOutputs));
           // Save output files for each node (async, don't block execution)
           // Pass runId to associate saves with workflow history
-          const savePromises: Promise<{ file_id?: string; data_id: string } | null>[] = [];
+          const savePromises: Promise<{ file_id?: string; data_id: string; file_url?: string; url?: string } | null>[] = [];
+          const saveMeta: Array<{ nodeId: string; portId: string; value: any; kind: 'single' | 'multi' | 'array'; index?: number }> = [];
 
           for (const [nodeId, output] of Object.entries(sessionOutputs)) {
             const node = workflow.nodes.find(n => n.id === nodeId);
@@ -1004,6 +1030,7 @@ export const useWorkflowExecution = ({
                 // Save all types: data URLs, text, JSON, task result URLs
                 if ((typeof value === 'string' && value.length > 0) || (typeof value === 'object' && value !== null && !Array.isArray(value))) {
                   console.log(`[WorkflowExecution] Saving multi-output node ${nodeId}/${portId}:`, typeof value === 'string' ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : 'object');
+                  saveMeta.push({ nodeId, portId, value, kind: 'multi' });
                   savePromises.push(
                     saveNodeOutputData(workflow.id, nodeId, portId, value, runId)
                       .then(result => {
@@ -1028,6 +1055,7 @@ export const useWorkflowExecution = ({
               if (firstOutputPort) {
                 const isUrl = outputToSave.startsWith('http://') || outputToSave.startsWith('https://') || outputToSave.startsWith('./assets/');
                 console.log(`[WorkflowExecution] Saving single-output node ${nodeId}/${firstOutputPort.id} (${isUrl ? 'URL' : 'text'}):`, outputToSave.length > 100 ? outputToSave.substring(0, 100) + '...' : outputToSave);
+                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
                 savePromises.push(
                   saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
                     .then(result => {
@@ -1051,6 +1079,7 @@ export const useWorkflowExecution = ({
               // JSON object output
               const firstOutputPort = tool.outputs[0];
               if (firstOutputPort) {
+                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
                 savePromises.push(
                   saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
                     .then(result => {
@@ -1074,6 +1103,7 @@ export const useWorkflowExecution = ({
                   const portId = tool.outputs.length > 1 ? tool.outputs[i]?.id || firstOutputPort.id : firstOutputPort.id;
                   // Save all types in array
                   if ((typeof item === 'string' && item.length > 0) || (typeof item === 'object' && item !== null)) {
+                    saveMeta.push({ nodeId, portId, value: item, kind: 'array', index: i });
                     savePromises.push(
                       saveNodeOutputData(workflow.id, nodeId, portId, item, runId)
                         .then(result => {
@@ -1097,15 +1127,11 @@ export const useWorkflowExecution = ({
           Promise.allSettled(savePromises).then(results => {
             // Check for any failed saves
             const failedSaves: string[] = [];
-            const successfulResults: Array<{ file_id?: string; data_id: string } | null> = [];
-
             results.forEach((result, index) => {
               if (result.status === 'rejected') {
                 const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
                 console.error(`[WorkflowExecution] Save promise ${index} failed:`, errorMsg);
                 failedSaves.push(`Save ${index + 1}: ${errorMsg}`);
-              } else if (result.status === 'fulfilled' && result.value !== null) {
-                successfulResults.push(result.value);
               }
             });
 
@@ -1116,114 +1142,62 @@ export const useWorkflowExecution = ({
               });
             }
 
-            // Use successful results only
-            const resultsArray = successfulResults;
             // Update history outputs with data_id references (replace data URLs with references)
             const updatedOutputs: Record<string, any> = { ...optimizedOutputs };
+            const outputReplacements: Array<{ nodeId: string; portId: string; value: any; kind: 'single' | 'multi' | 'array'; index?: number }> = [];
 
-            // Map results back to nodes (iterate through sessionOutputs in the same order as saves)
-            // Note: resultsArray only contains successful saves, so we need to track which saves succeeded
-            let resultIndex = 0;
-            for (const [nodeId, output] of Object.entries(sessionOutputs)) {
-              const node = workflow.nodes.find(n => n.id === nodeId);
-              if (!node) continue;
+            const isDataUrl = (value: any) => typeof value === 'string' && value.startsWith('data:');
 
-              const tool = TOOLS.find(t => t.id === node.toolId);
-              if (!tool || !tool.outputs) continue;
+            results.forEach((result, idx) => {
+              if (result.status !== 'fulfilled' || !result.value) return;
+              const meta = saveMeta[idx];
+              if (!meta) return;
+              const saveResult = result.value;
+              const fileUrl = saveResult.file_url || saveResult.url;
+              const shouldReplaceWithUrl = fileUrl && isDataUrl(meta.value);
 
-              // Check if this node's output was saved
-              if (node.outputValue && typeof node.outputValue === 'object') {
-                // Multi-output node - check each port
-                for (const [portId, value] of Object.entries(node.outputValue)) {
-                  if ((typeof value === 'string' && value.length > 0) || (typeof value === 'object' && value !== null && !Array.isArray(value))) {
-                    // Check if this save succeeded (resultIndex < resultsArray.length)
-                    if (resultIndex < resultsArray.length) {
-                      const saveResult = resultsArray[resultIndex];
-                      if (saveResult && saveResult.data_id) {
-                        // Update with data_id reference
-                        if (!updatedOutputs[nodeId] || typeof updatedOutputs[nodeId] !== 'object') {
-                          updatedOutputs[nodeId] = {};
-                        }
-                        updatedOutputs[nodeId][portId] = {
-                          type: 'reference',
-                          data_id: saveResult.data_id,
-                          file_id: saveResult.file_id
-                        };
-                      }
-                    }
-                    resultIndex++;
-                  }
+              if (meta.kind === 'multi') {
+                if (!updatedOutputs[meta.nodeId] || typeof updatedOutputs[meta.nodeId] !== 'object') {
+                  updatedOutputs[meta.nodeId] = {};
                 }
-              } else if ((typeof output === 'string' && output.length > 0) || (typeof output === 'object' && output !== null && !Array.isArray(output))) {
-                // Single output node
-                if (resultIndex < resultsArray.length) {
-                  const saveResult = resultsArray[resultIndex];
-                  if (saveResult && saveResult.data_id) {
-                    // Update with data_id reference
-                    if (typeof output === 'string' && output.startsWith('data:')) {
-                      updatedOutputs[nodeId] = {
-                        type: 'reference',
-                        data_id: saveResult.data_id,
-                        file_id: saveResult.file_id
-                      };
-                    } else if (typeof output === 'string') {
-                      // Check if it's a task result URL (image/video) or plain text
-                      const isTaskResultUrl = output.startsWith('./assets/task/result') ||
-                                             output.startsWith('http://') ||
-                                             output.startsWith('https://');
-
-                      if (isTaskResultUrl) {
-                        // Task result URL - mark as reference/url type
-                        updatedOutputs[nodeId] = {
-                          type: 'url',
-                          data_id: saveResult.data_id,
-                          data: output // Keep URL for quick access
-                        };
-                      } else {
-                        // Plain text
-                        updatedOutputs[nodeId] = {
-                          type: 'text',
-                          data_id: saveResult.data_id,
-                          data: output // Keep text for quick access
-                        };
-                      }
-                    } else {
-                      updatedOutputs[nodeId] = {
-                        type: 'json',
-                        data_id: saveResult.data_id,
-                        data: output // Keep JSON for quick access
-                      };
-                    }
-                  }
+                updatedOutputs[meta.nodeId][meta.portId] = shouldReplaceWithUrl
+                  ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
+                  : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+              } else if (meta.kind === 'single') {
+                if (typeof meta.value === 'string' && meta.value.startsWith('data:')) {
+                  updatedOutputs[meta.nodeId] = shouldReplaceWithUrl
+                    ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
+                    : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+                } else if (typeof meta.value === 'string') {
+                  const isTaskResultUrl = meta.value.startsWith('./assets/task/result') ||
+                                         meta.value.startsWith('http://') ||
+                                         meta.value.startsWith('https://');
+                  updatedOutputs[meta.nodeId] = isTaskResultUrl
+                    ? { type: 'url', data_id: saveResult.data_id, data: meta.value }
+                    : { type: 'text', data_id: saveResult.data_id, data: meta.value };
+                } else {
+                  updatedOutputs[meta.nodeId] = { type: 'json', data_id: saveResult.data_id, data: meta.value };
                 }
-                resultIndex++;
-              } else if (Array.isArray(output)) {
-                // Array output - each item was saved separately
-                const firstOutputPort = tool.outputs[0];
-                if (firstOutputPort) {
-                  const arrayRefs: any[] = [];
-                  for (let i = 0; i < output.length; i++) {
-                    const item = output[i];
-                    if ((typeof item === 'string' && item.length > 0) || (typeof item === 'object' && item !== null)) {
-                      if (resultIndex < resultsArray.length) {
-                        const saveResult = resultsArray[resultIndex];
-                        if (saveResult && saveResult.data_id) {
-                          arrayRefs.push({
-                            type: 'reference',
-                            data_id: saveResult.data_id,
-                            file_id: saveResult.file_id
-                          });
-                        }
-                      }
-                      resultIndex++;
-                    }
-                  }
-                  if (arrayRefs.length > 0) {
-                    updatedOutputs[nodeId] = arrayRefs;
-                  }
+              } else if (meta.kind === 'array') {
+                if (!Array.isArray(updatedOutputs[meta.nodeId])) {
+                  updatedOutputs[meta.nodeId] = [];
                 }
+                const entry = shouldReplaceWithUrl
+                  ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
+                  : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+                (updatedOutputs[meta.nodeId] as any[])[meta.index ?? 0] = entry;
               }
-            }
+
+              if (shouldReplaceWithUrl) {
+                outputReplacements.push({
+                  nodeId: meta.nodeId,
+                  portId: meta.portId,
+                  value: fileUrl,
+                  kind: meta.kind,
+                  index: meta.index
+                });
+              }
+            });
 
             // Update the run with optimized outputs
             setWorkflow(prev => {
@@ -1231,8 +1205,54 @@ export const useWorkflowExecution = ({
               const updatedHistory = prev.history.map(run =>
                 run.id === runId ? { ...run, outputs: updatedOutputs } : run
               );
-              return { ...prev, history: updatedHistory };
+              const updatedNodes = prev.nodes.map(node => {
+                const updates = outputReplacements.filter(r => r.nodeId === node.id);
+                if (updates.length === 0) return node;
+                if (node.outputValue && typeof node.outputValue === 'object' && !Array.isArray(node.outputValue)) {
+                  const nextOutputValue = { ...node.outputValue };
+                  updates.forEach(update => {
+                    if (update.kind === 'multi') {
+                      nextOutputValue[update.portId] = update.value;
+                    }
+                  });
+                  return { ...node, outputValue: nextOutputValue };
+                }
+                if (Array.isArray(node.outputValue)) {
+                  const nextArray = [...node.outputValue];
+                  updates.forEach(update => {
+                    if (update.kind === 'array') {
+                      nextArray[update.index ?? 0] = update.value;
+                    }
+                  });
+                  return { ...node, outputValue: nextArray };
+                }
+                const singleUpdate = updates.find(update => update.kind === 'single');
+                return singleUpdate ? { ...node, outputValue: singleUpdate.value } : node;
+              });
+              return { ...prev, history: updatedHistory, nodes: updatedNodes };
             });
+
+            if (outputReplacements.length > 0) {
+              setActiveOutputs(prev => {
+                const next = { ...prev };
+                outputReplacements.forEach(update => {
+                  if (update.kind === 'multi') {
+                    const existing = next[update.nodeId];
+                    next[update.nodeId] = {
+                      ...(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}),
+                      [update.portId]: update.value
+                    };
+                  } else if (update.kind === 'array') {
+                    const existing = Array.isArray(next[update.nodeId]) ? [...next[update.nodeId]] : [];
+                    existing[update.index ?? 0] = update.value;
+                    next[update.nodeId] = existing;
+                  } else {
+                    next[update.nodeId] = update.value;
+                  }
+                });
+                return next;
+              });
+            }
           }).catch(err => {
             const errorMsg = err instanceof Error ? err.message : String(err);
             console.error('[WorkflowExecution] Error processing save results:', errorMsg);

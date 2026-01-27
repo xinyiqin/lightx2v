@@ -944,7 +944,8 @@ export const deepseekText = async (
   customInstruction?: string,
   model = 'deepseek-v3-2-251201',
   outputFields?: OutputField[],
-  useSearch = false
+  useSearch = false,
+  returnRaw = false
 ): Promise<any> => {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
@@ -1089,7 +1090,9 @@ export const deepseekText = async (
         // If hasMultipleOutputs is true, return the JSON object (already in correct format)
         if (hasMultipleOutputs) {
           outputKeys.forEach(key => { if (!(key in extractedJson)) extractedJson[key] = "..."; });
-          return extractedJson;
+          return returnRaw
+            ? { data: extractedJson, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+            : extractedJson;
         }
         // If hasMultipleOutputs is false but JSON contains output fields, extract the first value
         // This handles cases where API returns { "out-text": "..." } but we want just the text
@@ -1099,10 +1102,14 @@ export const deepseekText = async (
         }
         // If it matches expected output keys, extract the value
         if (outputKeys.length === 1 && outputKeys[0] in extractedJson) {
-          return extractedJson[outputKeys[0]];
+          return returnRaw
+            ? { data: extractedJson[outputKeys[0]], raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+            : extractedJson[outputKeys[0]];
         }
         // Otherwise return the parsed JSON
-        return extractedJson;
+        return returnRaw
+          ? { data: extractedJson, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+          : extractedJson;
       } catch (e) {
         console.warn('[DeepSeek] Failed to parse JSON from code block:', e);
         // Fall through to normal processing
@@ -1114,15 +1121,21 @@ export const deepseekText = async (
     try {
       const parsed = JSON.parse(text);
       outputKeys.forEach(key => { if (!(key in parsed)) parsed[key] = "..."; });
-      return parsed;
+      return returnRaw
+        ? { data: parsed, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+        : parsed;
     } catch (e) {
       const fallback: Record<string, string> = {};
       outputKeys.forEach((key, i) => fallback[key] = i === 0 ? text : "...");
-      return fallback;
+      return returnRaw
+        ? { data: fallback, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+        : fallback;
     }
   }
 
-  return text;
+  return returnRaw
+    ? { data: text, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+    : text;
 };
 
 /**
@@ -1136,7 +1149,8 @@ export const doubaoText = async (
   model = 'doubao-seed-1-6-vision-250815',
   outputFields?: OutputField[],
   imageInput?: string | string[] | any[],
-  useSearch = false
+  useSearch = false,
+  returnRaw = false
 ): Promise<any> => {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
@@ -1313,7 +1327,9 @@ export const doubaoText = async (
         // If hasMultipleOutputs is true, return the JSON object (already in correct format)
         if (hasMultipleOutputs) {
           outputKeys.forEach(key => { if (!(key in extractedJson)) extractedJson[key] = "..."; });
-          return extractedJson;
+          return returnRaw
+            ? { data: extractedJson, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+            : extractedJson;
         }
         // If hasMultipleOutputs is false but JSON contains output fields, extract the first value
         // This handles cases where API returns { "out-text": "..." } but we want just the text
@@ -1323,10 +1339,14 @@ export const doubaoText = async (
         }
         // If it matches expected output keys, extract the value
         if (outputKeys.length === 1 && outputKeys[0] in extractedJson) {
-          return extractedJson[outputKeys[0]];
+          return returnRaw
+            ? { data: extractedJson[outputKeys[0]], raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+            : extractedJson[outputKeys[0]];
         }
         // Otherwise return the parsed JSON
-        return extractedJson;
+        return returnRaw
+          ? { data: extractedJson, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+          : extractedJson;
       } catch (e) {
         console.warn('[Doubao] Failed to parse JSON from code block:', e);
         // Fall through to normal processing
@@ -1338,15 +1358,21 @@ export const doubaoText = async (
     try {
       const parsed = JSON.parse(text);
       outputKeys.forEach(key => { if (!(key in parsed)) parsed[key] = "..."; });
-      return parsed;
+      return returnRaw
+        ? { data: parsed, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+        : parsed;
     } catch (e) {
       const fallback: Record<string, string> = {};
       outputKeys.forEach((key, i) => fallback[key] = i === 0 ? text : "...");
-      return fallback;
+      return returnRaw
+        ? { data: fallback, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+        : fallback;
     }
   }
 
-  return text;
+  return returnRaw
+    ? { data: text, raw_response: data, usage: data.usage || {}, finish_reason: data.finish_reason || '' }
+    : text;
 };
 
 /**

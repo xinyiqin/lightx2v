@@ -16,14 +16,16 @@ import {
   Undo,
   Redo,
   LayoutGrid,
-  LogOut,
-  LogIn,
+  Github,
   Hash,
-  Square
+  Square,
+  Lock,
+  Globe
 } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { formatTime } from '../../utils/format';
+import { UserCard } from '../common/UserCard';
 
 interface ViewState {
   x: number;
@@ -55,6 +57,7 @@ interface EditorHeaderProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onVisibilityChange: (isPublic: boolean) => void;
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -80,10 +83,12 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   canUndo,
   canRedo,
   onUndo,
-  onRedo
+  onRedo,
+  onVisibilityChange
 }) => {
   const { t } = useTranslation(lang);
   const [user, setUser] = useState<any>(null);
+  const isPublic = workflow.visibility === 'public';
 
   // 获取用户信息
   useEffect(() => {
@@ -162,7 +167,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   };
 
   return (
-    <header className="h-16 border-b border-slate-800/60 flex items-center justify-between px-6 bg-slate-900/40 backdrop-blur-2xl z-40">
+    <header className="h-16 border-b border-slate-800/80 flex items-center justify-between px-6 bg-slate-950/70 backdrop-blur-3xl z-40">
       <div className="flex items-center gap-5">
         <button
           onClick={onBack}
@@ -194,6 +199,14 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         </div>
       </div>
       <div className="flex items-center gap-4">
+        <a
+          href="https://github.com/ModelTC/LightX2V"
+          target="_blank"
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/60 hover:bg-slate-900 text-slate-300 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all border border-slate-800/80 group"
+        >
+          <Github size={12} className="group-hover:text-[#90dce1]" />
+          <span className="hidden lg:inline">{t('visit_github')}</span>
+        </a>
         {/* Undo/Redo Controls */}
         <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-800 rounded-xl p-1">
           <button
@@ -244,10 +257,32 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
 
         <button
           onClick={onToggleLang}
-          className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-800 text-slate-400 rounded-xl text-[10px] font-bold transition-all border border-slate-800"
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/60 hover:bg-slate-900 text-slate-300 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all border border-slate-800/80"
         >
           <Languages size={12} /> {t('lang_name')}
         </button>
+        <div className="flex items-center bg-slate-950/50 p-1 rounded-2xl border border-slate-800/50">
+          <button
+            onClick={() => onVisibilityChange(false)}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+              !isPublic ? 'bg-slate-800 text-slate-200 shadow-xl' : 'text-slate-600 hover:text-slate-400'
+            }`}
+          >
+            <Lock size={12} />
+            <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_private')}</span>
+          </button>
+          <button
+            onClick={() => onVisibilityChange(true)}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+              isPublic
+                ? 'bg-green-500/10 text-green-400 border border-green-500/20 shadow-xl shadow-green-500/5'
+                : 'text-slate-600 hover:text-slate-400'
+            }`}
+          >
+            <Globe size={12} />
+            <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_public')}</span>
+          </button>
+        </div>
         {selectedRunId && (
           <>
             <div className="flex items-center gap-2 px-4 py-2 bg-[#90dce1]/20 rounded-xl border border-[#90dce1]/30 animate-pulse">
@@ -273,12 +308,12 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         <button
           onClick={onSave}
           disabled={isSaving}
-          className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold border transition-all ${
+          className={`flex items-center gap-2 px-6 py-2 rounded-2xl text-[11px] font-bold uppercase tracking-widest border-2 transition-all shadow-[0_8px_20px_rgba(15,23,42,0.35)] ${
             isSaving
-              ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed'
+              ? 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed'
               : workflow.isDirty
-              ? 'bg-[#90dce1]/10 border-[#90dce1] text-[#90dce1] hover:bg-[#90dce1]/20'
-              : 'bg-slate-800 border-slate-700 text-slate-500'
+              ? 'bg-slate-900/70 border-[#90dce1]/80 text-slate-200 hover:shadow-[0_0_20px_rgba(144,220,225,0.25)] hover:-translate-y-0.5'
+              : 'bg-slate-900/70 border-slate-700/80 text-slate-500'
           }`}
         >
           <Save size={16} /> {t('save_flow')}
@@ -305,10 +340,10 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         <button
           onClick={onRun}
           disabled={isRunning && !isPaused}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-sm font-bold shadow-xl transition-all ${
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-[0_10px_30px_rgba(144,220,225,0.35)] transition-all ${
             isRunning && !isPaused
-              ? 'bg-slate-800 text-slate-500'
-              : 'bg-[#90dce1] hover:bg-[#7dd3da] text-white shadow-[#90dce1]/20 active:scale-95'
+              ? 'bg-slate-800 text-slate-500 shadow-none'
+              : 'bg-[#90dce1] hover:bg-[#7dd3da] text-slate-900 hover:shadow-[0_0_28px_rgba(144,220,225,0.5)] hover:-translate-y-0.5 active:scale-95'
           }`}
         >
           {isRunning && !isPaused ? (
@@ -319,49 +354,12 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           {isRunning && !isPaused ? t('executing') : t('run_fabric')}
         </button>
 
-        {/* 用户信息卡片 */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-[20px] transition-all duration-200">
-          {/* 用户头像 */}
-          <div className="flex items-center justify-center w-7 h-7 flex-shrink-0 rounded-full overflow-hidden bg-slate-700 border border-slate-600">
-            {user?.avatar_url ? (
-              <img
-                src={user.avatar_url}
-                alt={user.username || 'User'}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-600/50 to-slate-700/50">
-                <span className="text-[10px] text-slate-300 font-medium">
-                  {user?.username?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* 用户名 */}
-          <div className="text-xs font-medium text-slate-300 tracking-[-0.01em] whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]">
-            {user?.username || user?.email || (lang === 'zh' ? '未登录' : 'Not logged in')}
-          </div>
-
-          {/* 登录/登出按钮 */}
-          {user?.username || user?.email ? (
-            <button
-              onClick={handleLogout}
-              className="flex items-center justify-center w-6 h-6 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-red-500/10 hover:scale-110 active:scale-100 flex-shrink-0 group"
-              title={lang === 'zh' ? '登出' : 'Logout'}
-            >
-              <LogOut size={12} className="text-slate-400 group-hover:text-red-400 transition-colors" />
-            </button>
-          ) : (
-            <button
-              onClick={handleLogin}
-              className="flex items-center justify-center w-6 h-6 p-0 bg-transparent border-0 rounded-full cursor-pointer transition-all duration-200 hover:bg-[#90dce1]/10 hover:scale-110 active:scale-100 flex-shrink-0 group"
-              title={lang === 'zh' ? '登录' : 'Login'}
-            >
-              <LogIn size={12} className="text-slate-400 group-hover:text-[#90dce1] transition-colors" />
-            </button>
-          )}
-        </div>
+        <UserCard
+          user={user}
+          lang={lang}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
       </div>
     </header>
   );

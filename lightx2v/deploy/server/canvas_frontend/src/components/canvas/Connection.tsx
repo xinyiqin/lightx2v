@@ -33,7 +33,11 @@ export const Connection: React.FC<ConnectionProps> = ({
   const outputPortIndex = sourceOutputs.findIndex((p) => p.id === connection.sourcePortId);
   const inputPortIndex = targetInputs.findIndex((p) => p.id === connection.targetPortId);
 
-  const x1 = sourceNode.x + 224; // Output port center X
+  const sourceTool = TOOLS.find((t) => t.id === sourceNode.toolId);
+  const isSourceInput = sourceTool?.category === 'Input';
+  const sourceNodeWidth = isSourceInput ? 320 : 224;
+  const portOffset = 18;
+  const x1 = sourceNode.x + sourceNodeWidth; // Output port center X
   const nodeBottomY = sourceNode.y + sourceNodeHeight;
   const y1 = nodeBottomY - ((sourceOutputs.length - 1 - outputPortIndex) * 30) - 24; // Output port center Y
   const x2 = targetNode.x; // Input port center X

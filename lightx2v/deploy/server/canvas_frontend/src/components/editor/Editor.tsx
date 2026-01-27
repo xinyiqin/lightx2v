@@ -12,7 +12,7 @@ import { ResizableDivider } from './ResizableDivider';
 import { ErrorModal } from '../modals/ErrorModal';
 import { ValidationModal } from '../modals/ValidationModal';
 import { Language } from '../../i18n/useTranslation';
-import { Bot } from 'lucide-react';
+import { Bot, Sparkle, X } from 'lucide-react';
 
 interface EditorProps {
   lang: Language;
@@ -55,7 +55,12 @@ interface EditorProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onVisibilityChange: (isPublic: boolean) => void;
   onAddNode: (tool: any) => void;
+  sidebarDefaultTab?: 'tools' | 'chat';
+  onSidebarTabChange?: (tab: 'tools' | 'chat') => void;
+  focusAIChatInput?: boolean;
+  onAIChatInputFocused?: () => void;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
@@ -63,6 +68,7 @@ interface EditorProps {
   onWheel: (e: React.WheelEvent) => void;
   onNodeSelect: (nodeId: string) => void;
   onConnectionSelect: (connectionId: string) => void;
+  onDeleteConnection: (connectionId: string) => void;
   onNodeDragStart: (nodeId: string, offsetX: number, offsetY: number) => void;
   onNodeDrag: (nodeId: string, x: number, y: number) => void;
   onNodeDragEnd: () => void;
@@ -88,6 +94,7 @@ interface EditorProps {
   onSetVoiceSelect?: (nodeId: string | null) => void;
   onSetExpandedOutput?: (value: { nodeId: string; fieldId?: string } | null) => void;
   onSetShowAudioEditor?: (nodeId: string | null) => void;
+  onSetShowVideoEditor?: (nodeId: string | null) => void;
   onSetConnecting?: (value: {
     nodeId: string;
     portId: string;
@@ -142,24 +149,25 @@ interface EditorProps {
   isAIChatCollapsed?: boolean;
   onToggleAIChat?: () => void;
   onToggleAIChatCollapse?: () => void;
-      aiChatHistory?: any[];
-      isAIProcessing?: boolean;
-  onAISendMessage?: (message: string) => void;
+  aiChatHistory?: any[];
+  isAIProcessing?: boolean;
+  onAISendMessage?: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
+  onAIClearHistory?: () => void;
   onAIUndo?: (messageId: string) => void;
   onAIRetry?: (messageId: string) => void;
-      aiModel?: string;
-      onAIModelChange?: (model: string) => void;
-      // NodeConfigPanel collapse
-      nodeConfigPanelCollapsed?: boolean;
-      onToggleNodeConfigPanel?: () => void;
-      // Right panel resize
-      rightPanelSplitRatio?: number;
-      onRightPanelResize?: (deltaY: number) => void;
-      // AI Chat Panel position and size (for floating window)
-      aiChatPanelPosition?: { x: number; y: number };
-      aiChatPanelSize?: { width: number; height: number };
-      onAiChatPanelPositionChange?: (position: { x: number; y: number }) => void;
-      onAiChatPanelSizeChange?: (size: { width: number; height: number }) => void;
+  aiModel?: string;
+  onAIModelChange?: (model: string) => void;
+  // NodeConfigPanel collapse
+  nodeConfigPanelCollapsed?: boolean;
+  onToggleNodeConfigPanel?: () => void;
+  // Right panel resize
+  rightPanelSplitRatio?: number;
+  onRightPanelResize?: (deltaY: number) => void;
+  // AI Chat Panel position and size (for floating window)
+  aiChatPanelPosition?: { x: number; y: number };
+  aiChatPanelSize?: { width: number; height: number };
+  onAiChatPanelPositionChange?: (position: { x: number; y: number }) => void;
+  onAiChatPanelSizeChange?: (size: { width: number; height: number }) => void;
 }
 
 export const Editor: React.FC<EditorProps> = ({
@@ -196,7 +204,12 @@ export const Editor: React.FC<EditorProps> = ({
   canRedo,
   onUndo,
   onRedo,
+  onVisibilityChange,
   onAddNode,
+  sidebarDefaultTab,
+  onSidebarTabChange,
+  focusAIChatInput,
+  onAIChatInputFocused,
   onMouseMove,
   onMouseDown,
   onMouseUp,
@@ -204,6 +217,7 @@ export const Editor: React.FC<EditorProps> = ({
   onWheel,
   onNodeSelect,
   onConnectionSelect,
+  onDeleteConnection,
   onNodeDragStart,
   onNodeDrag,
   onNodeDragEnd,
@@ -229,6 +243,7 @@ export const Editor: React.FC<EditorProps> = ({
   onSetVoiceSelect = () => {},
   onSetExpandedOutput = () => {},
   onSetShowAudioEditor = () => {},
+  onSetShowVideoEditor = () => {},
   onSetConnecting = () => {},
   onAddConnection = () => {},
   onClearSelectedRunId = () => {},
@@ -256,33 +271,34 @@ export const Editor: React.FC<EditorProps> = ({
   activeResultsList = [],
   onToggleResultsCollapsed = () => {},
   onSelectRun = () => {},
-      onToggleShowIntermediate = () => {},
-      onExpandOutput = () => {},
-      onPinOutputToCanvas = () => {},
-      // AI Chat props
-      isAIChatOpen = false,
-      isAIChatCollapsed = false,
-      onToggleAIChat = () => {},
-      onToggleAIChatCollapse = () => {},
-      aiChatHistory = [],
-      isAIProcessing = false,
-      onAISendMessage = () => {},
-      onAIUndo = () => {},
-      onAIRetry = () => {},
-      aiModel = 'deepseek-v3-2-251201',
-      onAIModelChange = () => {},
-      // NodeConfigPanel collapse
-      nodeConfigPanelCollapsed = false,
-      onToggleNodeConfigPanel = () => {},
-      // Right panel split ratio
-      rightPanelSplitRatio = 0.5,
-      onRightPanelResize = () => {},
-      // AI Chat Panel position and size
-      aiChatPanelPosition,
-      aiChatPanelSize,
-      onAiChatPanelPositionChange = () => {},
-      onAiChatPanelSizeChange = () => {}
-    }) => {
+  onToggleShowIntermediate = () => {},
+  onExpandOutput = () => {},
+  onPinOutputToCanvas = () => {},
+  // AI Chat props
+  isAIChatOpen = false,
+  isAIChatCollapsed = false,
+  onToggleAIChat = () => {},
+  onToggleAIChatCollapse = () => {},
+  aiChatHistory = [],
+  isAIProcessing = false,
+  onAISendMessage = () => {},
+  onAIClearHistory = () => {},
+  onAIUndo = () => {},
+  onAIRetry = () => {},
+  aiModel = 'deepseek-v3-2-251201',
+  onAIModelChange = () => {},
+  // NodeConfigPanel collapse
+  nodeConfigPanelCollapsed = false,
+  onToggleNodeConfigPanel = () => {},
+  // Right panel split ratio
+  rightPanelSplitRatio = 0.5,
+  onRightPanelResize = () => {},
+  // AI Chat Panel position and size
+  aiChatPanelPosition,
+  aiChatPanelSize,
+  onAiChatPanelPositionChange = () => {},
+  onAiChatPanelSizeChange = () => {}
+}) => {
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-200 selection:bg-[#90dce1]/30 font-sans overflow-hidden">
       <ErrorModal error={globalError} lang={lang} onClose={onCloseError} />
@@ -310,6 +326,7 @@ export const Editor: React.FC<EditorProps> = ({
         canRedo={canRedo}
         onUndo={onUndo}
         onRedo={onRedo}
+        onVisibilityChange={onVisibilityChange}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -318,6 +335,18 @@ export const Editor: React.FC<EditorProps> = ({
           collapsed={sidebarCollapsed}
           onToggleCollapse={onToggleSidebar}
           onAddNode={onAddNode}
+          defaultTab={sidebarDefaultTab}
+          onTabChange={onSidebarTabChange}
+          focusChatInput={focusAIChatInput}
+          onChatInputFocused={onAIChatInputFocused}
+          chatHistory={aiChatHistory}
+          isProcessing={isAIProcessing}
+          onSendMessage={onAISendMessage}
+          onClearHistory={onAIClearHistory}
+          onUndo={onAIUndo}
+          onRetry={onAIRetry}
+          aiModel={aiModel}
+          onModelChange={onAIModelChange}
         />
 
         <Canvas
@@ -341,6 +370,7 @@ export const Editor: React.FC<EditorProps> = ({
           onWheel={onWheel}
           onNodeSelect={onNodeSelect}
           onConnectionSelect={onConnectionSelect}
+          onDeleteConnection={onDeleteConnection}
           onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragEnd={onNodeDragEnd}
@@ -362,6 +392,7 @@ export const Editor: React.FC<EditorProps> = ({
           onSetVoiceSelect={onSetVoiceSelect}
           onSetExpandedOutput={onSetExpandedOutput}
           onSetShowAudioEditor={onSetShowAudioEditor}
+          onSetShowVideoEditor={onSetShowVideoEditor}
           onSetConnecting={onSetConnecting}
           onAddConnection={onAddConnection}
           onClearSelectedRunId={onClearSelectedRunId}
@@ -409,6 +440,7 @@ export const Editor: React.FC<EditorProps> = ({
             chatHistory={aiChatHistory}
             isProcessing={isAIProcessing}
             onSendMessage={onAISendMessage}
+            onClearHistory={onAIClearHistory}
             onUndo={onAIUndo}
             onRetry={onAIRetry}
             lang={lang}
@@ -425,24 +457,28 @@ export const Editor: React.FC<EditorProps> = ({
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
           {/* 文字气泡提示 - 仅在未展开时显示 */}
           {(!isAIChatOpen || isAIChatCollapsed) && (
-            <div className="relative bg-slate-800/95 backdrop-blur-sm border border-slate-700 rounded-lg px-4 py-2 shadow-lg">
-              <p className="text-sm text-slate-200 whitespace-nowrap">
-                {lang === 'zh' ? '跟我说说你的想法···' : 'Tell me about your idea...'}
-              </p>
-              {/* 气泡箭头 - 指向右边的按钮 */}
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[8px] border-l-slate-800"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl border border-slate-800 px-4 py-2.5 rounded-2xl shadow-2xl animate-in slide-in-from-right-4 fade-in duration-500 pointer-events-none whitespace-nowrap hidden lg:block">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1 rounded-lg bg-[#90dce1]/10">
+                  <Sparkle size={14} className="text-[#90dce1] animate-pulse" />
+                </div>
+                <span className="text-[11px] font-bold text-slate-200 tracking-wide">
+                  {lang === 'zh' ? '需要协助构建工作流吗？' : 'Need help with workflows?'}
+                </span>
+              </div>
+              <div className="absolute right-[-6px] top-1/2 -translate-y-1/2 w-3 h-3 bg-slate-900/90 border-r border-t border-slate-800 rotate-45" />
             </div>
           )}
           <button
             onClick={onToggleAIChat}
-            className={`w-14 h-14 rounded-full shadow-2xl transition-all flex items-center justify-center ${
+            className={`w-16 h-16 rounded-full shadow-2xl transition-all flex items-center justify-center ${
               isAIChatOpen && !isAIChatCollapsed
-                ? 'bg-[#90dce1] hover:bg-[#90dce1] text-white'
-                : 'bg-[#90dce1] hover:bg-[#90dce1] text-white'
+                ? 'bg-slate-800 rotate-90 text-slate-300'
+                : 'bg-gradient-to-br from-[#90dce1] to-[#68b1b5] text-slate-950 hover:shadow-[#90dce1]/30'
             } hover:scale-110 active:scale-95`}
             title={lang === 'zh' ? 'AI助手' : 'AI Assistant'}
           >
-            <Bot size={24} />
+            {isAIChatOpen && !isAIChatCollapsed ? <X size={24} /> : <Bot size={28} />}
           </button>
         </div>
       </div>

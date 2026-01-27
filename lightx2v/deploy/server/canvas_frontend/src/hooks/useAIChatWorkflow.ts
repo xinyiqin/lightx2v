@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { WorkflowState, WorkflowNode, Connection, ToolDefinition, Port, DataType } from '../../types';
 import { TOOLS } from '../../constants';
-import { deepseekChat, deepseekChatStream, ppchatChatCompletions, ppchatChatCompletionsStream, ppchatGeminiText, doubaoText } from '../../services/geminiService';
+import { deepseekChat, deepseekChatStream, deepseekText, ppchatChatCompletions, ppchatChatCompletionsStream, ppchatGeminiText, doubaoText, lightX2VGetVoiceList, lightX2VGetCloneVoiceList } from '../../services/geminiService';
 import { useTranslation, Language } from '../i18n/useTranslation';
 
 interface Operation {
@@ -21,10 +21,24 @@ interface OperationResult {
   };
 }
 
+export interface ChatImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface ChatSource {
+  title?: string;
+  url: string;
+  siteName?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  image?: ChatImage;
+  useSearch?: boolean;
+  sources?: ChatSource[];
   timestamp: number;
   operations?: Operation[];
   operationResults?: OperationResult[];
@@ -32,6 +46,11 @@ export interface ChatMessage {
   historyCheckpoint?: number; // 执行操作前的历史索引，用于撤销
   thinking?: string; // 思考过程（流式输出时显示）
   isStreaming?: boolean; // 是否正在流式输出
+}
+
+export interface AIChatSendOptions {
+  image?: ChatImage;
+  useSearch?: boolean;
 }
 
 interface UseAIChatWorkflowProps {
@@ -55,6 +74,7 @@ interface UseAIChatWorkflowProps {
   canvasRef: React.RefObject<HTMLDivElement>;
   lang: Language;
   lightX2VVoiceList?: { voices?: any[]; emotions?: string[]; languages?: any[] } | null;
+  getLightX2VConfig: (workflow: WorkflowState | null) => { url: string; token: string };
   getCurrentHistoryIndex?: () => number;
   undoToIndex?: (index: number) => void;
 }
@@ -74,6 +94,7 @@ export const useAIChatWorkflow = ({
   canvasRef,
   lang,
   lightX2VVoiceList,
+  getLightX2VConfig,
   getCurrentHistoryIndex,
   undoToIndex
 }: UseAIChatWorkflowProps) => {
@@ -84,6 +105,12 @@ export const useAIChatWorkflow = ({
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(workflow?.chatHistory || []);
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiModel, setAiModel] = useState<string>('deepseek-v3-2-251201'); // AI模型选择
+  const [aiVoiceList, setAiVoiceList] = useState<{ voices?: any[]; emotions?: string[]; languages?: any[] } | null>(null);
+  const [loadingAiVoiceList, setLoadingAiVoiceList] = useState(false);
+  const aiVoiceListLoadedRef = useRef<string>(''); // Track which URL+token combo has been loaded
+  const [aiCloneVoiceList, setAiCloneVoiceList] = useState<any[]>([]);
+  const [loadingAiCloneVoiceList, setLoadingAiCloneVoiceList] = useState(false);
+  const aiCloneVoiceListLoadedRef = useRef<string>('');
   const [highlightedElements, setHighlightedElements] = useState<{
     nodeIds?: string[];
     connectionIds?: string[];
@@ -154,13 +181,47 @@ export const useAIChatWorkflow = ({
     }
   }, [chatHistory, workflow?.id]); // 当 chatHistory state 变化时同步到工作流
 
-  // 获取前10个音色信息
-  const getTopVoicesInfo = useCallback((): string => {
-    if (!lightX2VVoiceList?.voices || lightX2VVoiceList.voices.length === 0) {
-      return '';
+  // 获取前10个音色信息（必要时从后端/云端拉取）
+  const getTopVoicesInfo = useCallback(async (): Promise<string> => {
+    let voiceList = lightX2VVoiceList;
+    if (!voiceList?.voices || voiceList.voices.length === 0) {
+      voiceList = aiVoiceList;
+    }
+    if (!voiceList?.voices || voiceList.voices.length === 0) {
+      const apiClient = (window as any).__API_CLIENT__;
+      const hasApiClient = !!apiClient;
+      const config = getLightX2VConfig(workflowRef.current || null);
+      if (!hasApiClient && (!config.url || !config.token)) {
+        console.warn('[LightX2V] Missing URL or token for AI chat voice list');
+        return '';
+      }
+
+      const loadKey = `${config.url}:${config.token}`;
+      if (aiVoiceListLoadedRef.current === loadKey && !loadingAiVoiceList && aiVoiceList) {
+        voiceList = aiVoiceList;
+      } else if (!loadingAiVoiceList) {
+        setLoadingAiVoiceList(true);
+        try {
+          const voiceData = await lightX2VGetVoiceList(config.url, config.token);
+          setAiVoiceList(voiceData);
+          aiVoiceListLoadedRef.current = loadKey;
+          voiceList = voiceData;
+        } catch (error: any) {
+          console.error('[LightX2V] Failed to load voice list for AI chat:', error);
+          setAiVoiceList(null);
+          aiVoiceListLoadedRef.current = '';
+          return '';
+        } finally {
+          setLoadingAiVoiceList(false);
+        }
+      } else {
+        return '';
+      }
     }
 
-    const topVoices = lightX2VVoiceList.voices.slice(0, 10).map((voice: any, index: number) => {
+    if (!voiceList?.voices || voiceList.voices.length === 0) return '';
+
+    const topVoices = voiceList.voices.slice(0, 10).map((voice: any, index: number) => {
       const voiceId = voice.voice_type || voice.id || '';
       const voiceName = voice.name || voice.voice_name || voiceId;
       const gender = voice.gender || (voiceId.toLowerCase().includes('female') ? 'female' : voiceId.toLowerCase().includes('male') ? 'male' : 'unknown');
@@ -168,7 +229,56 @@ export const useAIChatWorkflow = ({
     }).join('\n');
 
     return `\n\n可用音色列表（前10个，用于TTS节点自动选择）：\n${topVoices}\n\n**TTS节点音色选择规则：**\n- 根据用户描述的需求（如"女声"、"男声"、"温柔"、"专业"等）自动选择合适的音色\n- 如果用户没有明确指定，默认使用第一个音色（通常是常用音色）\n- 在data中设置voiceType字段，例如: {"data": {"voiceType": "zh_female_vv_uranus_bigtts"}}\n- 注意：voiceType必须是上面列表中列出的voiceType值，不能使用不存在的音色ID`;
-  }, [lightX2VVoiceList]);
+  }, [lightX2VVoiceList, aiVoiceList, loadingAiVoiceList, getLightX2VConfig]);
+
+  // 获取前10个克隆音色信息（必要时从后端/云端拉取）
+  const getTopCloneVoicesInfo = useCallback(async (): Promise<string> => {
+    let cloneList = aiCloneVoiceList;
+    if (!Array.isArray(cloneList) || cloneList.length === 0) {
+      const apiClient = (window as any).__API_CLIENT__;
+      const hasApiClient = !!apiClient;
+      const config = getLightX2VConfig(workflowRef.current || null);
+      if (!hasApiClient && (!config.url || !config.token)) {
+        console.warn('[LightX2V] Missing URL or token for AI chat clone voice list');
+        return '';
+      }
+
+      const loadKey = `${config.url}:${config.token}`;
+      if (aiCloneVoiceListLoadedRef.current === loadKey && !loadingAiCloneVoiceList && aiCloneVoiceList.length > 0) {
+        cloneList = aiCloneVoiceList;
+      } else if (!loadingAiCloneVoiceList) {
+        setLoadingAiCloneVoiceList(true);
+        try {
+          const cloneListResult = await lightX2VGetCloneVoiceList(config.url, config.token);
+          const normalized = Array.isArray(cloneListResult) ? cloneListResult : [];
+          setAiCloneVoiceList(normalized);
+          aiCloneVoiceListLoadedRef.current = loadKey;
+          cloneList = normalized;
+        } catch (error: any) {
+          console.error('[LightX2V] Failed to load clone voice list for AI chat:', error);
+          setAiCloneVoiceList([]);
+          aiCloneVoiceListLoadedRef.current = '';
+          return '';
+        } finally {
+          setLoadingAiCloneVoiceList(false);
+        }
+      } else {
+        return '';
+      }
+    }
+
+    if (!Array.isArray(cloneList) || cloneList.length === 0) {
+      return `\n\n**音色克隆提示：**\n- 当前没有可用的克隆音色列表\n- 如果用户需要使用克隆音色，先创建克隆音色（通过音色克隆节点生成）后再选择`;
+    }
+
+    const topClones = cloneList.slice(0, 10).map((voice: any, index: number) => {
+      const speakerId = voice.speaker_id || voice.id || '';
+      const voiceName = voice.name || voice.voice_name || speakerId;
+      return `${index + 1}. ${voiceName} (speaker_id: "${speakerId}")`;
+    }).join('\n');
+
+    return `\n\n可用克隆音色列表（前10个，用于克隆音色节点选择）：\n${topClones}\n\n**音色克隆节点选择规则：**\n- 在data中设置speakerId字段，例如: {"data": {"speakerId": "your_speaker_id"}}\n- speakerId必须是上面列表中列出的speaker_id值，不能使用不存在的ID`;
+  }, [aiCloneVoiceList, loadingAiCloneVoiceList, getLightX2VConfig]);
 
   // 生成工具描述
   const generateToolsDescription = useCallback(() => {
@@ -215,11 +325,13 @@ Input 类型的节点（text-input, image-input, audio-input, video-input）**�
   }, [lang]);
 
   // 构建AI Prompt
-  const buildAIPrompt = useCallback((userInput: string) => {
+  const buildAIPrompt = useCallback(async (userInput: string) => {
     if (!workflow) return '';
 
     const toolsDesc = generateToolsDescription();
-    const voicesInfo = getTopVoicesInfo();
+    const voicesInfo = await getTopVoicesInfo();
+    const cloneVoicesInfo = await getTopCloneVoicesInfo();
+    console.log('voicesInfo', voicesInfo);
     const nodesInfo = workflow.nodes.map(n => ({
       id: n.id,
       toolId: n.toolId,
@@ -236,7 +348,7 @@ Input 类型的节点（text-input, image-input, audio-input, video-input）**�
 当前工作流状态：
 - 节点列表：${JSON.stringify(nodesInfo)}
 - 连接列表：${JSON.stringify(connectionsInfo)}
-${toolsDesc}${voicesInfo}
+${toolsDesc}${voicesInfo}${cloneVoicesInfo}
 
 用户输入：${userInput}
 
@@ -459,7 +571,7 @@ ${toolsDesc}${voicesInfo}
 **在add_node时可以使用tempId，然后在add_connection时使用这个tempId来引用节点**
 
 输出ONLY JSON，不要其他文本。`;
-  }, [workflow, generateToolsDescription]);
+  }, [workflow, generateToolsDescription, getTopVoicesInfo, getTopCloneVoicesInfo]);
 
   // 执行添加节点操作
   const executeAddNode = useCallback(async (
@@ -1225,16 +1337,27 @@ ${toolsDesc}${voicesInfo}
   }, [executeOperation]);
 
   // 处理用户输入
-  const handleUserInput = useCallback(async (userInput: string) => {
-    if (!workflow || !userInput.trim() || isProcessing) return;
+  const handleUserInput = useCallback(async (userInput: string, options: AIChatSendOptions = {}) => {
+    const trimmedInput = userInput.trim();
+    const hasImage = !!options.image;
+    if (!workflow || isProcessing || (!trimmedInput && !hasImage)) return;
 
     setIsProcessing(true);
+    const useSearch = options.useSearch ?? false;
+    const imageDataUrl = options.image
+      ? `data:${options.image.mimeType};base64,${options.image.data}`
+      : undefined;
+    const effectiveInput = trimmedInput || (hasImage
+      ? (lang === 'zh' ? '用户提供了一张参考图片。' : 'User provided a reference image.')
+      : '');
 
     // 添加用户消息到历史记录
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: userInput,
+      content: trimmedInput,
+      image: options.image,
+      useSearch,
       timestamp: Date.now()
     };
 
@@ -1246,7 +1369,7 @@ ${toolsDesc}${voicesInfo}
 
     try {
       // 构建AI Prompt
-      const systemPrompt = buildAIPrompt(userInput);
+      const systemPrompt = await buildAIPrompt(effectiveInput);
 
       // 构建消息历史（只保留最近的对话，避免token过多）
       // currentHistory 已经包含了刚添加的 userMessage，我们需要排除它，因为最后会单独添加
@@ -1266,13 +1389,16 @@ ${toolsDesc}${voicesInfo}
           role: 'system' as const,
           content: systemPrompt
         },
-        ...recentHistory.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
+        ...recentHistory.map(msg => {
+          const historyText = msg.content || (msg.image ? (lang === 'zh' ? '用户提供了一张参考图片。' : 'User provided a reference image.') : '');
+          return {
+            role: msg.role,
+            content: historyText
+          };
+        }).filter(msg => msg.content),
         {
           role: 'user' as const,
-          content: userInput
+          content: effectiveInput
         }
       ];
 
@@ -1295,6 +1421,7 @@ ${toolsDesc}${voicesInfo}
         content: '',
         thinking: '',
         isStreaming: true,
+        useSearch,
         timestamp: Date.now()
       };
       addMessageToHistory(assistantMessage);
@@ -1304,8 +1431,78 @@ ${toolsDesc}${voicesInfo}
       let contentText = '';
       let aiResponse = '';
 
+      const extractSources = (raw: any): ChatSource[] => {
+        const results: ChatSource[] = [];
+        const seen = new Set<string>();
+        if (!raw || !Array.isArray(raw.output)) return results;
+        raw.output.forEach((item: any) => {
+          if (item?.type !== 'message' || !Array.isArray(item.content)) return;
+          item.content.forEach((part: any) => {
+            const annotations = Array.isArray(part?.annotations) ? part.annotations : [];
+            annotations.forEach((ann: any) => {
+              if (ann?.type !== 'url_citation') return;
+              const url = ann.url || ann.uri;
+              if (!url || seen.has(url)) return;
+              seen.add(url);
+              results.push({
+                url,
+                title: ann.title,
+                siteName: ann.site_name
+              });
+            });
+          });
+        });
+        return results;
+      };
+
       try {
-        if (isDeepSeekModel) {
+      if (isDeepSeekModel) {
+        if (useSearch) {
+          const systemMessage = messages.find(m => m.role === 'system');
+          const conversationMessages = messages.filter(m => m.role !== 'system');
+          let fullPrompt = '';
+          if (systemMessage) {
+            fullPrompt += systemMessage.content + '\n\n';
+          }
+          const conversationText = conversationMessages.map(msg => {
+            if (msg.role === 'user') {
+              return `User: ${msg.content}`;
+            } else {
+              return `Assistant: ${msg.content}`;
+            }
+          }).join('\n\n');
+          fullPrompt += conversationText;
+          fullPrompt += '\n\n请以 JSON 格式返回，包含 "operations" 数组和 "explanation" 字段。';
+
+          const response = await deepseekText(
+            fullPrompt,
+            'basic',
+            undefined,
+            aiModel,
+            [{ id: 'operations', description: 'Array of operations' }, { id: 'explanation', description: 'Explanation of operations' }],
+            true,
+            true
+          );
+
+          let responseData: any = response;
+          let rawResponse: any = null;
+          if (response && typeof response === 'object' && 'raw_response' in response) {
+            rawResponse = (response as any).raw_response;
+            responseData = (response as any).data;
+          }
+
+          if (typeof responseData === 'string') {
+            aiResponse = responseData;
+          } else if (responseData && typeof responseData === 'object') {
+            aiResponse = JSON.stringify(responseData);
+          } else {
+            throw new Error('Unexpected response format from deepseekText');
+          }
+          if (rawResponse) {
+            assistantMessage.sources = extractSources(rawResponse);
+          }
+          assistantMessage.content = aiResponse;
+        } else {
           // DeepSeek 模型使用流式 API
           for await (const chunk of deepseekChatStream(messages, aiModel, 'json_object')) {
             if (chunk.type === 'thinking') {
@@ -1341,6 +1538,7 @@ ${toolsDesc}${voicesInfo}
               });
             }
           }
+        }
         } else if (isGeminiModel) {
           // Gemini 模型使用流式 API
           const geminiModelId = aiModel.replace('ppchat-', '');
@@ -1388,7 +1586,7 @@ ${toolsDesc}${voicesInfo}
               undefined,
               geminiModelId,
               [{ id: 'operations', description: 'Array of operations' }, { id: 'explanation', description: 'Explanation of operations' }],
-              undefined
+              imageDataUrl
             );
 
             if (typeof response === 'string') {
@@ -1424,16 +1622,27 @@ ${toolsDesc}${voicesInfo}
             undefined,
             aiModel,
             [{ id: 'operations', description: 'Array of operations' }, { id: 'explanation', description: 'Explanation of operations' }],
-            undefined,
-            false
+            imageDataUrl,
+            useSearch,
+            true
           );
 
-          if (typeof response === 'string') {
-            aiResponse = response;
-          } else if (response && typeof response === 'object') {
-            aiResponse = JSON.stringify(response);
+          let responseData: any = response;
+          let rawResponse: any = null;
+          if (response && typeof response === 'object' && 'raw_response' in response) {
+            rawResponse = (response as any).raw_response;
+            responseData = (response as any).data;
+          }
+
+          if (typeof responseData === 'string') {
+            aiResponse = responseData;
+          } else if (responseData && typeof responseData === 'object') {
+            aiResponse = JSON.stringify(responseData);
           } else {
             throw new Error('Unexpected response format from doubaoText');
+          }
+          if (rawResponse) {
+            assistantMessage.sources = extractSources(rawResponse);
           }
           assistantMessage.content = aiResponse;
         } else {

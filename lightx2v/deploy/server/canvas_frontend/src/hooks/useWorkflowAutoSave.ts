@@ -72,6 +72,7 @@ export const useWorkflowAutoSave = ({
             method: 'POST',
             body: JSON.stringify({
               workflow_id: workflow.id, // 显式传递 workflow_id 用于验证
+              name: workflow.name,
               nodes: workflow.nodes, // 包含执行状态
               connections: workflow.connections,
               global_inputs: workflow.globalInputs
@@ -103,7 +104,7 @@ export const useWorkflowAutoSave = ({
         autoSaveTimerRef.current = null;
       }
     };
-  }, [workflow?.isDirty, workflow?.id, workflow?.nodes, workflow?.connections, workflow?.globalInputs, onSave]);
+  }, [workflow?.isDirty, workflow?.id, workflow?.name, workflow?.nodes, workflow?.connections, workflow?.globalInputs, onSave]);
 
   return {
     resetAutoSaveTimer

@@ -11,7 +11,6 @@ import {
   Upload,
   Volume2,
   Video as VideoIcon,
-  Edit3,
   Maximize2,
   Play,
   ChevronDown,
@@ -26,6 +25,10 @@ import { formatTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath } from '../../utils/assetPath';
 import { uploadNodeInputFile } from '../../utils/workflowFileManager';
+import { TextNodePreview } from '../previews/TextNodePreview';
+import { ImageNodePreview } from '../previews/ImageNodePreview';
+import { AudioNodePreview } from '../previews/AudioNodePreview';
+import { VideoNodePreview } from '../previews/VideoNodePreview';
 
 interface NodeProps {
   node: WorkflowNode;
@@ -59,6 +62,7 @@ interface NodeProps {
   onSetVoiceSelect: (nodeId: string | null) => void;
   onSetExpandedOutput: (value: { nodeId: string; fieldId?: string } | null) => void;
   onSetShowAudioEditor: (nodeId: string | null) => void;
+  onSetShowVideoEditor: (nodeId: string | null) => void;
   onSetConnecting: (value: {
     nodeId: string;
     portId: string;
@@ -121,6 +125,7 @@ export const Node: React.FC<NodeProps> = ({
   onSetVoiceSelect,
   onSetExpandedOutput,
   onSetShowAudioEditor,
+  onSetShowVideoEditor,
   onSetConnecting,
   onAddConnection,
   onClearSelectedRunId,
@@ -134,6 +139,9 @@ export const Node: React.FC<NodeProps> = ({
   const { t } = useTranslation(lang);
   const nodeRef = useRef<HTMLDivElement>(null);
   const lastHeightRef = useRef<number>(0);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const tool = TOOLS.find((t) => t.id === node.toolId);
   if (!tool) return null;
@@ -158,6 +166,31 @@ export const Node: React.FC<NodeProps> = ({
     ? nodeResultRaw.data  // Extract text from { type: 'text', data: '...' }
     : nodeResultRaw;  // Use as-is for strings, arrays, or other types
   const firstOutputType = outputs[0]?.type || DataType.TEXT;
+  const resolveMediaSrc = (value?: string) => {
+    if (!value) return '';
+    if (value.startsWith('data:') || value.startsWith('http') || value.startsWith('/api/')) return value;
+    return getAssetPath(value);
+  };
+
+  const rawImageValues = Array.isArray(node.data.value) ? node.data.value : [];
+  const imageEdits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
+  const imageEntries = rawImageValues.map((value: string, index: number) => {
+    const display = resolveMediaSrc(value);
+    const existing = imageEdits[index];
+    if (existing && existing.source === value) {
+      return {
+        ...existing,
+        original: display,
+        cropped: existing.cropped || display
+      };
+    }
+    return {
+      source: value,
+      original: display,
+      cropped: display,
+      cropBox: { x: 10, y: 10, w: 80, h: 80 }
+    };
+  });
 
   const durationText =
     node.status === NodeStatus.RUNNING
@@ -168,7 +201,7 @@ export const Node: React.FC<NodeProps> = ({
   const hasData =
     (isInputNode && node.data.value && (Array.isArray(node.data.value) ? node.data.value.length > 0 : true)) ||
     (!isInputNode && sourceOutputs[node.id]);
-  const shouldShowPreview = hasData && node.toolId !== 'text-input';
+  const shouldShowPreview = hasData && !isInputNode && node.toolId !== 'text-input';
 
   const handleNodeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -196,6 +229,7 @@ export const Node: React.FC<NodeProps> = ({
     e.stopPropagation();
 
     if (direction === 'out') {
+      const nodeWidth = isInputNode ? 320 : 224;
       // For output ports, calculate position from node bottom (same as Connection component)
       const outputPortIndex = outputs.findIndex((p) => p.id === port.id);
       const nodeBottomY = node.y + nodeHeight;
@@ -251,13 +285,128 @@ export const Node: React.FC<NodeProps> = ({
   };
 
   const [isUploading, setIsUploading] = React.useState(false);
+  const outputPortId = outputs[0]?.id;
+  const isWorkflowReady = (id?: string) => {
+    if (!id) return false;
+    return id.startsWith('workflow-') ||
+      id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  };
+
+  const dataUrlToFile = (dataUrl: string, namePrefix: string) => {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+    const extMap: Record<string, string> = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/jpg': '.jpg',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'audio/wav': '.wav',
+      'audio/mpeg': '.mp3',
+      'audio/ogg': '.ogg',
+      'video/webm': '.webm',
+      'video/mp4': '.mp4'
+    };
+    const ext = extMap[mimeType] || '.bin';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], `${namePrefix}-${Date.now()}${ext}`, { type: mimeType });
+  };
+
+  const persistDataUrl = async (dataUrl: string, namePrefix: string) => {
+    if (!outputPortId || !isWorkflowReady(workflow.id)) return dataUrl;
+    try {
+      const file = dataUrlToFile(dataUrl, namePrefix);
+      const result = await uploadNodeInputFile(workflow.id!, node.id, outputPortId, file);
+      return result?.file_url || dataUrl;
+    } catch (err) {
+      console.error('[Node] Failed to persist data URL:', err);
+      return dataUrl;
+    }
+  };
+
+  React.useEffect(() => {
+    if (node.toolId !== 'image-input') return;
+    const values = Array.isArray(node.data.value) ? node.data.value : [];
+    const edits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
+    const needsSync = values.length !== edits.length || edits.some((entry: any, idx: number) => entry?.source !== values[idx]);
+    if (!needsSync) return;
+    const nextEdits = values.map((value: string, index: number) => {
+      const display = resolveMediaSrc(value);
+      const existing = edits[index];
+      if (existing && existing.source === value) {
+        return {
+          ...existing,
+          original: display,
+          cropped: existing.cropped || display
+        };
+      }
+      return {
+        source: value,
+        original: display,
+        cropped: display,
+        cropBox: { x: 10, y: 10, w: 80, h: 80 }
+      };
+    });
+    onUpdateNodeData(node.id, 'imageEdits', nextEdits);
+  }, [node.id, node.toolId, node.data.value, node.data.imageEdits]);
+
+  React.useEffect(() => {
+    if (!isWorkflowReady(workflow.id)) return;
+    if (node.toolId === 'audio-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
+      persistDataUrl(node.data.value, 'audio-input').then((url) => {
+        if (url !== node.data.value) {
+          onUpdateNodeData(node.id, 'value', url);
+        }
+      });
+    }
+    if (node.toolId === 'image-input' && Array.isArray(node.data.value) && node.data.value.some((v: string) => v.startsWith('data:'))) {
+      const values = node.data.value as string[];
+      const edits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
+      const persist = async () => {
+        const updatedValues = await Promise.all(values.map((val, idx) => {
+          if (val.startsWith('data:')) {
+            return persistDataUrl(val, `image-input-${idx}`);
+          }
+          return val;
+        }));
+        if (updatedValues.some((val, idx) => val !== values[idx])) {
+          const updatedEdits = updatedValues.map((val, idx) => {
+            const display = resolveMediaSrc(val);
+            const existing = edits[idx];
+            return {
+              ...(existing || { cropBox: { x: 10, y: 10, w: 80, h: 80 } }),
+              source: val,
+              original: existing?.original || display,
+              cropped: val
+            };
+          });
+          onUpdateNodeData(node.id, 'imageEdits', updatedEdits);
+          onUpdateNodeData(node.id, 'value', updatedValues);
+        }
+      };
+      persist();
+    }
+    if (node.toolId === 'video-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
+      persistDataUrl(node.data.value, 'video-input').then((url) => {
+        if (url !== node.data.value) {
+          onUpdateNodeData(node.id, 'value', url);
+        }
+      });
+    }
+  }, [workflow.id, node.id, node.toolId, node.data.value]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, isMultiple: boolean = false) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
     // 需要 workflow.id 才能上传
-    if (!workflow.id || (!workflow.id.startsWith('workflow-') && !workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+    if (!isWorkflowReady(workflow.id)) {
       console.error('[Node] Cannot upload file: workflow ID is not available');
       return;
     }
@@ -299,8 +448,16 @@ export const Node: React.FC<NodeProps> = ({
         // 更新 node.data.value，始终使用数组格式
         const currentValue = node.data.value || [];
         const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
-        const newValue = isMultiple ? [...existingUrls, ...validUrls] : validUrls;
+        const newValue = isMultiple ? [...existingUrls, ...validUrls] : validUrls[0];
         onUpdateNodeData(node.id, 'value', newValue);
+        if (node.toolId === 'audio-input' && newValue) {
+          onUpdateNodeData(node.id, 'audioOriginal', newValue);
+          onUpdateNodeData(node.id, 'audioRange', { start: 0, end: 100 });
+        }
+        if (node.toolId === 'video-input') {
+          onUpdateNodeData(node.id, 'trimStart', 0);
+          onUpdateNodeData(node.id, 'trimEnd', undefined);
+        }
       }
     } catch (err) {
       console.error('[Node] Error uploading files:', err);
@@ -312,8 +469,13 @@ export const Node: React.FC<NodeProps> = ({
   return (
     <div
       ref={nodeRef}
-      className={`node-element absolute w-56 bg-slate-900 border rounded-3xl shadow-2xl transition-all z-10 group ${
-        isSelected ? 'border-[#90dce1] ring-8 ring-#90dce1/10' : 'border-slate-800'
+      className={`node-element absolute bg-slate-900 border transition-all z-10 group ${
+        isInputNode
+          ? 'w-80 rounded-[2.5rem] shadow-2xl'
+          : 'w-56 rounded-3xl shadow-2xl'
+      } ${isSelected
+        ? 'border-[#90dce1] ring-8 ring-#90dce1/10 shadow-[0_0_40px_-10px_rgba(144,220,225,0.35)]'
+        : 'border-slate-800/80 hover:border-[#90dce1]/60 hover:shadow-[0_0_30px_-10px_rgba(144,220,225,0.2)]'
       }`}
       style={{ left: node.x, top: node.y }}
       onClick={handleNodeClick}
@@ -393,6 +555,23 @@ export const Node: React.FC<NodeProps> = ({
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {(node.toolId === 'audio-input' || node.toolId === 'video-input') && (
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (node.toolId === 'audio-input') {
+                  onSetShowAudioEditor(node.id);
+                } else {
+                  onSetShowVideoEditor(node.id);
+                }
+              }}
+              className="p-1.5 rounded-lg bg-slate-900/70 border border-slate-800 text-slate-400 hover:text-[#90dce1] hover:border-[#90dce1]/60 transition-all"
+              title={lang === 'zh' ? '放大编辑' : 'Expand'}
+            >
+              <Maximize2 size={12} />
+            </button>
+          )}
           {(node.status === NodeStatus.RUNNING || node.executionTime !== undefined) && (
             <span
               className={`text-[8px] font-bold ${
@@ -439,135 +618,209 @@ export const Node: React.FC<NodeProps> = ({
         {isInputNode && (
           <div onMouseDown={(e) => e.stopPropagation()} className="space-y-3">
             {node.toolId === 'text-input' && (
-              <textarea
+              <TextNodePreview
                 value={node.data.value || ''}
-                onChange={(e) => onUpdateNodeData(node.id, 'value', e.target.value)}
-                className="w-full h-24 bg-slate-950/50 border border-slate-800 rounded-xl p-2 text-[10px] resize-none focus:ring-1 focus:ring-#90dce1 transition-all text-slate-300 custom-scrollbar"
-                placeholder="Type here..."
+                onChange={(value) => onUpdateNodeData(node.id, 'value', value)}
               />
             )}
             {node.toolId === 'image-input' && (
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {/* Use activeOutputs if available (loaded from URL as data URL), otherwise use node.data.value */}
-                  {((activeOutputs[node.id] || node.data.value) || []).map((img: string, i: number) => {
-                    // activeOutputs should contain data URLs (loaded via getWorkflowFileByFileId)
-                    // node.data.value may contain file paths (like /api/v1/workflow/...)
-                    // If it's a file path, we should have already loaded it to activeOutputs
-                    // But if not, we need to handle it
-                    const imgSrc = img.startsWith('/api/v1/workflow/')
-                      ? img  // This shouldn't happen if loading worked correctly, but handle it
-                      : getAssetPath(img);
-                    return (
-                      <div key={i} className="relative w-8 h-8 group/img">
-                        <img
-                          src={imgSrc}
-                          className="w-full h-full object-cover rounded border border-slate-700"
-                          alt={`Image ${i + 1}`}
-                          onError={(e) => {
-                            // If image fails to load and it's a workflow file path, try loading it
-                            const target = e.target as HTMLImageElement;
-                            if (img.startsWith('/api/v1/workflow/')) {
-                              // Extract file_id and load via API
-                              const match = img.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
-                              if (match) {
-                                const [, workflowId, fileId] = match;
-                                // Import getWorkflowFileByFileId dynamically
-                                import('../../utils/workflowFileManager').then(({ getWorkflowFileByFileId }) => {
-                                  getWorkflowFileByFileId(workflowId, fileId).then(dataUrl => {
-                                    if (dataUrl) {
-                                      target.src = dataUrl;
-                                    }
-                                  });
-                                });
-                              }
-                            }
-                          }}
-                        />
-                        <button
-                          onClick={() => {
-                            const currentValue = activeOutputs[node.id] || node.data.value || [];
-                            const next = Array.isArray(currentValue)
-                              ? currentValue.filter((_: any, idx: number) => idx !== i)
-                              : [];
-                            onUpdateNodeData(node.id, 'value', next);
-                          }}
-                          className="absolute -top-1 -right-1 p-0.5 bg-red-500 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity"
-                        >
-                          <X size={6} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  <label className="w-8 h-8 flex items-center justify-center border border-dashed border-slate-700 rounded cursor-pointer hover:border-[#90dce1] transition-colors">
-                    <Plus size={10} className="text-slate-500" />
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, true)}
-                    />
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, true)}
+                />
+                {imageEntries.length === 0 ? (
+                  <label
+                    onClick={() => imageInputRef.current?.click()}
+                    className="flex flex-col items-center justify-center w-full py-10 border-2 border-dashed border-slate-800 rounded-[2rem] cursor-pointer hover:bg-slate-800/40 hover:border-[#90dce1]/40 transition-all group"
+                  >
+                    <div className="p-3 rounded-2xl bg-slate-900 group-hover:bg-[#90dce1]/10 transition-colors mb-3">
+                      <Upload size={24} className="text-slate-600 group-hover:text-[#90dce1] transition-colors" />
+                    </div>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-200">
+                      {lang === 'zh' ? '点击上传图片' : 'Upload Images'}
+                    </span>
                   </label>
-                </div>
+                ) : (
+                  <div className="relative group/content-container">
+                    <button
+                      onClick={() => {
+                        onUpdateNodeData(node.id, 'value', []);
+                        onUpdateNodeData(node.id, 'imageEdits', []);
+                      }}
+                      className="absolute -top-3 -right-3 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-2xl z-20 opacity-0 group-hover/content-container:opacity-100 transition-all scale-90 group-hover/content-container:scale-100 active:scale-90"
+                    >
+                      <X size={12} />
+                    </button>
+                    <ImageNodePreview
+                      images={imageEntries}
+                      onAddMore={() => imageInputRef.current?.click()}
+                      onUpdate={(nextImages) => {
+                        onUpdateNodeData(node.id, 'imageEdits', nextImages);
+                        const nextValues = nextImages.map((entry: any) =>
+                          entry.cropped && entry.cropped !== entry.original ? entry.cropped : entry.source
+                        );
+                        onUpdateNodeData(node.id, 'value', nextValues);
+                        if (isWorkflowReady(workflow.id) && outputPortId) {
+                          const persist = async () => {
+                            const updatedImages = await Promise.all(nextImages.map(async (entry: any, idx: number) => {
+                              if (typeof entry.cropped === 'string' && entry.cropped.startsWith('data:')) {
+                                const url = await persistDataUrl(entry.cropped, `image-input-${idx}`);
+                                return {
+                                  ...entry,
+                                  source: url,
+                                  cropped: url
+                                };
+                              }
+                              return entry;
+                            }));
+                            const updatedValues = updatedImages.map((entry: any) => entry.cropped || entry.source);
+                            onUpdateNodeData(node.id, 'imageEdits', updatedImages);
+                            onUpdateNodeData(node.id, 'value', updatedValues);
+                          };
+                          persist();
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             )}
             {(node.toolId === 'audio-input' || node.toolId === 'video-input') && (
               <div className="space-y-2">
-                {node.data.value ? (
-                  <div className="flex items-center justify-between p-2 bg-slate-950/50 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      {node.toolId === 'audio-input' ? (
-                        <Volume2 size={12} className="text-[#90dce1] shrink-0" />
-                      ) : (
-                        <VideoIcon size={12} className="text-[#90dce1] shrink-0" />
-                      )}
-                      <span className="text-[8px] text-slate-400 truncate">Media File</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {node.toolId === 'audio-input' && (
-                        <button
-                          onClick={() => onSetShowAudioEditor(node.id)}
-                          className="p-1 text-slate-600 hover:text-[#90dce1] transition-colors"
-                          title={lang === 'zh' ? '编辑音频' : 'Edit Audio'}
+                {(() => {
+                  const mediaValue = Array.isArray(node.data.value) ? node.data.value[0] : node.data.value;
+                  const hasMedia = !!mediaValue;
+                  if (!hasMedia) {
+                    return (
+                      <>
+                        <input
+                          ref={node.toolId === 'audio-input' ? audioInputRef : videoInputRef}
+                          type="file"
+                          accept={node.toolId === 'audio-input' ? 'audio/*' : 'video/*'}
+                          className="hidden"
+                          disabled={isUploading}
+                          onChange={(e) => handleFileUpload(e, false)}
+                        />
+                        <label
+                          onClick={() => (node.toolId === 'audio-input' ? audioInputRef.current : videoInputRef.current)?.click()}
+                          className="flex flex-col items-center justify-center w-full py-10 border-2 border-dashed border-slate-800 rounded-[2rem] cursor-pointer hover:bg-slate-800/40 hover:border-[#90dce1]/40 transition-all group"
                         >
-                          <Edit3 size={10} />
-                        </button>
-                      )}
+                          {isUploading ? (
+                            <>
+                              <RefreshCw size={24} className="text-[#90dce1] animate-spin mb-3" />
+                              <span className="text-[10px] font-black text-[#90dce1] uppercase tracking-widest">
+                                {lang === 'zh' ? '上传中...' : 'Uploading...'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <div className="p-3 rounded-2xl bg-slate-900 group-hover:bg-[#90dce1]/10 transition-colors mb-3">
+                                <Upload size={24} className="text-slate-600 group-hover:text-[#90dce1] transition-colors" />
+                              </div>
+                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-200">
+                                {lang === 'zh'
+                                  ? `点击上传${node.toolId === 'audio-input' ? '音频' : '视频'}`
+                                  : `Upload ${node.toolId === 'audio-input' ? 'Audio' : 'Video'}`}
+                              </span>
+                            </>
+                          )}
+                        </label>
+                      </>
+                    );
+                  }
+
+                  return (
+                    <div className="relative group/content-container">
                       <button
-                        onClick={() => onUpdateNodeData(node.id, 'value', null)}
-                        className="p-1 text-slate-600 hover:text-red-400"
+                        onClick={() => {
+                          onUpdateNodeData(node.id, 'value', null);
+                          if (node.toolId === 'audio-input') {
+                            onUpdateNodeData(node.id, 'audioOriginal', null);
+                            onUpdateNodeData(node.id, 'audioRange', null);
+                          }
+                          if (node.toolId === 'video-input') {
+                            onUpdateNodeData(node.id, 'trimStart', null);
+                            onUpdateNodeData(node.id, 'trimEnd', null);
+                          }
+                        }}
+                        className="absolute -top-3 -right-3 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-2xl z-20 opacity-0 group-hover/content-container:opacity-100 transition-all scale-90 group-hover/content-container:scale-100 active:scale-90"
                       >
-                        <X size={10} />
+                        <X size={12} />
                       </button>
+                      {node.toolId === 'audio-input' ? (
+                        <>
+                        <AudioNodePreview
+                          audioData={{
+                            original: node.data.audioOriginal || resolveMediaSrc(mediaValue),
+                            trimmed: mediaValue,
+                            range: node.data.audioRange || { start: 0, end: 100 }
+                          }}
+                          onUpdate={(trimmed, range) => {
+                            if (!node.data.audioOriginal) {
+                              onUpdateNodeData(node.id, 'audioOriginal', mediaValue);
+                            }
+                            onUpdateNodeData(node.id, 'audioRange', range);
+                            onUpdateNodeData(node.id, 'value', trimmed);
+                            if (typeof trimmed === 'string' && trimmed.startsWith('data:') && isWorkflowReady(workflow.id)) {
+                              persistDataUrl(trimmed, 'audio-input-trim').then((url) => {
+                                if (url !== trimmed) {
+                                  onUpdateNodeData(node.id, 'value', url);
+                                }
+                              });
+                            }
+                            if (typeof node.data.audioOriginal === 'string' && node.data.audioOriginal.startsWith('data:') && isWorkflowReady(workflow.id)) {
+                              persistDataUrl(node.data.audioOriginal, 'audio-input-original').then((url) => {
+                                if (url !== node.data.audioOriginal) {
+                                  onUpdateNodeData(node.id, 'audioOriginal', url);
+                                }
+                              });
+                            }
+                          }}
+                        />
+                        </>
+                      ) : (
+                        <VideoNodePreview
+                          videoUrl={resolveMediaSrc(node.data.videoOriginal || mediaValue)}
+                          initialStart={node.data.trimStart}
+                          initialEnd={node.data.trimEnd}
+                          onRangeChange={(start, end) => {
+                            onUpdateNodeData(node.id, 'trimStart', start);
+                            onUpdateNodeData(node.id, 'trimEnd', end);
+                          }}
+                          onUpdate={(start, end, trimmedUrl) => {
+                            onUpdateNodeData(node.id, 'trimStart', start);
+                            onUpdateNodeData(node.id, 'trimEnd', end);
+                            if (!node.data.videoOriginal) {
+                              onUpdateNodeData(node.id, 'videoOriginal', mediaValue);
+                            }
+                            if (trimmedUrl) {
+                              onUpdateNodeData(node.id, 'value', trimmedUrl);
+                              if (trimmedUrl.startsWith('data:') && isWorkflowReady(workflow.id)) {
+                                persistDataUrl(trimmedUrl, 'video-input-trim').then((url) => {
+                                  if (url !== trimmedUrl) {
+                                    onUpdateNodeData(node.id, 'value', url);
+                                  }
+                                });
+                              }
+                            }
+                            if (typeof node.data.videoOriginal === 'string' && node.data.videoOriginal.startsWith('data:') && isWorkflowReady(workflow.id)) {
+                              persistDataUrl(node.data.videoOriginal, 'video-input-original').then((url) => {
+                                if (url !== node.data.videoOriginal) {
+                                  onUpdateNodeData(node.id, 'videoOriginal', url);
+                                }
+                              });
+                            }
+                          }}
+                        />
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <label className="flex items-center justify-center gap-2 w-full py-3 border border-dashed border-slate-700 rounded-xl cursor-pointer hover:border-[#90dce1] hover:bg-[#90dce1]/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                    {isUploading ? (
-                      <>
-                        <RefreshCw size={12} className="text-[#90dce1] animate-spin" />
-                        <span className="text-[9px] font-black text-[#90dce1] uppercase">
-                          {lang === 'zh' ? '上传中...' : 'Uploading...'}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={12} className="text-slate-500" />
-                        <span className="text-[9px] font-black text-slate-500 uppercase">
-                          {lang === 'zh' ? '上传' : 'Upload'}
-                        </span>
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept={node.toolId === 'audio-input' ? 'audio/*' : 'video/*'}
-                      className="hidden"
-                      disabled={isUploading}
-                      onChange={(e) => handleFileUpload(e, false)}
-                    />
-                  </label>
-                )}
+                  );
+                })()}
               </div>
             )}
           </div>

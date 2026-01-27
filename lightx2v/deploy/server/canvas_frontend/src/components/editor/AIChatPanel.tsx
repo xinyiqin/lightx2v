@@ -13,7 +13,7 @@ interface AIChatPanelProps {
   onClose: () => void;
   chatHistory: ChatMessageType[];
   isProcessing: boolean;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onUndo?: (messageId: string) => void;
   onRetry?: (messageId: string) => void;
   lang: Language;

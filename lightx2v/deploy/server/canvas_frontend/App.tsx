@@ -23,9 +23,9 @@ import { PRESET_WORKFLOWS } from './preset_workflow';
 import { Editor } from './src/components/editor/Editor';
 import { Dashboard } from './src/components/dashboard/Dashboard';
 import { ExpandedOutputModal } from './src/components/modals/ExpandedOutputModal';
-import { AIGenerateModal } from './src/components/modals/AIGenerateModal';
 import { CloneVoiceModal } from './src/components/modals/CloneVoiceModal';
 import { AudioEditorModal } from './src/components/modals/AudioEditorModal';
+import { VideoEditorModal } from './src/components/modals/VideoEditorModal';
 import { useWorkflow } from './src/hooks/useWorkflow';
 import { useCanvas } from './src/hooks/useCanvas';
 import { useVoiceList } from './src/hooks/useVoiceList';
@@ -34,7 +34,6 @@ import { useNodeManagement } from './src/hooks/useNodeManagement';
 import { useConnectionManagement } from './src/hooks/useConnectionManagement';
 import { useModalState } from './src/hooks/useModalState';
 import { useResultManagement } from './src/hooks/useResultManagement';
-import { useAIGenerateWorkflow } from './src/hooks/useAIGenerateWorkflow';
 import { useWorkflowExecution } from './src/hooks/useWorkflowExecution';
 import { useUndoRedo } from './src/hooks/useUndoRedo';
 import { useAIChatWorkflow } from './src/hooks/useAIChatWorkflow';
@@ -50,7 +49,9 @@ const App: React.FC = () => {
     return (saved as any) || 'zh';
   });
   const [currentView, setCurrentView] = useState<'DASHBOARD' | 'EDITOR'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'MY' | 'PRESET'>('MY');
+  const [activeTab, setActiveTab] = useState<'MY' | 'COMMUNITY' | 'PRESET'>('COMMUNITY');
+  const [communityWorkflows, setCommunityWorkflows] = useState<WorkflowState[]>([]);
+  const nameSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Use useWorkflow Hook
   const {
@@ -63,6 +64,7 @@ const App: React.FC = () => {
     loadWorkflow,
     loadWorkflows,
     deleteWorkflow: deleteWorkflowFromHook,
+    updateWorkflowVisibility,
     isLoading: isLoadingWorkflows,
     isSaving: isSavingWorkflow
   } = useWorkflow();
@@ -112,9 +114,9 @@ const App: React.FC = () => {
   const [ticker, setTicker] = useState(0);
   const [validationErrors, setValidationErrors] = useState<{ message: string; type: 'ENV' | 'INPUT' }[]>([]);
   const [globalError, setGlobalError] = useState<{ message: string; details?: string } | null>(null);
-  const [aiWorkflowDescription, setAIWorkflowDescription] = useState('');
-  const [isGeneratingWorkflow, setIsGeneratingWorkflow] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [sidebarDefaultTab, setSidebarDefaultTab] = useState<'tools' | 'chat'>('tools');
+  const [focusAIChatInput, setFocusAIChatInput] = useState(false);
   const isPausedRef = useRef(false);
   const runningTaskIdsRef = useRef<Map<string, string>>(new Map()); // Map<nodeId, taskId> for tracking LightX2V tasks
   const abortControllerRef = useRef<AbortController | null>(null); // AbortController for cancelling tasks
@@ -319,34 +321,6 @@ const App: React.FC = () => {
     lang
   });
 
-  // Use useAIGenerateWorkflow Hook
-  const aiGenerateWorkflow = useAIGenerateWorkflow({
-    workflow,
-    setWorkflow,
-    setCurrentView,
-    getLightX2VConfig,
-    resetView,
-    lang
-  });
-
-  // Wrapper for generateWorkflowWithAI with loading state
-  const generateWorkflowWithAI = useCallback(async (description: string) => {
-    setIsGeneratingWorkflow(true);
-    try {
-      await aiGenerateWorkflow.generateWorkflowWithAI(description);
-      modalState.setShowAIGenerateModal(false);
-      setAIWorkflowDescription('');
-    } catch (error: any) {
-      console.error('[AI Workflow] Generation failed:', error);
-      setGlobalError({
-        message: t('execution_failed'),
-        details: error.message || String(error)
-      });
-    } finally {
-      setIsGeneratingWorkflow(false);
-    }
-  }, [aiGenerateWorkflow, modalState, setAIWorkflowDescription, setGlobalError, t]);
-
   // Use useAIChatWorkflow Hook
   const aiChatWorkflow = useAIChatWorkflow({
     workflow,
@@ -363,6 +337,7 @@ const App: React.FC = () => {
     canvasRef,
     lang,
     lightX2VVoiceList: voiceList.lightX2VVoiceList,
+    getLightX2VConfig,
     getCurrentHistoryIndex: undoRedo.getCurrentHistoryIndex,
     undoToIndex: undoRedo.undoToIndex
   });
@@ -603,6 +578,54 @@ const App: React.FC = () => {
         }
   }, [voiceList.lightX2VVoiceList, workflow]);
 
+  const loadCommunityWorkflows = useCallback(async () => {
+    try {
+      const response = await apiRequest('/api/v1/workflow/public?page=1&page_size=100');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+      const data = await response.json();
+      const workflows: WorkflowState[] = (data.workflows || []).map((wf: any) => ({
+        id: wf.workflow_id,
+        name: wf.name,
+        nodes: wf.nodes || [],
+        connections: wf.connections || [],
+        isDirty: false,
+        isRunning: false,
+        globalInputs: wf.global_inputs || {},
+        env: {
+          lightx2v_url: '',
+          lightx2v_token: ''
+        },
+        history: (wf.history_metadata || []).map((meta: any) => ({
+          id: meta.run_id || `run-${meta.timestamp}`,
+          timestamp: meta.timestamp,
+          totalTime: meta.totalTime,
+          nodesSnapshot: [],
+          outputs: {}
+        })),
+        updatedAt: wf.update_t ? wf.update_t * 1000 : Date.now(),
+        showIntermediateResults: false,
+        visibility: wf.visibility || 'public',
+        thumsupCount: wf.thumsup_count ?? 0,
+        thumsupLiked: wf.thumsup_liked ?? false,
+        authorName: wf.author_name || wf.user_id || 'Anonymous',
+        authorId: wf.user_id
+      }));
+      setCommunityWorkflows(workflows);
+    } catch (error) {
+      console.warn('[Workflow] Failed to load community workflows:', error);
+      setCommunityWorkflows([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'COMMUNITY') {
+      loadCommunityWorkflows();
+    }
+  }, [activeTab, loadCommunityWorkflows]);
+
   // saveWorkflowToLocal and deleteWorkflow are provided by useWorkflow Hook
 
   const deleteWorkflow = useCallback((id: string, e: React.MouseEvent) => {
@@ -610,6 +633,99 @@ const App: React.FC = () => {
     if (!window.confirm(t('confirm_delete'))) return;
     deleteWorkflowFromHook(id);
   }, [t, deleteWorkflowFromHook]);
+
+  const handleEditorVisibilityChange = useCallback(async (isPublic: boolean) => {
+    if (!workflow) return;
+    const visibility = isPublic ? 'public' : 'private';
+    const nextWorkflow = { ...workflow, visibility, isDirty: true };
+    setWorkflow(nextWorkflow);
+
+    const isSavedWorkflow = workflow.id && workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    const isTemporaryId = workflow.id && (workflow.id.startsWith('temp-') || workflow.id.startsWith('flow-'));
+
+    try {
+      if (isSavedWorkflow && !isTemporaryId) {
+        await updateWorkflowVisibility(workflow.id, visibility);
+      }
+
+      const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
+      saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+      setWorkflow(prev => prev ? ({ ...prev, id: savedId || prev.id, isDirty: false, visibility }) : prev);
+      autoSaveHook?.resetAutoSaveTimer();
+    } catch (error: any) {
+      setGlobalError({
+        message: t('execution_failed'),
+        details: error?.message || String(error)
+      });
+    }
+  }, [workflow, updateWorkflowVisibility, saveWorkflowToDatabase, saveWorkflowToLocal, autoSaveHook, setWorkflow, setGlobalError, t]);
+
+  const handleToggleWorkflowVisibility = useCallback(async (workflowId: string, visibility: 'private' | 'public') => {
+    try {
+      await updateWorkflowVisibility(workflowId, visibility);
+
+      if (workflow && workflow.id === workflowId) {
+        const nextWorkflow = { ...workflow, visibility, isDirty: true };
+        const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
+        saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+        setWorkflow(prev => prev ? ({ ...prev, id: savedId || prev.id, isDirty: false, visibility }) : prev);
+        autoSaveHook?.resetAutoSaveTimer();
+      }
+    } catch (error: any) {
+      setGlobalError({
+        message: t('execution_failed'),
+        details: error?.message || String(error)
+      });
+    }
+  }, [updateWorkflowVisibility, workflow, saveWorkflowToDatabase, saveWorkflowToLocal, setWorkflow, autoSaveHook, setGlobalError, t]);
+
+  const handleToggleWorkflowThumsup = useCallback(async (workflowId: string) => {
+    try {
+      const response = await apiRequest(`/api/v1/workflow/${workflowId}/thumsup`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+      const data = await response.json();
+      const nextCount = data.thumsup_count ?? 0;
+      const nextLiked = data.thumsup_liked ?? false;
+
+      setMyWorkflows(prev => prev.map(w => w.id === workflowId ? { ...w, thumsupCount: nextCount, thumsupLiked: nextLiked } : w));
+      setCommunityWorkflows(prev => prev.map(w => w.id === workflowId ? { ...w, thumsupCount: nextCount, thumsupLiked: nextLiked } : w));
+      setWorkflow(prev => prev ? (prev.id === workflowId ? { ...prev, thumsupCount: nextCount, thumsupLiked: nextLiked } : prev) : prev);
+    } catch (error: any) {
+      setGlobalError({
+        message: t('execution_failed'),
+        details: error?.message || String(error)
+      });
+    }
+  }, [setMyWorkflows, setCommunityWorkflows, setWorkflow, setGlobalError, t]);
+
+  const scheduleNameSave = useCallback((nextWorkflow: WorkflowState) => {
+    if (!nextWorkflow?.id) return;
+    const isSavedWorkflow = nextWorkflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    if (!isSavedWorkflow) return;
+
+    if (nameSaveTimerRef.current) {
+      clearTimeout(nameSaveTimerRef.current);
+    }
+
+    nameSaveTimerRef.current = setTimeout(async () => {
+      try {
+        const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
+        saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+        setWorkflow(prev => prev && prev.name === nextWorkflow.name ? { ...prev, id: savedId || prev.id, isDirty: false } : prev);
+        autoSaveHook?.resetAutoSaveTimer();
+      } catch (error: any) {
+        setGlobalError({
+          message: t('execution_failed'),
+          details: error?.message || String(error)
+        });
+      }
+    }, 600);
+  }, [saveWorkflowToDatabase, saveWorkflowToLocal, setWorkflow, autoSaveHook, setGlobalError, t]);
 
   const openWorkflow = useCallback(async (w: WorkflowState) => {
     setSelectedRunId(null);
@@ -739,7 +855,8 @@ const App: React.FC = () => {
         },
         history: [],
         updatedAt: Date.now(),
-        showIntermediateResults: true
+        showIntermediateResults: true,
+        visibility: 'private'
       };
 
       // Create workflow in database (backend will generate workflow_id)
@@ -781,6 +898,22 @@ const App: React.FC = () => {
     }
     // History will be automatically initialized by useUndoRedo when workflow changes
   }, [saveWorkflowToDatabase, loadWorkflow, getLightX2VConfig, t, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
+
+  const handleCreateWorkflow = useCallback(() => {
+    setSidebarDefaultTab('tools');
+    void createNewWorkflow();
+  }, [createNewWorkflow]);
+
+  const handleOpenWorkflow = useCallback((workflowToOpen: WorkflowState) => {
+    setSidebarDefaultTab('tools');
+    void openWorkflow(workflowToOpen);
+  }, [openWorkflow]);
+
+  const handleAIGenerateClick = useCallback(() => {
+    setSidebarDefaultTab('chat');
+    setFocusAIChatInput(true);
+    void createNewWorkflow();
+  }, [createNewWorkflow]);
 
   const selectedNode = useMemo(() => workflow?.nodes.find(n => n.id === selectedNodeId), [workflow, selectedNodeId]);
 
@@ -1139,25 +1272,16 @@ const App: React.FC = () => {
         <Dashboard
           lang={lang}
           myWorkflows={myWorkflows}
+          communityWorkflows={communityWorkflows}
           activeTab={activeTab}
           onToggleLang={toggleLang}
-          onCreateWorkflow={createNewWorkflow}
-          onAIGenerate={() => modalState.setShowAIGenerateModal(true)}
-          onOpenWorkflow={openWorkflow}
+          onCreateWorkflow={handleCreateWorkflow}
+          onAIGenerate={handleAIGenerateClick}
+          onOpenWorkflow={handleOpenWorkflow}
           onDeleteWorkflow={deleteWorkflow}
+          onToggleThumbsup={handleToggleWorkflowThumsup}
+          onToggleWorkflowVisibility={handleToggleWorkflowVisibility}
           onSetActiveTab={setActiveTab}
-        />
-        <AIGenerateModal
-          lang={lang}
-          isOpen={modalState.showAIGenerateModal}
-          description={aiWorkflowDescription}
-          isGenerating={isGeneratingWorkflow}
-          onClose={() => {
-            modalState.setShowAIGenerateModal(false);
-            setAIWorkflowDescription('');
-          }}
-          onDescriptionChange={setAIWorkflowDescription}
-          onGenerate={() => generateWorkflowWithAI(aiWorkflowDescription)}
         />
       </div>
     );
@@ -1216,13 +1340,21 @@ const App: React.FC = () => {
         isRunning={workflow.isRunning}
         isSaving={isSavingWorkflow}
         sidebarCollapsed={modalState.sidebarCollapsed}
+        sidebarDefaultTab={sidebarDefaultTab}
+        focusAIChatInput={focusAIChatInput}
+        onAIChatInputFocused={() => setFocusAIChatInput(false)}
         validationErrors={validationErrors}
         globalError={globalError}
         canvasRef={canvasRef}
         onBack={() => setCurrentView('DASHBOARD')}
         onWorkflowNameChange={(name) => {
           if (selectedRunId) setSelectedRunId(null);
-          setWorkflow(p => p ? ({ ...p, name, isDirty: true }) : null);
+          setWorkflow(p => {
+            if (!p) return null;
+            const next = { ...p, name, isDirty: true };
+            scheduleNameSave(next);
+            return next;
+          });
         }}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
@@ -1262,6 +1394,7 @@ const App: React.FC = () => {
         canRedo={undoRedo.canRedo}
         onUndo={undoRedo.undo}
         onRedo={undoRedo.redo}
+        onVisibilityChange={handleEditorVisibilityChange}
         onAddNode={addNode}
           onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown}
@@ -1270,6 +1403,7 @@ const App: React.FC = () => {
         onWheel={canvasHandleWheel}
         onNodeSelect={setSelectedNodeId}
         onConnectionSelect={setSelectedConnectionId}
+        onDeleteConnection={connectionManagement.deleteConnection}
         onNodeDragStart={handleNodeDragStart}
         onNodeDrag={handleNodeDrag}
         onNodeDragEnd={handleNodeDragEnd}
@@ -1294,6 +1428,7 @@ const App: React.FC = () => {
           onSetVoiceSelect={modalState.setShowVoiceSelect}
           onSetExpandedOutput={modalState.setExpandedOutput}
           onSetShowAudioEditor={modalState.setShowAudioEditor}
+          onSetShowVideoEditor={modalState.setShowVideoEditor}
         onSetConnecting={setConnecting}
         onAddConnection={addConnection}
         onClearSelectedRunId={() => setSelectedRunId(null)}
@@ -1346,6 +1481,7 @@ const App: React.FC = () => {
         aiChatHistory={aiChatWorkflow.chatHistory}
         isAIProcessing={aiChatWorkflow.isProcessing}
         onAISendMessage={aiChatWorkflow.handleUserInput}
+        onAIClearHistory={aiChatWorkflow.clearChatHistory}
         aiModel={aiChatWorkflow.aiModel}
         onAIModelChange={aiChatWorkflow.setAiModel}
         onAIUndo={(messageId) => {
@@ -1381,7 +1517,10 @@ const App: React.FC = () => {
 
                 // 如果找到了用户消息，重新发送
                 if (userMessage) {
-                  aiChatWorkflow.handleUserInput(userMessage.content);
+                  aiChatWorkflow.handleUserInput(userMessage.content, {
+                    image: userMessage.image,
+                    useSearch: userMessage.useSearch
+                  });
                 }
               }
             }}
@@ -1416,22 +1555,35 @@ const App: React.FC = () => {
         .animate-marching-ants { animation: marching-ants 1.5s linear infinite; }
         .animate-spin-slow { animation: spin 10s linear infinite; }
         .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-range-thumb::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 12px;
+          height: 12px;
+          border-radius: 999px;
+          background: #90dce1;
+          border: 2px solid #0f172a;
+          box-shadow: 0 0 10px rgba(144, 220, 225, 0.35);
+          cursor: pointer;
+          pointer-events: auto;
+        }
+        .custom-range-thumb { pointer-events: none; }
+        .custom-range-thumb::-moz-range-thumb {
+          width: 12px;
+          height: 12px;
+          border-radius: 999px;
+          background: #90dce1;
+          border: 2px solid #0f172a;
+          box-shadow: 0 0 10px rgba(144, 220, 225, 0.35);
+          cursor: pointer;
+          pointer-events: auto;
+        }
+        .custom-range-thumb::-webkit-slider-runnable-track,
+        .custom-range-thumb::-moz-range-track {
+          background: transparent;
+        }
         .canvas-grid { background-image: radial-gradient(rgba(51, 65, 85, 0.4) 1px, transparent 1px); }
         .connection-path:hover { stroke-opacity: 0.8; stroke-width: 5px; }
       `}</style>
-
-      <AIGenerateModal
-        lang={lang}
-        isOpen={modalState.showAIGenerateModal}
-        description={aiWorkflowDescription}
-        isGenerating={isGeneratingWorkflow}
-        onClose={() => {
-                  modalState.setShowAIGenerateModal(false);
-                  setAIWorkflowDescription('');
-                }}
-        onDescriptionChange={setAIWorkflowDescription}
-        onGenerate={() => generateWorkflowWithAI(aiWorkflowDescription)}
-      />
 
         <CloneVoiceModal
           isOpen={modalState.showCloneVoiceModal}
@@ -1463,11 +1615,46 @@ const App: React.FC = () => {
         return (
           <AudioEditorModal
             nodeId={modalState.showAudioEditor}
-            audioData={node.data.value}
+            audioData={node.data.audioOriginal || node.data.value}
+            audioRange={node.data.audioRange}
+            onRangeChange={(range) => {
+              updateNodeData(modalState.showAudioEditor!, 'audioRange', range);
+            }}
             onClose={() => modalState.setShowAudioEditor(null)}
             onSave={(trimmedAudio) => {
               updateNodeData(modalState.showAudioEditor!, 'value', trimmedAudio);
+              updateNodeData(modalState.showAudioEditor!, 'audioRange', node.data.audioRange || { start: 0, end: 100 });
               modalState.setShowAudioEditor(null);
+            }}
+            lang={lang}
+          />
+        );
+      })()}
+
+      {modalState.showVideoEditor && workflow && (() => {
+        const node = workflow.nodes.find(n => n.id === modalState.showVideoEditor);
+        if (!node || node.toolId !== 'video-input' || !node.data.value) return null;
+        const videoSource = node.data.videoOriginal || node.data.value;
+        return (
+          <VideoEditorModal
+            nodeId={modalState.showVideoEditor}
+            videoData={videoSource}
+            trimStart={node.data.trimStart}
+            trimEnd={node.data.trimEnd}
+            onRangeChange={(start, end) => {
+              updateNodeData(modalState.showVideoEditor!, 'trimStart', start);
+              updateNodeData(modalState.showVideoEditor!, 'trimEnd', end);
+            }}
+            onClose={() => modalState.setShowVideoEditor(null)}
+            onUpdate={(start, end, trimmedUrl) => {
+              updateNodeData(modalState.showVideoEditor!, 'trimStart', start);
+              updateNodeData(modalState.showVideoEditor!, 'trimEnd', end);
+              if (!node.data.videoOriginal) {
+                updateNodeData(modalState.showVideoEditor!, 'videoOriginal', videoSource);
+              }
+              if (trimmedUrl) {
+                updateNodeData(modalState.showVideoEditor!, 'value', trimmedUrl);
+              }
             }}
             lang={lang}
           />

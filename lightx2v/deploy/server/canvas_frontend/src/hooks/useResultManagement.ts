@@ -75,7 +75,7 @@ export const useResultManagement = ({
     const data = sourceRun ? sourceRun.outputs : activeOutputs;
     const nodes = sourceRun ? sourceRun.nodesSnapshot : workflow.nodes;
 
-    return nodes.filter(n => {
+    const filtered = nodes.filter(n => {
       if (n.status === NodeStatus.ERROR) return true;
       if (!data[n.id]) {
         const tool = TOOLS.find(t => t.id === n.toolId);
@@ -89,6 +89,11 @@ export const useResultManagement = ({
       }
       return true;
     });
+    const getCompletedTime = (node: WorkflowNode) => {
+      if (typeof node.completedAt === 'number') return node.completedAt;
+      return 0;
+    };
+    return [...filtered].sort((a, b) => getCompletedTime(b) - getCompletedTime(a));
   }, [workflow, selectedRunId, activeOutputs]);
 
   const handleManualResultEdit = useCallback(() => {

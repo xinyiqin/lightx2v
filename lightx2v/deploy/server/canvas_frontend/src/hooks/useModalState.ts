@@ -2,8 +2,8 @@ import { useState } from 'react';
 
 export const useModalState = () => {
   const [showCloneVoiceModal, setShowCloneVoiceModal] = useState(false);
-  const [showAIGenerateModal, setShowAIGenerateModal] = useState(false);
   const [showAudioEditor, setShowAudioEditor] = useState<string | null>(null); // nodeId of audio input being edited
+  const [showVideoEditor, setShowVideoEditor] = useState<string | null>(null); // nodeId of video input being edited
   const [expandedOutput, setExpandedOutput] = useState<{ nodeId: string; fieldId?: string } | null>(null);
   const [isEditingResult, setIsEditingResult] = useState(false);
   const [tempEditValue, setTempEditValue] = useState("");
@@ -11,7 +11,7 @@ export const useModalState = () => {
   const [showOutputQuickAdd, setShowOutputQuickAdd] = useState<{ nodeId: string; portId: string } | null>(null);
   const [showModelSelect, setShowModelSelect] = useState<string | null>(null);
   const [showVoiceSelect, setShowVoiceSelect] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [resultsCollapsed, setResultsCollapsed] = useState(true);
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [isAIChatCollapsed, setIsAIChatCollapsed] = useState(false);
@@ -66,10 +66,10 @@ export const useModalState = () => {
     // Modal states
     showCloneVoiceModal,
     setShowCloneVoiceModal,
-    showAIGenerateModal,
-    setShowAIGenerateModal,
     showAudioEditor,
     setShowAudioEditor,
+    showVideoEditor,
+    setShowVideoEditor,
     expandedOutput,
     setExpandedOutput,
     isEditingResult,

@@ -462,7 +462,7 @@ export const TOOLS: ToolDefinition[] = [
           speechRate: 0,
           pitch: 0,
           loudnessRate: 0,
-          resourceId: ''
+          resourceId: 'seed-tts-2.0'
         }
       },
       {

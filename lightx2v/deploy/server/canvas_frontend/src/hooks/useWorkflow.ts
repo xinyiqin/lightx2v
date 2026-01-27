@@ -47,7 +47,10 @@ export const useWorkflow = () => {
             outputs: {}
           })),
           updatedAt: wf.update_t * 1000, // Convert to milliseconds
-          showIntermediateResults: false
+          showIntermediateResults: false,
+          visibility: wf.visibility || 'private',
+          thumsupCount: wf.thumsup_count ?? 0,
+          thumsupLiked: wf.thumsup_liked ?? false
         }));
         setMyWorkflows(workflows);
         console.log('[Workflow] Loaded workflows from API:', workflows.length);
@@ -364,17 +367,43 @@ export const useWorkflow = () => {
           }
         }
 
+        const stripBase64FromOutput = (value: any): any => {
+          if (typeof value === 'string') {
+            return value.startsWith('data:') ? '' : value;
+          }
+          if (Array.isArray(value)) {
+            return value
+              .map(stripBase64FromOutput)
+              .filter(v => v !== '' && v !== null && v !== undefined);
+          }
+          if (value && typeof value === 'object') {
+            if (value.type === 'reference' || value.data_id) {
+              return value;
+            }
+            const cleaned: Record<string, any> = {};
+            Object.entries(value).forEach(([key, val]) => {
+              const nextVal = stripBase64FromOutput(val);
+              if (nextVal !== '' && nextVal !== null && nextVal !== undefined) {
+                cleaned[key] = nextVal;
+              }
+            });
+            return cleaned;
+          }
+          return value;
+        };
+
         // Store active_outputs in extra_info for resuming execution
         const extraInfo: Record<string, any> = {};
         if (options?.activeOutputs) {
-          // Convert data URLs to file references for storage efficiency
           const cleanedActiveOutputs: Record<string, any> = {};
           for (const [nodeId, output] of Object.entries(options.activeOutputs)) {
-            if (typeof output === 'string' && output.startsWith('data:')) {
-              // Keep data URL for now, will be replaced with file reference when file is saved
-              cleanedActiveOutputs[nodeId] = output;
-            } else {
-              cleanedActiveOutputs[nodeId] = output;
+            const cleanedOutput = stripBase64FromOutput(output);
+            if (Array.isArray(cleanedOutput)) {
+              if (cleanedOutput.length > 0) cleanedActiveOutputs[nodeId] = cleanedOutput;
+            } else if (cleanedOutput && typeof cleanedOutput === 'object') {
+              if (Object.keys(cleanedOutput).length > 0) cleanedActiveOutputs[nodeId] = cleanedOutput;
+            } else if (cleanedOutput !== '' && cleanedOutput !== null && cleanedOutput !== undefined) {
+              cleanedActiveOutputs[nodeId] = cleanedOutput;
             }
           }
           extraInfo.active_outputs = cleanedActiveOutputs;
@@ -427,34 +456,43 @@ export const useWorkflow = () => {
 
         // Clean history_metadata outputs: remove base64 data URLs, keep only file paths/URLs
         // This prevents storing large base64 data in workflow JSON
+        // Clean node outputValue to avoid persisting base64 in workflow nodes
+        for (let i = 0; i < cleanedNodes.length; i++) {
+          const node = cleanedNodes[i];
+          if (node.outputValue !== undefined) {
+            const cleanedOutputValue = stripBase64FromOutput(node.outputValue);
+            if (Array.isArray(cleanedOutputValue)) {
+              cleanedNodes[i] = {
+                ...cleanedNodes[i],
+                outputValue: cleanedOutputValue.length > 0 ? cleanedOutputValue : undefined
+              };
+            } else if (cleanedOutputValue && typeof cleanedOutputValue === 'object') {
+              cleanedNodes[i] = {
+                ...cleanedNodes[i],
+                outputValue: Object.keys(cleanedOutputValue).length > 0 ? cleanedOutputValue : undefined
+              };
+            } else {
+              cleanedNodes[i] = {
+                ...cleanedNodes[i],
+                outputValue: cleanedOutputValue !== '' && cleanedOutputValue !== null && cleanedOutputValue !== undefined
+                  ? cleanedOutputValue
+                  : undefined
+              };
+            }
+          }
+        }
+
         const cleanedHistoryMetadata = latestWorkflow.history.map(run => {
           const cleanedOutputs: Record<string, any> = {};
           // Keep URLs and file paths, but remove base64 data (data:image/..., data:video/..., data:audio/...)
           Object.entries(run.outputs || {}).forEach(([nodeId, output]) => {
-            if (Array.isArray(output)) {
-              cleanedOutputs[nodeId] = output.map((item: any) => {
-                if (typeof item === 'string' && item.startsWith('data:')) {
-                  // Remove base64 data URLs
-                  return '';
-                }
-                return item; // Keep URLs (http/https) and file paths
-              }).filter((item: any) => item !== '');
-            } else if (typeof output === 'string') {
-              if (output.startsWith('data:')) {
-                // Remove base64 data URLs
-                cleanedOutputs[nodeId] = '';
-              } else {
-                // Keep regular URLs (http/https) and file paths
-                cleanedOutputs[nodeId] = output;
-              }
-            } else {
-              cleanedOutputs[nodeId] = output;
-            }
-          });
-          // Only keep outputs that have non-empty values
-          Object.keys(cleanedOutputs).forEach(key => {
-            if (cleanedOutputs[key] === '' || (Array.isArray(cleanedOutputs[key]) && cleanedOutputs[key].length === 0)) {
-              delete cleanedOutputs[key];
+            const cleanedOutput = stripBase64FromOutput(output);
+            if (Array.isArray(cleanedOutput)) {
+              if (cleanedOutput.length > 0) cleanedOutputs[nodeId] = cleanedOutput;
+            } else if (cleanedOutput && typeof cleanedOutput === 'object') {
+              if (Object.keys(cleanedOutput).length > 0) cleanedOutputs[nodeId] = cleanedOutput;
+            } else if (cleanedOutput !== '' && cleanedOutput !== null && cleanedOutput !== undefined) {
+              cleanedOutputs[nodeId] = cleanedOutput;
             }
           });
 
@@ -480,14 +518,26 @@ export const useWorkflow = () => {
         });
 
         // 使用最新的工作流状态构建保存数据
+        const trimChatHistory = (history: any[]): any[] => {
+          if (!Array.isArray(history)) return [];
+          const recent = history.slice(-20);
+          return recent.map((msg: any) => {
+            if (!msg || typeof msg !== 'object') return msg;
+            // Remove assistant thinking process before saving
+            const { thinking, ...rest } = msg;
+            return rest;
+          });
+        };
+
         workflowData = {
           name: options?.name || latestWorkflow.name,
           description: options?.description || '',
           nodes: cleanedNodes, // Use cleaned nodes (input nodes with base64 will be kept for now)
           connections: latestWorkflow.connections, // Save connections
           history_metadata: cleanedHistoryMetadata, // Use cleaned history metadata (no base64 data)
-          chat_history: latestWorkflow.chatHistory || [],
-          extra_info: extraInfo
+          chat_history: trimChatHistory(latestWorkflow.chatHistory || []),
+          extra_info: extraInfo,
+          visibility: latestWorkflow.visibility || 'private'
         };
 
         // Check if workflow exists in database
@@ -904,7 +954,10 @@ export const useWorkflow = () => {
           })),
           chatHistory: wf.chat_history || [],
           updatedAt: wf.update_t * 1000,
-          showIntermediateResults: false
+          showIntermediateResults: false,
+          visibility: wf.visibility || 'private',
+          thumsupCount: wf.thumsup_count ?? 0,
+          thumsupLiked: wf.thumsup_liked ?? false
         };
         setWorkflow(workflow);
         return { workflow, activeOutputs };
@@ -962,6 +1015,38 @@ export const useWorkflow = () => {
     });
   }, [setMyWorkflows]);
 
+  const updateWorkflowVisibility = useCallback(async (id: string, visibility: 'private' | 'public') => {
+    if (!id) return;
+    if (visibility !== 'private' && visibility !== 'public') return;
+
+    try {
+      const response = await apiRequest(`/api/v1/workflow/${id}/visibility`, {
+        method: 'PUT',
+        body: JSON.stringify({ visibility })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to update visibility: ${errorText}`);
+      }
+
+      setMyWorkflows(prev => {
+        const next = prev.map(w => w.id === id ? { ...w, visibility } : w);
+        try {
+          localStorage.setItem('omniflow_user_data', JSON.stringify(next));
+        } catch (e) {
+          console.error('Failed to save workflows to localStorage:', e);
+        }
+        return next;
+      });
+
+      setWorkflow(prev => prev ? (prev.id === id ? { ...prev, visibility, isDirty: true } : prev) : prev);
+    } catch (error) {
+      console.error('[Workflow] Failed to update workflow visibility:', error);
+      throw error;
+    }
+  }, [setMyWorkflows, setWorkflow]);
+
   return {
     myWorkflows,
     workflow,
@@ -972,6 +1057,7 @@ export const useWorkflow = () => {
     loadWorkflow,
     loadWorkflows,
     deleteWorkflow,
+    updateWorkflowVisibility,
     isSaving,
     isLoading
   };

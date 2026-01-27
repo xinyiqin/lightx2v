@@ -213,10 +213,18 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                           ))}
                         </div>
                       ) : (
-                        <p className="text-[10px] text-slate-400 line-clamp-4 leading-relaxed">{res}</p>
+                        <p
+                          onClick={() => onExpandOutput(node.id)}
+                          className="text-[10px] text-slate-400 line-clamp-4 leading-relaxed cursor-pointer hover:text-slate-200 transition-colors"
+                        >
+                          {res}
+                        </p>
                       )
                     ) : type === DataType.IMAGE ? (
-                      <div className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar">
+                      <div
+                        onClick={() => onExpandOutput(node.id)}
+                        className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar cursor-pointer"
+                      >
                         {(Array.isArray(res) ? res : [res]).map((img, i) => (
                           <img
                             key={i}
@@ -226,7 +234,10 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <div className="flex items-center justify-center h-full text-#90dce1">
+                      <div
+                        onClick={() => onExpandOutput(node.id)}
+                        className="flex items-center justify-center h-full text-#90dce1 cursor-pointer hover:text-[#90dce1] transition-colors"
+                      >
                         {type === DataType.AUDIO ? <Volume2 size={24} /> : <VideoIcon size={24} />}
                       </div>
                     )}

@@ -111,6 +111,12 @@ class BaseTaskManager:
     async def list_workflows(self, **kwargs):
         raise NotImplementedError
 
+    async def toggle_workflow_thumsup(self, workflow_id, user_id):
+        raise NotImplementedError
+
+    async def get_workflow_thumsup(self, workflow_id, user_id=None):
+        raise NotImplementedError
+
     def fmt_dict(self, data):
         for k in ["status"]:
             if k in data:
@@ -255,7 +261,7 @@ class BaseTaskManager:
         assert await self.insert_voice_clone_if_not_exists(voice_clone), f"create voice clone {voice_clone} failed"
         return True
 
-    async def create_workflow(self, user_id, name, description="", nodes=None, connections=None, workflow_id=None):
+    async def create_workflow(self, user_id, name, description="", nodes=None, connections=None, workflow_id=None, visibility="private"):
         if workflow_id is None:
             workflow_id = str(uuid.uuid4())
         else:
@@ -269,6 +275,9 @@ class BaseTaskManager:
                 raise ValueError(f"Workflow {workflow_id} already exists. Use update_workflow instead.")
 
         cur_t = current_time()
+        if visibility not in ["private", "public"]:
+            raise ValueError(f"Invalid workflow visibility: {visibility}")
+
         workflow_data = {
             "workflow_id": workflow_id,
             "user_id": user_id,
@@ -283,6 +292,7 @@ class BaseTaskManager:
             "data_store": {"outputs": {}},
             "chat_history": [],
             "extra_info": "",
+            "visibility": visibility,
         }
         assert await self.insert_workflow(workflow_data), f"create workflow {workflow_data} failed"
         return workflow_id
