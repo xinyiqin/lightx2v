@@ -49,7 +49,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             if k in data:
                 data[k] = json.loads(data[k])
         for k in self.time_keys:
-            if k in data:
+            if k in data and data[k] is not None:
                 data[k] = data[k].timestamp()
 
     async def get_conn(self):
@@ -79,9 +79,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             (2, "Add shares table", self.upgrade_v2),
             (3, "Add podcasts table", self.upgrade_v3),
             (4, "Add voice clones table", self.upgrade_v4),
-            (5, "Add workflows table with data_store", self.upgrade_v5),
-            (6, "Add workflow visibility", self.upgrade_v6),
-            (7, "Add workflow thumsup table", self.upgrade_v7),
+            (5, "Add workflows table, workflow thumsup", self.upgrade_v5),
         ]
         logger.info(f"upgrade_db: {self.db_url}")
         cur_ver = await self.query_version()
@@ -278,8 +276,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation="read_uncommitted"):
-                # create workflows table with data_store and chat_history (merged v5 and v6)
-                default_data_store = '{"outputs": {}}'
+                # create workflows table
                 await conn.execute(
                     f"""
                     CREATE TABLE IF NOT EXISTS {self.table_workflows} (
@@ -294,51 +291,15 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         connections JSONB NOT NULL,
                         history_metadata JSONB,
                         extra_info JSONB,
-                        data_store JSONB DEFAULT $1::jsonb,
-                        chat_history JSONB DEFAULT '[]'::jsonb,
-                        visibility VARCHAR(16) DEFAULT 'private',
+                        data_store JSONB,
+                        chat_history JSONB,
+                        visibility VARCHAR(16),
+                        tag VARCHAR(16),
                         FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
                     )
-                """,
-                    default_data_store,
+                """
                 )
-                # create indexes
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_user_id ON {self.table_workflows}(user_id)")
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_update_t ON {self.table_workflows}(update_t)")
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_tag ON {self.table_workflows}(tag)")
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflows}_name ON {self.table_workflows}(name)")
-                # update version
-                await conn.execute(f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)", version, description, datetime.now())
-                return True
-        except:  # noqa
-            logger.error(f"upgrade_v5 error: {traceback.format_exc()}")
-            return False
-        finally:
-            await self.release_conn(conn)
-
-    async def upgrade_v6(self, version, description):
-        conn = await self.get_conn()
-        try:
-            async with conn.transaction(isolation="read_uncommitted"):
-                await conn.execute(f"ALTER TABLE {self.table_workflows} ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) DEFAULT 'private'")
-                await conn.execute(f"UPDATE {self.table_workflows} SET visibility = 'private' WHERE visibility IS NULL OR visibility = ''")
-                await conn.execute(
-                    f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)",
-                    version,
-                    description,
-                    datetime.now(),
-                )
-                return True
-        except:  # noqa
-            logger.error(f"upgrade_v6 error: {traceback.format_exc()}")
-            return False
-        finally:
-            await self.release_conn(conn)
-
-    async def upgrade_v7(self, version, description):
-        conn = await self.get_conn()
-        try:
-            async with conn.transaction(isolation="read_uncommitted"):
+                # create workflow_thumsup table
                 await conn.execute(
                     f"""
                     CREATE TABLE IF NOT EXISTS {self.table_workflow_thumsup} (
@@ -351,17 +312,11 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     )
                 """
                 )
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflow_thumsup}_workflow_id ON {self.table_workflow_thumsup}(workflow_id)")
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table_workflow_thumsup}_user_id ON {self.table_workflow_thumsup}(user_id)")
-                await conn.execute(
-                    f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)",
-                    version,
-                    description,
-                    datetime.now(),
-                )
+                # update version
+                await conn.execute(f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)", version, description, datetime.now())
                 return True
         except:  # noqa
-            logger.error(f"upgrade_v7 error: {traceback.format_exc()}")
+            logger.error(f"upgrade_v5 error: {traceback.format_exc()}")
             return False
         finally:
             await self.release_conn(conn)
@@ -1291,8 +1246,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     f"""
                     INSERT INTO {self.table_workflows}
                     (workflow_id, user_id, name, description, create_t, update_t, last_run_t,
-                     nodes, connections, history_metadata, extra_info, data_store, chat_history, visibility)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                     nodes, connections, history_metadata, extra_info, data_store, chat_history, visibility, tag)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                     """,
                     workflow_data["workflow_id"],
                     workflow_data["user_id"],
@@ -1308,6 +1263,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     workflow_data.get("data_store", {"outputs": {}}),
                     workflow_data.get("chat_history", []),
                     workflow_data.get("visibility", "private"),
+                    workflow_data.get("tag", ""),
                 )
                 return True
         except:  # noqa
@@ -1342,37 +1298,15 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation="read_uncommitted"):
-                # Check if workflow exists and belongs to user
-                query = f"SELECT workflow_id FROM {self.table_workflows} WHERE workflow_id = $1 AND tag != 'delete'"
-                params = [workflow_id]
-                if user_id is not None:
-                    query += " AND user_id = $2"
-                    params.append(user_id)
-                row = await conn.fetchrow(query, *params)
-                if not row:
-                    return False
-
                 # Build update query
                 set_clauses = []
                 update_params = []
                 param_idx = 1
 
+                self.fmt_dict(updates)
                 for key, value in updates.items():
-                    if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
-                        # JSON fields
-                        self.fmt_dict({key: value})
-                        set_clauses.append(f"{key} = ${param_idx}")
-                        update_params.append(json.dumps(value, ensure_ascii=False))
-                    elif key in ["name", "description", "tag", "visibility"]:
-                        set_clauses.append(f"{key} = ${param_idx}")
-                        update_params.append(value)
-                    elif key == "last_run_t":
-                        if value is not None:
-                            self.fmt_dict({key: value})
-                            set_clauses.append(f"{key} = ${param_idx}")
-                            update_params.append(datetime.fromtimestamp(value) if isinstance(value, (int, float)) else value)
-                        else:
-                            set_clauses.append(f"{key} = NULL")
+                    set_clauses.append(f"{key} = ${param_idx}")
+                    update_params.append(value)
                     param_idx += 1
 
                 # Always update update_t
@@ -1394,17 +1328,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 all_params = update_params + where_params
 
                 query = f"UPDATE {self.table_workflows} SET {', '.join(set_clauses)} WHERE {where_clause}"
+                # logger.debug(f"update_workflow query: {query}, params: {all_params}")
                 ret = await conn.execute(query, *all_params)
+                count = self.check_update_valid(ret, "update_workflow", query, all_params)
+                assert count > 0, f"update_workflow: no rows updated for workflow_id={workflow_id}, user_id={user_id}"
+                return True
 
-                try:
-                    count = self.check_update_valid(ret, "update_workflow", query, all_params)
-                    return count > 0
-                except AssertionError:
-                    logger.warning(f"update_workflow: no rows updated for workflow_id={workflow_id}, user_id={user_id}")
-                    return False
-        except:  # noqa
+        except Exception:
             logger.error(f"update_workflow error: {traceback.format_exc()}")
             return False
+
         finally:
             await self.release_conn(conn)
 
@@ -1413,15 +1346,13 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation="read_uncommitted"):
-                query = f"DELETE FROM {self.table_workflows} WHERE workflow_id = $1"
+                query = f"UPDATE {self.table_workflows} SET tag = 'delete' WHERE workflow_id = $1"
                 params = [workflow_id]
                 if user_id is not None:
                     query += " AND user_id = $2"
                     params.append(user_id)
                 ret = await conn.execute(query, *params)
-                if ret == "DELETE 0":
-                    return False
-                return True
+                return ret > 0
         except:  # noqa
             logger.error(f"delete_workflow error: {traceback.format_exc()}")
             return False
@@ -1434,10 +1365,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
         try:
             async with conn.transaction(isolation="read_uncommitted"):
                 count = kwargs.get("count", False)
-                query = "SELECT * FROM " if not count else "SELECT COUNT(*) FROM "
+                query = "SELECT * FROM "
+                if count:
+                    query = f"SELECT COUNT(*) FROM "
+                    assert "limit" not in kwargs, "limit is not allowed when count is True"
+                    assert "offset" not in kwargs, "offset is not allowed when count is True"
+
                 param_idx = 1
                 params = []
-
                 conds = []
                 if "user_id" in kwargs:
                     conds.append(f"user_id = ${param_idx}")
@@ -1455,30 +1390,26 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     params.extend([f"%{search_term.lower()}%", f"%{search_term.lower()}%"])
                     param_idx += 2
 
+                if not kwargs.get("include_delete", False):
+                    conds.append(f"tag != ${param_idx}")
+                    params.append("delete")
+                    param_idx += 1
+
                 query += self.table_workflows + " WHERE " + (" AND ".join(conds) if conds else "1=1")
 
                 if not count:
                     sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
                     query += f" ORDER BY {sort_key} DESC"
 
-                    # Pagination
-                    page = kwargs.get("page", 1)
-                    page_size = kwargs.get("page_size", 10)
-                    offset = (page - 1) * page_size
-                    if "offset" in kwargs:
-                        offset = kwargs["offset"]
-                    if "limit" in kwargs:
-                        query += f" LIMIT ${param_idx}"
-                        params.append(kwargs["limit"])
-                    else:
-                        query += f" LIMIT ${param_idx}"
-                        params.append(page_size)
+                if "limit" in kwargs:
+                    query += f" LIMIT ${param_idx}"
+                    params.append(kwargs["limit"])
                     param_idx += 1
 
-                    if offset > 0:
-                        query += f" OFFSET ${param_idx}"
-                        params.append(offset)
-
+                if "offset" in kwargs:
+                    query += f" OFFSET ${param_idx}"
+                    params.append(kwargs["offset"])
+                    param_idx += 1
                 rows = await conn.fetch(query, *params)
                 if count:
                     return rows[0]["count"]

@@ -293,6 +293,7 @@ class BaseTaskManager:
             "chat_history": [],
             "extra_info": "",
             "visibility": visibility,
+            "tag": "",
         }
         assert await self.insert_workflow(workflow_data), f"create workflow {workflow_data} failed"
         return workflow_id

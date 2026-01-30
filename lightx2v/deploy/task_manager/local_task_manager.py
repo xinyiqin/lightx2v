@@ -601,18 +601,10 @@ class LocalTaskManager(BaseTaskManager):
         # Sort
         sort_key = "update_t" if kwargs.get("sort_by_update_t", False) else "create_t"
         workflows = sorted(workflows, key=lambda x: x.get(sort_key, 0), reverse=True)
-
-        # Pagination
-        page = kwargs.get("page", 1)
-        page_size = kwargs.get("page_size", 10)
-        offset = (page - 1) * page_size
         if "offset" in kwargs:
-            offset = kwargs["offset"]
+            workflows = workflows[kwargs["offset"] :]
         if "limit" in kwargs:
-            workflows = workflows[offset : offset + kwargs["limit"]]
-        else:
-            workflows = workflows[offset : offset + page_size]
-
+            workflows = workflows[: kwargs["limit"]]
         return workflows
 
     @class_try_catch_async

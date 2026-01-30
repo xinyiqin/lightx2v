@@ -7,7 +7,7 @@ import { sharedStore } from './sharedStore'
 class ApiClient {
   constructor() {
     // 从环境变量或配置中获取后端地址
-    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082'
+    this.baseURL = import.meta.env.VITE_API_BASE_URL || "" // empty string means relative path
   }
 
   /**
