@@ -1941,42 +1941,46 @@ async def api_v1_workflow_get(request: Request, user=Depends(verify_user_access)
         return error_response(str(e), 500)
 
 
+async def _update_workflow(workflow_id, params, user):
+    updates = {}
+
+    if "name" in params:
+        updates["name"] = params["name"]
+    if "description" in params:
+        updates["description"] = params["description"]
+    if "nodes" in params:
+        updates["nodes"] = params["nodes"]
+    if "connections" in params:
+        updates["connections"] = params["connections"]
+    if "history_metadata" in params:
+        updates["history_metadata"] = params["history_metadata"]
+    if "chat_history" in params:
+        updates["chat_history"] = params["chat_history"]
+    if "extra_info" in params:
+        updates["extra_info"] = params["extra_info"]
+    if "last_run_t" in params:
+        updates["last_run_t"] = params["last_run_t"]
+    if "visibility" in params:
+        if params["visibility"] not in ["private", "public"]:
+            return error_response("visibility must be 'private' or 'public'", 400)
+        updates["visibility"] = params["visibility"]
+
+    # Check if workflow exists first
+    existing_workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
+    if not existing_workflow:
+        logger.warning(f"Workflow {workflow_id} not found for user {user['user_id']}")
+        return error_response(f"Workflow {workflow_id} not found", 404)
+    success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+    return success
+
+
 @app.put("/api/v1/workflow/{workflow_id}")
 async def api_v1_workflow_update(request: Request, user=Depends(verify_user_access)):
     """Update a workflow."""
     try:
         workflow_id = request.path_params["workflow_id"]
         params = await request.json()
-        updates = {}
-
-        if "name" in params:
-            updates["name"] = params["name"]
-        if "description" in params:
-            updates["description"] = params["description"]
-        if "nodes" in params:
-            updates["nodes"] = params["nodes"]
-        if "connections" in params:
-            updates["connections"] = params["connections"]
-        if "history_metadata" in params:
-            updates["history_metadata"] = params["history_metadata"]
-        if "chat_history" in params:
-            updates["chat_history"] = params["chat_history"]
-        if "extra_info" in params:
-            updates["extra_info"] = params["extra_info"]
-        if "last_run_t" in params:
-            updates["last_run_t"] = params["last_run_t"]
-        if "visibility" in params:
-            if params["visibility"] not in ["private", "public"]:
-                return error_response("visibility must be 'private' or 'public'", 400)
-            updates["visibility"] = params["visibility"]
-
-        # Check if workflow exists first
-        existing_workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not existing_workflow:
-            logger.warning(f"Workflow {workflow_id} not found for user {user['user_id']}")
-            return error_response(f"Workflow {workflow_id} not found", 404)
-
-        success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+        success = await _update_workflow(workflow_id, params, user)
         if success:
             logger.info(f"Workflow {workflow_id} updated by user {user['user_id']}")
             return {"message": "Workflow updated successfully"}
@@ -2463,53 +2467,6 @@ async def api_v1_workflow_node_output_history(request: Request, user=Depends(ver
         return error_response(str(e), 500)
 
 
-@app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/reuse")
-async def api_v1_workflow_node_output_reuse(request: Request, user=Depends(verify_user_access)):
-    try:
-        workflow_id = request.path_params["workflow_id"]
-        node_id = request.path_params["node_id"]
-        port_id = request.path_params["port_id"]
-        workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not workflow:
-            return error_response("Workflow not found", 404)
-
-        params = await request.json()
-        history_index = params.get("history_index")
-
-        if history_index is None or not isinstance(history_index, int):
-            return error_response("history_index is required and must be an integer", 400)
-
-        if "data_store" not in workflow:
-            workflow["data_store"] = {}
-        if "outputs" not in workflow["data_store"]:
-            workflow["data_store"]["outputs"] = {}
-        if node_id not in workflow["data_store"]["outputs"]:
-            return error_response("Node output not found", 404)
-
-        node_outputs = workflow["data_store"]["outputs"][node_id]
-        if port_id not in node_outputs:
-            return error_response("Port output not found", 404)
-
-        port_data = node_outputs[port_id]
-        history = port_data.get("history", [])
-
-        if history_index < 0 or history_index >= len(history):
-            return error_response(f"Invalid history_index: {history_index}. History length: {len(history)}", 400)
-
-        history_data_ref = history[history_index]
-        port_data["current"] = history_data_ref
-        success = await task_manager.update_workflow(workflow_id, {"data_store": workflow["data_store"]}, user["user_id"])
-
-        if not success:
-            return error_response("Failed to update workflow", 400)
-
-        logger.info(f"Reused history[{history_index}] for node {node_id}/{port_id} in workflow {workflow_id}")
-        return {"message": "History output reused successfully", "data": history_data_ref}
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/upload")
 async def api_v1_workflow_node_output_upload(request: Request, file: UploadFile = File(...), user=Depends(verify_user_access)):
     try:
@@ -2543,6 +2500,7 @@ async def api_v1_workflow_node_output_upload(request: Request, file: UploadFile 
 @app.get("/api/v1/workflow/{workflow_id}/file/{file_id}")
 async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access)):
     try:
+        raise
         workflow_id = request.path_params["workflow_id"]
         file_id = request.path_params["file_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
@@ -2586,6 +2544,7 @@ async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/save")
 async def api_v1_workflow_node_output_save(request: Request, user=Depends(verify_user_access)):
     try:
+        raise
         workflow_id = request.path_params["workflow_id"]
         node_id = request.path_params["node_id"]
         port_id = request.path_params["port_id"]
@@ -2689,31 +2648,9 @@ async def api_v1_workflow_autosave(request: Request, user=Depends(verify_user_ac
     try:
         workflow_id = request.path_params["workflow_id"]
         params = await request.json()
-
-        request_workflow_id = params.get("workflow_id")
-        if request_workflow_id and request_workflow_id != workflow_id:
-            logger.warning(f"Workflow ID mismatch in autosave: URL={workflow_id}, body={request_workflow_id}")
-            return error_response(f"Workflow ID mismatch: URL parameter {workflow_id} does not match request body {request_workflow_id}", 400)
-
-        updates = {}
-
-        if "name" in params:
-            updates["name"] = params["name"]
-        if "nodes" in params:
-            updates["nodes"] = params["nodes"]
-        if "connections" in params:
-            updates["connections"] = params["connections"]
-        if "visibility" in params:
-            if params["visibility"] not in ["private", "public"]:
-                return error_response("visibility must be 'private' or 'public'", 400)
-            updates["visibility"] = params["visibility"]
-
-        workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not workflow:
-            return error_response(f"Workflow {workflow_id} not found", 404)
-
-        success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+        success = await _update_workflow(workflow_id, params, user)
         if success:
+            logger.info(f"Workflow {workflow_id} autosaved")
             workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
             return {"message": "Workflow autosaved", "workflow_id": workflow_id, "update_t": workflow["update_t"]}
         else:

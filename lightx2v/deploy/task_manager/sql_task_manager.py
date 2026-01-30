@@ -1273,13 +1273,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
             await self.release_conn(conn)
 
     @class_try_catch_async
-    async def query_workflow(self, workflow_id, user_id=None):
+    async def query_workflow(self, workflow_id, user_id=None, allow_public=True):
         conn = await self.get_conn()
         try:
             query = f"SELECT * FROM {self.table_workflows} WHERE workflow_id = $1 AND tag != 'delete'"
             params = [workflow_id]
             if user_id is not None:
-                query += " AND user_id = $2"
+                if allow_public:
+                    query += " AND (user_id = $2 OR visibility = 'public')"
+                else:
+                    query += " AND user_id = $2"
                 params.append(user_id)
             row = await conn.fetchrow(query, *params)
             if not row:

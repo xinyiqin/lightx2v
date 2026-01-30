@@ -505,15 +505,14 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, "w") as fout:
             fout.write(json.dumps(workflow, indent=4, ensure_ascii=False))
 
-    def load_workflow(self, workflow_id, user_id=None):
+    def load_workflow(self, workflow_id, user_id=None, allow_public=True):
         fpath = self.get_workflow_filename(workflow_id)
         if not os.path.exists(fpath):
             return None
         data = json.load(open(fpath))
-        if "visibility" not in data:
-            data["visibility"] = "private"
         if user_id is not None and data.get("user_id") != user_id:
-            raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
+            if not (allow_public and data.get("visibility", "private") == "public"):
+                raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
         if data.get("tag") == "delete":
             raise Exception(f"Workflow {workflow_id} is deleted")
         self.parse_dict(data)
@@ -525,8 +524,8 @@ class LocalTaskManager(BaseTaskManager):
         return True
 
     @class_try_catch_async
-    async def query_workflow(self, workflow_id, user_id=None):
-        return self.load_workflow(workflow_id, user_id)
+    async def query_workflow(self, workflow_id, user_id=None, allow_public=True):
+        return self.load_workflow(workflow_id, user_id, allow_public)
 
     @class_try_catch_async
     async def update_workflow(self, workflow_id, updates, user_id=None):
