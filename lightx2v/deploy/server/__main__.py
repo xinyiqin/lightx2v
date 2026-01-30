@@ -2500,7 +2500,6 @@ async def api_v1_workflow_node_output_upload(request: Request, file: UploadFile 
 @app.get("/api/v1/workflow/{workflow_id}/file/{file_id}")
 async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access)):
     try:
-        raise
         workflow_id = request.path_params["workflow_id"]
         file_id = request.path_params["file_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
@@ -2544,7 +2543,6 @@ async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/save")
 async def api_v1_workflow_node_output_save(request: Request, user=Depends(verify_user_access)):
     try:
-        raise
         workflow_id = request.path_params["workflow_id"]
         node_id = request.path_params["node_id"]
         port_id = request.path_params["port_id"]
