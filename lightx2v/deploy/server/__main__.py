@@ -487,8 +487,9 @@ async def api_v1_task_result_url(request: Request, user=Depends(verify_user_acce
 
 
 @app.get("/api/v1/workflow/{workflow_id}/input")
-async def api_v1_workflow_input(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_input(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
         filename = request.query_params.get("filename")
         if not filename:
             return error_response("filename is required", 400)
@@ -1840,54 +1841,73 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
         return error_response(error_msg, 500)
 
 
+async def _format_user_name(user_id):
+    try:
+        if not user_id:
+            return ""
+        user = await task_manager.query_user(user_id)
+        return user.get("username", "")
+    except Exception:
+        logger.error(f"Failed to format user name for user {user_id}: {traceback.format_exc()}")
+        return ""
+
+
+async def _list_workflows_paginated(request: Request, user: dict, public: bool):
+    """Shared logic for listing workflows: user's list (public=False) or public workflows (public=True)."""
+    page = int(request.query_params.get("page", 1))
+    page_size = int(request.query_params.get("page_size", 10))
+    search = request.query_params.get("search", None)
+    if page < 1 or page_size < 1:
+        return error_response("page and page_size must be greater than 0", 400)
+
+    query_params = {}
+    if public:
+        query_params["visibility"] = "public"
+    else:
+        query_params["user_id"] = user["user_id"]
+    if search:
+        query_params["search"] = search
+
+    total_workflows = await task_manager.list_workflows(count=True, **query_params)
+    total_pages = (total_workflows + page_size - 1) // page_size
+    page_info = {"page": page, "page_size": page_size, "total": total_workflows, "total_pages": total_pages}
+    if page > total_pages:
+        return {"workflows": [], "pagination": page_info}
+
+    query_params["offset"] = (page - 1) * page_size
+    query_params["limit"] = page_size
+    workflows = await task_manager.list_workflows(**query_params)
+
+    rets = []
+    for wf in workflows:
+        thumsup = await task_manager.get_workflow_thumsup(wf["workflow_id"], user["user_id"])
+        wf_user_id = wf.get("user_id", "")
+        wf_user_name = await _format_user_name(wf_user_id)
+        item = {
+            "workflow_id": wf["workflow_id"],
+            "name": wf["name"],
+            "description": wf.get("description", ""),
+            "create_t": wf["create_t"],
+            "update_t": wf["update_t"],
+            "last_run_t": wf.get("last_run_t"),
+            "visibility": wf.get("visibility", "private"),
+            "thumsup_count": thumsup.get("count", 0),
+            "thumsup_liked": thumsup.get("liked", False),
+            "user_id": wf_user_id,
+            "author_name": wf_user_name,
+            "nodes": wf.get("nodes", []),
+            "connections": wf.get("connections", []),
+        }
+        rets.append(item)
+    return {"workflows": rets, "pagination": page_info}
+
+
 @app.get("/api/v1/workflow/list")
 async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access)):
     """List workflows with pagination and search."""
     try:
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
-        search = request.query_params.get("search", None)
-
-        if page < 1 or page_size < 1:
-            return error_response("page and page_size must be greater than 0", 400)
-        page_size = min(page_size, 100)
-
-        kwargs = {
-            "user_id": user["user_id"],
-            "page": page,
-            "page_size": page_size,
-        }
-        if search:
-            kwargs["search"] = search
-
-        workflows = await task_manager.list_workflows(**kwargs)
-
-        # Get total count for pagination
-        count_kwargs = {"user_id": user["user_id"], "count": True}
-        if search:
-            count_kwargs["search"] = search
-        total = await task_manager.list_workflows(**count_kwargs)
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-
-        # Return only metadata for list view
-        workflow_list = []
-        for wf in workflows:
-            thumsup = await task_manager.get_workflow_thumsup(wf["workflow_id"], user["user_id"])
-            workflow_list.append(
-                {
-                    "workflow_id": wf["workflow_id"],
-                    "name": wf["name"],
-                    "description": wf.get("description", ""),
-                    "create_t": wf["create_t"],
-                    "update_t": wf["update_t"],
-                    "last_run_t": wf.get("last_run_t"),
-                    "visibility": wf.get("visibility", "private"),
-                    "thumsup_count": thumsup.get("count", 0),
-                    "thumsup_liked": thumsup.get("liked", False),
-                }
-            )
-
-        return {"workflows": workflow_list, "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages}}
+        result = await _list_workflows_paginated(request, user, public=False)
+        return result
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
@@ -1897,72 +1917,21 @@ async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access
 async def api_v1_workflow_public(request: Request, user=Depends(verify_user_access)):
     """List public workflows for community view."""
     try:
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
-        search = request.query_params.get("search", None)
-
-        if page < 1 or page_size < 1:
-            return error_response("page and page_size must be greater than 0", 400)
-        page_size = min(page_size, 100)
-
-        kwargs = {
-            "page": page,
-            "page_size": page_size,
-            "visibility": "public",
-        }
-        if search:
-            kwargs["search"] = search
-
-        workflows = await task_manager.list_workflows(**kwargs)
-
-        count_kwargs = {"count": True, "visibility": "public"}
-        if search:
-            count_kwargs["search"] = search
-        total = await task_manager.list_workflows(**count_kwargs)
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-
-        workflow_list = []
-        for wf in workflows:
-            thumsup = await task_manager.get_workflow_thumsup(wf["workflow_id"], user["user_id"])
-            author_name = ""
-            try:
-                author_id = wf.get("user_id")
-                if author_id:
-                    author_info = await task_manager.query_user(author_id)
-                    author_name = author_info.get("username") if author_info else ""
-            except Exception:
-                author_name = ""
-            workflow_list.append(
-                {
-                    "workflow_id": wf["workflow_id"],
-                    "name": wf["name"],
-                    "description": wf.get("description", ""),
-                    "create_t": wf["create_t"],
-                    "update_t": wf["update_t"],
-                    "last_run_t": wf.get("last_run_t"),
-                    "visibility": wf.get("visibility", "private"),
-                    "user_id": wf.get("user_id"),
-                    "author_name": author_name,
-                    "nodes": wf.get("nodes", []),
-                    "connections": wf.get("connections", []),
-                    "thumsup_count": thumsup.get("count", 0),
-                    "thumsup_liked": thumsup.get("liked", False),
-                }
-            )
-
-        return {"workflows": workflow_list, "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages}}
+        result = await _list_workflows_paginated(request, user, public=True)
+        return result
     except Exception as e:
         traceback.print_exc()
         return error_response(str(e), 500)
 
 
 @app.get("/api/v1/workflow/{workflow_id}")
-async def api_v1_workflow_get(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_get(request: Request, user=Depends(verify_user_access)):
     """Get a workflow by ID."""
     try:
+        workflow_id = request.path_params["workflow_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
-            return error_response("Workflow not found", 404)
+            return error_response(f"Workflow {workflow_id} not found", 404)
         thumsup = await task_manager.get_workflow_thumsup(workflow_id, user["user_id"])
         workflow["thumsup_count"] = thumsup.get("count", 0)
         workflow["thumsup_liked"] = thumsup.get("liked", False)
@@ -1972,41 +1941,46 @@ async def api_v1_workflow_get(workflow_id: str, request: Request, user=Depends(v
         return error_response(str(e), 500)
 
 
+async def _update_workflow(workflow_id, params, user):
+    updates = {}
+
+    if "name" in params:
+        updates["name"] = params["name"]
+    if "description" in params:
+        updates["description"] = params["description"]
+    if "nodes" in params:
+        updates["nodes"] = params["nodes"]
+    if "connections" in params:
+        updates["connections"] = params["connections"]
+    if "history_metadata" in params:
+        updates["history_metadata"] = params["history_metadata"]
+    if "chat_history" in params:
+        updates["chat_history"] = params["chat_history"]
+    if "extra_info" in params:
+        updates["extra_info"] = params["extra_info"]
+    if "last_run_t" in params:
+        updates["last_run_t"] = params["last_run_t"]
+    if "visibility" in params:
+        if params["visibility"] not in ["private", "public"]:
+            return error_response("visibility must be 'private' or 'public'", 400)
+        updates["visibility"] = params["visibility"]
+
+    # Check if workflow exists first
+    existing_workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
+    if not existing_workflow:
+        logger.warning(f"Workflow {workflow_id} not found for user {user['user_id']}")
+        return error_response(f"Workflow {workflow_id} not found", 404)
+    success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+    return success
+
+
 @app.put("/api/v1/workflow/{workflow_id}")
-async def api_v1_workflow_update(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_update(request: Request, user=Depends(verify_user_access)):
     """Update a workflow."""
     try:
+        workflow_id = request.path_params["workflow_id"]
         params = await request.json()
-        updates = {}
-
-        if "name" in params:
-            updates["name"] = params["name"]
-        if "description" in params:
-            updates["description"] = params["description"]
-        if "nodes" in params:
-            updates["nodes"] = params["nodes"]
-        if "connections" in params:
-            updates["connections"] = params["connections"]
-        if "history_metadata" in params:
-            updates["history_metadata"] = params["history_metadata"]
-        if "chat_history" in params:
-            updates["chat_history"] = params["chat_history"]
-        if "extra_info" in params:
-            updates["extra_info"] = params["extra_info"]
-        if "last_run_t" in params:
-            updates["last_run_t"] = params["last_run_t"]
-        if "visibility" in params:
-            if params["visibility"] not in ["private", "public"]:
-                return error_response("visibility must be 'private' or 'public'", 400)
-            updates["visibility"] = params["visibility"]
-
-        # Check if workflow exists first
-        existing_workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not existing_workflow:
-            logger.warning(f"Workflow {workflow_id} not found for user {user['user_id']}")
-            return error_response(f"Workflow {workflow_id} not found", 404)
-
-        success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+        success = await _update_workflow(workflow_id, params, user)
         if success:
             logger.info(f"Workflow {workflow_id} updated by user {user['user_id']}")
             return {"message": "Workflow updated successfully"}
@@ -2019,10 +1993,11 @@ async def api_v1_workflow_update(workflow_id: str, request: Request, user=Depend
 
 
 @app.put("/api/v1/workflow/{workflow_id}/visibility")
-async def api_v1_workflow_visibility(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_visibility(request: Request, user=Depends(verify_user_access)):
     """Update workflow visibility (private/public)."""
     try:
         params = await request.json()
+        workflow_id = request.path_params["workflow_id"]
         visibility = params.get("visibility", "")
         if visibility not in ["private", "public"]:
             return error_response("visibility must be 'private' or 'public'", 400)
@@ -2045,9 +2020,10 @@ async def api_v1_workflow_visibility(workflow_id: str, request: Request, user=De
 
 
 @app.post("/api/v1/workflow/{workflow_id}/thumsup")
-async def api_v1_workflow_thumsup(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_thumsup(request: Request, user=Depends(verify_user_access)):
     """Toggle workflow thumsup."""
     try:
+        workflow_id = request.path_params["workflow_id"]
         workflow = await task_manager.query_workflow(workflow_id, user_id=None)
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2065,9 +2041,10 @@ async def api_v1_workflow_thumsup(workflow_id: str, request: Request, user=Depen
 
 
 @app.get("/api/v1/workflow/{workflow_id}/thumsup")
-async def api_v1_workflow_thumsup_get(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_thumsup_get(request: Request, user=Depends(verify_user_access)):
     """Get workflow thumsup status."""
     try:
+        workflow_id = request.path_params["workflow_id"]
         workflow = await task_manager.query_workflow(workflow_id, user_id=None)
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2085,12 +2062,12 @@ async def api_v1_workflow_thumsup_get(workflow_id: str, request: Request, user=D
 
 
 @app.post("/api/v1/workflow/{workflow_id}/copy")
-async def api_v1_workflow_copy(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_copy(request: Request, user=Depends(verify_user_access)):
     """Copy a workflow (for preset workflows). Creates a new workflow with the same content but new workflow_id and current user_id."""
     try:
         params = await request.json()
         new_workflow_id = params.get("workflow_id")
-
+        workflow_id = request.path_params["workflow_id"]
         original_workflow = await task_manager.query_workflow(workflow_id, user_id=None)
         if not original_workflow:
             logger.warning(f"Workflow {workflow_id} not found for copying")
@@ -2380,8 +2357,9 @@ async def save_node_output_data_with_rollback(
 
 
 @app.delete("/api/v1/workflow/{workflow_id}")
-async def api_v1_workflow_delete(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_delete(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         success = await task_manager.delete_workflow(workflow_id, user["user_id"])
         if not success:
@@ -2398,8 +2376,10 @@ async def api_v1_workflow_delete(workflow_id: str, request: Request, user=Depend
 
 
 @app.delete("/api/v1/workflow/{workflow_id}/node/{node_id}")
-async def api_v1_workflow_delete_node(workflow_id: str, node_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_delete_node(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        node_id = request.path_params["node_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2414,8 +2394,11 @@ async def api_v1_workflow_delete_node(workflow_id: str, node_id: str, request: R
 
 
 @app.get("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}")
-async def api_v1_workflow_node_output(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_node_output(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        node_id = request.path_params["node_id"]
+        port_id = request.path_params["port_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2458,8 +2441,11 @@ async def api_v1_workflow_node_output(workflow_id: str, node_id: str, port_id: s
 
 
 @app.get("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/history")
-async def api_v1_workflow_node_output_history(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_node_output_history(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        node_id = request.path_params["node_id"]
+        port_id = request.path_params["port_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2481,53 +2467,12 @@ async def api_v1_workflow_node_output_history(workflow_id: str, node_id: str, po
         return error_response(str(e), 500)
 
 
-@app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/reuse")
-async def api_v1_workflow_node_output_reuse(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
-    try:
-        workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not workflow:
-            return error_response("Workflow not found", 404)
-
-        params = await request.json()
-        history_index = params.get("history_index")
-
-        if history_index is None or not isinstance(history_index, int):
-            return error_response("history_index is required and must be an integer", 400)
-
-        if "data_store" not in workflow:
-            workflow["data_store"] = {}
-        if "outputs" not in workflow["data_store"]:
-            workflow["data_store"]["outputs"] = {}
-        if node_id not in workflow["data_store"]["outputs"]:
-            return error_response("Node output not found", 404)
-
-        node_outputs = workflow["data_store"]["outputs"][node_id]
-        if port_id not in node_outputs:
-            return error_response("Port output not found", 404)
-
-        port_data = node_outputs[port_id]
-        history = port_data.get("history", [])
-
-        if history_index < 0 or history_index >= len(history):
-            return error_response(f"Invalid history_index: {history_index}. History length: {len(history)}", 400)
-
-        history_data_ref = history[history_index]
-        port_data["current"] = history_data_ref
-        success = await task_manager.update_workflow(workflow_id, {"data_store": workflow["data_store"]}, user["user_id"])
-
-        if not success:
-            return error_response("Failed to update workflow", 400)
-
-        logger.info(f"Reused history[{history_index}] for node {node_id}/{port_id} in workflow {workflow_id}")
-        return {"message": "History output reused successfully", "data": history_data_ref}
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/upload")
-async def api_v1_workflow_node_output_upload(workflow_id: str, node_id: str, port_id: str, file: UploadFile = File(...), user=Depends(verify_user_access)):
+async def api_v1_workflow_node_output_upload(request: Request, file: UploadFile = File(...), user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        node_id = request.path_params["node_id"]
+        port_id = request.path_params["port_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2553,8 +2498,10 @@ async def api_v1_workflow_node_output_upload(workflow_id: str, node_id: str, por
 
 
 @app.get("/api/v1/workflow/{workflow_id}/file/{file_id}")
-async def api_v1_workflow_file(workflow_id: str, file_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        file_id = request.path_params["file_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2594,8 +2541,11 @@ async def api_v1_workflow_file(workflow_id: str, file_id: str, request: Request,
 
 
 @app.post("/api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/save")
-async def api_v1_workflow_node_output_save(workflow_id: str, node_id: str, port_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_node_output_save(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
+        node_id = request.path_params["node_id"]
+        port_id = request.path_params["port_id"]
         workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
         if not workflow:
             return error_response("Workflow not found", 404)
@@ -2691,81 +2641,14 @@ async def api_v1_workflow_node_output_save(workflow_id: str, node_id: str, port_
         return error_response(error_msg, 500)
 
 
-@app.get("/api/v1/workflow/list")
-async def api_v1_workflow_list(request: Request, user=Depends(verify_user_access)):
-    try:
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
-        search = request.query_params.get("search", None)
-
-        if page < 1 or page_size < 1:
-            return error_response("page and page_size must be greater than 0", 400)
-        page_size = min(page_size, 100)
-
-        kwargs = {
-            "user_id": user["user_id"],
-            "page": page,
-            "page_size": page_size,
-        }
-        if search:
-            kwargs["search"] = search
-
-        workflows = await task_manager.list_workflows(**kwargs)
-
-        count_kwargs = {"user_id": user["user_id"], "count": True}
-        if search:
-            count_kwargs["search"] = search
-        total = await task_manager.list_workflows(**count_kwargs)
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-
-        workflow_list = []
-        for wf in workflows:
-            workflow_list.append(
-                {
-                    "workflow_id": wf["workflow_id"],
-                    "name": wf["name"],
-                    "description": wf.get("description", ""),
-                    "create_t": wf["create_t"],
-                    "update_t": wf["update_t"],
-                    "last_run_t": wf.get("last_run_t"),
-                }
-            )
-
-        return {"workflows": workflow_list, "pagination": {"page": page, "page_size": page_size, "total": total, "total_pages": total_pages}}
-    except Exception as e:
-        traceback.print_exc()
-        return error_response(str(e), 500)
-
-
 @app.post("/api/v1/workflow/{workflow_id}/autosave")
-async def api_v1_workflow_autosave(workflow_id: str, request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_autosave(request: Request, user=Depends(verify_user_access)):
     try:
+        workflow_id = request.path_params["workflow_id"]
         params = await request.json()
-
-        request_workflow_id = params.get("workflow_id")
-        if request_workflow_id and request_workflow_id != workflow_id:
-            logger.warning(f"Workflow ID mismatch in autosave: URL={workflow_id}, body={request_workflow_id}")
-            return error_response(f"Workflow ID mismatch: URL parameter {workflow_id} does not match request body {request_workflow_id}", 400)
-
-        updates = {}
-
-        if "name" in params:
-            updates["name"] = params["name"]
-        if "nodes" in params:
-            updates["nodes"] = params["nodes"]
-        if "connections" in params:
-            updates["connections"] = params["connections"]
-        if "visibility" in params:
-            if params["visibility"] not in ["private", "public"]:
-                return error_response("visibility must be 'private' or 'public'", 400)
-            updates["visibility"] = params["visibility"]
-
-        workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
-        if not workflow:
-            return error_response(f"Workflow {workflow_id} not found", 404)
-
-        success = await task_manager.update_workflow(workflow_id, updates, user["user_id"])
+        success = await _update_workflow(workflow_id, params, user)
         if success:
+            logger.info(f"Workflow {workflow_id} autosaved")
             workflow = await task_manager.query_workflow(workflow_id, user["user_id"])
             return {"message": "Workflow autosaved", "workflow_id": workflow_id, "update_t": workflow["update_t"]}
         else:
