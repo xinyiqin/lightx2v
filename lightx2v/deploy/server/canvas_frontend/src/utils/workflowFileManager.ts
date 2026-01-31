@@ -1,9 +1,83 @@
 /**
  * 工作流文件管理工具
  * 使用新的统一接口（基于 data_store.outputs）
+ *
+ * 仅前端（standalone）时 IndexedDB 用法：
+ * - 写入：uploadNodeInputFile(文件上传) 或 persistDataUrlToLocal(data: URL) → 存 Blob，得到 local://key
+ * - 读取：getLocalFileDataUrl(local://key) → 得到 data URL，用于 <img>/预览/执行入参
+ * - 列表缩略图：WorkflowCard 里 previewImage 为 local:// 时用 getLocalFileDataUrl 异步解析后显示
  */
 
 import { apiRequest } from './apiClient';
+import { isStandalone } from '../config/runtimeMode';
+
+const LOCAL_FILES_DB = 'canvas_local_files';
+const LOCAL_FILES_STORE = 'files';
+
+function openLocalDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(LOCAL_FILES_DB, 1);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(LOCAL_FILES_STORE)) {
+        db.createObjectStore(LOCAL_FILES_STORE);
+      }
+    };
+  });
+}
+
+/**
+ * 纯前端模式：从 IndexedDB 读取 local://key 对应的文件，返回 data URL
+ */
+export async function getLocalFileDataUrl(key: string): Promise<string | null> {
+  if (!key) return null;
+  const rawKey = key.startsWith('local://') ? key.slice(8) : key;
+  try {
+    const db = await openLocalDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_FILES_STORE, 'readonly');
+      const store = tx.objectStore(LOCAL_FILES_STORE);
+      const req = store.get(rawKey);
+      req.onerror = () => { db.close(); reject(req.error); };
+      req.onsuccess = () => {
+        db.close();
+        const blob = req.result as Blob | undefined;
+        if (!blob) {
+          resolve(null);
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      };
+    });
+  } catch (e) {
+    console.warn('[WorkflowFileManager] getLocalFileDataUrl failed:', rawKey, e);
+    return null;
+  }
+}
+
+/**
+ * 纯前端模式：将 Blob 存入 IndexedDB，返回 local://key
+ */
+export async function saveLocalFile(key: string, blob: Blob): Promise<void> {
+  try {
+    const db = await openLocalDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_FILES_STORE, 'readwrite');
+      const store = tx.objectStore(LOCAL_FILES_STORE);
+      store.put(blob, key);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+  } catch (e) {
+    console.error('[WorkflowFileManager] saveLocalFile failed:', key, e);
+    throw e;
+  }
+}
 
 /**
  * 从 base64 data URL 提取 MIME 类型和扩展名
@@ -49,6 +123,24 @@ function dataURLToBlob(dataUrl: string): Blob {
 }
 
 /**
+ * 仅前端模式：将 data: URL 存入 IndexedDB，返回 local://key，供列表缩略图等使用。
+ * 有后端时直接返回原 dataUrl（不写入 IndexedDB）。
+ */
+export async function persistDataUrlToLocal(dataUrl: string, keyPrefix: string): Promise<string> {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return dataUrl;
+  if (!isStandalone()) return dataUrl;
+  try {
+    const blob = dataURLToBlob(dataUrl);
+    const key = `${keyPrefix}_${crypto.randomUUID()}`;
+    await saveLocalFile(key, blob);
+    return `local://${key}`;
+  } catch (e) {
+    console.warn('[WorkflowFileManager] persistDataUrlToLocal failed:', e);
+    return dataUrl;
+  }
+}
+
+/**
  * 保存节点输出数据（统一接口，替代旧的 input/intermediate/output 区分）
  */
 export async function saveNodeOutputData(
@@ -58,6 +150,7 @@ export async function saveNodeOutputData(
   data: string | Blob | object,
   runId?: string
 ): Promise<{ file_id?: string; data_id: string; file_url?: string; url?: string } | null> {
+  if (isStandalone()) return null;
   try {
     let outputData: string | object;
     let fileInfo: any = null;
@@ -161,6 +254,7 @@ export async function getNodeOutputData(
   nodeId: string,
   portId: string
 ): Promise<any | null> {
+  if (isStandalone()) return null;
   try {
     const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output/${portId}`);
 
@@ -311,15 +405,27 @@ export async function reuseNodeOutputHistory(
 
 /**
  * 直接上传文件到工作流节点输出（用于输入节点）
- * 上传时立即保存到服务器，返回 file_id 和 file_url
+ * 有后端时保存到服务器；纯前端时保存到 IndexedDB，返回 local://key
  */
 export async function uploadNodeInputFile(
   workflowId: string,
   nodeId: string,
   portId: string,
-  file: File
+  file: File,
+  index: number = 0
 ): Promise<{ file_id: string; file_path: string; file_url: string } | null> {
   try {
+    if (isStandalone()) {
+      const key = `localFile_${workflowId}_${nodeId}_${portId}_${index}_${crypto.randomUUID()}`;
+      await saveLocalFile(key, file);
+      const localRef = `local://${key}`;
+      return {
+        file_id: key,
+        file_path: localRef,
+        file_url: localRef
+      };
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -366,12 +472,16 @@ export async function uploadNodeInputFile(
 
 /**
  * 根据 file_id 获取工作流文件（新格式）
+ * 纯前端模式：fileId 为 local://key 时从 IndexedDB 解析
  */
 export async function getWorkflowFileByFileId(
   workflowId: string,
   fileId: string
 ): Promise<string | null> {
   try {
+    if (fileId.startsWith('local://')) {
+      return getLocalFileDataUrl(fileId);
+    }
     // Use apiRequest to ensure Authorization header is set
     const url = `/api/v1/workflow/${workflowId}/file/${fileId}`;
 

@@ -4,6 +4,7 @@ import {
   Trash2,
   CheckCircle2,
   AlertCircle,
+  TriangleAlert,
   PlayCircle as PlayIcon,
   FastForward,
   X,
@@ -13,9 +14,11 @@ import {
   Video as VideoIcon,
   Maximize2,
   Play,
+  Square,
   ChevronDown,
   CheckCircle2 as CheckCircle,
-  Globe
+  Globe,
+  Bot
 } from 'lucide-react';
 import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition } from '../../../types';
 import { TOOLS } from '../../../constants';
@@ -23,8 +26,10 @@ import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
 import { formatTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
-import { getAssetPath } from '../../utils/assetPath';
-import { uploadNodeInputFile } from '../../utils/workflowFileManager';
+import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
+import { uploadNodeInputFile, getLocalFileDataUrl } from '../../utils/workflowFileManager';
+import { isStandalone } from '../../config/runtimeMode';
+import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { TextNodePreview } from '../previews/TextNodePreview';
 import { ImageNodePreview } from '../previews/ImageNodePreview';
 import { AudioNodePreview } from '../previews/AudioNodePreview';
@@ -56,6 +61,8 @@ interface NodeProps {
   onDeleteNode: (nodeId: string) => void;
   onReplaceNode: (nodeId: string, newToolId: string) => void;
   onRunWorkflow: (nodeId?: string, runThisOnly?: boolean) => void;
+  onCancelNodeRun?: (nodeId: string) => void;
+  pendingRunNodeIds?: string[];
   onSetReplaceMenu: (nodeId: string | null) => void;
   onSetOutputQuickAdd: (value: { nodeId: string; portId: string } | null) => void;
   onSetModelSelect: (nodeId: string | null) => void;
@@ -83,6 +90,8 @@ interface NodeProps {
   getCompatibleToolsForOutput: (outputType: DataType) => ToolDefinition[];
   quickAddInput: (node: WorkflowNode, port: Port) => void;
   quickAddOutput: (node: WorkflowNode, port: Port, toolId: string) => void;
+  onAddNodeToChat?: (nodeId: string, name: string) => void;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
   connecting: {
     nodeId: string;
     portId: string;
@@ -119,6 +128,9 @@ export const Node: React.FC<NodeProps> = ({
   onDeleteNode,
   onReplaceNode,
   onRunWorkflow,
+  onCancelNodeRun = (_nodeId?: string) => {},
+  pendingRunNodeIds = [],
+  resolveLightX2VResultRef,
   onSetReplaceMenu,
   onSetOutputQuickAdd,
   onSetModelSelect,
@@ -133,6 +145,7 @@ export const Node: React.FC<NodeProps> = ({
   getCompatibleToolsForOutput,
   quickAddInput,
   quickAddOutput,
+  onAddNodeToChat,
   connecting,
   onNodeHeightChange
 }) => {
@@ -158,16 +171,67 @@ export const Node: React.FC<NodeProps> = ({
       }
     }
   }, [node.id, onNodeHeightChange, node.data, outputs.length, activeOutputs[node.id], node.status]);
-  const nodeResultRaw = sourceOutputs[node.id] || (tool.category === 'Input' ? node.data.value : null);
-  // Extract actual value from reference objects (for history outputs or saved outputs)
-  const nodeResult = nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw) && nodeResultRaw.type === 'url'
-    ? nodeResultRaw.data  // Extract URL from { type: 'url', data: '...' }
-    : nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw) && nodeResultRaw.type === 'text'
-    ? nodeResultRaw.data  // Extract text from { type: 'text', data: '...' }
-    : nodeResultRaw;  // Use as-is for strings, arrays, or other types
+  // Prefer sourceOutputs (activeOutputs / run), then node.outputValue so saved refs show after load/refresh
+  const nodeResultRaw = sourceOutputs[node.id] ?? node.outputValue ?? (tool.category === 'Input' ? node.data.value : null);
+  // Extract actual value from reference/optimized objects (for history or 纯前端 run.outputs)
+  const nodeResult =
+    nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw)
+      ? nodeResultRaw.type === 'url' && typeof nodeResultRaw.data === 'string'
+        ? nodeResultRaw.data
+        : nodeResultRaw.type === 'text'
+        ? nodeResultRaw.data
+        : nodeResultRaw.type === 'data_url' && typeof nodeResultRaw._full_data === 'string'
+        ? nodeResultRaw._full_data
+        : nodeResultRaw.type === 'json' && nodeResultRaw.data != null
+        ? nodeResultRaw.data
+        : nodeResultRaw
+      : nodeResultRaw;
   const firstOutputType = outputs[0]?.type || DataType.TEXT;
+  const previewValue = Array.isArray(nodeResult) ? (nodeResult.length > 0 ? nodeResult[0] : null) : (nodeResult ?? null);
+  const isPreviewRef = previewValue != null && isLightX2VResultRef(previewValue);
+  const previewRefObj = isPreviewRef && typeof previewValue === 'object' ? (previewValue as LightX2VResultRef) : null;
+  const [resolvedPreviewUrl, setResolvedPreviewUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!previewRefObj || !resolveLightX2VResultRef) return;
+    let cancelled = false;
+    resolveLightX2VResultRef(previewRefObj).then((url) => {
+      if (!cancelled) setResolvedPreviewUrl(url);
+    }).catch(() => {
+      if (!cancelled) setResolvedPreviewUrl(null);
+    });
+    return () => { cancelled = true; setResolvedPreviewUrl(null); };
+  }, [previewRefObj?.task_id, previewRefObj?.output_name, previewRefObj?.is_cloud, resolveLightX2VResultRef]);
+  const refPreviewUrl = isPreviewRef && previewRefObj
+    ? (resolveLightX2VResultRef ? resolvedPreviewUrl : getResultRefPreviewUrl(previewRefObj))
+    : null;
+  const [resolvedLocalUrls, setResolvedLocalUrls] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    const values = Array.isArray(node.data.value) ? node.data.value : (node.data.value ? [node.data.value] : []);
+    const localRefs = values.filter((v: unknown) => typeof v === 'string' && (v as string).startsWith('local://'));
+    if (localRefs.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      localRefs.map(async (ref: string) => {
+        const dataUrl = await getLocalFileDataUrl(ref);
+        return [ref, dataUrl] as const;
+      })
+    ).then((pairs) => {
+      if (cancelled) return;
+      setResolvedLocalUrls((prev) => {
+        const next = { ...prev };
+        pairs.forEach(([ref, url]) => {
+          if (url) next[ref] = url;
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.id, node.data.value]);
   const resolveMediaSrc = (value?: string) => {
     if (!value) return '';
+    if (value.startsWith('local://')) return resolvedLocalUrls[value] || '';
     if (value.startsWith('data:') || value.startsWith('http') || value.startsWith('/api/')) return value;
     return getAssetPath(value);
   };
@@ -288,6 +352,7 @@ export const Node: React.FC<NodeProps> = ({
   const outputPortId = outputs[0]?.id;
   const isWorkflowReady = (id?: string) => {
     if (!id) return false;
+    if (isStandalone()) return id.length > 0;
     return id.startsWith('workflow-') ||
       id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   };
@@ -466,6 +531,22 @@ export const Node: React.FC<NodeProps> = ({
     }
   };
 
+  const modelNotInList =
+    Array.isArray(tool.models) &&
+    tool.models.length > 0 &&
+    node.data.model != null &&
+    String(node.data.model).trim() !== '' &&
+    !tool.models.some((m) => m.id === node.data.model);
+
+  const modelsListEmpty = Array.isArray(tool.models) && tool.models.length === 0;
+
+  // 当前模型不在支持列表中时，自动选为列表第一项
+  React.useEffect(() => {
+    if (!modelNotInList || !tool.models?.length) return;
+    const firstId = tool.models[0]?.id;
+    if (firstId != null) onUpdateNodeData(node.id, 'model', firstId);
+  }, [modelNotInList, tool.models, node.id, onUpdateNodeData]);
+
   return (
     <div
       ref={nodeRef}
@@ -481,6 +562,16 @@ export const Node: React.FC<NodeProps> = ({
       onClick={handleNodeClick}
       onMouseDown={handleNodeMouseDown}
     >
+      {/* 模型列表为空时显示警告；模型不在列表中时已由 effect 自动切到第一项 */}
+      {modelsListEmpty && (
+        <div
+          className="absolute bottom-full left-0 right-0 mb-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-200 text-[9px] font-bold z-20"
+          title={t('model_list_empty')}
+        >
+          <TriangleAlert size={10} className="shrink-0" />
+          <span className="truncate">{t('model_list_empty')}</span>
+        </div>
+      )}
       {/* Replace and Delete Menu */}
       {isSelected && (
         <div className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-2 z-20 replace-menu-container">
@@ -533,6 +624,20 @@ export const Node: React.FC<NodeProps> = ({
           >
             <Trash2 size={16} />
           </button>
+          {onAddNodeToChat && (
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const nodeName = lang === 'zh' ? tool.name_zh : tool.name;
+                onAddNodeToChat(node.id, nodeName);
+              }}
+              className="p-2 bg-[#90dce1] text-slate-900 rounded-full shadow-lg hover:bg-[#7accd0] transition-all active:scale-90"
+              title={lang === 'zh' ? '加入对话' : 'Add to chat'}
+            >
+              <Bot size={16} />
+            </button>
+          )}
         </div>
       )}
 
@@ -584,26 +689,41 @@ export const Node: React.FC<NodeProps> = ({
 
           {!isInputNode && (
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                title={t('run_this_only')}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRunWorkflow(node.id, true);
-                }}
-                className="p-1 text-slate-400 hover:text-[#90dce1] transition-colors"
-              >
-                <PlayIcon size={12} />
-              </button>
-              <button
-                title={t('run_from_here')}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRunWorkflow(node.id, false);
-                }}
-                className="p-1 text-slate-400 hover:text-emerald-400 transition-colors"
-              >
-                <FastForward size={12} />
-              </button>
+              {node.status === NodeStatus.RUNNING || (pendingRunNodeIds && pendingRunNodeIds.includes(node.id)) ? (
+                <button
+                  title={lang === 'zh' ? '取消运行' : 'Cancel run'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancelNodeRun(node.id);
+                  }}
+                  className="p-1 text-slate-400 hover:text-red-400 transition-colors"
+                >
+                  <Square size={12} />
+                </button>
+              ) : (
+                <>
+                  <button
+                    title={t('run_this_only')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRunWorkflow(node.id, true);
+                    }}
+                    className="p-1 text-slate-400 hover:text-[#90dce1] transition-colors"
+                  >
+                    <PlayIcon size={12} />
+                  </button>
+                  <button
+                    title={t('run_from_here')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRunWorkflow(node.id, false);
+                    }}
+                    className="p-1 text-slate-400 hover:text-emerald-400 transition-colors"
+                  >
+                    <FastForward size={12} />
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -621,6 +741,8 @@ export const Node: React.FC<NodeProps> = ({
               <TextNodePreview
                 value={node.data.value || ''}
                 onChange={(value) => onUpdateNodeData(node.id, 'value', value)}
+                placeholder={lang === 'zh' ? '在此输入文本...' : 'Enter input text here...'}
+                charsLabel={lang === 'zh' ? '字符' : 'Characters'}
               />
             )}
             {node.toolId === 'image-input' && (
@@ -908,7 +1030,7 @@ export const Node: React.FC<NodeProps> = ({
                   ))}
                 </div>
               )}
-              <span className="truncate">{p.label}</span>
+              <span className="truncate">{lang === 'zh' && p.label_zh ? p.label_zh : p.label}</span>
               <div
                 className="port w-3 h-3 rounded-full bg-slate-800 border-2 border-slate-950 absolute -right-[24px] cursor-crosshair hover:bg-[#90dce1] transition-colors"
                 onMouseDown={handlePortMouseDown(p, 'out')}
@@ -930,25 +1052,36 @@ export const Node: React.FC<NodeProps> = ({
           className="absolute -right-36 top-0 max-w-32 max-h-32 bg-slate-800/95 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden cursor-pointer hover:scale-110 hover:border-[#90dce1] transition-all z-30 group/thumb flex items-center justify-center"
         >
           {firstOutputType === DataType.IMAGE ? (
-            <img
-              src={getAssetPath(
-                Array.isArray(nodeResult)
-                  ? (nodeResult.length > 0 ? nodeResult[0] : '')
-                  : (nodeResult || '')
-              )}
-              className="max-w-full max-h-full w-auto h-auto object-contain"
-              alt="Preview"
-              onError={(e) => {
-                // 如果图片加载失败，尝试使用原始值（可能是 base64）
-                const target = e.currentTarget;
-                const originalSrc = Array.isArray(nodeResult)
-                  ? (nodeResult.length > 0 ? nodeResult[0] : '')
-                  : (nodeResult || '');
-                if (target.src !== originalSrc) {
-                  target.src = originalSrc;
-                }
-              }}
-            />
+            isPreviewRef ? (
+              refPreviewUrl ? (
+                <img
+                  src={refPreviewUrl}
+                  className="max-w-full max-h-full w-auto h-auto object-contain"
+                  alt="Preview"
+                />
+              ) : (
+                <div className="text-[9px] text-slate-500 uppercase">Loading...</div>
+              )
+            ) : (
+              <img
+                src={getAssetPath(
+                  Array.isArray(nodeResult)
+                    ? (nodeResult.length > 0 ? nodeResult[0] : '')
+                    : (nodeResult || '')
+                )}
+                className="max-w-full max-h-full w-auto h-auto object-contain"
+                alt="Preview"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  const originalSrc = Array.isArray(nodeResult)
+                    ? (nodeResult.length > 0 ? nodeResult[0] : '')
+                    : (nodeResult || '');
+                  if (target.src !== originalSrc) {
+                    target.src = originalSrc;
+                  }
+                }}
+              />
+            )
           ) : firstOutputType === DataType.TEXT ? (
             <div className="p-3 text-[8px] text-slate-300 overflow-hidden leading-snug font-medium selection:bg-transparent w-full h-full">
               {typeof nodeResult === 'object'
@@ -965,31 +1098,61 @@ export const Node: React.FC<NodeProps> = ({
             </div>
           ) : (
             <div className="w-full h-full relative bg-black group/video min-w-32 min-h-24 flex items-center justify-center">
-              <video
-                src={getAssetPath(
-                  Array.isArray(nodeResult)
-                    ? (nodeResult.length > 0 ? nodeResult[0] : '')
-                    : (nodeResult || '')
-                )}
-                className="max-w-full max-h-full w-auto h-auto object-contain opacity-60 group-hover/thumb:opacity-100 transition-opacity"
-                muted
-                preload="none"
-                loading="lazy"
-                onMouseOver={(e) => {
-                  const video = e.currentTarget;
-                  if (video.readyState < 2) {
-                    video.load();
-                  }
-                  video.play().catch(() => {});
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.pause();
-                  e.currentTarget.currentTime = 0;
-                }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center text-white pointer-events-none group-hover/thumb:scale-125 transition-transform">
-                <Play size={24} className="drop-shadow-lg" fill="currentColor" />
-              </div>
+              {isPreviewRef ? (
+                refPreviewUrl ? (
+                  <>
+                    <video
+                      src={refPreviewUrl}
+                      className="max-w-full max-h-full w-auto h-auto object-contain opacity-60 group-hover/thumb:opacity-100 transition-opacity"
+                      muted
+                      preload="none"
+                      loading="lazy"
+                      onMouseOver={(e) => {
+                        const video = e.currentTarget;
+                        if (video.readyState < 2) video.load();
+                        video.play().catch(() => {});
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.pause();
+                        e.currentTarget.currentTime = 0;
+                      }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center text-white pointer-events-none group-hover/thumb:scale-125 transition-transform">
+                      <Play size={24} className="drop-shadow-lg" fill="currentColor" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[9px] text-slate-500 uppercase">Loading...</div>
+                )
+              ) : (
+                <>
+                  <video
+                    src={getAssetPath(
+                      Array.isArray(nodeResult)
+                        ? (nodeResult.length > 0 ? nodeResult[0] : '')
+                        : (nodeResult || '')
+                    )}
+                    className="max-w-full max-h-full w-auto h-auto object-contain opacity-60 group-hover/thumb:opacity-100 transition-opacity"
+                    muted
+                    preload="none"
+                    loading="lazy"
+                    onMouseOver={(e) => {
+                      const video = e.currentTarget;
+                      if (video.readyState < 2) {
+                        video.load();
+                      }
+                      video.play().catch(() => {});
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.pause();
+                      e.currentTarget.currentTime = 0;
+                    }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center text-white pointer-events-none group-hover/thumb:scale-125 transition-transform">
+                    <Play size={24} className="drop-shadow-lg" fill="currentColor" />
+                  </div>
+                </>
+              )}
             </div>
           )}
           <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-slate-950/90 to-transparent flex items-center px-2.5">

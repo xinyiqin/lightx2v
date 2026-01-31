@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layers, Trash2, Calendar, Sparkle, Lock, Globe, Heart, Users, Boxes } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
+import { getAssetPath } from '../../utils/assetPath';
+import { getLocalFileDataUrl } from '../../utils/workflowFileManager';
 
 interface WorkflowCardProps {
   workflow: WorkflowState;
@@ -30,13 +32,42 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
 
   // Extract preview content from workflow (image first, then text)
   const textInputNode = workflow.nodes.find(n => n.toolId === 'text-input' && n.data?.value);
-  const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && n.data?.value);
+  const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && (n.data?.value || (Array.isArray(n.data?.imageEdits) && n.data.imageEdits.length > 0)));
   const imageValue = imageInputNode?.data?.value;
+  const imageEdits = Array.isArray(imageInputNode?.data?.imageEdits) ? imageInputNode.data.imageEdits : [];
 
   const previewText = typeof textInputNode?.data?.value === 'string' ? textInputNode?.data?.value : null;
-  const previewImage = Array.isArray(imageValue)
-    ? imageValue[0]
-    : (typeof imageValue === 'string' ? imageValue : null);
+  // 优先从 value 取第一张图；若无则从 imageEdits 取第一张的 cropped 或 original
+  let previewImage: string | null = null;
+  if (Array.isArray(imageValue) && imageValue.length > 0) {
+    previewImage = typeof imageValue[0] === 'string' ? imageValue[0] : null;
+  } else if (typeof imageValue === 'string') {
+    previewImage = imageValue;
+  }
+  if (!previewImage && imageEdits.length > 0) {
+    const first = imageEdits[0] as { cropped?: string; original?: string; source?: string };
+    previewImage = (first.cropped || first.original || first.source) ?? null;
+  }
+
+  // Resolve local:// (IndexedDB) to data URL for thumbnail
+  const [resolvedLocalUrl, setResolvedLocalUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!previewImage || !previewImage.startsWith('local://')) {
+      setResolvedLocalUrl(null);
+      return;
+    }
+    let cancelled = false;
+    getLocalFileDataUrl(previewImage).then((url) => {
+      if (!cancelled && url) setResolvedLocalUrl(url);
+      else if (!cancelled) setResolvedLocalUrl(null);
+    });
+    return () => { cancelled = true; };
+  }, [previewImage]);
+
+  // 仅前端时 image-input 常存为 data:image；local:// 需异步解析为 data URL
+  const displayImageUrl =
+    previewImage &&
+    (previewImage.startsWith('local://') ? resolvedLocalUrl : previewImage);
 
   const cardMode = isPreset ? 'PRESET' : mode;
   const visibility = workflow.visibility || (cardMode !== 'MY' ? 'public' : 'private');
@@ -67,21 +98,27 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
       )}
 
       <div className="relative flex-1 bg-slate-950/50 flex items-center justify-center overflow-hidden">
-        {previewImage ? (
-          <img
-            src={
-              previewImage.startsWith('/')
-                ? (previewImage.startsWith('/assets/') && !previewImage.startsWith('/canvas/')
-                    ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${previewImage}`
-                    : previewImage)
-                : (previewImage.startsWith('data:')
-                    ? previewImage
-                    : `data:image/png;base64,${previewImage}`)
-            }
-            alt="Preview"
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
+        {displayImageUrl ? (
+          (() => {
+            // data:image（仅前端）、local:// 解析结果、http(s)/blob 原样；路径用 getAssetPath；裸 base64 加 data: 前缀
+            const raw = previewImage!.startsWith('local://') ? displayImageUrl : previewImage!;
+            const src =
+              typeof raw === 'string' && (raw.startsWith('data:') || raw.startsWith('http') || raw.startsWith('blob:'))
+                ? raw
+                : typeof raw === 'string' && (raw.startsWith('/') || raw.includes('/'))
+                  ? getAssetPath(raw)
+                  : typeof raw === 'string' && /^[A-Za-z0-9+/=]+$/.test(raw)
+                    ? `data:image/png;base64,${raw}`
+                    : getAssetPath(raw);
+            return (
+              <img
+                src={src}
+                alt="Preview"
+                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            );
+          })()
         ) : previewText ? (
           <div className="px-10 py-8 text-[13px] text-slate-900 italic line-clamp-[10] leading-relaxed bg-white w-full h-full border-b border-slate-800/50 flex items-center justify-center text-center">
             {previewText}

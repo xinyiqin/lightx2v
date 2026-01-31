@@ -14,7 +14,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         id: 'node-scene-text',
         toolId: 'text-input',
         x: 100,
-        y: 200,
+        y: 120,
         data: {
           value: '宫崎骏风格的治愈场景：宁静的乡村小屋，远处是连绵的绿色山丘，天空中有几朵白云，温暖的阳光洒在大地上，远处有风车在缓缓转动。整体色调柔和，充满自然气息。'
         },
@@ -25,7 +25,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         id: 'node-scene-image',
         toolId: 'text-to-image',
         x: 500,
-        y: 200,
+        y: 120,
         data: {
           value: '',
           model: 'Qwen-Image-2512',
@@ -38,7 +38,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         id: 'node-motion-text',
         toolId: 'text-input',
         x: 500,
-        y: 400,
+        y: 320,
         data: {
           value: '镜头缓慢向前推进，云朵在天空中缓缓飘动，风车叶片缓慢旋转，阳光透过云层洒下光影变化，整体氛围宁静治愈，多个镜头自然过渡'
         },
@@ -49,7 +49,7 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         id: 'node-video',
         toolId: 'video-gen-image',
         x: 900,
-        y: 300,
+        y: 220,
         data: {
           value: '',
           model: 'Wan2.2_I2V_A14B_distilled'
@@ -91,6 +91,237 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
     history: [],
     showIntermediateResults: true
   },
+  // 电商产品精修 + 首尾帧视频：产品图 → Doubao 生成精修/运镜提示 → 图生图 → 首尾帧视频（首帧=原图，尾帧=精修图）
+  {
+    id: 'preset-ecommerce-product-video',
+    name: '电商产品精修首尾帧视频',
+    updatedAt: Date.now(),
+    isDirty: false,
+    isRunning: false,
+    env: {
+      lightx2v_url: (process.env.LIGHTX2V_URL || 'https://x2v.light-ai.top').trim(),
+      lightx2v_token: (process.env.LIGHTX2V_TOKEN || '').trim()
+    },
+    globalInputs: {},
+    history: [],
+    showIntermediateResults: true,
+    connections: [
+      { id: 'ec-c1', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-llm', targetPortId: 'in-image' },
+      { id: 'ec-c2', sourceNodeId: 'ec-node-refinement-hint', sourcePortId: 'out-text', targetNodeId: 'ec-node-llm', targetPortId: 'in-text' },
+      { id: 'ec-c3', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i', targetPortId: 'in-image' },
+      { id: 'ec-c4', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_prompt', targetNodeId: 'ec-node-i2i', targetPortId: 'in-text' },
+      { id: 'ec-c5', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-video', targetPortId: 'in-image-start' },
+      { id: 'ec-c6', sourceNodeId: 'ec-node-i2i', sourcePortId: 'out-image', targetNodeId: 'ec-node-video', targetPortId: 'in-image-end' },
+      { id: 'ec-c7', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_prompt', targetNodeId: 'ec-node-video', targetPortId: 'in-text' }
+    ],
+    nodes: [
+      {
+        id: 'ec-node-product',
+        toolId: 'image-input',
+        x: 50,
+        y: 80,
+        status: NodeStatus.IDLE,
+        data: { value: ['/assets/shoe.jpg'] }
+      },
+      {
+        id: 'ec-node-refinement-hint',
+        toolId: 'text-input',
+        x: 50,
+        y: 260,
+        status: NodeStatus.IDLE,
+        data: {
+          value: '产品置于纯净纯白背景、正视图/平视、3D 渲染感、精准还原颜色与材质（玻璃通透/塑料哑光/金属光泽等）、清除指纹灰尘瑕疵、光影立体、标签文字清晰、光线柔和均匀'
+        }
+      },
+      {
+        id: 'ec-node-llm',
+        toolId: 'text-generation',
+        x: 280,
+        y: 160,
+        status: NodeStatus.IDLE,
+        data: {
+          model: 'doubao-seed-1-6-vision-250815',
+          mode: 'custom',
+          customInstruction: `你是一位电商主图与视频脚本专家。用户会提供一张产品图（in-image）和一段精修要求（in-text，可修改），请结合两者生成两个字段，语言与用户输入一致（默认中文）。
+
+refinement_prompt（精修提示词）：
+- 以用户 in-text 的精修要求为基础，可直接采用或稍作润色/补全，得到一段可直接用作图生图 prompt 的文本
+- 只输出该段文本，不要加字段名或前缀
+
+motion_prompt（运镜提示词）：
+- 用于首尾帧视频（从原图过渡到精修图）的运镜/过渡描述
+- 根据产品图与精修方向，简短描述从原图到精修图的画面变化（如光线与质感逐渐增强、画面保持稳定等），适合作为图生视频的 motion 提示
+- 只输出一段简短描述，不要加字段名或前缀`,
+          customOutputs: [
+            { id: 'refinement_prompt', label: '精修提示词', description: '用于图生图的电商主图精修提示' },
+            { id: 'motion_prompt', label: '运镜提示词', description: '用于首尾帧视频的过渡/运镜描述' }
+          ]
+        }
+      },
+      {
+        id: 'ec-node-i2i',
+        toolId: 'image-to-image',
+        x: 560,
+        y: 180,
+        status: NodeStatus.IDLE,
+        data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-video',
+        toolId: 'video-gen-dual-frame',
+        x: 900,
+        y: 220,
+        status: NodeStatus.IDLE,
+        data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '3:4' }
+      }
+    ]
+  },
+  // AI动画12分镜：角色图+故事 → 规划12镜 → 链式图生图（人物一致）→ 大部分图生视频，场景切换处首尾帧（强调转场运镜）
+  {
+    id: 'preset-ai-animation-12',
+    name: 'AI动画12分镜日常',
+    updatedAt: Date.now(),
+    isDirty: false,
+    isRunning: false,
+    env: { lightx2v_url: '', lightx2v_token: '' },
+    globalInputs: {},
+    history: [],
+    showIntermediateResults: true,
+    connections: [
+      { id: 'anim-c1', sourceNodeId: 'anim-char', sourcePortId: 'out-image', targetNodeId: 'anim-planner', targetPortId: 'in-image' },
+      { id: 'anim-c2', sourceNodeId: 'anim-story', sourcePortId: 'out-text', targetNodeId: 'anim-planner', targetPortId: 'in-text' },
+      { id: 'anim-c3', sourceNodeId: 'anim-char', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-1', targetPortId: 'in-image' },
+      { id: 'anim-c4', sourceNodeId: 'anim-planner', sourcePortId: 'shot1_image_prompt', targetNodeId: 'anim-i2i-1', targetPortId: 'in-text' },
+      { id: 'anim-c5', sourceNodeId: 'anim-i2i-1', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-2', targetPortId: 'in-image' },
+      { id: 'anim-c6', sourceNodeId: 'anim-planner', sourcePortId: 'shot2_image_prompt', targetNodeId: 'anim-i2i-2', targetPortId: 'in-text' },
+      { id: 'anim-c7', sourceNodeId: 'anim-i2i-2', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-3', targetPortId: 'in-image' },
+      { id: 'anim-c8', sourceNodeId: 'anim-planner', sourcePortId: 'shot3_image_prompt', targetNodeId: 'anim-i2i-3', targetPortId: 'in-text' },
+      { id: 'anim-c9', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-4', targetPortId: 'in-image' },
+      { id: 'anim-c10', sourceNodeId: 'anim-planner', sourcePortId: 'shot4_image_prompt', targetNodeId: 'anim-i2i-4', targetPortId: 'in-text' },
+      { id: 'anim-c11', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-5', targetPortId: 'in-image' },
+      { id: 'anim-c12', sourceNodeId: 'anim-planner', sourcePortId: 'shot5_image_prompt', targetNodeId: 'anim-i2i-5', targetPortId: 'in-text' },
+      { id: 'anim-c13', sourceNodeId: 'anim-i2i-5', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-6', targetPortId: 'in-image' },
+      { id: 'anim-c14', sourceNodeId: 'anim-planner', sourcePortId: 'shot6_image_prompt', targetNodeId: 'anim-i2i-6', targetPortId: 'in-text' },
+      { id: 'anim-c15', sourceNodeId: 'anim-i2i-6', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-7', targetPortId: 'in-image' },
+      { id: 'anim-c16', sourceNodeId: 'anim-planner', sourcePortId: 'shot7_image_prompt', targetNodeId: 'anim-i2i-7', targetPortId: 'in-text' },
+      { id: 'anim-c17', sourceNodeId: 'anim-i2i-7', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-8', targetPortId: 'in-image' },
+      { id: 'anim-c18', sourceNodeId: 'anim-planner', sourcePortId: 'shot8_image_prompt', targetNodeId: 'anim-i2i-8', targetPortId: 'in-text' },
+      { id: 'anim-c19', sourceNodeId: 'anim-i2i-8', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-9', targetPortId: 'in-image' },
+      { id: 'anim-c20', sourceNodeId: 'anim-planner', sourcePortId: 'shot9_image_prompt', targetNodeId: 'anim-i2i-9', targetPortId: 'in-text' },
+      { id: 'anim-c21', sourceNodeId: 'anim-i2i-9', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-10', targetPortId: 'in-image' },
+      { id: 'anim-c22', sourceNodeId: 'anim-planner', sourcePortId: 'shot10_image_prompt', targetNodeId: 'anim-i2i-10', targetPortId: 'in-text' },
+      { id: 'anim-c23', sourceNodeId: 'anim-i2i-10', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-11', targetPortId: 'in-image' },
+      { id: 'anim-c24', sourceNodeId: 'anim-planner', sourcePortId: 'shot11_image_prompt', targetNodeId: 'anim-i2i-11', targetPortId: 'in-text' },
+      { id: 'anim-c25', sourceNodeId: 'anim-i2i-11', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-12', targetPortId: 'in-image' },
+      { id: 'anim-c26', sourceNodeId: 'anim-planner', sourcePortId: 'shot12_image_prompt', targetNodeId: 'anim-i2i-12', targetPortId: 'in-text' },
+      { id: 'anim-c27', sourceNodeId: 'anim-i2i-1', sourcePortId: 'out-image', targetNodeId: 'anim-v-1', targetPortId: 'in-image' },
+      { id: 'anim-c28', sourceNodeId: 'anim-planner', sourcePortId: 'shot1_video_prompt', targetNodeId: 'anim-v-1', targetPortId: 'in-text' },
+      { id: 'anim-c29', sourceNodeId: 'anim-i2i-2', sourcePortId: 'out-image', targetNodeId: 'anim-v-2', targetPortId: 'in-image' },
+      { id: 'anim-c30', sourceNodeId: 'anim-planner', sourcePortId: 'shot2_video_prompt', targetNodeId: 'anim-v-2', targetPortId: 'in-text' },
+      { id: 'anim-c31', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-v-3', targetPortId: 'in-image' },
+      { id: 'anim-c32', sourceNodeId: 'anim-planner', sourcePortId: 'shot3_video_prompt', targetNodeId: 'anim-v-3', targetPortId: 'in-text' },
+      { id: 'anim-c33', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-start' },
+      { id: 'anim-c34', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-end' },
+      { id: 'anim-c35', sourceNodeId: 'anim-planner', sourcePortId: 'shot4_video_prompt', targetNodeId: 'anim-v-4', targetPortId: 'in-text' },
+      { id: 'anim-c36', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-v-5', targetPortId: 'in-image' },
+      { id: 'anim-c37', sourceNodeId: 'anim-planner', sourcePortId: 'shot5_video_prompt', targetNodeId: 'anim-v-5', targetPortId: 'in-text' },
+      { id: 'anim-c38', sourceNodeId: 'anim-i2i-5', sourcePortId: 'out-image', targetNodeId: 'anim-v-6', targetPortId: 'in-image' },
+      { id: 'anim-c39', sourceNodeId: 'anim-planner', sourcePortId: 'shot6_video_prompt', targetNodeId: 'anim-v-6', targetPortId: 'in-text' },
+      { id: 'anim-c40', sourceNodeId: 'anim-i2i-6', sourcePortId: 'out-image', targetNodeId: 'anim-v-7', targetPortId: 'in-image-start' },
+      { id: 'anim-c41', sourceNodeId: 'anim-i2i-7', sourcePortId: 'out-image', targetNodeId: 'anim-v-7', targetPortId: 'in-image-end' },
+      { id: 'anim-c42', sourceNodeId: 'anim-planner', sourcePortId: 'shot7_video_prompt', targetNodeId: 'anim-v-7', targetPortId: 'in-text' },
+      { id: 'anim-c43', sourceNodeId: 'anim-i2i-7', sourcePortId: 'out-image', targetNodeId: 'anim-v-8', targetPortId: 'in-image' },
+      { id: 'anim-c44', sourceNodeId: 'anim-planner', sourcePortId: 'shot8_video_prompt', targetNodeId: 'anim-v-8', targetPortId: 'in-text' },
+      { id: 'anim-c45', sourceNodeId: 'anim-i2i-8', sourcePortId: 'out-image', targetNodeId: 'anim-v-9', targetPortId: 'in-image' },
+      { id: 'anim-c46', sourceNodeId: 'anim-planner', sourcePortId: 'shot9_video_prompt', targetNodeId: 'anim-v-9', targetPortId: 'in-text' },
+      { id: 'anim-c47', sourceNodeId: 'anim-i2i-9', sourcePortId: 'out-image', targetNodeId: 'anim-v-10', targetPortId: 'in-image-start' },
+      { id: 'anim-c48', sourceNodeId: 'anim-i2i-10', sourcePortId: 'out-image', targetNodeId: 'anim-v-10', targetPortId: 'in-image-end' },
+      { id: 'anim-c49', sourceNodeId: 'anim-planner', sourcePortId: 'shot10_video_prompt', targetNodeId: 'anim-v-10', targetPortId: 'in-text' },
+      { id: 'anim-c50', sourceNodeId: 'anim-i2i-11', sourcePortId: 'out-image', targetNodeId: 'anim-v-11', targetPortId: 'in-image' },
+      { id: 'anim-c51', sourceNodeId: 'anim-planner', sourcePortId: 'shot11_video_prompt', targetNodeId: 'anim-v-11', targetPortId: 'in-text' },
+      { id: 'anim-c52', sourceNodeId: 'anim-i2i-12', sourcePortId: 'out-image', targetNodeId: 'anim-v-12', targetPortId: 'in-image' },
+      { id: 'anim-c53', sourceNodeId: 'anim-planner', sourcePortId: 'shot12_video_prompt', targetNodeId: 'anim-v-12', targetPortId: 'in-text' }
+    ],
+    nodes: [
+      { id: 'anim-char', toolId: 'image-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: ['/assets/girl.png'] } },
+      { id: 'anim-story', toolId: 'text-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: '初音未来的日常，从早上睡醒到晚上睡觉。' } },
+      {
+        id: 'anim-planner',
+        toolId: 'text-generation',
+        x: 400,
+        y: 180,
+        status: NodeStatus.IDLE,
+        data: {
+          model: 'doubao-seed-1-6-vision-250815',
+          mode: 'custom',
+          customInstruction: `你是一位日系二次元动画分镜师。用户会提供一张角色参考图（默认初音未来或用户自定）和一段故事概述（默认：初音未来的日常，从早上睡醒到晚上睡觉）。请生成12个分镜的详细描述，所有输出字段使用中文。
+
+人物一致性（绝对关键）：
+- 第一镜：基于用户提供的角色图，描述「该角色在某一场景中的姿态与表情」，保持与参考图一致的发型、发色、服装、五官。
+- 第二镜及以后：基于「上一张图」进行修改，描述「在该新场景/时刻中角色在做什么、表情与动作」，严格保持同一人物的发型、发色、服装特征、五官风格，像同一个人连续出现。若中途换装或换发型，后续镜头需保持与前一镜一致。
+
+场景与风格：
+- 场景可自由切换（卧室→窗边→厨房→户外→…），不要求场景一致，按时间线推进即可。
+- 画风统一：全部为日系二次元动画风格；光线与色调随剧情时间（清晨/午后/傍晚/夜晚）自然变化。
+- 可有2～3个无人物镜头：如窗外云卷云舒、闹钟特写、夕阳空镜等，用于氛围与转场，风格与整体一致。
+
+输出字段（共24个，只输出该镜头的描述文本，不要加字段名或前缀）：
+- shot1_image_prompt ～ shot12_image_prompt：每镜的单张画面描述，直接用于图生图。有角色时强调「在上一张图/参考图基础上保持人物一致并改为…」；无人物镜只描述场景与氛围。
+- shot1_video_prompt ～ shot12_video_prompt：每镜的短视频动效/运镜描述。其中 shot4、shot7、shot10 对应「场景切换」镜头，必须强调转场与运镜（如镜头从上一场景拉远/推近到新场景、淡入淡出、光线过渡、空间切换等）；其余为单镜头内的动作与轻微运镜。`,
+          customOutputs: [
+            { id: 'shot1_image_prompt', label: '分镜1 画面', description: '第1镜图生图提示' },
+            { id: 'shot1_video_prompt', label: '分镜1 运镜', description: '第1镜视频运镜' },
+            { id: 'shot2_image_prompt', label: '分镜2 画面', description: '第2镜图生图提示' },
+            { id: 'shot2_video_prompt', label: '分镜2 运镜', description: '第2镜视频运镜' },
+            { id: 'shot3_image_prompt', label: '分镜3 画面', description: '第3镜图生图提示' },
+            { id: 'shot3_video_prompt', label: '分镜3 运镜', description: '第3镜视频运镜' },
+            { id: 'shot4_image_prompt', label: '分镜4 画面', description: '第4镜图生图提示（场景切换）' },
+            { id: 'shot4_video_prompt', label: '分镜4 运镜', description: '第4镜转场运镜，强调转场' },
+            { id: 'shot5_image_prompt', label: '分镜5 画面', description: '第5镜图生图提示' },
+            { id: 'shot5_video_prompt', label: '分镜5 运镜', description: '第5镜视频运镜' },
+            { id: 'shot6_image_prompt', label: '分镜6 画面', description: '第6镜图生图提示' },
+            { id: 'shot6_video_prompt', label: '分镜6 运镜', description: '第6镜视频运镜' },
+            { id: 'shot7_image_prompt', label: '分镜7 画面', description: '第7镜图生图提示（场景切换）' },
+            { id: 'shot7_video_prompt', label: '分镜7 运镜', description: '第7镜转场运镜，强调转场' },
+            { id: 'shot8_image_prompt', label: '分镜8 画面', description: '第8镜图生图提示' },
+            { id: 'shot8_video_prompt', label: '分镜8 运镜', description: '第8镜视频运镜' },
+            { id: 'shot9_image_prompt', label: '分镜9 画面', description: '第9镜图生图提示' },
+            { id: 'shot9_video_prompt', label: '分镜9 运镜', description: '第9镜视频运镜' },
+            { id: 'shot10_image_prompt', label: '分镜10 画面', description: '第10镜图生图提示（场景切换）' },
+            { id: 'shot10_video_prompt', label: '分镜10 运镜', description: '第10镜转场运镜，强调转场' },
+            { id: 'shot11_image_prompt', label: '分镜11 画面', description: '第11镜图生图提示' },
+            { id: 'shot11_video_prompt', label: '分镜11 运镜', description: '第11镜视频运镜' },
+            { id: 'shot12_image_prompt', label: '分镜12 画面', description: '第12镜图生图提示' },
+            { id: 'shot12_video_prompt', label: '分镜12 运镜', description: '第12镜视频运镜' }
+          ]
+        }
+      },
+      { id: 'anim-i2i-1', toolId: 'image-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-2', toolId: 'image-to-image', x: 900, y: 240, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-3', toolId: 'image-to-image', x: 900, y: 400, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-4', toolId: 'image-to-image', x: 900, y: 560, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-5', toolId: 'image-to-image', x: 900, y: 720, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-6', toolId: 'image-to-image', x: 900, y: 880, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-7', toolId: 'image-to-image', x: 900, y: 1040, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-8', toolId: 'image-to-image', x: 900, y: 1200, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-9', toolId: 'image-to-image', x: 900, y: 1360, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-10', toolId: 'image-to-image', x: 900, y: 1520, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-11', toolId: 'image-to-image', x: 900, y: 1680, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-i2i-12', toolId: 'image-to-image', x: 900, y: 1840, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+      { id: 'anim-v-1', toolId: 'video-gen-image', x: 1500, y: 80, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-2', toolId: 'video-gen-image', x: 1500, y: 240, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-3', toolId: 'video-gen-image', x: 1500, y: 400, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-4', toolId: 'video-gen-dual-frame', x: 1500, y: 560, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-5', toolId: 'video-gen-image', x: 1500, y: 720, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-6', toolId: 'video-gen-image', x: 1500, y: 880, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-7', toolId: 'video-gen-dual-frame', x: 1500, y: 1040, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-8', toolId: 'video-gen-image', x: 1500, y: 1200, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-9', toolId: 'video-gen-image', x: 1500, y: 1360, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-10', toolId: 'video-gen-dual-frame', x: 1500, y: 1520, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-11', toolId: 'video-gen-image', x: 1500, y: 1680, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'anim-v-12', toolId: 'video-gen-image', x: 1500, y: 1840, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
+    ]
+  },
   {
     id: 'preset-knowledge-ip',
     name: '知识IP口播工作流',
@@ -114,9 +345,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
       { id: 'c7', sourceNodeId: 'ip-node-ai', sourcePortId: 's2v_prompt', targetNodeId: 'ip-node-avatar', targetPortId: 'in-text' }
     ],
     nodes: [
-      { id: 'ip-node-url', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "https://github.com/ModelTC/LightX2V/blob/main/README_zh.md" } },
-      { id: 'ip-node-image-ref', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/programmer.png'] } },
-      { id: 'ip-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: {
+      { id: 'ip-node-url', toolId: 'text-input', x: 80, y: 80, status: NodeStatus.IDLE, data: { value: "https://github.com/ModelTC/LightX2V/blob/main/README_zh.md" } },
+      { id: 'ip-node-image-ref', toolId: 'image-input', x: 80, y: 280, status: NodeStatus.IDLE, data: { value: ['/assets/programmer.png'] } },
+      { id: 'ip-node-ai', toolId: 'text-generation', x: 520, y: 180, status: NodeStatus.IDLE, data: {
           model: 'doubao-seed-1-6-vision-250815',
           mode: 'custom',
           useSearch: true,
@@ -156,8 +387,8 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
             { id: 's2v_prompt', label: 'S2V提示词', description: '数字人视频动作和运动的描述。' }
           ]
       } },
-      { id: 'ip-node-tts', toolId: 'tts', x: 900, y: 300, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
-      { id: 'ip-node-avatar', toolId: 'avatar-gen', x: 1500, y: 200, status: NodeStatus.IDLE, data: { model: 'SekoTalk' } }
+      { id: 'ip-node-tts', toolId: 'tts', x: 900, y: 280, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
+      { id: 'ip-node-avatar', toolId: 'avatar-gen', x: 1500, y: 280, status: NodeStatus.IDLE, data: { model: 'SekoTalk' } }
     ]
   },
     {
@@ -208,12 +439,12 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'prod-c27', sourceNodeId: 'prod-node-planner', sourcePortId: 'high_motion', targetNodeId: 'prod-node-video-high', targetPortId: 'in-text' }
       ],
       nodes: [
-        // Input nodes
-        { id: 'prod-node-person', toolId: 'image-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: ['/assets/model_girl.png'] } },
-        { id: 'prod-node-product', toolId: 'image-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: ['/assets/product_glass.png'] } },
-        { id: 'prod-node-text', toolId: 'text-input', x: 50, y: 600, status: NodeStatus.IDLE, data: { value: "" } },
+        // Input nodes (vertical spacing ~200px to avoid overlap with node height ~140–180)
+        { id: 'prod-node-person', toolId: 'image-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: ['/assets/model_girl.png'] } },
+        { id: 'prod-node-product', toolId: 'image-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: ['/assets/product_glass.png'] } },
+        { id: 'prod-node-text', toolId: 'text-input', x: 50, y: 480, status: NodeStatus.IDLE, data: { value: "" } },
         // AI Chat Planner (Doubao Vision)
-        { id: 'prod-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
+        { id: 'prod-node-planner', toolId: 'text-generation', x: 450, y: 280, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的虚拟人产品展示创意总监。你的任务是根据输入的人物图片、产品图片和可选的文字描述，生成详细的图生图修改提示词和视频运镜提示词。
@@ -307,9 +538,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'c7', sourceNodeId: 'node-voice', sourcePortId: 'out-audio', targetNodeId: 'node-final-avatar', targetPortId: 'in-audio' }
       ],
       nodes: [
-        { id: 'node-img-in', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/girl.jpg'] } },
-        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 350, status: NodeStatus.IDLE, data: { value: "女孩改为穿着性感纯欲的睡衣坐在床上，用性感迷人的声音说着勾人的话" } },
-        { id: 'node-logic', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: {
+        { id: 'node-img-in', toolId: 'image-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: ['/assets/girl.jpg'] } },
+        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: "女孩改为穿着性感纯欲的睡衣坐在床上，用性感迷人的声音说着勾人的话" } },
+        { id: 'node-logic', toolId: 'text-generation', x: 450, y: 280, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的数字人视频创意总监。你的任务是根据输入的人物图片和文字描述，生成同步的数字人视频组件。
@@ -340,9 +571,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
               { id: 'voice_style', label: '语调', description: '根据用户描述和场景特点生成的配音指导，描述应该体现的风格、情感、语气等。' }
             ]
         } },
-        { id: 'node-i2i-gen', toolId: 'image-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-voice', toolId: 'tts', x: 900, y: 450, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
-        { id: 'node-final-avatar', toolId: 'avatar-gen', x: 1500, y: 250, status: NodeStatus.IDLE, data: {} }
+        { id: 'node-i2i-gen', toolId: 'image-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-voice', toolId: 'tts', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
+        { id: 'node-final-avatar', toolId: 'avatar-gen', x: 1500, y: 260, status: NodeStatus.IDLE, data: {} }
       ]
     },
     {
@@ -409,11 +640,11 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'c45', sourceNodeId: 'node-planner', sourcePortId: 'scene9_video', targetNodeId: 'node-video-9', targetPortId: 'in-text' }
       ],
       nodes: [
-        // Input nodes
-        { id: 'node-char-img', toolId: 'image-input', x: 50, y: 500, status: NodeStatus.IDLE, data: { value: ['/assets/princess.png'] } },
-        { id: 'node-desc', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主早晨醒来，在温馨的房间里梳妆打扮，然后望向窗外，窗外是很漂亮的阿伦黛尔小镇风光，然后镜头转向远景能够看到艾莎公主在窗边伸了个懒腰" } },
+        // Input nodes (vertical spacing ~200px)
+        { id: 'node-char-img', toolId: 'image-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: ['/assets/princess.png'] } },
+        { id: 'node-desc', toolId: 'text-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主早晨醒来，在温馨的房间里梳妆打扮，然后望向窗外，窗外是很漂亮的阿伦黛尔小镇风光，然后镜头转向远景能够看到艾莎公主在窗边伸了个懒腰" } },
         // Planner node
-        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 350, status: NodeStatus.IDLE, data: {
+        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 180, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的视频故事板规划师。你的任务是根据输入描述和人物图片，将其分解为恰好9个场景（分镜）用于顺序图像生成。
@@ -498,26 +729,26 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
               { id: 'scene9_video', label: 'Scene 9 Video Prompt', description: 'Video motion prompt for scene 9' }
             ]
         } },
-        // Image-to-image nodes for all 9 scenes (sequential generation based on previous image + character)
-        { id: 'node-i2i-1', toolId: 'image-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-2', toolId: 'image-to-image', x: 900, y: 150, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-3', toolId: 'image-to-image', x: 900, y: 250, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-4', toolId: 'image-to-image', x: 900, y: 350, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-5', toolId: 'image-to-image', x: 900, y: 450, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-6', toolId: 'image-to-image', x: 900, y: 550, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-7', toolId: 'image-to-image', x: 900, y: 650, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-8', toolId: 'image-to-image', x: 900, y: 750, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-9', toolId: 'image-to-image', x: 900, y: 850, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        // Video generation nodes (all 9 scenes using image-to-video)
-        { id: 'node-video-1', toolId: 'video-gen-image', x: 1500, y: 50, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-2', toolId: 'video-gen-image', x: 1500, y: 150, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-3', toolId: 'video-gen-image', x: 1500, y: 250, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-4', toolId: 'video-gen-image', x: 1500, y: 350, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-5', toolId: 'video-gen-image', x: 1500, y: 450, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-6', toolId: 'video-gen-image', x: 1500, y: 550, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-7', toolId: 'video-gen-image', x: 1500, y: 650, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-8', toolId: 'video-gen-image', x: 1500, y: 750, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-9', toolId: 'video-gen-image', x: 1500, y: 850, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
+        // Image-to-image nodes for all 9 scenes (vertical spacing 180px)
+        { id: 'node-i2i-1', toolId: 'image-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-2', toolId: 'image-to-image', x: 900, y: 260, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-3', toolId: 'image-to-image', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-4', toolId: 'image-to-image', x: 900, y: 620, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-5', toolId: 'image-to-image', x: 900, y: 800, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-6', toolId: 'image-to-image', x: 900, y: 980, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-7', toolId: 'image-to-image', x: 900, y: 1160, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-8', toolId: 'image-to-image', x: 900, y: 1340, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-9', toolId: 'image-to-image', x: 900, y: 1520, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        // Video generation nodes (all 9 scenes, same vertical spacing)
+        { id: 'node-video-1', toolId: 'video-gen-image', x: 1500, y: 80, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-2', toolId: 'video-gen-image', x: 1500, y: 260, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-3', toolId: 'video-gen-image', x: 1500, y: 440, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-4', toolId: 'video-gen-image', x: 1500, y: 620, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-5', toolId: 'video-gen-image', x: 1500, y: 800, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-6', toolId: 'video-gen-image', x: 1500, y: 980, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-7', toolId: 'video-gen-image', x: 1500, y: 1160, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-8', toolId: 'video-gen-image', x: 1500, y: 1340, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-9', toolId: 'video-gen-image', x: 1500, y: 1520, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
       ]
     },
     {
@@ -586,12 +817,12 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'c47', sourceNodeId: 'node-planner', sourcePortId: 'shot9_video_prompt', targetNodeId: 'node-avatar-9', targetPortId: 'in-text' }
       ],
       nodes: [
-        // Input nodes
-        { id: 'node-char-img', toolId: 'image-input', x: 50, y: 500, status: NodeStatus.IDLE, data: { value: ['/assets/singing_princess.png'] } },
-        { id: 'node-audio-in', toolId: 'audio-input', x: 50, y: 700, status: NodeStatus.IDLE, data: { value: '/assets/let_it_go_part.wav' } },
-        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主正在演唱《Let It Go》，动作优雅，表情充满自信和力量" } },
+        // Input nodes (vertical spacing ~200px)
+        { id: 'node-char-img', toolId: 'image-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: ['/assets/singing_princess.png'] } },
+        { id: 'node-text-in', toolId: 'text-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: "冰雪奇缘中的艾莎公主正在演唱《Let It Go》，动作优雅，表情充满自信和力量" } },
+        { id: 'node-audio-in', toolId: 'audio-input', x: 50, y: 480, status: NodeStatus.IDLE, data: { value: '/assets/let_it_go_part.wav' } },
         // AI Chat Planner (Doubao Vision)
-        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
+        { id: 'node-planner', toolId: 'text-generation', x: 450, y: 280, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的音乐视频多机位导演。你的任务是根据输入的角色图片和可选的文字描述，为演唱表演生成9个不同机位的详细描述。
@@ -660,27 +891,27 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
               { id: 'shot9_video_prompt', label: 'Shot 9 Video Prompt', description: 'Extreme close-up shot video action description' }
             ]
         } },
-        // Image-to-Image nodes (9 shots)
-        { id: 'node-i2i-1', toolId: 'image-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-2', toolId: 'image-to-image', x: 900, y: 150, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-3', toolId: 'image-to-image', x: 900, y: 250, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-4', toolId: 'image-to-image', x: 900, y: 350, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-5', toolId: 'image-to-image', x: 900, y: 450, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-6', toolId: 'image-to-image', x: 900, y: 550, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-7', toolId: 'image-to-image', x: 900, y: 650, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-8', toolId: 'image-to-image', x: 900, y: 750, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'node-i2i-9', toolId: 'image-to-image', x: 900, y: 850, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        // Avatar Video nodes (shots 1, 2, 5, 6, 9 - digital avatar)
-        { id: 'node-avatar-1', toolId: 'avatar-gen', x: 1500, y: 50, status: NodeStatus.IDLE, data: {} },
-        { id: 'node-avatar-2', toolId: 'avatar-gen', x: 1500, y: 150, status: NodeStatus.IDLE, data: {} },
-        { id: 'node-avatar-5', toolId: 'avatar-gen', x: 1500, y: 450, status: NodeStatus.IDLE, data: {} },
-        { id: 'node-avatar-6', toolId: 'avatar-gen', x: 1500, y: 550, status: NodeStatus.IDLE, data: {} },
-        { id: 'node-avatar-9', toolId: 'avatar-gen', x: 1500, y: 850, status: NodeStatus.IDLE, data: {} },
-        // Image-to-Video nodes (shots 3, 4, 7, 8 - image-to-video)
-        { id: 'node-video-3', toolId: 'video-gen-image', x: 1500, y: 250, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-4', toolId: 'video-gen-image', x: 1500, y: 350, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-7', toolId: 'video-gen-image', x: 1500, y: 650, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
-        { id: 'node-video-8', toolId: 'video-gen-image', x: 1500, y: 750, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
+        // Image-to-Image nodes (9 shots, vertical spacing 180px)
+        { id: 'node-i2i-1', toolId: 'image-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-2', toolId: 'image-to-image', x: 900, y: 260, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-3', toolId: 'image-to-image', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-4', toolId: 'image-to-image', x: 900, y: 620, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-5', toolId: 'image-to-image', x: 900, y: 800, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-6', toolId: 'image-to-image', x: 900, y: 980, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-7', toolId: 'image-to-image', x: 900, y: 1160, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-8', toolId: 'image-to-image', x: 900, y: 1340, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'node-i2i-9', toolId: 'image-to-image', x: 900, y: 1520, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        // Avatar Video nodes (shots 1, 2, 5, 6, 9 - digital avatar, same y as i2i)
+        { id: 'node-avatar-1', toolId: 'avatar-gen', x: 1500, y: 80, status: NodeStatus.IDLE, data: {} },
+        { id: 'node-avatar-2', toolId: 'avatar-gen', x: 1500, y: 260, status: NodeStatus.IDLE, data: {} },
+        { id: 'node-avatar-5', toolId: 'avatar-gen', x: 1500, y: 800, status: NodeStatus.IDLE, data: {} },
+        { id: 'node-avatar-6', toolId: 'avatar-gen', x: 1500, y: 980, status: NodeStatus.IDLE, data: {} },
+        { id: 'node-avatar-9', toolId: 'avatar-gen', x: 1500, y: 1520, status: NodeStatus.IDLE, data: {} },
+        // Image-to-Video nodes (shots 3, 4, 7, 8 - image-to-video, same y as i2i)
+        { id: 'node-video-3', toolId: 'video-gen-image', x: 1500, y: 440, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-4', toolId: 'video-gen-image', x: 1500, y: 620, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-7', toolId: 'video-gen-image', x: 1500, y: 1160, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+        { id: 'node-video-8', toolId: 'video-gen-image', x: 1500, y: 1340, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
       ]
     },
     {
@@ -708,10 +939,10 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'c9', sourceNodeId: 'chibi-node-ai', sourcePortId: 's2v_prompt', targetNodeId: 'chibi-node-avatar', targetPortId: 'in-text' }
       ],
       nodes: [
-        { id: 'chibi-node-person', toolId: 'image-input', x: 50, y: 200, status: NodeStatus.IDLE, data: { value: [] } },
-        { id: 'chibi-node-doll-ref', toolId: 'image-input', x: 50, y: 50, status: NodeStatus.IDLE, data: { value: ['/assets/doll.jpg'] } },
-        { id: 'chibi-node-input', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "角色说的话和角色背景描述" } },
-        { id: 'chibi-node-ai', toolId: 'text-generation', x: 450, y: 300, status: NodeStatus.IDLE, data: {
+        { id: 'chibi-node-doll-ref', toolId: 'image-input', x: 50, y: 80, status: NodeStatus.IDLE, data: { value: ['/assets/doll.jpg'] } },
+        { id: 'chibi-node-person', toolId: 'image-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: [] } },
+        { id: 'chibi-node-input', toolId: 'text-input', x: 50, y: 480, status: NodeStatus.IDLE, data: { value: "角色说的话和角色背景描述" } },
+        { id: 'chibi-node-ai', toolId: 'text-generation', x: 450, y: 280, status: NodeStatus.IDLE, data: {
             model: 'doubao-seed-1-6-vision-250815',
             mode: 'custom',
             customInstruction: `你是一位专业的Q版数字人视频创意总监。你的任务是根据输入的人物图片和用户描述（角色说的话和角色背景），生成完整的Q版数字人视频组件。
@@ -755,9 +986,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
               { id: 's2v_prompt', label: 'S2V提示词', description: '数字人视频动作和运动的描述。' }
             ]
         } },
-        { id: 'chibi-node-i2i', toolId: 'image-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
-        { id: 'chibi-node-tts', toolId: 'tts', x: 900, y: 450, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
-        { id: 'chibi-node-avatar', toolId: 'avatar-gen', x: 1500, y: 250, status: NodeStatus.IDLE, data: { model: 'SekoTalk' } }
+        { id: 'chibi-node-i2i', toolId: 'image-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '9:16' } },
+        { id: 'chibi-node-tts', toolId: 'tts', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_female_vv_uranus_bigtts', resourceId: 'seed-tts-2.0' } },
+        { id: 'chibi-node-avatar', toolId: 'avatar-gen', x: 1500, y: 260, status: NodeStatus.IDLE, data: { model: 'SekoTalk' } }
       ]
     },
     {
@@ -809,8 +1040,8 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         { id: 'oner-c20', sourceNodeId: 'oner-node-planner', sourcePortId: 'shot5_video_motion', targetNodeId: 'oner-node-video-5', targetPortId: 'in-text' }
       ],
       nodes: [
-        { id: 'oner-node-desc', toolId: 'text-input', x: 50, y: 400, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市的宏大全景，从高空俯瞰整座城市，镜头逐渐下降穿过云雾，掠过摩天大楼的玻璃幕墙，最终聚焦到繁华街道上的人群和霓虹灯" } },
-        { id: 'oner-node-planner', toolId: 'text-generation', x: 450, y: 400, status: NodeStatus.IDLE, data: {
+        { id: 'oner-node-desc', toolId: 'text-input', x: 50, y: 280, status: NodeStatus.IDLE, data: { value: "一座未来主义赛博朋克城市的宏大全景，从高空俯瞰整座城市，镜头逐渐下降穿过云雾，掠过摩天大楼的玻璃幕墙，最终聚焦到繁华街道上的人群和霓虹灯" } },
+        { id: 'oner-node-planner', toolId: 'text-generation', x: 450, y: 280, status: NodeStatus.IDLE, data: {
             model: 'deepseek-v3-2-251201',
             mode: 'custom',
             customInstruction: `你是一位专业的电影级视频分镜设计师。你的任务是根据用户的场景描述，设计一个"一镜到底"的连续运镜视频。
@@ -880,16 +1111,16 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
               { id: 'shot5_video_motion', label: '分镜5运镜描述', description: '分镜5的收尾运镜提示词，使用电影式运镜语言描述收尾性的相机运动' }
             ]
         } },
-        { id: 'oner-node-img-1', toolId: 'text-to-image', x: 900, y: 100, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "16:9" } },
-        { id: 'oner-node-img-2', toolId: 'image-to-image', x: 900, y: 250, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
-        { id: 'oner-node-img-3', toolId: 'image-to-image', x: 900, y: 400, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
-        { id: 'oner-node-img-4', toolId: 'image-to-image', x: 900, y: 550, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
-        { id: 'oner-node-img-5', toolId: 'image-to-image', x: 900, y: 700, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
-        { id: 'oner-node-video-1', toolId: 'video-gen-dual-frame', x: 1500, y: 100, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
-        { id: 'oner-node-video-2', toolId: 'video-gen-dual-frame', x: 1500, y: 250, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
-        { id: 'oner-node-video-3', toolId: 'video-gen-dual-frame', x: 1500, y: 400, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
-        { id: 'oner-node-video-4', toolId: 'video-gen-dual-frame', x: 1500, y: 550, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
-        { id: 'oner-node-video-5', toolId: 'video-gen-dual-frame', x: 1500, y: 700, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } }
+        { id: 'oner-node-img-1', toolId: 'text-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "16:9" } },
+        { id: 'oner-node-img-2', toolId: 'image-to-image', x: 900, y: 260, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
+        { id: 'oner-node-img-3', toolId: 'image-to-image', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
+        { id: 'oner-node-img-4', toolId: 'image-to-image', x: 900, y: 620, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
+        { id: 'oner-node-img-5', toolId: 'image-to-image', x: 900, y: 800, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511', aspectRatio: "16:9" } },
+        { id: 'oner-node-video-1', toolId: 'video-gen-dual-frame', x: 1500, y: 80, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
+        { id: 'oner-node-video-2', toolId: 'video-gen-dual-frame', x: 1500, y: 260, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
+        { id: 'oner-node-video-3', toolId: 'video-gen-dual-frame', x: 1500, y: 440, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
+        { id: 'oner-node-video-4', toolId: 'video-gen-dual-frame', x: 1500, y: 620, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } },
+        { id: 'oner-node-video-5', toolId: 'video-gen-dual-frame', x: 1500, y: 800, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } }
       ]
     },
     {
@@ -933,9 +1164,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
                 { id: 'video_motion_prompt', label: 'Motion Prompt', description: 'Prompt describing the transition and camera motion.' }
               ]
           } },
-          { id: 'node-start-frame', toolId: 'text-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "16:9" } },
-          { id: 'node-end-frame', toolId: 'image-to-image', x: 900, y: 550, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511' } },
-          { id: 'node-video', toolId: 'video-gen-dual-frame', x: 1500, y: 300, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } }
+          { id: 'node-start-frame', toolId: 'text-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "16:9" } },
+          { id: 'node-end-frame', toolId: 'image-to-image', x: 900, y: 440, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-Edit-2511' } },
+          { id: 'node-video', toolId: 'video-gen-dual-frame', x: 1500, y: 260, status: NodeStatus.IDLE, data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: "16:9" } }
         ]
       },
       {
@@ -1011,9 +1242,9 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
                 { id: 'avatar_video_prompt', label: '数字人视频动作提示', description: '数字人视频动作和运动的描述（例如：自然的说话手势、头部动作、面部表情）。' }
               ]
           } },
-          { id: 'node-image', toolId: 'text-to-image', x: 900, y: 50, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "9:16" } },
-          { id: 'node-tts', toolId: 'tts', x: 900, y: 350, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_male_dayi_saturn_bigtts', resourceId: 'seed-tts-2.0' } },
-          { id: 'node-avatar', toolId: 'avatar-gen', x: 1500, y: 200, status: NodeStatus.IDLE, data: {} }
+          { id: 'node-image', toolId: 'text-to-image', x: 900, y: 80, status: NodeStatus.IDLE, data: { model: 'Qwen-Image-2512', aspectRatio: "9:16" } },
+          { id: 'node-tts', toolId: 'tts', x: 900, y: 360, status: NodeStatus.IDLE, data: { model: 'lightx2v', voiceType: 'zh_male_dayi_saturn_bigtts', resourceId: 'seed-tts-2.0' } },
+          { id: 'node-avatar', toolId: 'avatar-gen', x: 1500, y: 220, status: NodeStatus.IDLE, data: {} }
         ]
       },
 ];

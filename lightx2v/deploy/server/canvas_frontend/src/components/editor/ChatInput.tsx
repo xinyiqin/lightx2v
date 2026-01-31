@@ -23,7 +23,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // IME 组合输入中（如中文选字）按 Enter 时不发送，等组合完毕后再按 Enter 才发送
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }

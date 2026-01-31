@@ -75,7 +75,12 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     set_private: 'Set Private',
     set_public: 'Set Public',
     visibility_private: 'Private',
-    visibility_public: 'Public'
+    visibility_public: 'Public',
+    model_needs_update: 'Model not in list — please update manually',
+    model_list_empty: 'Model list is empty — check environment or API config',
+    chat_mode_edit: 'Workflow Edit',
+    chat_mode_ideation: 'Ideation',
+    generate_workflow_directly: 'Generate workflow directly'
   },
   zh: {
     app_name: 'LightX2V OmniFlow',
@@ -151,6 +156,19 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     set_private: '设为私有',
     set_public: '设为公开',
     visibility_private: '私有',
-    visibility_public: '公开'
+    visibility_public: '公开',
+    model_needs_update: '当前模型不在支持列表中，请手动更新',
+    model_list_empty: '该节点模型列表为空，请检查环境或 API 配置',
+    text_input_placeholder: '在此输入文本...',
+    chars_count: '字符',
+    global_ai_behavior_placeholder: '设置全局 AI 行为...',
+    field_id_placeholder: '字段 ID（如 prompt）',
+    custom_instruction_placeholder: '给 AI 的指令（意图、约束等）...',
+    search_voices_placeholder: '搜索音色...',
+    optional_emotion_placeholder: '可选情绪',
+    edit_field_placeholder: '编辑字段内容...',
+    chat_mode_edit: '工作流编辑',
+    chat_mode_ideation: '构思模式',
+    generate_workflow_directly: '直接生成工作流'
   }
 };

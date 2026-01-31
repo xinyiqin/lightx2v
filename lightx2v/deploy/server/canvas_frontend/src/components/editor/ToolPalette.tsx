@@ -20,10 +20,14 @@ interface ToolPaletteProps {
   isProcessing?: boolean;
   onSendMessage?: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onClearHistory?: () => void;
+  chatContextNodes?: { nodeId: string; name: string }[];
+  onRemoveNodeFromChatContext?: (nodeId: string) => void;
   onUndo?: (messageId: string) => void;
   onRetry?: (messageId: string) => void;
   aiModel?: string;
   onModelChange?: (model: string) => void;
+  chatMode?: 'edit' | 'ideation';
+  onChatModeChange?: (mode: 'edit' | 'ideation') => void;
 }
 
 export const ToolPalette: React.FC<ToolPaletteProps> = ({
@@ -39,10 +43,14 @@ export const ToolPalette: React.FC<ToolPaletteProps> = ({
   isProcessing = false,
   onSendMessage = () => {},
   onClearHistory,
+  chatContextNodes = [],
+  onRemoveNodeFromChatContext,
   onUndo,
   onRetry,
   aiModel,
-  onModelChange
+  onModelChange,
+  chatMode = 'edit',
+  onChatModeChange = () => {}
 }) => {
   const { t } = useTranslation(lang);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'tools' | 'chat'>(defaultTab);
@@ -177,11 +185,15 @@ export const ToolPalette: React.FC<ToolPaletteProps> = ({
                   isProcessing={isProcessing}
                   onSendMessage={onSendMessage}
                   onClearHistory={onClearHistory}
+                  chatContextNodes={chatContextNodes}
+                  onRemoveNodeFromChatContext={onRemoveNodeFromChatContext}
                   onUndo={onUndo}
                   onRetry={onRetry}
                   lang={lang}
                   aiModel={aiModel}
                   onModelChange={onModelChange}
+                  chatMode={chatMode}
+                  onChatModeChange={onChatModeChange}
                   autoFocusInput={focusChatInput}
                   onAutoFocusDone={onChatInputFocused}
                 />

@@ -1,16 +1,21 @@
 import { apiRequest } from './apiClient';
+import { isStandalone } from '../config/runtimeMode';
 
 /**
  * 检查工作流是否为预设工作流（不属于当前用户）
- * @param workflowId 工作流ID
- * @param currentUserId 当前用户ID
- * @returns Promise<{isPreset: boolean, workflow: any | null}> 如果是预设工作流，返回true和null；否则返回false和工作流对象
+ * 纯前端模式：不请求后端，视为非预设
  */
 export async function checkWorkflowOwnership(
   workflowId: string,
   currentUserId: string | null
 ): Promise<{ isPreset: boolean; workflow: any | null }> {
-  if (!currentUserId || !workflowId) {
+  if (!workflowId) {
+    return { isPreset: false, workflow: null };
+  }
+  if (isStandalone()) {
+    return { isPreset: false, workflow: null };
+  }
+  if (!currentUserId) {
     return { isPreset: false, workflow: null };
   }
 

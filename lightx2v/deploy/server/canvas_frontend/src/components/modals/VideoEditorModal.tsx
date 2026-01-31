@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Video } from 'lucide-react';
 import { Language } from '../../i18n/useTranslation';
 import { VideoNodePreview } from '../previews/VideoNodePreview';
+import { getAssetBasePath } from '../../utils/assetPath';
 
 interface VideoEditorModalProps {
   nodeId: string;
@@ -24,7 +25,7 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
   lang
 }) => {
   const normalizedVideo = videoData.startsWith('/assets/') && !videoData.startsWith('/canvas/')
-    ? `${(window as any).__ASSET_BASE_PATH__ || '/canvas'}${videoData}`
+    ? `${getAssetBasePath()}${videoData}`
     : videoData;
   const title = lang === 'zh' ? '视频输入' : 'Video Input';
   const subtitle = lang === 'zh' ? '源输入 - 可编辑' : 'Source Input - Editable';

@@ -274,7 +274,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Provide starting text for the workflow',
     description_zh: '为工作流提供初始文本',
     inputs: [],
-    outputs: [{ id: 'out-text', type: DataType.TEXT, label: 'Text' }],
+    outputs: [{ id: 'out-text', type: DataType.TEXT, label: 'Text', label_zh: '文本' }],
     icon: 'Type'
   },
   {
@@ -286,7 +286,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Upload one or more images as workflow input',
     description_zh: '上传一张或多张图片作为输入',
     inputs: [],
-    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image(s)' }],
+    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image(s)', label_zh: '图像' }],
     icon: 'Image'
   },
   {
@@ -298,7 +298,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Upload an audio file as workflow input',
     description_zh: '上传音频文件作为输入',
     inputs: [],
-    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio' }],
+    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio', label_zh: '音频' }],
     icon: 'Volume2'
   },
   {
@@ -322,8 +322,8 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Advanced reasoning and generation with multiple text outputs',
     description_zh: '基于大语言模型的高级推理和文本生成能力',
     inputs: [
-      { id: 'in-text', type: DataType.TEXT, label: 'Prompt' },
-      { id: 'in-image', type: DataType.IMAGE, label: 'Image (Optional)' }
+      { id: 'in-text', type: DataType.TEXT, label: 'Prompt', label_zh: '提示词' },
+      { id: 'in-image', type: DataType.IMAGE, label: 'Image (Optional)', label_zh: '图像（可选）' }
     ],
     outputs: [], // Dynamically managed via node.data.customOutputs
     icon: 'Cpu',
@@ -416,10 +416,10 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Edit or transform images with text using Gemini or LightX2V',
     description_zh: '通过文本编辑或转换图像',
     inputs: [
-      { id: 'in-image', type: DataType.IMAGE, label: 'Reference Image' },
-      { id: 'in-text', type: DataType.TEXT, label: 'Edit Prompt' }
+      { id: 'in-image', type: DataType.IMAGE, label: 'Reference Image', label_zh: '参考图' },
+      { id: 'in-text', type: DataType.TEXT, label: 'Edit Prompt', label_zh: '编辑提示词' }
     ],
-    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Result' }],
+    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Result', label_zh: '结果' }],
     icon: 'Palette',
     defaultParams: {
       aspectRatio: '1:1'
@@ -444,10 +444,10 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Text-to-speech conversion',
     description_zh: '使用 Gemini 或 LightX2V 进行语音合成',
     inputs: [
-      { id: 'in-text', type: DataType.TEXT, label: 'TTS Text' },
-      { id: 'in-context-tone', type: DataType.TEXT, label: 'Context & Tone (Opt)' }
+      { id: 'in-text', type: DataType.TEXT, label: 'TTS Text', label_zh: 'TTS 文本' },
+      { id: 'in-context-tone', type: DataType.TEXT, label: 'Context & Tone (Opt)', label_zh: '语境与语调（可选）' }
     ],
-    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio' }],
+    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio', label_zh: '音频' }],
     icon: 'Volume2',
     defaultParams: {
       model: 'lightx2v'
@@ -483,9 +483,9 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Clone voice from audio and generate TTS with cloned voice',
     description_zh: '从音频克隆音色，并使用克隆的音色生成语音',
     inputs: [
-      { id: 'in-tts-text', type: DataType.TEXT, label: 'TTS Text' }
+      { id: 'in-tts-text', type: DataType.TEXT, label: 'TTS Text', label_zh: 'TTS 文本' }
     ],
-    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio' }],
+    outputs: [{ id: 'out-audio', type: DataType.AUDIO, label: 'Audio', label_zh: '音频' }],
     icon: 'Mic',
     defaultParams: {
       style: '正常',
@@ -504,8 +504,8 @@ export const TOOLS: ToolDefinition[] = [
     category_zh: 'AI 模型',
     description: 'Generate video from text',
     description_zh: '根据文本生成视频短片',
-    inputs: [{ id: 'in-text', type: DataType.TEXT, label: 'Prompt' }],
-    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video' }],
+    inputs: [{ id: 'in-text', type: DataType.TEXT, label: 'Prompt', label_zh: '提示词' }],
+    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video', label_zh: '视频' }],
     icon: 'Video',
     defaultParams: {
       aspectRatio: '16:9'
@@ -523,10 +523,10 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Generate video from a starting image',
     description_zh: '以起始图像生成动感视频',
     inputs: [
-      { id: 'in-image', type: DataType.IMAGE, label: 'Start Frame' },
-      { id: 'in-text', type: DataType.TEXT, label: 'Motion Prompt' }
+      { id: 'in-image', type: DataType.IMAGE, label: 'Start Frame', label_zh: '起始帧' },
+      { id: 'in-text', type: DataType.TEXT, label: 'Motion Prompt', label_zh: '动作提示词' }
     ],
-    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video' }],
+    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video', label_zh: '视频' }],
     icon: 'Clapperboard',
     defaultParams: {
       aspectRatio: '16:9'
@@ -544,11 +544,11 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Generate video with start and end frame constraints (Wan 2.2)',
     description_zh: '通过首尾两张图像及其描述生成过渡视频',
     inputs: [
-      { id: 'in-image-start', type: DataType.IMAGE, label: 'Start Frame' },
-      { id: 'in-image-end', type: DataType.IMAGE, label: 'End Frame' },
-      { id: 'in-text', type: DataType.TEXT, label: 'Prompt (Optional)' }
+      { id: 'in-image-start', type: DataType.IMAGE, label: 'Start Frame', label_zh: '起始帧' },
+      { id: 'in-image-end', type: DataType.IMAGE, label: 'End Frame', label_zh: '结束帧' },
+      { id: 'in-text', type: DataType.TEXT, label: 'Prompt (Optional)', label_zh: '提示词（可选）' }
     ],
-    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video' }],
+    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video', label_zh: '视频' }],
     icon: 'FastForward',
     defaultParams: {
       aspectRatio: '16:9'
@@ -566,11 +566,11 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Speech-to-Video talking avatar powered by LightX2V SekoTalk',
     description_zh: '基于音频驱动的数字人播报视频',
     inputs: [
-      { id: 'in-image', type: DataType.IMAGE, label: 'Portrait Image' },
-      { id: 'in-audio', type: DataType.AUDIO, label: 'Voice Audio' },
-      { id: 'in-text', type: DataType.TEXT, label: 'Optional Prompt' }
+      { id: 'in-image', type: DataType.IMAGE, label: 'Portrait Image', label_zh: '人像图' },
+      { id: 'in-audio', type: DataType.AUDIO, label: 'Voice Audio', label_zh: '语音' },
+      { id: 'in-text', type: DataType.TEXT, label: 'Optional Prompt', label_zh: '可选提示词' }
     ],
-    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Avatar Video' }],
+    outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Avatar Video', label_zh: '数字人视频' }],
     icon: 'UserCircle',
     models: [
       // LightX2V models will be added dynamically via updateLightX2VModels
@@ -605,9 +605,9 @@ export const TOOLS: ToolDefinition[] = [
     description: 'Remove watermarks from Gemini AI generated images using Reverse Alpha Blending',
     description_zh: '使用反向 Alpha 混合算法去除 Gemini AI 生成图片的水印',
     inputs: [
-      { id: 'in-image', type: DataType.IMAGE, label: 'Image with Watermark' }
+      { id: 'in-image', type: DataType.IMAGE, label: 'Image with Watermark', label_zh: '带水印图像' }
     ],
-    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image without Watermark' }],
+    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image without Watermark', label_zh: '去水印图像' }],
     icon: 'Eraser',
     models: []
   }

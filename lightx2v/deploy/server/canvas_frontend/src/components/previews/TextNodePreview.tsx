@@ -4,9 +4,16 @@ import { XCircle } from 'lucide-react';
 interface TextNodePreviewProps {
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
+  charsLabel?: string;
 }
 
-export const TextNodePreview: React.FC<TextNodePreviewProps> = ({ value, onChange }) => {
+export const TextNodePreview: React.FC<TextNodePreviewProps> = ({
+  value,
+  onChange,
+  placeholder = 'Enter input text here...',
+  charsLabel = 'Characters'
+}) => {
   return (
     <div className="space-y-2">
       <div className="relative group">
@@ -14,7 +21,7 @@ export const TextNodePreview: React.FC<TextNodePreviewProps> = ({ value, onChang
           value={value}
           onChange={e => onChange(e.target.value)}
           className="w-full h-32 bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-[11px] leading-relaxed text-slate-200 resize-none focus:outline-none focus:border-[#90dce1]/50 focus:ring-1 focus:ring-[#90dce1]/20 transition-all custom-scrollbar"
-          placeholder="Enter input text here..."
+          placeholder={placeholder}
         />
         {value && (
           <button
@@ -27,7 +34,7 @@ export const TextNodePreview: React.FC<TextNodePreviewProps> = ({ value, onChang
       </div>
       <div className="flex justify-end px-1">
         <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">
-          {value.length} Characters
+          {value.length} {charsLabel}
         </span>
       </div>
     </div>

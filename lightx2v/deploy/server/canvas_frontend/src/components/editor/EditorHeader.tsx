@@ -5,8 +5,6 @@ import {
   ZoomOut,
   Maximize,
   Languages,
-  BookOpen,
-  Timer,
   X,
   Save,
   Play,
@@ -20,11 +18,12 @@ import {
   Hash,
   Square,
   Lock,
-  Globe
+  Globe,
+  Terminal
 } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
-import { formatTime } from '../../utils/format';
+import { isStandalone } from '../../config/runtimeMode';
 import { UserCard } from '../common/UserCard';
 
 interface ViewState {
@@ -261,49 +260,40 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         >
           <Languages size={12} /> {t('lang_name')}
         </button>
-        <div className="flex items-center bg-slate-950/50 p-1 rounded-2xl border border-slate-800/50">
-          <button
-            onClick={() => onVisibilityChange(false)}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
-              !isPublic ? 'bg-slate-800 text-slate-200 shadow-xl' : 'text-slate-600 hover:text-slate-400'
-            }`}
-          >
-            <Lock size={12} />
-            <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_private')}</span>
-          </button>
-          <button
-            onClick={() => onVisibilityChange(true)}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
-              isPublic
-                ? 'bg-green-500/10 text-green-400 border border-green-500/20 shadow-xl shadow-green-500/5'
-                : 'text-slate-600 hover:text-slate-400'
-            }`}
-          >
-            <Globe size={12} />
-            <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_public')}</span>
-          </button>
-        </div>
-        {selectedRunId && (
-          <>
-            <div className="flex items-center gap-2 px-4 py-2 bg-[#90dce1]/20 rounded-xl border border-[#90dce1]/30 animate-pulse">
-              <BookOpen size={14} className="text-[#90dce1]" />
-              <span className="text-[10px] font-black uppercase text-[#90dce1]">
-                {t('snapshot_view')}
-              </span>
-              <button onClick={onClearSnapshot} className="ml-2 hover:text-white">
-                <X size={12} />
-              </button>
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-xl border border-slate-800">
-              <Timer size={14} className="text-[#90dce1]" />
-              <span className="text-[10px] font-black uppercase text-slate-300">
-                {t('run_time')}:{' '}
-                {formatTime(
-                  workflow.history.find((r) => r.id === selectedRunId)?.totalTime
-                )}
-              </span>
-            </div>
-          </>
+        <button
+          onClick={() => {
+            console.log('[工作流] 当前工作流数据:', workflow);
+            console.log('[工作流] JSON:', JSON.stringify(workflow, null, 2));
+          }}
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-300 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all border border-slate-800/80"
+          title={lang === 'zh' ? '在控制台打印当前工作流数据' : 'Print current workflow to console'}
+        >
+          <Terminal size={12} />
+          {lang === 'zh' ? '打印工作流' : 'Print'}
+        </button>
+        {!isStandalone() && (
+          <div className="flex items-center bg-slate-950/50 p-1 rounded-2xl border border-slate-800/50">
+            <button
+              onClick={() => onVisibilityChange(false)}
+              className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+                !isPublic ? 'bg-slate-800 text-slate-200 shadow-xl' : 'text-slate-600 hover:text-slate-400'
+              }`}
+            >
+              <Lock size={12} />
+              <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_private')}</span>
+            </button>
+            <button
+              onClick={() => onVisibilityChange(true)}
+              className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+                isPublic
+                  ? 'bg-green-500/10 text-green-400 border border-green-500/20 shadow-xl shadow-green-500/5'
+                  : 'text-slate-600 hover:text-slate-400'
+              }`}
+            >
+              <Globe size={12} />
+              <span className="text-[10px] font-black uppercase tracking-widest">{t('visibility_public')}</span>
+            </button>
+          </div>
         )}
         <button
           onClick={onSave}

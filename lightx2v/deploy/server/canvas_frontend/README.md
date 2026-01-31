@@ -78,9 +78,14 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 # 可选 - PP Chat Gemini 模型
 PPCHAT_API_KEY=your_ppchat_api_key
 
-# 可选 - LightX2V 服务
+# 可选 - LightX2V 服务（接自建后端时使用）
 LIGHTX2V_TOKEN=your_lightx2v_token
 LIGHTX2V_URL=https://x2v.light-ai.top
+
+# 仅前端部署时：启用独立模式并配置云端 LightX2V
+# VITE_STANDALONE=true
+# LIGHTX2V_CLOUD_URL=https://x2v.light-ai.top
+# LIGHTX2V_CLOUD_TOKEN=your_lightx2v_cloud_token
 ```
 
 4. **启动开发服务器**
@@ -101,6 +106,23 @@ npm run build
 ```
 
 构建产物将输出到 `dist` 目录。
+
+### 仅前端部署（Standalone）
+
+当不接自建后端、仅部署前端并直连 LightX2V 云端时，需：
+
+1. **设置环境变量**（构建前写入 `.env.local` 或 CI 环境）：
+   - `VITE_STANDALONE=true`：启用仅前端模式（无自建后端）
+   - `LIGHTX2V_CLOUD_URL`：LightX2V 云端 API 地址（如 `https://x2v.light-ai.top`）
+   - `LIGHTX2V_CLOUD_TOKEN`：LightX2V 云端访问令牌
+
+2. **构建**：
+   ```bash
+   VITE_STANDALONE=true npm run build
+   ```
+   或先在 `.env.local` 中写好上述变量后再执行 `npm run build`。
+
+3. **行为说明**：该模式下工作流数据仅存于浏览器（localStorage / IndexedDB），视频、TTS、图生图等能力通过上述云端地址与 token 调用。
 
 ### Railway 部署
 
@@ -281,8 +303,11 @@ npm run build
 | `GEMINI_API_KEY` | ✅ | Gemini API 密钥 |
 | `DEEPSEEK_API_KEY` | ❌ | DeepSeek API 密钥（使用 DeepSeek 模型时必需） |
 | `PPCHAT_API_KEY` | ❌ | PP Chat API 密钥（使用 PP Chat Gemini 模型时必需） |
-| `LIGHTX2V_TOKEN` | ❌ | LightX2V 访问令牌 |
-| `LIGHTX2V_URL` | ❌ | LightX2V API 地址（默认：https://x2v.light-ai.top） |
+| `LIGHTX2V_TOKEN` | ❌ | LightX2V 访问令牌（接自建后端时使用） |
+| `LIGHTX2V_URL` | ❌ | LightX2V API 地址（接自建后端时使用，默认：https://x2v.light-ai.top） |
+| `VITE_STANDALONE` | ❌ | 设为 `true` 时启用仅前端部署模式（无自建后端） |
+| `LIGHTX2V_CLOUD_URL` | 仅前端时 | 仅前端部署时 LightX2V 云端 API 地址（如 https://x2v.light-ai.top） |
+| `LIGHTX2V_CLOUD_TOKEN` | 仅前端时 | 仅前端部署时 LightX2V 云端访问令牌（调用视频/TTS/图生图等必需） |
 
 ### 工作流执行
 

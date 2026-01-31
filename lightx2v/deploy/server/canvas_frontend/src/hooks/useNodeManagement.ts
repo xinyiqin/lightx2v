@@ -34,8 +34,8 @@ export const useNodeManagement = ({
 }: UseNodeManagementProps) => {
   const { t } = useTranslation(lang);
 
-  const addNode = useCallback((tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean) => {
-    if (selectedRunId) return null;
+  const addNode = useCallback((tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean, forceEditMode?: boolean) => {
+    if (selectedRunId && !forceEditMode) return null;
     const defaultData: Record<string, any> = { ...dataOverride };
 
     // 先处理 TTS 节点的特殊逻辑（需要在通用模型选择之前）
@@ -64,6 +64,7 @@ export const useNodeManagement = ({
 
     if ((tool.id === 'text-to-image' || tool.id === 'image-to-image') && !defaultData.aspectRatio) defaultData.aspectRatio = "1:1";
     if (tool.id.includes('video-gen') && !defaultData.aspectRatio) defaultData.aspectRatio = "16:9";
+    if (tool.id === 'text-input' && defaultData.value === undefined) defaultData.value = lang === 'zh' ? '在此输入文本' : '';
     if (tool.id === 'lightx2v-voice-clone') {
       if (!defaultData.style) defaultData.style = "正常";
       if (!defaultData.speed) defaultData.speed = 1.0;
@@ -128,8 +129,44 @@ export const useNodeManagement = ({
   }, [selectedNodeId, selectedRunId, setWorkflow, setSelectedNodeId]);
 
   const updateNodeData = useCallback((nodeId: string, key: string, value: any) => {
-    if (selectedRunId) return;
     setValidationErrors([]);
+
+    // 以下更新无论是否在运行快照视图都应用，保证 AI 等调用能真正改到工作流（如 customOutputs）
+    // 支持一次性合并多个 data 字段（避免多次调用时后一次覆盖前一次），由 AI 工作流等调用
+    // 对数组（如 customOutputs）做深拷贝，确保引用变化以便 React 与 getNodeOutputs 等能正确更新
+    if (key === '__mergeData' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const cloneForMerge = (v: any): any => {
+        if (Array.isArray(v)) return v.map(item => (item && typeof item === 'object' && !Array.isArray(item) ? { ...item } : item));
+        if (v && typeof v === 'object' && !Array.isArray(v)) return { ...v };
+        return v;
+      };
+      const clonedValue = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cloneForMerge(v)]));
+      setWorkflow(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, status: NodeStatus.IDLE, data: { ...n.data, ...clonedValue } } : n),
+          isDirty: true
+        };
+      });
+      return;
+    }
+
+    if (selectedRunId) return;
+
+    // 支持直接修改节点的输出值（如文本生成节点已生成的内容），同步到 node.outputValue 与 activeOutputs，供展示与下游执行使用
+    if (key === 'outputValue') {
+      setActiveOutputs(ao => ({ ...ao, [nodeId]: value }));
+      setWorkflow(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, outputValue: value, status: NodeStatus.IDLE } : n),
+          isDirty: true
+        };
+      });
+      return;
+    }
 
     setWorkflow(prev => {
       if (!prev) return null;
@@ -285,7 +322,7 @@ export const useNodeManagement = ({
 
     const defaultData: Record<string, any> = {};
     if (tool.models && tool.models.length > 0) defaultData.model = tool.models[0].id;
-    if (tool.id === 'text-input') defaultData.value = "";
+    if (tool.id === 'text-input') defaultData.value = lang === 'zh' ? '在此输入文本' : '';
 
     const newNode: WorkflowNode = {
       id: newNodeId,
@@ -371,7 +408,13 @@ export const useNodeManagement = ({
       [DataType.VIDEO]: 'video-input'
     };
     const tool = TOOLS.find(t => t.id === toolIdMap[type]);
-    if (tool) addNode(tool, 100, 100, { value });
+    if (!tool) return;
+    // image-input 要求 node.data.value 为数组，单张图需包装成 [url]
+    const payload =
+      type === DataType.IMAGE
+        ? { value: Array.isArray(value) ? value : value != null ? [value] : [] }
+        : { value };
+    addNode(tool, 100, 100, payload);
   }, [addNode]);
 
   return {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Wand2, Languages, Sparkle, Plus, LayoutGrid, Github, Gift, CreditCard } from 'lucide-react';
 import { useTranslation, Language } from '../../i18n/useTranslation';
+import { isStandalone } from '../../config/runtimeMode';
 import { UserCard } from './UserCard';
 
 interface HeaderProps {
@@ -114,20 +115,22 @@ export const Header: React.FC<HeaderProps> = ({
             {t('app_subtitle')}
           </span>
         </div>
-        <div className="hidden md:flex items-center bg-slate-900/60 border border-slate-800/80 rounded-2xl p-1 ml-2">
-          <button
-            onClick={handleSwitchToNormalMode}
-            className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2 hover:text-slate-300 transition-all hover:bg-slate-900/80 rounded-xl"
-            title={lang === 'zh' ? '切换到普通模式' : 'Switch to Normal Mode'}
-          >
-            <Gift size={12} className="text-slate-600" />
-            {t('lite_free_label')}
-          </button>
-          <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-900 bg-[#90dce1] rounded-xl shadow-[0_0_20px_rgba(144,220,225,0.25)]">
-            <CreditCard size={12} className="text-slate-900 inline-block mr-2" />
-            {t('pro_edition_label')}
+        {!isStandalone() && (
+          <div className="hidden md:flex items-center bg-slate-900/60 border border-slate-800/80 rounded-2xl p-1 ml-2">
+            <button
+              onClick={handleSwitchToNormalMode}
+              className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2 hover:text-slate-300 transition-all hover:bg-slate-900/80 rounded-xl"
+              title={lang === 'zh' ? '切换到普通模式' : 'Switch to Normal Mode'}
+            >
+              <Gift size={12} className="text-slate-600" />
+              {t('lite_free_label')}
+            </button>
+            <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-900 bg-[#90dce1] rounded-xl shadow-[0_0_20px_rgba(144,220,225,0.25)]">
+              <CreditCard size={12} className="text-slate-900 inline-block mr-2" />
+              {t('pro_edition_label')}
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <a

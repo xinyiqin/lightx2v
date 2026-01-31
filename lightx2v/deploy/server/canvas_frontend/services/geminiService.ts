@@ -469,7 +469,13 @@ export const lightX2VTask = async (
   let maxAttempts = 120; // 10 minutes total
 
   while (status !== "SUCCEED" && status !== "FAILED" && status !== "CANCELLED" && maxAttempts > 0) {
+    if (abortSignal?.aborted) {
+      throw new DOMException('Task cancelled by user', 'AbortError');
+    }
     await new Promise(res => setTimeout(res, 5000));
+    if (abortSignal?.aborted) {
+      throw new DOMException('Task cancelled by user', 'AbortError');
+    }
     const queryRes = await lightX2VRequest({
       baseUrl: actualBaseUrl,
       token: actualToken,
@@ -518,6 +524,30 @@ export const lightX2VTask = async (
 };
 
 /**
+ * LightX2V Result URL - resolve task_id + output_name to a fresh URL (for refs that avoid CDN expiry)
+ */
+export const lightX2VResultUrl = async (
+  baseUrl: string,
+  token: string,
+  taskId: string,
+  outputName: string
+): Promise<string> => {
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/task/result_url?task_id=${encodeURIComponent(taskId)}&name=${encodeURIComponent(outputName)}`;
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  const res = await fetch(url, { method: 'GET', headers });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LightX2V result_url failed: ${res.status} ${err}`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!data.url) throw new Error(`LightX2V result_url missing url for task_id=${taskId} name=${outputName}`);
+  return data.url;
+};
+
+/**
  * LightX2V Model List Service
  * Get available model list from LightX2V API
  */
@@ -541,6 +571,47 @@ export const lightX2VGetModelList = async (
 
   const data = await response.json();
   return data.models || [];
+};
+
+/**
+ * LightX2V Cancel Task (for standalone: cancel via cloud API)
+ */
+export const lightX2VCancelTask = async (
+  baseUrl: string,
+  token: string,
+  taskId: string
+): Promise<Response> => {
+  if (!baseUrl?.trim() || !taskId) {
+    return new Response(JSON.stringify({ error: 'Missing baseUrl or taskId' }), { status: 400 });
+  }
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/task/cancel?task_id=${encodeURIComponent(taskId)}`;
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  return fetch(url, { method: 'GET', headers });
+};
+
+/**
+ * LightX2V Task Query - get current task status (for post-cancel status sync)
+ */
+export const lightX2VTaskQuery = async (
+  baseUrl: string,
+  token: string,
+  taskId: string
+): Promise<{ status: string; error?: string }> => {
+  if (!baseUrl?.trim() || !taskId) {
+    return { status: 'UNKNOWN' };
+  }
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/task/query?task_id=${encodeURIComponent(taskId)}`;
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  const res = await fetch(url, { method: 'GET', headers });
+  if (!res.ok) return { status: 'UNKNOWN' };
+  const data = await res.json().catch(() => ({}));
+  return { status: data.status || 'UNKNOWN', error: data.error };
 };
 
 /**

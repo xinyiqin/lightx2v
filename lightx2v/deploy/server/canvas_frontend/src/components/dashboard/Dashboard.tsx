@@ -21,6 +21,8 @@ interface DashboardProps {
   onSetActiveTab: (tab: 'MY' | 'COMMUNITY' | 'PRESET') => void;
   isLoading?: boolean;
   onRefresh?: () => void;
+  /** 纯前端模式不显示社区栏目 */
+  hideCommunityTab?: boolean;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -37,7 +39,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onToggleThumbsup,
   onSetActiveTab,
   isLoading = false,
-  onRefresh
+  onRefresh,
+  hideCommunityTab = false
 }) => {
   const { t } = useTranslation(lang);
   const accentColor = '#90dce1';
@@ -57,7 +60,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       />
       <main className="flex-1 p-12 w-full overflow-y-auto custom-scrollbar relative">
         <div className="max-w-7xl mx-auto space-y-12 pb-24 relative z-10">
-          <div className="grid grid-cols-3 border-b border-slate-800/60 w-full max-w-4xl mx-auto">
+          <div className={`grid border-b border-slate-800/60 w-full max-w-4xl mx-auto ${hideCommunityTab ? 'grid-cols-2' : 'grid-cols-3'}`}>
             <button
               onClick={() => onSetActiveTab('MY')}
               className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative flex items-center justify-center ${
@@ -70,18 +73,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="absolute bottom-0 left-0 w-full h-1 rounded-full" style={{ backgroundColor: getTabColor('MY') }}></div>
               )}
             </button>
-            <button
-              onClick={() => onSetActiveTab('COMMUNITY')}
-              className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative flex items-center justify-center ${
-                activeTab === 'COMMUNITY' ? '' : 'text-slate-500 hover:text-slate-300'
-              }`}
-              style={{ color: activeTab === 'COMMUNITY' ? getTabColor('COMMUNITY') : undefined }}
-            >
-              {t('workflow_community')}
-              {activeTab === 'COMMUNITY' && (
-                <div className="absolute bottom-0 left-0 w-full h-1 rounded-full" style={{ backgroundColor: getTabColor('COMMUNITY') }}></div>
-              )}
-            </button>
+            {!hideCommunityTab && (
+              <button
+                onClick={() => onSetActiveTab('COMMUNITY')}
+                className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative flex items-center justify-center ${
+                  activeTab === 'COMMUNITY' ? '' : 'text-slate-500 hover:text-slate-300'
+                }`}
+                style={{ color: activeTab === 'COMMUNITY' ? getTabColor('COMMUNITY') : undefined }}
+              >
+                {t('workflow_community')}
+                {activeTab === 'COMMUNITY' && (
+                  <div className="absolute bottom-0 left-0 w-full h-1 rounded-full" style={{ backgroundColor: getTabColor('COMMUNITY') }}></div>
+                )}
+              </button>
+            )}
             <button
               onClick={() => onSetActiveTab('PRESET')}
               className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative flex items-center justify-center ${
@@ -103,7 +108,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <p className="text-sm font-black uppercase tracking-[0.3em]">{t('no_workflows')}</p>
                 </div>
               ) : (
-                myWorkflows.map((w) => (
+                [...myWorkflows]
+                  .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+                  .map((w) => (
                   <WorkflowCard
                     key={w.id}
                     workflow={w}
@@ -115,9 +122,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     mode="MY"
                     accentColor={accentColor}
                   />
-                ))
+                  ))
               )
-            ) : activeTab === 'COMMUNITY' ? (
+            ) : !hideCommunityTab && activeTab === 'COMMUNITY' ? (
               communityWorkflows.length === 0 ? (
                 <div className="col-span-full py-32 flex flex-col items-center justify-center opacity-20">
                   <Users size={64} className="mb-4" />

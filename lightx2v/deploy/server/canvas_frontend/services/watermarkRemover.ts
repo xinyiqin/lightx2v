@@ -3,6 +3,8 @@
  * Removes watermarks from Gemini AI generated images using Reverse Alpha Blending
  */
 
+import { getAssetBasePath } from '../src/utils/assetPath';
+
 // Constants for watermark removal
 const ALPHA_THRESHOLD = 0.002;  // Ignore very small alpha values (noise)
 const MAX_ALPHA = 0.99;          // Avoid division by near-zero values
@@ -124,8 +126,8 @@ function removeWatermark(
  */
 async function loadWatermarkBackground(size: 48 | 96): Promise<ImageData> {
   const img = new Image();
-  // 获取资源基础路径，确保在 qiankun 环境中路径正确
-  const basePath = (window as any).__ASSET_BASE_PATH__ || '/canvas';
+  // 获取资源基础路径，确保在 qiankun/独立部署环境中路径正确
+  const basePath = getAssetBasePath();
   const bgPath = size === 48
     ? `${basePath}/assets/bg_48.png`
     : `${basePath}/assets/bg_96.png`;

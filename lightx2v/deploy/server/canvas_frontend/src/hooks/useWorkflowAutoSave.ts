@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { WorkflowState } from '../../types';
 import { apiRequest } from '../utils/apiClient';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
+import { isStandalone } from '../config/runtimeMode';
 
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds
 
@@ -65,31 +66,38 @@ export const useWorkflowAutoSave = ({
 
         // Use save queue for auto-save (lower priority, but still queued)
         await workflowSaveQueue.enqueue(workflow.id, async () => {
-          // 重新获取最新的工作流状态（从传入的 workflow，但应该是最新的）
-          // 自动保存时也保存执行状态，确保数据一致性
-          // 自动保存通过 URL 路径传递 workflow_id，后端会验证该 workflow_id 是否属于当前用户
-          const response = await apiRequest(`/api/v1/workflow/${workflow.id}/autosave`, {
-            method: 'POST',
-            body: JSON.stringify({
-              workflow_id: workflow.id, // 显式传递 workflow_id 用于验证
-              name: workflow.name,
-              nodes: workflow.nodes, // 包含执行状态
-              connections: workflow.connections,
-              global_inputs: workflow.globalInputs
-            })
-          });
-
-          if (response.ok) {
-            const data = await response.json();
+          if (isStandalone()) {
             lastSavedRef.current = now;
-            console.log('[Workflow AutoSave] Workflow autosaved:', workflow.id, data);
+            if (onSave) await onSave(workflow);
+            console.log('[Workflow AutoSave] [Standalone] Workflow autosaved locally:', workflow.id);
+            return;
+          }
+          try {
+            const response = await apiRequest(`/api/v1/workflow/${workflow.id}/autosave`, {
+              method: 'POST',
+              body: JSON.stringify({
+                workflow_id: workflow.id,
+                name: workflow.name,
+                nodes: workflow.nodes,
+                connections: workflow.connections,
+                global_inputs: workflow.globalInputs
+              })
+            });
 
-            // Call optional onSave callback
-            if (onSave) {
-              await onSave(workflow);
+            if (response.ok) {
+              const data = await response.json();
+              lastSavedRef.current = now;
+              console.log('[Workflow AutoSave] Workflow autosaved:', workflow.id, data);
+              if (onSave) await onSave(workflow);
+            } else {
+              console.warn('[Workflow AutoSave] Backend autosave failed, falling back to local save:', workflow.id);
+              lastSavedRef.current = now;
+              if (onSave) await onSave(workflow);
             }
-          } else {
-            console.warn('[Workflow AutoSave] Failed to autosave workflow:', workflow.id);
+          } catch (err) {
+            console.warn('[Workflow AutoSave] Backend unavailable, falling back to local save:', err);
+            lastSavedRef.current = now;
+            if (onSave) await onSave(workflow);
           }
         });
       } catch (error) {

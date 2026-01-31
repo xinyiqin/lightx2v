@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Download, SaveAll } from 'lucide-react';
 import { DataType } from '../../../types';
 import { downloadFile } from '../../utils/download';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { pcmToWavUrl } from '../../utils/audio';
 import { getAssetPath } from '../../utils/assetPath';
+import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
 interface ExpandedOutputModalProps {
   lang: Language;
   expandedOutput: { nodeId: string; fieldId?: string } | null;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
   expandedResultData: {
     content: any;
     label: string;
@@ -28,6 +30,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   lang,
   expandedOutput,
   expandedResultData,
+  resolveLightX2VResultRef,
   isEditingResult,
   tempEditValue,
   onClose,
@@ -36,6 +39,19 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   onTempEditValueChange
 }) => {
   const { t } = useTranslation(lang);
+  const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expandedResultData?.content || !resolveLightX2VResultRef || !isLightX2VResultRef(expandedResultData.content)) {
+      setResolvedMediaUrl(null);
+      return;
+    }
+    let cancelled = false;
+    resolveLightX2VResultRef(expandedResultData.content).then(url => {
+      if (!cancelled) setResolvedMediaUrl(url);
+    }).catch(() => { if (!cancelled) setResolvedMediaUrl(null); });
+    return () => { cancelled = true; };
+  }, [expandedResultData?.content, resolveLightX2VResultRef]);
 
   if (!expandedOutput || !expandedResultData) return null;
 
@@ -103,7 +119,15 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               </p>
             )
           ) : expandedResultData.type === DataType.IMAGE ? (
-            <img src={getAssetPath(expandedResultData.content)} className="max-h-full rounded-2xl shadow-2xl border border-slate-800" />
+            (() => {
+              const raw = expandedResultData.content;
+              const isRef = isLightX2VResultRef(raw);
+              const imgSrc = isRef ? (resolvedMediaUrl ?? '') : (raw != null && raw !== '' ? (typeof raw === 'string' && (raw.startsWith('http') || raw.startsWith('data:')) ? raw : getAssetPath(raw)) : '');
+              if (!imgSrc || imgSrc === '') {
+                return <div className="text-sm text-slate-500">{isRef && !resolvedMediaUrl ? 'Loading...' : 'No image data'}</div>;
+              }
+              return <img src={imgSrc} className="max-h-full rounded-2xl shadow-2xl border border-slate-800" alt="" />;
+            })()
           ) : expandedResultData.type === DataType.AUDIO ? (
             (() => {
               const getMediaValue = (value: any) => {
@@ -150,7 +174,41 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               );
             })()
           ) : (
-            <video controls autoPlay src={getAssetPath(expandedResultData.content)} className="max-h-full rounded-2xl shadow-2xl" />
+            (() => {
+              const raw = expandedResultData.content;
+              const isRef = isLightX2VResultRef(raw);
+              const getMediaValue = (val: any): string => {
+                if (val == null) return '';
+                if (typeof val === 'string') return val;
+                if (Array.isArray(val)) {
+                  const first = val.find((item: any) => typeof item === 'string');
+                  return first != null ? first : '';
+                }
+                if (typeof val === 'object') {
+                  return (
+                    (typeof val.data === 'string' && val.data) ||
+                    (typeof val.url === 'string' && val.url) ||
+                    (typeof val.file_url === 'string' && val.file_url) ||
+                    (typeof val._full_data === 'string' && val._full_data) ||
+                    ''
+                  );
+                }
+                return '';
+              };
+              const v = getMediaValue(raw);
+              const videoSrc = isRef ? (resolvedMediaUrl ?? '') : (v !== '' ? (v.startsWith('http') || v.startsWith('data:') ? v : getAssetPath(v)) : '');
+              if (!videoSrc || videoSrc === '') {
+                return <div className="text-sm text-slate-500">{isRef && !resolvedMediaUrl ? 'Loading...' : 'No video data'}</div>;
+              }
+              return (
+                <video
+                  controls
+                  autoPlay
+                  src={videoSrc}
+                  className="max-h-full rounded-2xl shadow-2xl"
+                />
+              );
+            })()
           )}
         </div>
       </div>

@@ -46,6 +46,8 @@ export interface ChatMessage {
   historyCheckpoint?: number; // 执行操作前的历史索引，用于撤销
   thinking?: string; // 思考过程（流式输出时显示）
   isStreaming?: boolean; // 是否正在流式输出
+  /** 当 AI 返回 type=conversation 且信息不足时，可附带选项供用户点击，点击后以该选项作为下一条用户消息发送 */
+  choices?: string[];
 }
 
 export interface AIChatSendOptions {
@@ -56,7 +58,9 @@ export interface AIChatSendOptions {
 interface UseAIChatWorkflowProps {
   workflow: WorkflowState | null;
   setWorkflow: (workflow: WorkflowState | null) => void;
-  addNode: (tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean) => WorkflowNode | null;
+  /** 获取当前最新工作流（操作执行后、重试等场景下让 AI 看到实际画布状态，避免闭包旧状态） */
+  getWorkflow?: () => WorkflowState | null;
+  addNode: (tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean, forceEditMode?: boolean) => WorkflowNode | null;
   deleteNode: (nodeId: string) => void;
   updateNodeData: (nodeId: string, key: string, value: any) => void;
   replaceNode: (nodeId: string, newToolId: string) => void;
@@ -77,11 +81,18 @@ interface UseAIChatWorkflowProps {
   getLightX2VConfig: (workflow: WorkflowState | null) => { url: string; token: string };
   getCurrentHistoryIndex?: () => number;
   undoToIndex?: (index: number) => void;
+  /** 当前各节点的输出（执行结果），用于在 prompt 中让 AI 看到节点已生成的内容 */
+  activeOutputs?: Record<string, any>;
+  /** 清除当前选中的运行快照，使画布进入编辑模式（AI 执行 add_node 等操作前调用） */
+  clearSelectedRunId?: () => void;
+  /** 工作流编辑：侧重工具/参数/连接；构思：侧重内容，多轮反问后再生成，每次 choices 含「直接生成工作流」 */
+  chatMode?: 'edit' | 'ideation';
 }
 
 export const useAIChatWorkflow = ({
   workflow,
   setWorkflow,
+  getWorkflow,
   addNode: originalAddNode,
   deleteNode: originalDeleteNode,
   updateNodeData: originalUpdateNodeData,
@@ -96,7 +107,10 @@ export const useAIChatWorkflow = ({
   lightX2VVoiceList,
   getLightX2VConfig,
   getCurrentHistoryIndex,
-  undoToIndex
+  undoToIndex,
+  activeOutputs: activeOutputsProp = {},
+  clearSelectedRunId,
+  chatMode = 'edit'
 }: UseAIChatWorkflowProps) => {
   const { t } = useTranslation(lang);
   // 使用 ref 存储完整的对话历史（用于发送请求）
@@ -115,6 +129,7 @@ export const useAIChatWorkflow = ({
     nodeIds?: string[];
     connectionIds?: string[];
   }>({});
+  const [chatContextNodes, setChatContextNodes] = useState<{ nodeId: string; name: string }[]>([]);
 
   // 使用ref跟踪最新的workflow状态
   const workflowRef = useRef<WorkflowState | null>(workflow);
@@ -324,29 +339,67 @@ Input 类型的节点（text-input, image-input, audio-input, video-input）**�
 5. **优先使用已有节点的输出端口进行连接，而不是添加新的 Input 节点**`;
   }, [lang]);
 
-  // 构建AI Prompt
+  // 将节点输出内容整理为可放入 prompt 的简短形式，避免超长或 base64 撑爆上下文
+  const sanitizeOutputForPrompt = useCallback((value: any): any => {
+    if (value == null) return value;
+    if (typeof value === 'string') {
+      if (value.length > 2000) return value.slice(0, 2000) + '...[truncated]';
+      if (/^data:(\w+\/\w+);base64,/.test(value)) return '[MEDIA: base64]';
+      if (/^https?:\/\/.+/i.test(value) && /\.(mp4|webm|ogg|mp3|wav|png|jpg|jpeg|gif|webp)(\?|$)/i.test(value)) return '[MEDIA: URL]';
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(sanitizeOutputForPrompt);
+    if (typeof value === 'object') {
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = sanitizeOutputForPrompt(v);
+      return out;
+    }
+    return value;
+  }, []);
+
+  // 构建AI Prompt（使用 getWorkflow 获取“当前”工作流，确保操作失败/重试后 AI 看到的是实际画布状态）
   const buildAIPrompt = useCallback(async (userInput: string) => {
-    if (!workflow) return '';
+    const currentWorkflow = getWorkflow?.() ?? workflow;
+    if (!currentWorkflow) return '';
 
     const toolsDesc = generateToolsDescription();
     const voicesInfo = await getTopVoicesInfo();
     const cloneVoicesInfo = await getTopCloneVoicesInfo();
     console.log('voicesInfo', voicesInfo);
-    const nodesInfo = workflow.nodes.map(n => ({
-      id: n.id,
-      toolId: n.toolId,
-      x: n.x,
-      y: n.y,
-      data: n.data
-    }));
-    const connectionsInfo = workflow.connections;
+    const nodesInfo = currentWorkflow.nodes.map(n => {
+      const rawOutput = activeOutputsProp[n.id] ?? (n as any).outputValue ?? null;
+      return {
+        id: n.id,
+        toolId: n.toolId,
+        x: n.x,
+        y: n.y,
+        data: n.data,
+        ...(rawOutput != null ? { outputValue: sanitizeOutputForPrompt(rawOutput) } : {})
+      };
+    });
+    const connectionsInfo = currentWorkflow.connections;
+
+    const directGenerateLabel = t('generate_workflow_directly');
+    const modeBlock = chatMode === 'ideation'
+      ? `
+**当前模式：构思模式**
+- 你的首要任务是**内容构思**，而非直接操作工作流。通过多轮反问丰富用户意图（例如：想要几个分镜、每个分镜的画面偏好、风格、节奏等）。
+- 每次回复末尾请提供 choices 引导用户选择或补充，且**必须包含「${directGenerateLabel}」**选项，让用户可随时跳过构思直接执行。
+- 仅当用户明确确认信息充足、或用户点击/说出「${directGenerateLabel}」时，再根据已收集的信息返回 type: "workflow" 并执行操作。
+- 构思阶段用 type: "conversation" 回复，用 choices 做多轮澄清（如分镜数、分镜一选项、分镜二选项等），最后再生成工作流。
+`
+      : `
+**当前模式：工作流编辑模式**
+- 侧重对当前工作流的**操作**（选择更合适的工具、参数、位置、连接等）。当用户意图明确时可直接生成并执行操作。
+`;
 
     return `你是一个工作流编辑助手。用户会通过自然语言与你交流，可能是：
 1. 想要修改工作流（添加节点、删除节点、修改节点、添加连接等）
 2. 普通对话（打招呼、询问问题、闲聊等，与工作流无关）
+${modeBlock}
 
 当前工作流状态：
-- 节点列表：${JSON.stringify(nodesInfo)}
+- 节点列表：${JSON.stringify(nodesInfo)}（其中 outputValue 表示该节点当前已生成/展示的输出内容，便于理解用户如「改这段文案」等请求）
 - 连接列表：${JSON.stringify(connectionsInfo)}
 ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
 
@@ -398,6 +451,9 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
   "type": "conversation",
   "content": "你想查询什么内容？请具体说明你想要修改工作流（比如添加节点、删除节点等）还是进行其他操作。"
 }
+   - **可选字段 choices**：当用户需求不明确时，用 choices 引导用户明确**他想要的内容**（如：动画场景、故事内容、角色形象、风格、时长等），**不要**把 choices 写成工具或工作流步骤。前端会把选项展示为可点击按钮，用户点击后该选项会作为下一条消息发送。例如用户说「想做动画」时，应引导用户明确场景/故事/角色，例如：
+{"type": "conversation", "content": "好的，先确定一下您想要的动画内容：您更想先定下哪一块？", "choices": ["先定故事/剧本内容", "先定角色形象和风格", "先定场景和镜头"]}
+   - **策略**：只有在信息足够、能明确执行工作流操作时才返回 type: "workflow" 并执行；信息不足时返回 type: "conversation"，用 choices 引导用户补充**想要的内容**（场景、故事、角色、风格等），待用户明确后再执行操作。
 
 支持的操作类型：
 1. add_node: 添加节点（toolId必需，x/y可选，data/model可选，nodeId可选，tempId可选）
@@ -449,6 +505,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
 2. delete_node: 删除节点（支持nodeId、nodeIds数组、toolId、all）
 3. update_node: 更新节点参数（nodeId必需，updates对象，支持嵌套路径如"data.value"）
    - 例如: {"updates": {"data.value": "新文本", "data.model": "新模型", "toolId": "image-to-image"}}
+   - **可直接修改某节点的生成结果（输出值）**：updates 可包含 outputValue，用于覆盖该节点当前的输出（如文本生成节点已生成的文案）。例如用户不满意某文案时：{"updates": {"outputValue": "用户满意的新文案"}}。修改后会同步到画布展示与下游节点执行时的输入。多输出节点可传对象，如 {"outputValue": {"out-text": "文案", "out-tone": "语气"}}
    - **重要：如果更新会改变节点的 toolId（例如从 text-to-image 改为 image-to-image），必须在 add_connection 之前执行，确保目标节点有正确的输入端口**
    - 例如：如果要连接图像输入到某个节点，但该节点当前是 text-to-image，需要先执行 update_node 将其改为 image-to-image，然后再执行 add_connection
 4. replace_node: 替换节点类型（nodeId和newToolId必需）
@@ -477,8 +534,8 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
 重要提示：
 - **操作是按顺序执行的，后面的操作依赖于前面操作的结果**
 - **如果目标节点需要改变类型才能接受某个输入，必须先改变节点类型（update_node/replace_node），再添加连接（add_connection）**
-- **对于普通对话，必须返回 {"type": "conversation", "content": "回答内容"} 格式
-- 如果用户描述不明确，返回 {"type": "conversation", "content": "补充信息说明"} 格式
+- **对于普通对话，必须返回 {"type": "conversation", "content": "回答内容"} 格式；可选增加 "choices" 引导用户明确想要的内容（如场景、故事、角色、风格等），choices 应是用户想选的内容描述，不是工具名或步骤名，前端会展示为可点击按钮，用户点击后该选项会作为下一条消息发送**
+- 如果用户描述不明确（如只说「想做动画」），返回 conversation 并可用 choices 引导用户补充**内容**（例如：先定故事、先定角色、先定场景等）
 - 验证操作的合法性（节点ID是否存在、连接是否有效等）
 - 如果操作不合法，返回 {"type": "conversation", "content": "错误说明"} 而不是执行
 - 对于批量操作，生成多个操作指令，并确保顺序正确
@@ -571,7 +628,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
 **在add_node时可以使用tempId，然后在add_connection时使用这个tempId来引用节点**
 
 输出ONLY JSON，不要其他文本。`;
-  }, [workflow, generateToolsDescription, getTopVoicesInfo, getTopCloneVoicesInfo]);
+  }, [workflow, getWorkflow, generateToolsDescription, getTopVoicesInfo, getTopCloneVoicesInfo, activeOutputsProp, sanitizeOutputForPrompt, chatMode]);
 
   // 执行添加节点操作
   const executeAddNode = useCallback(async (
@@ -653,10 +710,12 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       nodeData.model = details.model;
     }
 
+    // 若当前处于运行快照视图，先清除快照选择使画布进入编辑模式，再添加节点（通过 forceEditMode 让 addNode 在当次调用中生效）
+    clearSelectedRunId?.();
     // 如果AI指定了nodeId，使用指定的ID；否则使用tempId（如果存在）或自动生成
     const specifiedNodeId = details.nodeId || details.tempId;
-    // 对于AI Chat场景，如果指定了nodeId，允许覆盖已存在的节点（使用相同的ID）
-    const newNode = originalAddNode(tool, nodeX, nodeY, nodeData, specifiedNodeId, !!specifiedNodeId);
+    // 对于AI Chat场景，如果指定了nodeId，允许覆盖已存在的节点（使用相同的ID）；forceEditMode 为 true 时即使选中了运行快照也允许添加
+    const newNode = originalAddNode(tool, nodeX, nodeY, nodeData, specifiedNodeId, !!specifiedNodeId, true);
 
     if (!newNode) {
       return {
@@ -676,7 +735,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       },
       affectedElements: { nodeIds: [newNode.id] }
     };
-  }, [workflow, originalAddNode, screenToWorldCoords, canvasRef]);
+  }, [workflow, originalAddNode, screenToWorldCoords, canvasRef, clearSelectedRunId]);
 
   // 执行删除节点操作
   const executeDeleteNode = useCallback(async (
@@ -764,6 +823,9 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       };
     }
 
+    // 切回编辑模式，否则 useNodeManagement.updateNodeData 会因 selectedRunId 直接 return，更新不会生效
+    clearSelectedRunId?.();
+
     // 如果更新包含 toolId，应该使用 replaceNode 而不是 updateNodeData
     if (details.updates.toolId) {
       const newToolId = details.updates.toolId;
@@ -773,7 +835,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       // 先替换 toolId
       originalReplaceNode(details.nodeId, newToolId);
 
-      // 然后更新其他字段
+      // 然后更新其他字段：先收集所有 data 相关更新，一次性合并，避免多次 setWorkflow 互相覆盖（如 customInstruction + customOutputs）
       if (Object.keys(otherUpdates).length > 0) {
         const tool = TOOLS.find(t => t.id === newToolId);
         if (otherUpdates.model && tool?.models) {
@@ -787,21 +849,22 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
           }
         }
 
+        const dataMerge: Record<string, any> = {};
+        if (typeof otherUpdates.data === 'object' && otherUpdates.data !== null && !Array.isArray(otherUpdates.data)) {
+          Object.assign(dataMerge, otherUpdates.data);
+        }
         for (const [key, value] of Object.entries(otherUpdates)) {
-          if (key.includes('.')) {
-            const parts = key.split('.');
-            if (parts[0] === 'data') {
-              originalUpdateNodeData(details.nodeId, parts.slice(1).join('.'), value);
-            } else {
-              return {
-                success: false,
-                operation: { type: 'update_node', details },
-                error: `Nested path update not supported: ${key}`
-              };
-            }
-          } else {
-            originalUpdateNodeData(details.nodeId, key, value);
+          if (key === 'data') continue;
+          if (key.includes('.') && key.split('.')[0] === 'data') {
+            dataMerge[key.split('.').slice(1).join('.')] = value;
           }
+        }
+        if (Object.keys(dataMerge).length > 0) {
+          originalUpdateNodeData(details.nodeId, '__mergeData', dataMerge);
+        }
+        for (const [key, value] of Object.entries(otherUpdates)) {
+          if (key === 'data' || (key.includes('.') && key.split('.')[0] === 'data')) continue;
+          originalUpdateNodeData(details.nodeId, key, value);
         }
       }
 
@@ -813,7 +876,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       };
     }
 
-    // 如果没有 toolId 更新，正常处理其他更新
+    // 如果没有 toolId 更新，正常处理其他更新：先收集所有 data 相关更新，一次性合并，避免多次 setWorkflow 互相覆盖（如 customInstruction + customOutputs）
     const tool = TOOLS.find(t => t.id === node.toolId);
     if (details.updates.model && tool?.models) {
       const modelExists = tool.models.some(m => m.id === details.updates.model);
@@ -826,11 +889,16 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       }
     }
 
+    const dataMerge: Record<string, any> = {};
+    if (typeof details.updates.data === 'object' && details.updates.data !== null && !Array.isArray(details.updates.data)) {
+      Object.assign(dataMerge, details.updates.data);
+    }
     for (const [key, value] of Object.entries(details.updates)) {
+      if (key === 'data') continue;
       if (key.includes('.')) {
         const parts = key.split('.');
         if (parts[0] === 'data') {
-          originalUpdateNodeData(details.nodeId, parts.slice(1).join('.'), value);
+          dataMerge[parts.slice(1).join('.')] = value;
         } else {
           return {
             success: false,
@@ -838,9 +906,14 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
             error: `Nested path update not supported: ${key}`
           };
         }
-      } else {
-        originalUpdateNodeData(details.nodeId, key, value);
       }
+    }
+    if (Object.keys(dataMerge).length > 0) {
+      originalUpdateNodeData(details.nodeId, '__mergeData', dataMerge);
+    }
+    for (const [key, value] of Object.entries(details.updates)) {
+      if (key === 'data' || key.includes('.')) continue;
+      originalUpdateNodeData(details.nodeId, key, value);
     }
 
     return {
@@ -849,7 +922,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       result: { nodeId: details.nodeId },
       affectedElements: { nodeIds: [details.nodeId] }
     };
-  }, [workflow, originalUpdateNodeData, originalReplaceNode]);
+  }, [workflow, originalUpdateNodeData, originalReplaceNode, clearSelectedRunId]);
 
   // 执行替换节点操作
   const executeReplaceNode = useCallback(async (
@@ -905,7 +978,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     };
   }, [workflow, originalReplaceNode, getReplaceableTools]);
 
-  // 执行添加连接操作
+  // 执行添加连接操作（workflowOverride：同一批操作中前面 update_node 等已修改的 workflow，用于查找新 port 如 customOutputs 更新后的输出）
   const executeAddConnection = useCallback(async (
     details: {
       sourceNodeId: string;
@@ -915,10 +988,11 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     },
     createdNodes?: Map<string, WorkflowNode>,
     tempIdToNodeId?: Map<string, string>,
-    createdNodesInOrder?: WorkflowNode[]
+    createdNodesInOrder?: WorkflowNode[],
+    workflowOverride?: WorkflowState | null
   ): Promise<OperationResult> => {
-    // 使用ref获取最新的workflow状态
-    let currentWorkflow = workflowRef.current;
+    // 优先使用调用方传入的 workflow（同一批操作中已应用前面 update_node 的中间状态），否则用 ref
+    let currentWorkflow = workflowOverride ?? workflowRef.current;
     if (!currentWorkflow) {
       return {
         success: false,
@@ -1152,6 +1226,25 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     };
   }, [originalAddConnection, getNodeOutputs]);
 
+  // 将 update_node 的 data 合并应用到给定 workflow（用于同一批操作中后续 add_connection 能读到新 port）
+  const applyUpdateNodeToWorkflow = useCallback((wf: WorkflowState, nodeId: string, updates: Record<string, any>): WorkflowState => {
+    const dataMerge: Record<string, any> = {};
+    if (typeof updates.data === 'object' && updates.data !== null && !Array.isArray(updates.data)) {
+      Object.assign(dataMerge, updates.data);
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      if (key === 'data') continue;
+      if (key.includes('.') && key.split('.')[0] === 'data') {
+        dataMerge[key.split('.').slice(1).join('.')] = value;
+      }
+    }
+    if (Object.keys(dataMerge).length === 0) return wf;
+    return {
+      ...wf,
+      nodes: wf.nodes.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...dataMerge } } : n)
+    };
+  }, []);
+
   // 执行删除连接操作
   const executeDeleteConnection = useCallback(async (
     details: {
@@ -1210,15 +1303,15 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     };
   }, [workflow, originalDeleteConnection]);
 
-  // 执行单个操作
+  // 执行单个操作（runningWorkflow：同一批中前面已应用的 update_node 等中间状态，供 add_connection 查找新 port）
   const executeOperation = useCallback(async (
     operation: Operation,
     createdNodes?: Map<string, WorkflowNode>,
     tempIdToNodeId?: Map<string, string>,
-    createdNodesInOrder?: WorkflowNode[]
+    createdNodesInOrder?: WorkflowNode[],
+    runningWorkflow?: WorkflowState | null
   ): Promise<OperationResult> => {
-    // 使用ref获取最新的workflow状态
-    const currentWorkflow = workflowRef.current;
+    const currentWorkflow = runningWorkflow ?? workflowRef.current;
     if (!currentWorkflow) {
       return {
         success: false,
@@ -1238,7 +1331,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
         case 'replace_node':
           return await executeReplaceNode(operation.details);
         case 'add_connection':
-          return await executeAddConnection(operation.details, createdNodes, tempIdToNodeId, createdNodesInOrder);
+          return await executeAddConnection(operation.details, createdNodes, tempIdToNodeId, createdNodesInOrder, runningWorkflow ?? undefined);
         case 'delete_connection':
           return await executeDeleteConnection(operation.details);
         default:
@@ -1273,9 +1366,12 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     // 临时ID到实际节点ID的映射（tempId -> actualNodeId）
     const tempIdToNodeId = new Map<string, string>();
 
+    // 同一批操作中的“运行中”工作流：前面 update_node 等已应用到此副本，供后续 add_connection 查找新 port（如 customOutputs 更新后的 shot1_image）
+    let runningWorkflow: WorkflowState | null = getWorkflow?.() ?? workflow ?? null;
+
     for (let i = 0; i < operations.length; i++) {
       const operation = operations[i];
-      const result = await executeOperation(operation, createdNodes, tempIdToNodeId);
+      const result = await executeOperation(operation, createdNodes, tempIdToNodeId, undefined, runningWorkflow ?? undefined);
 
       // 如果执行了 replace_node 或 update_node（包含 toolId），等待一小段时间让状态更新
       // 这样后续的 add_connection 操作可以获取到更新后的节点状态
@@ -1299,6 +1395,16 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       if (!result.success) {
         errors.push(result.error || 'Unknown error');
         break; // 停止执行
+      }
+
+      // 同步 runningWorkflow：后续 add_connection 需要基于已更新的节点（如 update_node 后的新 customOutputs）查找 port
+      if (runningWorkflow) {
+        if (operation.type === 'update_node' && operation.details.nodeId && operation.details.updates && !operation.details.updates.toolId) {
+          // 仅 data 更新（如 customOutputs）时同步；含 toolId 时走 replaceNode，不在此模拟
+          runningWorkflow = applyUpdateNodeToWorkflow(runningWorkflow, operation.details.nodeId, operation.details.updates);
+        } else if (operation.type === 'add_node' && result.result?.node) {
+          runningWorkflow = { ...runningWorkflow, nodes: [...runningWorkflow.nodes, result.result.node] };
+        }
       }
 
       // 如果刚创建了节点，保存到createdNodes中，并建立tempId映射
@@ -1334,7 +1440,20 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       results,
       errors
     };
-  }, [executeOperation]);
+  }, [executeOperation, getWorkflow, workflow, applyUpdateNodeToWorkflow]);
+
+  const addNodeToChatContext = useCallback((nodeId: string, name: string) => {
+    setChatContextNodes(prev => {
+      if (prev.some(n => n.nodeId === nodeId)) return prev;
+      return [...prev, { nodeId, name }];
+    });
+  }, []);
+  const removeNodeFromChatContext = useCallback((nodeId: string) => {
+    setChatContextNodes(prev => prev.filter(n => n.nodeId !== nodeId));
+  }, []);
+  const clearChatContextNodes = useCallback(() => {
+    setChatContextNodes([]);
+  }, []);
 
   // 处理用户输入
   const handleUserInput = useCallback(async (userInput: string, options: AIChatSendOptions = {}) => {
@@ -1350,6 +1469,16 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     const effectiveInput = trimmedInput || (hasImage
       ? (lang === 'zh' ? '用户提供了一张参考图片。' : 'User provided a reference image.')
       : '');
+    const contextPrefix =
+      chatContextNodes.length > 0
+        ? (lang === 'zh'
+            ? '用户选中的节点（用于帮助理解意图；请结合对话上下文和用户指令判断修改范围，可仅修改这些节点、其前置/后置节点或整个工作流等）：\n'
+            : 'User selected nodes (for intent reference; determine scope of changes from conversation context and user instruction—e.g. only these nodes, their predecessors/successors, or the entire workflow):\n') +
+          chatContextNodes.map(n => `- [${n.nodeId}] ${n.name}`).join('\n') +
+          '\n\n' +
+          (lang === 'zh' ? '用户说：' : 'User said: ')
+        : '';
+    const effectiveUserMessage = contextPrefix + effectiveInput;
 
     // 添加用户消息到历史记录
     const userMessage: ChatMessage = {
@@ -1368,8 +1497,8 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     const currentHistory = chatHistoryRef.current;
 
     try {
-      // 构建AI Prompt
-      const systemPrompt = await buildAIPrompt(effectiveInput);
+      // 构建AI Prompt（带上选中节点上下文）
+      const systemPrompt = await buildAIPrompt(effectiveUserMessage);
 
       // 构建消息历史（只保留最近的对话，避免token过多）
       // currentHistory 已经包含了刚添加的 userMessage，我们需要排除它，因为最后会单独添加
@@ -1398,7 +1527,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
         }).filter(msg => msg.content),
         {
           role: 'user' as const,
-          content: effectiveInput
+          content: effectiveUserMessage
         }
       ];
 
@@ -1812,6 +1941,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       if (responseType === 'conversation') {
         assistantMessage.isStreaming = false;
         assistantMessage.content = parsed.content || parsed.explanation || aiResponse;
+        assistantMessage.choices = Array.isArray(parsed.choices) ? parsed.choices : undefined;
         if (thinkingText) {
           assistantMessage.thinking = thinkingText;
         }
@@ -1832,6 +1962,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       if (parsed.error && !parsed.operations) {
         assistantMessage.isStreaming = false;
         assistantMessage.content = parsed.question || parsed.error || parsed.content || aiResponse;
+        assistantMessage.choices = Array.isArray(parsed.choices) ? parsed.choices : undefined;
         if (thinkingText) {
           assistantMessage.thinking = thinkingText;
         }
@@ -1852,6 +1983,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       if (!parsed.operations || (Array.isArray(parsed.operations) && parsed.operations.length === 0)) {
         assistantMessage.isStreaming = false;
         assistantMessage.content = parsed.content || parsed.explanation || aiResponse;
+        assistantMessage.choices = Array.isArray(parsed.choices) ? parsed.choices : undefined;
         if (thinkingText) {
           assistantMessage.thinking = thinkingText;
         }
@@ -1925,6 +2057,8 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
         });
       }
 
+      // 发送完成后清空对话上下文节点，下次需重新选择
+      clearChatContextNodes();
     } catch (error: any) {
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now()}-error`,
@@ -1937,12 +2071,13 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     } finally {
       setIsProcessing(false);
     }
-  }, [workflow, isProcessing, buildAIPrompt, executeOperations, addMessageToHistory]);
+  }, [workflow, isProcessing, buildAIPrompt, executeOperations, addMessageToHistory, chatContextNodes, lang, clearChatContextNodes]);
 
   // 清除对话历史
   const clearChatHistory = useCallback(() => {
     chatHistoryRef.current = [];
     setChatHistory([]);
+    setChatContextNodes([]);
     console.log('[AI Chat] 已清除对话历史');
   }, []);
 
@@ -1970,6 +2105,10 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     setHighlightedElements,
     aiModel,
     setAiModel,
-    undoMessageOperations
+    undoMessageOperations,
+    chatContextNodes,
+    addNodeToChatContext,
+    removeNodeFromChatContext,
+    clearChatContextNodes
   };
 };

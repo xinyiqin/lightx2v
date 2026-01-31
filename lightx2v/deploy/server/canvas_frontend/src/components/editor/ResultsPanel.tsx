@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   History,
   ChevronUp,
@@ -12,25 +12,42 @@ import {
   Volume2,
   Video as VideoIcon
 } from 'lucide-react';
-import { WorkflowState, WorkflowNode, NodeStatus, DataType, GenerationRun } from '../../../types';
+import { WorkflowState, NodeStatus, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
 import { formatTime } from '../../utils/format';
 import { getAssetPath } from '../../utils/assetPath';
+import type { ResultEntry } from '../../hooks/useResultManagement';
+import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
 interface ResultsPanelProps {
   lang: Language;
   workflow: WorkflowState;
   resultsCollapsed: boolean;
   onToggleCollapsed: () => void;
-  activeResultsList: WorkflowNode[];
-  sourceOutputs: Record<string, any>;
-  selectedRunId: string | null;
-  onSelectRun: (runId: string | null) => void;
+  resultEntries: ResultEntry[];
   onToggleShowIntermediate: () => void;
-  onExpandOutput: (nodeId: string, fieldId?: string) => void;
+  onExpandOutput: (nodeId: string, fieldId?: string, runId?: string) => void;
   onPinOutputToCanvas?: (content: any, type: DataType) => void;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
+}
+
+function ResolvedImage({ content, resolveLightX2VResultRef, className }: { content: any; resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>; className?: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (content == null) { setUrl(null); return; }
+    if (isLightX2VResultRef(content) && resolveLightX2VResultRef) {
+      let cancelled = false;
+      resolveLightX2VResultRef(content).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
+      return () => { cancelled = true; };
+    }
+    const direct = typeof content === 'string' ? (content.startsWith('http') || content.startsWith('data:') ? content : getAssetPath(content)) : getAssetPath(content);
+    setUrl(direct || null);
+  }, [content, resolveLightX2VResultRef]);
+  if (url) return <img src={url} className={className} alt="" />;
+  if (content != null && isLightX2VResultRef(content)) return <div className={className + ' flex items-center justify-center text-[9px] text-slate-500 uppercase'}>Loading...</div>;
+  return <img src={getAssetPath(content)} className={className} alt="" />;
 }
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({
@@ -38,13 +55,11 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
   workflow,
   resultsCollapsed,
   onToggleCollapsed,
-  activeResultsList,
-  sourceOutputs,
-  selectedRunId,
-  onSelectRun,
+  resultEntries,
   onToggleShowIntermediate,
   onExpandOutput,
-  onPinOutputToCanvas
+  onPinOutputToCanvas,
+  resolveLightX2VResultRef
 }) => {
   const { t } = useTranslation(lang);
 
@@ -81,49 +96,19 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
             </>
           )}
         </div>
-        {!resultsCollapsed && (
-          <div className="flex gap-4">
-            {workflow.history.map(r => (
-              <button
-                key={r.id}
-                onClick={() => onSelectRun(r.id)}
-                className={`group relative px-4 py-1.5 rounded-full text-[9px] font-bold border transition-all ${
-                  selectedRunId === r.id
-                    ? 'bg-#90dce1 border-#90dce1 text-white'
-                    : 'bg-slate-800 border-slate-700 text-slate-400'
-                }`}
-              >
-                {new Date(r.timestamp).toLocaleTimeString()}
-                {r.totalTime !== undefined && (
-                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 text-[8px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl">
-                    {t('run_time')}: {formatTime(r.totalTime)}
-                  </span>
-                )}
-              </button>
-            ))}
-            {selectedRunId && (
-              <button
-                onClick={() => onSelectRun(null)}
-                className="p-1.5 text-slate-500 hover:text-white transition-all active:scale-90"
-              >
-                <RefreshCw size={14} />
-              </button>
-            )}
-          </div>
-        )}
       </div>
       {!resultsCollapsed && (
-        <div className="flex-1 overflow-x-auto p-8 flex gap-8 items-start custom-scrollbar">
-          {activeResultsList.length === 0 && !workflow.isRunning ? (
+        <div className="flex-1 overflow-x-auto p-8 flex gap-8 items-start custom-scrollbar flex-row">
+          {resultEntries.length === 0 && !workflow.isRunning ? (
             <div className="flex-1 flex flex-col items-center justify-center opacity-10 animate-pulse">
               <RefreshCw size={48} className="mb-4 animate-spin-slow" />
               <span className="text-[10px] font-black uppercase tracking-widest">{t('awaiting_execution')}</span>
             </div>
           ) : (
-            activeResultsList.map(node => {
+            resultEntries.map(entry => {
+              const { node, output: res, runId } = entry;
               const tool = TOOLS.find(t => t.id === node.toolId);
               if (!tool) return null;
-              const res = sourceOutputs[node.id] || (tool.category === 'Input' ? node.data.value : null);
               const type = tool?.outputs[0]?.type || DataType.TEXT;
               const isTerminal = !workflow.connections.some(c => c.sourceNodeId === node.id);
 
@@ -132,9 +117,11 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                   ? ((performance.now() - (node.startTime || performance.now())) / 1000).toFixed(1) + 's'
                   : formatTime(node.executionTime);
 
+              const expand = (fieldId?: string) => onExpandOutput(node.id, fieldId, runId);
+
               return (
                 <div
-                  key={node.id}
+                  key={`${runId}-${node.id}`}
                   className={`min-w-[320px] max-w-[420px] bg-slate-900/50 rounded-[32px] border p-6 flex flex-col shadow-2xl relative overflow-hidden group transition-all h-[190px] ${
                     node.status === NodeStatus.ERROR
                       ? 'border-red-500/30 bg-red-500/5'
@@ -149,26 +136,22 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         {React.createElement(getIcon(tool.icon), { size: 12 })}{' '}
                         {lang === 'zh' ? tool.name_zh : tool.name}
                       </span>
-                      {(node.status === NodeStatus.RUNNING || node.executionTime !== undefined) && (
-                        <span
-                          className={`text-[8px] font-bold ${
-                            node.status === NodeStatus.RUNNING ? 'text-#90dce1' : 'text-slate-600'
-                          }`}
-                        >
-                          {t('run_time')}: {elapsed}
-                        </span>
-                      )}
+                      <span className="text-[8px] font-bold text-slate-600">
+                        {runId === 'current' && (node.status === NodeStatus.RUNNING || node.executionTime !== undefined)
+                          ? `${t('run_time')}: ${elapsed}`
+                          : new Date(entry.runTimestamp).toLocaleTimeString()}
+                      </span>
                     </div>
                     <div className="flex gap-2">
                       {node.status !== NodeStatus.ERROR && (
                         <>
                           <button
-                            onClick={() => onExpandOutput(node.id)}
+                            onClick={() => expand()}
                             className="p-1.5 text-slate-500 hover:text-white transition-all"
                           >
                             <Maximize2 size={14} />
                           </button>
-                          {onPinOutputToCanvas && (
+                          {onPinOutputToCanvas && res != null && (
                             <button
                               onClick={() => onPinOutputToCanvas(res, type)}
                               className="p-1.5 text-slate-500 hover:text-#90dce1 transition-all"
@@ -194,12 +177,12 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         <p className="text-[9px] text-slate-400 line-clamp-3 leading-relaxed">{node.error}</p>
                       </div>
                     ) : type === DataType.TEXT ? (
-                      typeof res === 'object' ? (
+                      typeof res === 'object' && res !== null && !Array.isArray(res) && (res as any)._type !== 'reference' ? (
                         <div className="space-y-2">
-                          {Object.entries(res || {}).map(([k, v]) => (
+                          {Object.entries(res).map(([k, v]) => (
                             <div
                               key={k}
-                              onClick={() => onExpandOutput(node.id, k)}
+                              onClick={() => expand(k)}
                               className="group/field p-2 bg-slate-900/60 rounded-lg border border-slate-800 hover:border-#90dce1/50 cursor-pointer transition-all"
                             >
                               <div className="flex items-center justify-between mb-1">
@@ -208,34 +191,35 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                                 </span>
                                 <Maximize2 size={8} className="text-slate-600 group-hover/field:text-#90dce1" />
                               </div>
-                              <p className="text-[9px] text-slate-400 line-clamp-1">{v as string}</p>
+                              <p className="text-[9px] text-slate-400 line-clamp-1">{String(v)}</p>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <p
-                          onClick={() => onExpandOutput(node.id)}
+                          onClick={() => expand()}
                           className="text-[10px] text-slate-400 line-clamp-4 leading-relaxed cursor-pointer hover:text-slate-200 transition-colors"
                         >
-                          {res}
+                          {res != null ? String(res) : '—'}
                         </p>
                       )
                     ) : type === DataType.IMAGE ? (
                       <div
-                        onClick={() => onExpandOutput(node.id)}
+                        onClick={() => expand()}
                         className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar cursor-pointer"
                       >
-                        {(Array.isArray(res) ? res : [res]).map((img, i) => (
-                          <img
+                        {(Array.isArray(res) ? res : res != null ? [res] : []).map((img, i) => (
+                          <ResolvedImage
                             key={i}
-                            src={getAssetPath(img)}
+                            content={img}
+                            resolveLightX2VResultRef={resolveLightX2VResultRef}
                             className="h-full w-auto object-cover rounded-lg border border-slate-800"
                           />
                         ))}
                       </div>
                     ) : (
                       <div
-                        onClick={() => onExpandOutput(node.id)}
+                        onClick={() => expand()}
                         className="flex items-center justify-center h-full text-#90dce1 cursor-pointer hover:text-[#90dce1] transition-colors"
                       >
                         {type === DataType.AUDIO ? <Volume2 size={24} /> : <VideoIcon size={24} />}

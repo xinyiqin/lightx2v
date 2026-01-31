@@ -171,7 +171,7 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
             onClick={() => { setSelectedIndex(idx); setIsCropMode(false); }}
             className={`relative group shrink-0 w-12 h-12 rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${selectedIndex === idx ? 'border-[#90dce1] ring-2 ring-[#90dce1]/20' : 'border-slate-800 opacity-60 hover:opacity-100'}`}
           >
-            <img src={entry.cropped} className="w-full h-full object-cover" />
+            {entry.cropped ? <img src={entry.cropped} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-slate-800" />}
             <button
               onClick={(e) => removeImage(idx, e)}
               className="absolute top-0 right-0 p-0.5 bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -192,6 +192,8 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
         ref={containerRef}
         className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-900/50 select-none group"
       >
+        {(isCropMode ? currentEntry.original : currentEntry.cropped) ? (
+        <>
         <img
           ref={imgRef}
           src={isCropMode ? currentEntry.original : currentEntry.cropped}
@@ -245,6 +247,10 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
               <Crop size={14} />
             </button>
           </div>
+        )}
+        </>
+        ) : (
+          <div className="w-full min-h-24 bg-slate-800 flex items-center justify-center text-slate-500 text-sm">No image</div>
         )}
       </div>
 

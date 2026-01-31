@@ -4,7 +4,7 @@ export const useModalState = () => {
   const [showCloneVoiceModal, setShowCloneVoiceModal] = useState(false);
   const [showAudioEditor, setShowAudioEditor] = useState<string | null>(null); // nodeId of audio input being edited
   const [showVideoEditor, setShowVideoEditor] = useState<string | null>(null); // nodeId of video input being edited
-  const [expandedOutput, setExpandedOutput] = useState<{ nodeId: string; fieldId?: string } | null>(null);
+  const [expandedOutput, setExpandedOutput] = useState<{ nodeId: string; fieldId?: string; runId?: string } | null>(null);
   const [isEditingResult, setIsEditingResult] = useState(false);
   const [tempEditValue, setTempEditValue] = useState("");
   const [showReplaceMenu, setShowReplaceMenu] = useState<string | null>(null);

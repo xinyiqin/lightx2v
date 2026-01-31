@@ -88,6 +88,8 @@ interface EditorProps {
   onDeleteNode?: (nodeId: string) => void;
   onReplaceNode?: (nodeId: string, newToolId: string) => void;
   onRunWorkflow?: (nodeId?: string, runThisOnly?: boolean) => void;
+  onCancelNodeRun?: (nodeId: string) => void;
+  pendingRunNodeIds?: string[];
   onSetReplaceMenu?: (nodeId: string | null) => void;
   onSetOutputQuickAdd?: (value: { nodeId: string; portId: string } | null) => void;
   onSetModelSelect?: (nodeId: string | null) => void;
@@ -137,12 +139,12 @@ interface EditorProps {
   onShowCloneVoiceModal?: () => void;
   // ResultsPanel props
   resultsCollapsed?: boolean;
-  activeResultsList?: WorkflowNode[];
+  resultEntries?: import('../../hooks/useResultManagement').ResultEntry[];
   onToggleResultsCollapsed?: () => void;
-  onSelectRun?: (runId: string | null) => void;
   onToggleShowIntermediate?: () => void;
-  onExpandOutput?: (nodeId: string, fieldId?: string) => void;
+  onExpandOutput?: (nodeId: string, fieldId?: string, runId?: string) => void;
   onPinOutputToCanvas?: (content: any, type: DataType) => void;
+  resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
   // AI Chat props
   isAIChatOpen?: boolean;
@@ -153,6 +155,9 @@ interface EditorProps {
   isAIProcessing?: boolean;
   onAISendMessage?: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onAIClearHistory?: () => void;
+  chatContextNodes?: { nodeId: string; name: string }[];
+  onAddNodeToChatContext?: (nodeId: string, name: string) => void;
+  onRemoveNodeFromChatContext?: (nodeId: string) => void;
   onAIUndo?: (messageId: string) => void;
   onAIRetry?: (messageId: string) => void;
   aiModel?: string;
@@ -168,6 +173,8 @@ interface EditorProps {
   aiChatPanelSize?: { width: number; height: number };
   onAiChatPanelPositionChange?: (position: { x: number; y: number }) => void;
   onAiChatPanelSizeChange?: (size: { width: number; height: number }) => void;
+  aiChatMode?: 'edit' | 'ideation';
+  onAIChatModeChange?: (mode: 'edit' | 'ideation') => void;
 }
 
 export const Editor: React.FC<EditorProps> = ({
@@ -199,6 +206,7 @@ export const Editor: React.FC<EditorProps> = ({
   onSave,
   onPause,
   onRun,
+  onStop,
   onToggleSidebar,
   canUndo,
   canRedo,
@@ -237,6 +245,8 @@ export const Editor: React.FC<EditorProps> = ({
   onDeleteNode = () => {},
   onReplaceNode = () => {},
   onRunWorkflow = () => {},
+  onCancelNodeRun = () => {},
+  pendingRunNodeIds = [],
   onSetReplaceMenu = () => {},
   onSetOutputQuickAdd = () => {},
   onSetModelSelect = () => {},
@@ -268,12 +278,12 @@ export const Editor: React.FC<EditorProps> = ({
   onShowCloneVoiceModal = () => {},
   // ResultsPanel props
   resultsCollapsed = true,
-  activeResultsList = [],
+  resultEntries = [],
   onToggleResultsCollapsed = () => {},
-  onSelectRun = () => {},
   onToggleShowIntermediate = () => {},
   onExpandOutput = () => {},
   onPinOutputToCanvas = () => {},
+  resolveLightX2VResultRef,
   // AI Chat props
   isAIChatOpen = false,
   isAIChatCollapsed = false,
@@ -283,6 +293,9 @@ export const Editor: React.FC<EditorProps> = ({
   isAIProcessing = false,
   onAISendMessage = () => {},
   onAIClearHistory = () => {},
+  chatContextNodes = [],
+  onAddNodeToChatContext = () => {},
+  onRemoveNodeFromChatContext = () => {},
   onAIUndo = () => {},
   onAIRetry = () => {},
   aiModel = 'deepseek-v3-2-251201',
@@ -297,7 +310,9 @@ export const Editor: React.FC<EditorProps> = ({
   aiChatPanelPosition,
   aiChatPanelSize,
   onAiChatPanelPositionChange = () => {},
-  onAiChatPanelSizeChange = () => {}
+  onAiChatPanelSizeChange = () => {},
+  aiChatMode = 'edit',
+  onAIChatModeChange = () => {}
 }) => {
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-200 selection:bg-[#90dce1]/30 font-sans overflow-hidden">
@@ -322,6 +337,7 @@ export const Editor: React.FC<EditorProps> = ({
         onSave={onSave}
         onPause={onPause}
         onRun={onRun}
+        onStop={onStop}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={onUndo}
@@ -343,10 +359,14 @@ export const Editor: React.FC<EditorProps> = ({
           isProcessing={isAIProcessing}
           onSendMessage={onAISendMessage}
           onClearHistory={onAIClearHistory}
+          chatContextNodes={chatContextNodes}
+          onRemoveNodeFromChatContext={onRemoveNodeFromChatContext}
           onUndo={onAIUndo}
           onRetry={onAIRetry}
           aiModel={aiModel}
           onModelChange={onAIModelChange}
+          chatMode={aiChatMode}
+          onChatModeChange={onAIChatModeChange}
         />
 
         <Canvas
@@ -386,6 +406,8 @@ export const Editor: React.FC<EditorProps> = ({
           onDeleteNode={onDeleteNode}
           onReplaceNode={onReplaceNode}
           onRunWorkflow={onRunWorkflow}
+          onCancelNodeRun={onCancelNodeRun}
+          pendingRunNodeIds={pendingRunNodeIds}
           onSetReplaceMenu={onSetReplaceMenu}
           onSetOutputQuickAdd={onSetOutputQuickAdd}
           onSetModelSelect={onSetModelSelect}
@@ -401,6 +423,8 @@ export const Editor: React.FC<EditorProps> = ({
           quickAddInput={quickAddInput}
           quickAddOutput={quickAddOutput}
           onNodeHeightChange={onNodeHeightChange}
+          onAddNodeToChat={onAddNodeToChatContext}
+          resolveLightX2VResultRef={resolveLightX2VResultRef}
         />
 
         {/* 右侧面板容器：NodeConfigPanel */}
@@ -441,6 +465,8 @@ export const Editor: React.FC<EditorProps> = ({
             isProcessing={isAIProcessing}
             onSendMessage={onAISendMessage}
             onClearHistory={onAIClearHistory}
+            chatContextNodes={chatContextNodes}
+            onRemoveNodeFromChatContext={onRemoveNodeFromChatContext}
             onUndo={onAIUndo}
             onRetry={onAIRetry}
             lang={lang}
@@ -450,6 +476,8 @@ export const Editor: React.FC<EditorProps> = ({
             size={aiChatPanelSize}
             onPositionChange={onAiChatPanelPositionChange}
             onSizeChange={onAiChatPanelSizeChange}
+            chatMode={aiChatMode}
+            onChatModeChange={onAIChatModeChange}
           />
         )}
 
@@ -488,13 +516,11 @@ export const Editor: React.FC<EditorProps> = ({
         workflow={workflow}
         resultsCollapsed={resultsCollapsed}
         onToggleCollapsed={onToggleResultsCollapsed}
-        activeResultsList={activeResultsList}
-        sourceOutputs={sourceOutputs}
-        selectedRunId={selectedRunId}
-        onSelectRun={onSelectRun}
+        resultEntries={resultEntries}
         onToggleShowIntermediate={onToggleShowIntermediate}
         onExpandOutput={onExpandOutput}
         onPinOutputToCanvas={onPinOutputToCanvas}
+        resolveLightX2VResultRef={resolveLightX2VResultRef}
       />
     </div>
   );

@@ -2,7 +2,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { initLightX2VToken } from './src/utils/apiClient';
+import { initLightX2VToken, clearTokenCache } from './src/utils/apiClient';
 
 // 声明全局类型
 declare global {
@@ -34,6 +34,13 @@ export async function mount(props: any) {
   // 将共享的状态和方法挂载到 window，供 App 组件使用
   if (props?.sharedStore) {
     (window as any).__SHARED_STORE__ = props.sharedStore;
+    // 首次进入画布时同步主应用 token 到 localStorage，避免子应用读不到登录态
+    const token = props.sharedStore.getState?.('token');
+    const initialState = typeof props.getInitialState === 'function' ? props.getInitialState() : null;
+    const tokenToSync = token ?? initialState?.token;
+    if (tokenToSync && typeof localStorage !== 'undefined') {
+      localStorage.setItem('accessToken', tokenToSync);
+    }
   }
   if (props?.apiClient) {
     (window as any).__API_CLIENT__ = props.apiClient;
@@ -45,7 +52,7 @@ export async function mount(props: any) {
     (window as any).__ON_GLOBAL_STATE_CHANGE__ = props.onGlobalStateChange;
   }
 
-  // 初始化 LIGHTX2V_TOKEN：如果用户已登录，使用用户的 accessToken
+  clearTokenCache();
   initLightX2VToken();
 
   // 检查环境变量（用于调试）
@@ -201,9 +208,11 @@ window.addEventListener('unhandledrejection', (event) => {
 // 确保生命周期被注册到 window.moudleQiankunAppLifeCycles
 // vite-plugin-qiankun 应该会自动处理，但手动注册确保兼容性
 if (typeof window !== 'undefined') {
-  // 设置资源基础路径
-  // 在 qiankun 环境中为 /canvas，独立运行时为空字符串（因为 base 是 /）
-  (window as any).__ASSET_BASE_PATH__ = (window as any).__POWERED_BY_QIANKUN__ ? '/canvas' : '';
+  // 设置资源基础路径：qiankun 用 /canvas，独立运行用 Vite 的 base（与构建一致，Railway 根路径部署为 ''）
+  const baseUrl = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL
+    ? import.meta.env.BASE_URL.replace(/\/$/, '') || ''
+    : '';
+  (window as any).__ASSET_BASE_PATH__ = (window as any).__POWERED_BY_QIANKUN__ ? '/canvas' : baseUrl;
 
   if (!window.moudleQiankunAppLifeCycles) {
     (window as any).moudleQiankunAppLifeCycles = {};

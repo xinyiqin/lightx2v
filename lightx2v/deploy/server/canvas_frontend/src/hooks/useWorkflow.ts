@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { WorkflowState, NodeStatus } from '../../types';
 import { apiRequest } from '../utils/apiClient';
-import { getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
+import { getNodeOutputData, getWorkflowFileByFileId, getLocalFileDataUrl, persistDataUrlToLocal } from '../utils/workflowFileManager';
 import { TOOLS } from '../../constants';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
+import { isStandalone } from '../config/runtimeMode';
 
 export const useWorkflow = () => {
   const [myWorkflows, setMyWorkflows] = useState<WorkflowState[]>([]);
@@ -22,6 +23,20 @@ export const useWorkflow = () => {
   // Load workflows from API (with localStorage fallback)
   const loadWorkflows = useCallback(async () => {
     setIsLoading(true);
+    if (isStandalone()) {
+      const saved = localStorage.getItem('omniflow_user_data');
+      if (saved) {
+        try {
+          const workflows = JSON.parse(saved);
+          setMyWorkflows(Array.isArray(workflows) ? workflows : []);
+          console.log('[Workflow] [Standalone] Loaded workflows from localStorage:', (workflows || []).length);
+        } catch (e) {
+          console.error('[Workflow] Failed to parse omniflow_user_data:', e);
+        }
+      }
+      setIsLoading(false);
+      return;
+    }
     try {
       // Try to load from API first
       const response = await apiRequest('/api/v1/workflow/list?page=1&page_size=100');
@@ -82,10 +97,30 @@ export const useWorkflow = () => {
 
   // Save workflow to localStorage (for backup and local development)
   // Define this BEFORE saveWorkflowToDatabase to avoid "Cannot access before initialization" error
-  const saveWorkflowToLocal = useCallback((current: WorkflowState) => {
-    // Clean input node values: remove base64 data URLs, keep only file paths
-    // This prevents storing large base64 data in localStorage
-    const cleanedNodes = current.nodes.map(node => {
+  const saveWorkflowToLocal = useCallback(async (current: WorkflowState) => {
+    let nodesToSave = current.nodes;
+    // 仅前端：先把 data: 存入 IndexedDB 得到 local://，再保存列表，这样 MY 列表缩略图能解析显示
+    if (isStandalone()) {
+      nodesToSave = await Promise.all(current.nodes.map(async (node) => {
+        const tool = TOOLS.find(t => t.id === node.toolId);
+        if (!tool || tool.category !== 'Input' || !node.data?.value) return node;
+        const nodeValue = node.data.value;
+        const prefix = `wf_${current.id}_${node.id}`;
+        if (Array.isArray(nodeValue)) {
+          const replaced = await Promise.all(nodeValue.map((v: string, i: number) =>
+            typeof v === 'string' && v.startsWith('data:') ? persistDataUrlToLocal(v, `${prefix}_${i}`) : v
+          ));
+          return { ...node, data: { ...node.data, value: replaced } };
+        }
+        if (typeof nodeValue === 'string' && nodeValue.startsWith('data:')) {
+          const localRef = await persistDataUrlToLocal(nodeValue, `${prefix}_0`);
+          return { ...node, data: { ...node.data, value: localRef } };
+        }
+        return node;
+      }));
+    }
+    // Clean input node values: remove base64 data URLs, keep only file paths (standalone 下已是 local://)
+    const cleanedNodes = nodesToSave.map(node => {
       const tool = TOOLS.find(t => t.id === node.toolId);
       if (!tool || tool.category !== 'Input') {
         // Not an input node, return as-is
@@ -108,10 +143,11 @@ export const useWorkflow = () => {
         return false;
       };
 
-      // Check if it's already a saved path
+      // Check if it's already a saved path (including standalone local://)
       const isSavedPath = (val: any): boolean => {
         if (typeof val === 'string') {
-          return val.startsWith('./assets/workflow/input') ||
+          return val.startsWith('local://') ||
+                 val.startsWith('./assets/workflow/input') ||
                  val.startsWith('./assets/task/') ||
                  val.startsWith('/assets/workflow/input') ||
                  val.startsWith('/assets/task/') ||
@@ -120,6 +156,7 @@ export const useWorkflow = () => {
         }
         if (Array.isArray(val)) {
           return val.every(item => typeof item === 'string' && (
+            item.startsWith('local://') ||
             item.startsWith('./assets/workflow/input') ||
             item.startsWith('./assets/task/') ||
             item.startsWith('/assets/workflow/input') ||
@@ -256,22 +293,34 @@ export const useWorkflow = () => {
     });
   }, []);
 
+  /** 仅保存到本地（localStorage + 列表），不请求后端。用于仅部署前端时 autosave 后端失败后的回退。 */
+  const saveWorkflowToLocalOnly = useCallback(async (current: WorkflowState, options?: { name?: string }): Promise<string> => {
+    const workflowId = current.id;
+    const toSave = options?.name ? { ...current, name: options.name } : current;
+    await saveWorkflowToLocal(toSave);
+    return workflowId;
+  }, [saveWorkflowToLocal]);
+
   // Save workflow to database (and optionally localStorage)
   const saveWorkflowToDatabase = useCallback(async (current: WorkflowState, options?: { name?: string; description?: string; activeOutputs?: Record<string, any> }): Promise<string> => {
     const workflowId = current.id;
-    // Allow saving without workflow_id (for new workflows, backend will generate it)
 
     // 使用保存队列，避免并发保存冲突
-    // 注意：保存函数会在执行时重新获取最新的工作流状态，避免状态过期
     return workflowSaveQueue.enqueue(workflowId, async () => {
       setIsSaving(true);
-      let workflowData: any = null;
-
-      // 重新获取最新的工作流状态（从 ref 获取，确保是最新的）
-      // 优先使用 ref 中的最新状态，如果 ref 中没有或 ID 不匹配，使用传入的 current
       const latestWorkflow = (workflowRef.current && workflowRef.current.id === workflowId)
         ? workflowRef.current
         : current;
+
+      // 纯前端：仅写本地（含 data: -> IndexedDB -> local://），不请求后端
+      if (isStandalone()) {
+        const toSave = options?.name ? { ...latestWorkflow, name: options.name } : latestWorkflow;
+        await saveWorkflowToLocal(toSave);
+        setIsSaving(false);
+        return workflowId;
+      }
+
+      let workflowData: any = null;
 
       try {
         // 检查工作流是否仍然存在（通过检查是否在 myWorkflows 中）
@@ -378,6 +427,10 @@ export const useWorkflow = () => {
           }
           if (value && typeof value === 'object') {
             if (value.type === 'reference' || value.data_id) {
+              return value;
+            }
+            // Preserve LightX2VResultRef (task_id + output_name) so saved workflow can resolve result_url
+            if (value.__type === 'lightx2v_result' && typeof value.task_id === 'string' && typeof value.output_name === 'string') {
               return value;
             }
             const cleaned: Record<string, any> = {};
@@ -554,7 +607,7 @@ export const useWorkflow = () => {
 
           if (updateResponse.ok) {
             console.log('[Workflow] Workflow updated in database:', workflowId);
-            saveWorkflowToLocal(latestWorkflow);
+            await saveWorkflowToLocal(latestWorkflow);
             return workflowId;
           } else {
             const errorText = await updateResponse.text();
@@ -743,7 +796,7 @@ export const useWorkflow = () => {
           const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: finalCleanedNodes };
           setWorkflow(updatedWorkflow);
           workflowRef.current = updatedWorkflow;
-          saveWorkflowToLocal(updatedWorkflow);
+          await saveWorkflowToLocal(updatedWorkflow);
           // Update URL hash to reflect the new workflow ID
           if (typeof window !== 'undefined') {
             window.history.replaceState(null, '', `#workflow/${newWorkflowId}`);
@@ -768,7 +821,7 @@ export const useWorkflow = () => {
         }
 
         // Fallback to localStorage
-        saveWorkflowToLocal(latestWorkflow);
+        await saveWorkflowToLocal(latestWorkflow);
         throw error;
       } finally {
         setIsSaving(false);
@@ -776,9 +829,70 @@ export const useWorkflow = () => {
     });
   }, [saveWorkflowToLocal, setWorkflow, myWorkflows]);
 
-  // Load a single workflow from API
+  // Load a single workflow from API (or from localStorage in standalone)
   const loadWorkflow = useCallback(async (workflowId: string): Promise<{ workflow: WorkflowState; activeOutputs: Record<string, any> } | null> => {
     try {
+      if (isStandalone()) {
+        const saved = localStorage.getItem('omniflow_user_data');
+        if (!saved) {
+          setWorkflow(null);
+          return null;
+        }
+        let workflows: WorkflowState[];
+        try {
+          workflows = JSON.parse(saved);
+          if (!Array.isArray(workflows)) workflows = [];
+        } catch {
+          setWorkflow(null);
+          return null;
+        }
+        const found = workflows.find((w: WorkflowState) => w.id === workflowId);
+        if (!found) {
+          setWorkflow(null);
+          return null;
+        }
+        const loadedOutputs: Record<string, any> = {};
+        for (const node of found.nodes) {
+          const tool = TOOLS.find(t => t.id === node.toolId);
+          if (!tool || tool.category !== 'Input') continue;
+          const nodeValue = node.data?.value;
+          if (!nodeValue) continue;
+          const resolveOne = async (path: string): Promise<string | null> => {
+            if (typeof path !== 'string') return null;
+            if (path.startsWith('local://')) return getLocalFileDataUrl(path);
+            return path;
+          };
+          if (Array.isArray(nodeValue)) {
+            const urls = await Promise.all(nodeValue.map((p: string) => resolveOne(p)));
+            loadedOutputs[node.id] = urls.filter((u): u is string => u != null);
+          } else {
+            const url = await resolveOne(nodeValue);
+            if (url) loadedOutputs[node.id] = url;
+          }
+        }
+        // 从最近一次运行的 history 恢复各节点执行结果预览（与 result 面板一致：data_url/url/text 等展开为实际值）
+        const normalizeHistoryOutput = (v: any): any => {
+          if (v == null) return v;
+          if (typeof v === 'object' && !Array.isArray(v)) {
+            if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
+            if (v.type === 'url' && typeof v.data === 'string') return v.data;
+            if (v.type === 'text' && v.data !== undefined) return v.data;
+            if (v.type === 'json' && v.data !== undefined) return v.data;
+          }
+          if (Array.isArray(v)) return v.map(normalizeHistoryOutput);
+          return v;
+        };
+        const latestRun = found.history?.[0];
+        if (latestRun?.outputs && typeof latestRun.outputs === 'object') {
+          for (const [nodeId, out] of Object.entries(latestRun.outputs)) {
+            const normalized = normalizeHistoryOutput(out);
+            if (normalized != null) loadedOutputs[nodeId] = normalized;
+          }
+        }
+        setWorkflow(found);
+        return { workflow: found, activeOutputs: loadedOutputs };
+      }
+
       const response = await apiRequest(`/api/v1/workflow/${workflowId}`);
       if (response.ok) {
         const wf = await response.json();
@@ -963,14 +1077,33 @@ export const useWorkflow = () => {
         return { workflow, activeOutputs };
       } else {
         console.warn('[Workflow] Failed to load workflow from API, trying localStorage');
-        // Fallback to localStorage
+        // Fallback to localStorage：从最近一次运行恢复节点执行结果预览
         const saved = localStorage.getItem('omniflow_user_data');
         if (saved) {
           const workflows = JSON.parse(saved);
           const found = workflows.find((w: WorkflowState) => w.id === workflowId);
           if (found) {
+            const fallbackOutputs: Record<string, any> = {};
+            const normalizeHistoryOutput = (v: any): any => {
+              if (v == null) return v;
+              if (typeof v === 'object' && !Array.isArray(v)) {
+                if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
+                if (v.type === 'url' && typeof v.data === 'string') return v.data;
+                if (v.type === 'text' && v.data !== undefined) return v.data;
+                if (v.type === 'json' && v.data !== undefined) return v.data;
+              }
+              if (Array.isArray(v)) return v.map(normalizeHistoryOutput);
+              return v;
+            };
+            const latestRun = found.history?.[0];
+            if (latestRun?.outputs && typeof latestRun.outputs === 'object') {
+              for (const [nodeId, out] of Object.entries(latestRun.outputs)) {
+                const normalized = normalizeHistoryOutput(out);
+                if (normalized != null) fallbackOutputs[nodeId] = normalized;
+              }
+            }
             setWorkflow(found);
-            return { workflow: found, activeOutputs: {} };
+            return { workflow: found, activeOutputs: fallbackOutputs };
           }
         }
         return null;
@@ -983,27 +1116,24 @@ export const useWorkflow = () => {
 
   // Delete workflow
   const deleteWorkflow = useCallback(async (id: string) => {
-    // 从保存队列中移除相关任务
     workflowSaveQueue.removeTask(id);
-
-    // 从离线队列中移除相关任务
     workflowOfflineQueue.removeTask(id);
 
-    try {
-      // Try to delete from database first (check if it's a database ID)
-      if (id.startsWith('workflow-') || id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-        const response = await apiRequest(`/api/v1/workflow/${id}`, {
-          method: 'DELETE'
-        });
-        if (response.ok) {
-          console.log('[Workflow] Workflow deleted from database:', id);
+    if (!isStandalone()) {
+      try {
+        if (id.startsWith('workflow-') || id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+          const response = await apiRequest(`/api/v1/workflow/${id}`, {
+            method: 'DELETE'
+          });
+          if (response.ok) {
+            console.log('[Workflow] Workflow deleted from database:', id);
+          }
         }
+      } catch (error) {
+        console.warn('[Workflow] Failed to delete workflow from database, deleting from localStorage:', error);
       }
-    } catch (error) {
-      console.warn('[Workflow] Failed to delete workflow from database, deleting from localStorage:', error);
     }
 
-    // Also delete from localStorage
     setMyWorkflows(prev => {
       const next = prev.filter(w => w.id !== id);
       try {
@@ -1018,6 +1148,20 @@ export const useWorkflow = () => {
   const updateWorkflowVisibility = useCallback(async (id: string, visibility: 'private' | 'public') => {
     if (!id) return;
     if (visibility !== 'private' && visibility !== 'public') return;
+
+    if (isStandalone()) {
+      setMyWorkflows(prev => {
+        const next = prev.map(w => w.id === id ? { ...w, visibility } : w);
+        try {
+          localStorage.setItem('omniflow_user_data', JSON.stringify(next));
+        } catch (e) {
+          console.error('Failed to save workflows to localStorage:', e);
+        }
+        return next;
+      });
+      setWorkflow(prev => prev ? (prev.id === id ? { ...prev, visibility, isDirty: true } : prev) : prev);
+      return;
+    }
 
     try {
       const response = await apiRequest(`/api/v1/workflow/${id}/visibility`, {
@@ -1047,12 +1191,17 @@ export const useWorkflow = () => {
     }
   }, [setMyWorkflows, setWorkflow]);
 
+  /** 获取当前最新工作流（用于 AI 等需要“实时”状态的场景，避免闭包拿到旧状态） */
+  const getWorkflow = useCallback(() => workflowRef.current, []);
+
   return {
     myWorkflows,
     workflow,
     setWorkflow,
+    getWorkflow,
     setMyWorkflows,
     saveWorkflowToLocal,
+    saveWorkflowToLocalOnly,
     saveWorkflowToDatabase,
     loadWorkflow,
     loadWorkflows,

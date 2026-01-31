@@ -51,6 +51,8 @@ interface CanvasProps {
   onDeleteNode?: (nodeId: string) => void;
   onReplaceNode?: (nodeId: string, newToolId: string) => void;
   onRunWorkflow?: (nodeId?: string, runThisOnly?: boolean) => void;
+  onCancelNodeRun?: (nodeId: string) => void;
+  pendingRunNodeIds?: string[];
   onSetReplaceMenu?: (nodeId: string | null) => void;
   onSetOutputQuickAdd?: (value: { nodeId: string; portId: string } | null) => void;
   onSetModelSelect?: (nodeId: string | null) => void;
@@ -79,6 +81,8 @@ interface CanvasProps {
   quickAddInput?: (node: WorkflowNode, port: Port) => void;
   quickAddOutput?: (node: WorkflowNode, port: Port, toolId: string) => void;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
+  onAddNodeToChat?: (nodeId: string, name: string) => void;
+  resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -118,6 +122,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   onDeleteNode = () => {},
   onReplaceNode = () => {},
   onRunWorkflow = () => {},
+  onCancelNodeRun = () => {},
+  pendingRunNodeIds = [],
   onSetReplaceMenu = () => {},
   onSetOutputQuickAdd = () => {},
   onSetModelSelect = () => {},
@@ -132,7 +138,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   getCompatibleToolsForOutput = () => [],
   quickAddInput = () => {},
   quickAddOutput = () => {},
-  onNodeHeightChange
+  onNodeHeightChange,
+  onAddNodeToChat,
+  resolveLightX2VResultRef
 }) => {
   return (
     <main
@@ -235,6 +243,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             onDeleteNode={onDeleteNode}
             onReplaceNode={onReplaceNode}
             onRunWorkflow={onRunWorkflow}
+            onCancelNodeRun={onCancelNodeRun}
+            pendingRunNodeIds={pendingRunNodeIds}
             onSetReplaceMenu={onSetReplaceMenu}
             onSetOutputQuickAdd={onSetOutputQuickAdd}
             onSetModelSelect={onSetModelSelect}
@@ -251,6 +261,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             quickAddOutput={quickAddOutput}
             connecting={connecting}
             onNodeHeightChange={onNodeHeightChange}
+            onAddNodeToChat={onAddNodeToChat}
+            resolveLightX2VResultRef={resolveLightX2VResultRef}
           />
         ))}
       </div>

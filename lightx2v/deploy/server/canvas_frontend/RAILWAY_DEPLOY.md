@@ -42,8 +42,8 @@ Railway 会自动读取 `railway.json` 配置文件，配置了：
 - 启动命令：`npm start`
 
 ### package.json
-- `build`: 使用 Vite 构建生产版本
-- `start`: 使用 `vite preview` 提供静态文件服务，监听 Railway 提供的 PORT 环境变量
+- `build`: 使用 Vite 构建生产版本（生产环境默认 `base: '/'`，根路径部署）
+- `start`: 使用 `serve -s dist -l 0.0.0.0:${PORT}` 提供静态文件服务，**必须绑定 0.0.0.0** 否则 Railway 无法访问
 
 ### 端口配置
 Railway 会自动设置 `PORT` 环境变量，应用会在该端口上启动。如果未设置，默认使用 3000 端口。
@@ -61,8 +61,12 @@ Railway 会自动设置 `PORT` 环境变量，应用会在该端口上启动。�
 - 检查 Railway 日志
 
 ### 端口问题
-- Railway 会自动设置 PORT，确保应用使用 `process.env.PORT` 或 `$PORT`
-- 如果使用硬编码端口，请改为使用环境变量
+- Railway 会自动设置 PORT，应用通过 `serve -l 0.0.0.0:${PORT}` 监听
+- **必须监听 0.0.0.0**，不能只监听 localhost，否则公网无法访问
+
+### 页面空白 / Failed to fetch dynamically imported module
+- 独立部署（根路径）时，构建已使用 `base: '/'`，资源路径为 `/assets/...`
+- 若部署在子路径（如 `/canvas/`），在 Railway 环境变量中设置 `VITE_BASE_URL=/canvas/` 后重新构建
 
 ## 自定义域名
 

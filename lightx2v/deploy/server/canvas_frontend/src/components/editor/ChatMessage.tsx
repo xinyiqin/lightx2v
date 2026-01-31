@@ -78,6 +78,9 @@ interface ChatMessageProps {
   onRetry?: () => void;
   thinking?: string;
   isStreaming?: boolean;
+  /** AI 返回的选项，用户点击后作为下一条消息发送 */
+  choices?: string[];
+  onChoiceClick?: (choice: string) => void;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -96,7 +99,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onUndo,
   onRetry,
   thinking,
-  isStreaming
+  isStreaming,
+  choices,
+  onChoiceClick
 }) => {
   const isUser = role === 'user';
   const hasOperations = operations && operations.length > 0;
@@ -188,7 +193,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           {latencyLabel && <span className="ml-2 text-slate-600">• {latencyLabel}</span>}
         </div>
       )}
-      {/* Message Bubble */}
+      {/* Message Bubble：流式且有思考过程时，生成完成前不显示气泡 */}
+      {(isUser || !isStreaming || !hasThinking) && (
       <div
         className={`max-w-[90%] px-3.5 py-2.5 rounded-2xl text-[12px] leading-snug ${
           isUser
@@ -212,7 +218,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           <div>
             {content.trim().length > 0 ? (
               <>
-                <MarkdownRenderer text={content} />
+                <MarkdownRenderer
+                  text={content}
+                  textClass={isUser ? 'text-[13px] leading-relaxed text-slate-900' : 'text-[13px] leading-relaxed text-white'}
+                  headerClass={isUser ? 'text-[12px] font-black text-slate-800 mt-3 mb-2 first:mt-0' : 'text-[12px] font-black text-slate-100 mt-3 mb-2 first:mt-0'}
+                />
                 {isStreaming && (
                   <span className="inline-block w-2 h-4 bg-[#90dce1] ml-1 animate-pulse" />
                 )}
@@ -281,6 +291,23 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           )}
         </div>
       </div>
+      )}
+
+      {/* 选项按钮：AI 返回 choices 时展示，点击后作为下一条用户消息发送 */}
+      {!isUser && choices && choices.length > 0 && onChoiceClick && !isStreaming && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {choices.map((choice, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => onChoiceClick(choice)}
+              className="px-3 py-1.5 text-xs font-medium bg-[#90dce1]/12 hover:bg-[#90dce1]/22 border border-[#90dce1]/25 hover:border-[#90dce1]/45 rounded-xl text-slate-200 hover:text-[#90dce1] transition-all"
+            >
+              {choice}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 思考过程（外置块） */}
       {hasThinking && !isUser && (

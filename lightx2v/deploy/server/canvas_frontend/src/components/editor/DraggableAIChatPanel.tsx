@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { X, Bot, GripVertical, RotateCcw, ImagePlus, Globe, Send, Sparkle, Workflow, VideoIcon } from 'lucide-react';
+import { X, Bot, GripVertical, RotateCcw, ImagePlus, Globe, Send, Sparkle, Workflow, VideoIcon, Pencil, Lightbulb, Shuffle } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
-import { Language } from '../../i18n/useTranslation';
+import { useTranslation, Language } from '../../i18n/useTranslation';
 import { ChatMessage as ChatMessageType } from '../../hooks/useAIChatWorkflow';
 import { TOOLS } from '../../../constants';
 
@@ -12,6 +12,8 @@ interface DraggableAIChatPanelProps {
   isProcessing: boolean;
   onSendMessage: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onClearHistory?: () => void;
+  chatContextNodes?: { nodeId: string; name: string }[];
+  onRemoveNodeFromChatContext?: (nodeId: string) => void;
   onUndo?: (messageId: string) => void;
   onRetry?: (messageId: string) => void;
   lang: Language;
@@ -24,6 +26,8 @@ interface DraggableAIChatPanelProps {
   embedded?: boolean;
   autoFocusInput?: boolean;
   onAutoFocusDone?: () => void;
+  chatMode?: 'edit' | 'ideation';
+  onChatModeChange?: (mode: 'edit' | 'ideation') => void;
 }
 
 const DEFAULT_WIDTH = 400;
@@ -31,6 +35,54 @@ const DEFAULT_HEIGHT = 800;
 const MIN_WIDTH = 300;
 const MIN_HEIGHT = 300;
 const AUTO_SCROLL_THRESHOLD = 160;
+const QUICK_TIP_DISPLAY_COUNT = 3;
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickRandomTips<T>(tips: T[], n: number): T[] {
+  return shuffleArray(tips).slice(0, n);
+}
+
+type TipEntry = { key: string; labelZh: string; labelEn: string; icon: 'Bot' | 'Workflow' | 'VideoIcon' | 'Sparkle' | 'Pencil' | 'Lightbulb' };
+
+const EDIT_MODE_TIPS: TipEntry[] = [
+  { key: 'edit_1', labelZh: '做一个AI数字人工作流', labelEn: 'Create an AI digital human workflow', icon: 'Bot' },
+  { key: 'edit_2', labelZh: '视频都改为9:16', labelEn: 'Change all video to 9:16', icon: 'VideoIcon' },
+  { key: 'edit_3', labelZh: '支持哪些工具？', labelEn: 'What tools are supported?', icon: 'Workflow' },
+  { key: 'edit_4', labelZh: '描述目前工作流', labelEn: 'Describe the current workflow', icon: 'Workflow' },
+  { key: 'edit_5', labelZh: 'LightX2V 是什么？', labelEn: 'What is LightX2V?', icon: 'Sparkle' },
+  { key: 'edit_6', labelZh: '支持什么样的AI视频生成？', labelEn: 'What AI video generation is supported?', icon: 'VideoIcon' },
+  { key: 'edit_7', labelZh: '添加一个文本输入节点', labelEn: 'Add a text input node', icon: 'Pencil' },
+  { key: 'edit_8', labelZh: '把这两个节点连起来', labelEn: 'Connect these two nodes', icon: 'Workflow' },
+  { key: 'edit_9', labelZh: '帮我加一个图像生成节点', labelEn: 'Add an image generation node', icon: 'Workflow' },
+  { key: 'edit_10', labelZh: '当前画布上有哪些节点？', labelEn: 'What nodes are on the canvas?', icon: 'Workflow' },
+  { key: 'edit_11', labelZh: '把所有图片尺寸统一为 16:9', labelEn: 'Make all image dimensions 16:9', icon: 'VideoIcon' },
+  { key: 'edit_12', labelZh: '添加语音克隆节点', labelEn: 'Add a voice clone node', icon: 'Bot' },
+  { key: 'edit_13', labelZh: '把所有视频尺寸统一为 16:9', labelEn: 'Make all video dimensions 16:9', icon: 'VideoIcon' },
+];
+
+const IDEATION_MODE_TIPS: TipEntry[] = [
+  { key: 'ideation_1', labelZh: '我想做宫崎骏风格动画', labelEn: 'I want to make a Studio Ghibli style animation', icon: 'Sparkle' },
+  { key: 'ideation_2', labelZh: '我想做一个酷炫的科幻风转场动画', labelEn: 'I want a cool sci-fi transition animation', icon: 'VideoIcon' },
+  { key: 'ideation_3', labelZh: '我想做一个虚拟数字人女友', labelEn: 'I want to create a virtual digital human girlfriend', icon: 'Bot' },
+  { key: 'ideation_4', labelZh: '帮我构思一个产品宣传片', labelEn: 'Help me brainstorm a product promo video', icon: 'Lightbulb' },
+  { key: 'ideation_5', labelZh: '我想做治愈系风景动画', labelEn: 'I want to make a healing landscape animation', icon: 'Sparkle' },
+  { key: 'ideation_6', labelZh: '构思一个赛博朋克风格的短片', labelEn: 'Brainstorm a cyberpunk style short', icon: 'VideoIcon' },
+  { key: 'ideation_7', labelZh: '我想做儿童向的科普动画', labelEn: 'I want to make a kids\' science animation', icon: 'Lightbulb' },
+  { key: 'ideation_8', labelZh: '帮我想想一个品牌故事短片', labelEn: 'Help me think of a brand story short', icon: 'Lightbulb' },
+  { key: 'ideation_9', labelZh: '我想做电影感的故事预告', labelEn: 'I want a cinematic story teaser', icon: 'VideoIcon' },
+  { key: 'ideation_10', labelZh: '构思一个古风国潮的动画', labelEn: 'Brainstorm a traditional Chinese style animation', icon: 'Sparkle' },
+  { key: 'ideation_11', labelZh: '我想做赛博朋克城市漫游', labelEn: 'I want a cyberpunk city walkthrough', icon: 'VideoIcon' },
+  { key: 'ideation_12', labelZh: '帮我构思一个MV分镜', labelEn: 'Help me brainstorm an MV storyboard', icon: 'Lightbulb' },
+  { key: 'ideation_13', labelZh: '我想做蒸汽朋克风格', labelEn: 'I want a steampunk style', icon: 'Sparkle' },
+];
 
 export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   isOpen,
@@ -39,6 +91,8 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   isProcessing,
   onSendMessage,
   onClearHistory,
+  chatContextNodes = [],
+  onRemoveNodeFromChatContext,
   onUndo,
   onRetry,
   lang,
@@ -50,8 +104,11 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   onSizeChange,
   embedded = false,
   autoFocusInput,
-  onAutoFocusDone
+  onAutoFocusDone,
+  chatMode = 'edit',
+  onChatModeChange = (_m: 'edit' | 'ideation') => {}
 }) => {
+  const { t } = useTranslation(lang);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -86,6 +143,20 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   const [selectedImage, setSelectedImage] = useState<{ data: string; mimeType: string } | null>(null);
   const [isSearchEnabled, setIsSearchEnabled] = useState(false);
   const [showModelSelect, setShowModelSelect] = useState(false);
+
+  const iconMap = useRef({ Bot, Workflow, VideoIcon, Sparkle, Pencil, Lightbulb }).current;
+  const currentModeTipPool = chatMode === 'edit' ? EDIT_MODE_TIPS : IDEATION_MODE_TIPS;
+  const [visibleQuickTipEntries, setVisibleQuickTipEntries] = useState<TipEntry[]>(() =>
+    pickRandomTips(EDIT_MODE_TIPS, QUICK_TIP_DISPLAY_COUNT)
+  );
+
+  useEffect(() => {
+    setVisibleQuickTipEntries(pickRandomTips(currentModeTipPool, QUICK_TIP_DISPLAY_COUNT));
+  }, [chatMode]);
+
+  const handleShuffleTips = useCallback(() => {
+    setVisibleQuickTipEntries(pickRandomTips(currentModeTipPool, QUICK_TIP_DISPLAY_COUNT));
+  }, [currentModeTipPool]);
 
   // 拖拽状态
   const isDraggingRef = useRef(false);
@@ -298,14 +369,6 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
     }
   }, [isGeminiModel, isSearchEnabled]);
 
-  const quickTips = [
-    { key: 'tip_avatar_flow', label: lang === 'zh' ? '做一个AI数字人工作流' : 'Create an AI digital human workflow', icon: <Bot size={10} /> },
-    { key: 'tip_tool_types', label: lang === 'zh' ? '支持的工具类型有哪些？' : 'What tools are supported?', icon: <Workflow size={10} /> },
-    { key: 'tip_lightx2v', label: lang === 'zh' ? 'LightX2V 是什么？' : 'What is LightX2V?', icon: <Sparkle size={10} /> },
-    { key: 'tip_video_generation', label: lang === 'zh' ? '支持什么样的AI视频生成？' : 'What AI video generation is supported?', icon: <VideoIcon size={10} /> },
-  ];
-  const visibleQuickTips = quickTips.slice(0, 4);
-
   return (
     <div
       ref={panelRef}
@@ -435,6 +498,8 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
                 onRetry={onRetry ? () => onRetry(message.id) : undefined}
                 thinking={message.thinking}
                 isStreaming={message.isStreaming}
+                choices={message.choices}
+                onChoiceClick={message.choices?.length ? (choice) => onSendMessage(choice) : undefined}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -445,20 +510,60 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
       {/* Input */}
       <div className="p-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-3 shrink-0">
         {!isProcessing && (
-          <div className="flex flex-wrap gap-2">
-            {visibleQuickTips.map(tip => (
-              <button
-                key={tip.key}
-                onClick={() => handleSend(tip.label)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-[#90dce1]/30 rounded-full text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:text-[#90dce1] transition-all group"
-              >
-                <span className="text-slate-500 group-hover:text-[#90dce1] transition-colors">{tip.icon}</span>
-                {tip.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            {visibleQuickTipEntries.map((entry) => {
+              const label = lang === 'zh' ? entry.labelZh : entry.labelEn;
+              const IconComponent = iconMap[entry.icon];
+              return (
+                <button
+                  key={entry.key}
+                  onClick={() => handleSend(label)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-[#90dce1]/30 rounded-full text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:text-[#90dce1] transition-all group"
+                >
+                  <span className="text-slate-500 group-hover:text-[#90dce1] transition-colors shrink-0">
+                    {IconComponent ? <IconComponent size={10} /> : null}
+                  </span>
+                  {label}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={handleShuffleTips}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-[#90dce1]/30 rounded-full text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:text-[#90dce1] transition-all"
+              title={lang === 'zh' ? '换一批提示' : 'Shuffle tips'}
+            >
+              <Shuffle size={10} className="shrink-0" />
+              {lang === 'zh' ? '换一批' : 'Shuffle'}
+            </button>
           </div>
         )}
         <div className="space-y-4">
+          {chatContextNodes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
+                {lang === 'zh' ? '针对节点：' : 'Context: '}
+              </span>
+              {chatContextNodes.map((n) => (
+                <span
+                  key={n.nodeId}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-800/80 border border-slate-700 rounded-lg text-[11px] text-slate-200"
+                >
+                  <span className="truncate max-w-[120px]">{n.name}</span>
+                  {onRemoveNodeFromChatContext && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveNodeFromChatContext(n.nodeId)}
+                      className="p-0.5 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
+                      title={lang === 'zh' ? '从对话中移除' : 'Remove from context'}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
           {selectedImage && (
             <div className="relative inline-block group">
               <img
@@ -504,7 +609,8 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  // IME 组合输入中（如中文选字）按 Enter 时不发送，等组合完毕后再按 Enter 才发送
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     handleSend();
                   }
@@ -544,6 +650,35 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
             </div>
           </div>
         </div>
+        {/* 模式切换：工作流编辑 / 构思模式 */}
+        {onChatModeChange && (
+          <div className="flex rounded-xl bg-slate-900/80 border border-slate-800 p-0.5 w-full">
+            <button
+              type="button"
+              onClick={() => onChatModeChange('edit')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                chatMode === 'edit'
+                  ? 'bg-[#90dce1]/15 text-[#90dce1] border border-[#90dce1]/30'
+                  : 'text-slate-500 hover:text-slate-300 border border-transparent'
+              }`}
+            >
+              <Pencil size={12} className="shrink-0" />
+              {t('chat_mode_edit')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChatModeChange('ideation')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                chatMode === 'ideation'
+                  ? 'bg-[#90dce1]/15 text-[#90dce1] border border-[#90dce1]/30'
+                  : 'text-slate-500 hover:text-slate-300 border border-transparent'
+              }`}
+            >
+              <Lightbulb size={12} className="shrink-0" />
+              {t('chat_mode_ideation')}
+            </button>
+          </div>
+        )}
       </div>
 
       {!embedded && (

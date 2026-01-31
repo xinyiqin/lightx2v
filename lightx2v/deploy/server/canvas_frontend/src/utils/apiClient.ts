@@ -1,36 +1,33 @@
+import { isStandalone } from '../config/runtimeMode';
 
 /**
  * 初始化 LIGHTX2V_TOKEN
- * - 如果使用环境变量 URL (LIGHTX2V_URL 存在)，则必须使用环境变量的 LIGHTX2V_TOKEN，不存在则报错
- * - 否则，如果用户已登录，使用用户的 accessToken
+ * - 现在为「本地后端」或「Cloud」两种模式：LIGHTX2V_TOKEN 可选
+ * - 若设置了 LIGHTX2V_URL：优先用环境变量 LIGHTX2V_TOKEN，否则用用户登录的 accessToken
+ * - 若未设置 LIGHTX2V_URL：用用户登录的 accessToken 或环境变量 LIGHTX2V_TOKEN
  */
 export function initLightX2VToken(): void {
-  const envUrl = process.env.LIGHTX2V_URL;
-  const envToken = process.env.LIGHTX2V_TOKEN;
+  const envUrl = (process.env.BASE_URL || '').trim();
+  const envToken = (process.env.LIGHTX2V_TOKEN || '').trim();
+  const accessToken = localStorage.getItem('accessToken');
 
-  // 如果使用环境变量 URL，必须使用环境变量的 TOKEN
-  if (envUrl && envUrl.trim()) {
-    if (!envToken || !envToken.trim()) {
-      throw new Error('LIGHTX2V_URL 已设置，但 LIGHTX2V_TOKEN 未设置。请设置 LIGHTX2V_TOKEN 环境变量。');
-    }
-    // 使用环境变量的 TOKEN，不同步 localStorage
-    console.log('[LightX2V] 使用环境变量 URL，使用环境变量 LIGHTX2V_TOKEN');
-    console.log('[LightX2V] process.env.LIGHTX2V_TOKEN:', envToken ? `${envToken.substring(0, 10)}...` : 'empty');
+  if (envUrl && envToken) {
+    // 环境变量 URL + TOKEN 都有：直接使用
+    console.log('[LightX2V] 使用环境变量 URL + LIGHTX2V_TOKEN');
     return;
   }
-
-  // 不使用环境变量 URL 时，使用原来的逻辑
-  const accessToken = localStorage.getItem('accessToken');
   if (accessToken) {
-    // 用户已登录，直接设置 process.env.LIGHTX2V_TOKEN 为用户的 accessToken
     (process.env as any).LIGHTX2V_TOKEN = accessToken;
-    console.log('[LightX2V] 已将 process.env.LIGHTX2V_TOKEN 设置为用户登录的 accessToken');
-    console.log('[LightX2V] process.env.LIGHTX2V_TOKEN:', accessToken ? `${accessToken.substring(0, 10)}...` : 'empty');
-  } else {
-    // 用户未登录，保持使用环境变量的值
-    console.log('[LightX2V] 用户未登录，使用环境变量 LIGHTX2V_TOKEN');
-    console.log('[LightX2V] process.env.LIGHTX2V_TOKEN:', envToken ? `${envToken.substring(0, 10)}...` : 'empty');
+    console.log('[LightX2V] 使用用户登录的 accessToken 作为 LIGHTX2V_TOKEN');
+    return;
   }
+  if (envToken) {
+    (process.env as any).LIGHTX2V_TOKEN = envToken;
+    console.log('[LightX2V] 使用环境变量 LIGHTX2V_TOKEN');
+    return;
+  }
+  // 本地后端或未配置：不设置 token，由请求时 getAccessToken 再取
+  console.log('[LightX2V] 未设置 LIGHTX2V_TOKEN，将使用本地后端或登录后 token');
 }
 
 /**
@@ -74,6 +71,11 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export async function apiRequest(url: string, options: RequestInit = {}): Promise<Response> {
+  // 纯前端部署时，不请求自建后端（相对路径均为后端）；LightX2V Cloud 通过 lightX2VRequest 打完整 URL
+  if (isStandalone() && !url.startsWith('http://') && !url.startsWith('https://')) {
+    throw new Error('[Standalone] Backend API disabled. Use local storage or LightX2V Cloud only.');
+  }
+
   const apiClient = getApiClient();
 
   // 参考主应用的做法：总是获取认证 headers，然后合并 options.headers
@@ -121,60 +123,36 @@ export function getApiBaseUrl(): string {
   // 回退到当前域名
   return typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.host}`
-    : 'http://localhost:8082';
+    : 'http://localhost:8081';
 }
 
 /**
  * 获取访问令牌
- * - 如果使用环境变量 URL (LIGHTX2V_URL 存在)，则只使用环境变量的 LIGHTX2V_TOKEN
- * - 否则，优先使用用户登录的 accessToken，否则使用 process.env.LIGHTX2V_TOKEN
+ * - 本地后端或 Cloud：优先 sharedStore（qiankun 主应用），否则 localStorage，否则环境变量 LIGHTX2V_TOKEN
  */
-// 缓存 token，避免重复读取 localStorage
 let tokenCache: { token: string; timestamp: number } | null = null;
-const TOKEN_CACHE_TTL = 1000; // 1秒缓存，避免频繁读取
+const TOKEN_CACHE_TTL = 1000;
+
+/** 清除 token 缓存，用于 qiankun mount 后强制重新从 sharedStore/localStorage 读取 */
+export function clearTokenCache(): void {
+  tokenCache = null;
+}
 
 export function getAccessToken(): string {
-  const envUrl = process.env.LIGHTX2V_URL;
-
-  // 如果使用环境变量 URL，只使用环境变量的 TOKEN
-  if (envUrl && envUrl.trim()) {
-    const envToken = (process.env.LIGHTX2V_TOKEN || '').trim();
-    if (!envToken) {
-      throw new Error('LIGHTX2V_URL 已设置，但 LIGHTX2V_TOKEN 未设置。请设置 LIGHTX2V_TOKEN 环境变量。');
-    }
-    // 只在开发环境或首次调用时打印日志
-    if (!tokenCache || Date.now() - tokenCache.timestamp > TOKEN_CACHE_TTL) {
-      // 减少日志输出
-    }
-    return envToken;
-  }
-
-  // 检查缓存
   const now = Date.now();
   if (tokenCache && now - tokenCache.timestamp < TOKEN_CACHE_TTL) {
     return tokenCache.token;
   }
 
-  // 不使用环境变量 URL 时，使用原来的逻辑
-  const localToken = localStorage.getItem('accessToken');
+  const sharedStore = getSharedStore();
+  const storeToken = sharedStore ? sharedStore.getState('token') : null;
+  const localToken = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const envToken = (process.env.LIGHTX2V_TOKEN || '').trim();
 
-  // 只在首次调用或缓存过期时打印日志
-  if (!tokenCache || now - tokenCache.timestamp > TOKEN_CACHE_TTL) {
-    // 减少日志输出，只在必要时打印
+  const token = (storeToken || localToken || envToken) || '';
+  if (storeToken || localToken) {
+    (process.env as any).LIGHTX2V_TOKEN = token;
   }
-
-  let token: string;
-  if (localToken) {
-    // 如果获取到了 token，同时更新 process.env.LIGHTX2V_TOKEN
-    (process.env as any).LIGHTX2V_TOKEN = localToken;
-    token = localToken;
-  } else {
-    // 如果没有登录，使用环境变量
-    token = (process.env.LIGHTX2V_TOKEN || '').trim();
-  }
-
-  // 更新缓存
   tokenCache = { token, timestamp: now };
-
   return token;
 }

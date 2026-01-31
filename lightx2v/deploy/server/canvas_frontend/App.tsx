@@ -40,6 +40,8 @@ import { useAIChatWorkflow } from './src/hooks/useAIChatWorkflow';
 import { useWorkflowAutoSave } from './src/hooks/useWorkflowAutoSave';
 import { getAccessToken, initLightX2VToken, apiRequest } from './src/utils/apiClient';
 import { checkWorkflowOwnership, getCurrentUserId } from './src/utils/workflowUtils';
+import { isStandalone } from './src/config/runtimeMode';
+import { collectLightX2VResultRefs } from './src/utils/resultRef';
 
 // --- Main App ---
 
@@ -49,7 +51,7 @@ const App: React.FC = () => {
     return (saved as any) || 'zh';
   });
   const [currentView, setCurrentView] = useState<'DASHBOARD' | 'EDITOR'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'MY' | 'COMMUNITY' | 'PRESET'>('COMMUNITY');
+  const [activeTab, setActiveTab] = useState<'MY' | 'COMMUNITY' | 'PRESET'>(() => (isStandalone() ? 'PRESET' : 'COMMUNITY'));
   const [communityWorkflows, setCommunityWorkflows] = useState<WorkflowState[]>([]);
   const nameSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -58,8 +60,10 @@ const App: React.FC = () => {
     myWorkflows,
     workflow,
     setWorkflow,
+    getWorkflow,
     setMyWorkflows,
     saveWorkflowToLocal,
+    saveWorkflowToLocalOnly,
     saveWorkflowToDatabase,
     loadWorkflow,
     loadWorkflows,
@@ -117,6 +121,7 @@ const App: React.FC = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [sidebarDefaultTab, setSidebarDefaultTab] = useState<'tools' | 'chat'>('tools');
   const [focusAIChatInput, setFocusAIChatInput] = useState(false);
+  const [aiChatMode, setAiChatMode] = useState<'edit' | 'ideation'>('edit');
   const isPausedRef = useRef(false);
   const runningTaskIdsRef = useRef<Map<string, string>>(new Map()); // Map<nodeId, taskId> for tracking LightX2V tasks
   const abortControllerRef = useRef<AbortController | null>(null); // AbortController for cancelling tasks
@@ -269,8 +274,14 @@ const App: React.FC = () => {
   const autoSaveHook = useWorkflowAutoSave({
     workflow,
     onSave: async (w) => {
-      // Auto-save callback (optional)
-      console.log('[App] Auto-save completed for workflow:', w.id);
+      try {
+        await saveWorkflowToDatabase(w, { name: w.name });
+      } catch (e) {
+        // 仅部署前端时后端不可用，回退到本地保存
+        console.warn('[App] Autosave backend failed, saving locally:', e);
+        await saveWorkflowToLocalOnly(w, { name: w.name });
+      }
+      setWorkflow(prev => prev && prev.id === w.id ? { ...prev, isDirty: false } : prev);
     }
   });
 
@@ -325,6 +336,7 @@ const App: React.FC = () => {
   const aiChatWorkflow = useAIChatWorkflow({
     workflow,
     setWorkflow,
+    getWorkflow,
     addNode: nodeManagement.addNode,
     deleteNode: nodeManagement.deleteNode,
     updateNodeData: nodeManagement.updateNodeData,
@@ -339,7 +351,10 @@ const App: React.FC = () => {
     lightX2VVoiceList: voiceList.lightX2VVoiceList,
     getLightX2VConfig,
     getCurrentHistoryIndex: undoRedo.getCurrentHistoryIndex,
-    undoToIndex: undoRedo.undoToIndex
+    undoToIndex: undoRedo.undoToIndex,
+    activeOutputs,
+    clearSelectedRunId: () => setSelectedRunId(null),
+    chatMode: aiChatMode
   });
 
   // Use useWorkflowExecution Hook
@@ -358,17 +373,28 @@ const App: React.FC = () => {
     setGlobalError,
     updateNodeData: nodeManagement.updateNodeData,
     voiceList,
-    lang
+    lang,
+    onSaveExecutionToLocal: isStandalone() ? async (w) => { await saveWorkflowToLocalOnly(w); } : undefined
   });
 
   // Destructure updateNodeData from nodeManagement (for use in other places)
   const updateNodeData = nodeManagement.updateNodeData;
 
-  // runWorkflow, validateWorkflow, stopWorkflow, and getDescendants are now provided by useWorkflowExecution Hook
+  // runWorkflow, validateWorkflow, stopWorkflow, cancelNodeRun, pendingRunNodeIds, getDescendants, resolveLightX2VResultRef from useWorkflowExecution
   const runWorkflow = workflowExecution.runWorkflow;
   const stopWorkflow = workflowExecution.stopWorkflow;
+  const cancelNodeRun = workflowExecution.cancelNodeRun;
+  const pendingRunNodeIds = workflowExecution.pendingRunNodeIds;
   const validateWorkflow = workflowExecution.validateWorkflow;
   const getDescendants = workflowExecution.getDescendants;
+  const resolveLightX2VResultRef = workflowExecution.resolveLightX2VResultRef;
+
+  // Pre-resolve lightx2v result refs when entering workflow editor (warm cache for node previews)
+  useEffect(() => {
+    if (currentView !== 'EDITOR' || !workflow || !resolveLightX2VResultRef) return;
+    const refs = workflow.nodes.flatMap((n) => collectLightX2VResultRefs(n.outputValue));
+    refs.forEach((ref) => resolveLightX2VResultRef(ref).catch(() => {}));
+  }, [currentView, workflow?.id, workflow?.nodes, resolveLightX2VResultRef]);
 
   // Helper functions for voice selection
   const getLanguageDisplayName = useCallback((langCode: string) => {
@@ -405,7 +431,21 @@ const App: React.FC = () => {
         console.log('[App] Loading workflow from URL hash:', workflowId);
 
         try {
-          // Check if workflow belongs to current user
+          if (isStandalone()) {
+            const loaded = await loadWorkflow(workflowId);
+            if (loaded) {
+              const config = getLightX2VConfig(null);
+              const newWorkflow = {
+                ...loaded.workflow,
+                env: { lightx2v_url: config.url, lightx2v_token: config.token }
+              };
+              setWorkflow(newWorkflow);
+              setActiveOutputs(loaded.activeOutputs);
+              setCurrentView('EDITOR');
+            }
+            return;
+          }
+
           const currentUserId = getCurrentUserId();
           const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
 
@@ -504,6 +544,19 @@ const App: React.FC = () => {
           console.log('[App] Hash changed, loading workflow:', workflowId);
 
           try {
+            if (isStandalone()) {
+              const loaded = await loadWorkflow(workflowId);
+              if (loaded) {
+                const config = getLightX2VConfig(null);
+                setWorkflow({
+                  ...loaded.workflow,
+                  env: { lightx2v_url: config.url, lightx2v_token: config.token }
+                });
+                setActiveOutputs(loaded.activeOutputs);
+                setCurrentView('EDITOR');
+              }
+              return;
+            }
             const currentUserId = getCurrentUserId();
             const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
 
@@ -579,6 +632,10 @@ const App: React.FC = () => {
   }, [voiceList.lightX2VVoiceList, workflow]);
 
   const loadCommunityWorkflows = useCallback(async () => {
+    if (isStandalone()) {
+      setCommunityWorkflows([]);
+      return;
+    }
     try {
       const response = await apiRequest('/api/v1/workflow/public?page=1&page_size=100');
       if (!response.ok) {
@@ -649,7 +706,7 @@ const App: React.FC = () => {
       }
 
       const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
-      saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+      await saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
       setWorkflow(prev => prev ? ({ ...prev, id: savedId || prev.id, isDirty: false, visibility }) : prev);
       autoSaveHook?.resetAutoSaveTimer();
     } catch (error: any) {
@@ -667,7 +724,7 @@ const App: React.FC = () => {
       if (workflow && workflow.id === workflowId) {
         const nextWorkflow = { ...workflow, visibility, isDirty: true };
         const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
-        saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+        await saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
         setWorkflow(prev => prev ? ({ ...prev, id: savedId || prev.id, isDirty: false, visibility }) : prev);
         autoSaveHook?.resetAutoSaveTimer();
       }
@@ -680,6 +737,24 @@ const App: React.FC = () => {
   }, [updateWorkflowVisibility, workflow, saveWorkflowToDatabase, saveWorkflowToLocal, setWorkflow, autoSaveHook, setGlobalError, t]);
 
   const handleToggleWorkflowThumsup = useCallback(async (workflowId: string) => {
+    if (isStandalone()) {
+      setMyWorkflows(prev => prev.map(w => {
+        if (w.id !== workflowId) return w;
+        const nextLiked = !w.thumsupLiked;
+        const nextCount = Math.max(0, (w.thumsupCount ?? 0) + (nextLiked ? 1 : -1));
+        return { ...w, thumsupLiked: nextLiked, thumsupCount: nextCount };
+      }));
+      setCommunityWorkflows(prev => prev.map(w => {
+        if (w.id !== workflowId) return w;
+        const nextLiked = !w.thumsupLiked;
+        const nextCount = Math.max(0, (w.thumsupCount ?? 0) + (nextLiked ? 1 : -1));
+        return { ...w, thumsupLiked: nextLiked, thumsupCount: nextCount };
+      }));
+      setWorkflow(prev => prev && prev.id === workflowId
+        ? { ...prev, thumsupLiked: !prev.thumsupLiked, thumsupCount: Math.max(0, (prev.thumsupCount ?? 0) + (prev.thumsupLiked ? -1 : 1)) }
+        : prev);
+      return;
+    }
     try {
       const response = await apiRequest(`/api/v1/workflow/${workflowId}/thumsup`, {
         method: 'POST'
@@ -705,7 +780,8 @@ const App: React.FC = () => {
 
   const scheduleNameSave = useCallback((nextWorkflow: WorkflowState) => {
     if (!nextWorkflow?.id) return;
-    const isSavedWorkflow = nextWorkflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    const isUuid = nextWorkflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    const isSavedWorkflow = isUuid || isStandalone();
     if (!isSavedWorkflow) return;
 
     if (nameSaveTimerRef.current) {
@@ -715,7 +791,7 @@ const App: React.FC = () => {
     nameSaveTimerRef.current = setTimeout(async () => {
       try {
         const savedId = await saveWorkflowToDatabase(nextWorkflow, { name: nextWorkflow.name });
-        saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
+        await saveWorkflowToLocal({ ...nextWorkflow, id: savedId || nextWorkflow.id });
         setWorkflow(prev => prev && prev.name === nextWorkflow.name ? { ...prev, id: savedId || prev.id, isDirty: false } : prev);
         autoSaveHook?.resetAutoSaveTimer();
       } catch (error: any) {
@@ -741,56 +817,48 @@ const App: React.FC = () => {
     let activeOutputsToRestore: Record<string, any> = {};
     let workflowIdToOpen = w.id;
 
-    if (w.id && (w.id.startsWith('workflow-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+    if (w.id && (w.id.startsWith('workflow-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) || isStandalone())) {
       try {
-        // Check if workflow belongs to current user
-        const currentUserId = getCurrentUserId();
-        const { isPreset } = await checkWorkflowOwnership(w.id, currentUserId);
-
-        if (isPreset) {
-          // Workflow belongs to different user (preset workflow), copy it
-          console.log('[App] Opening preset workflow, copying to create user-owned version');
-
-          // Generate new UUID for copied workflow
-          const generateUUID = () => {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-              const r = Math.random() * 16 | 0;
-              const v = c === 'x' ? r : (r & 0x3 | 0x8);
-              return v.toString(16);
-            });
-          };
-          const newWorkflowId = generateUUID();
-
-          // Copy workflow via API
-          const copyResponse = await apiRequest(`/api/v1/workflow/${w.id}/copy`, {
-            method: 'POST',
-            body: JSON.stringify({
-              workflow_id: newWorkflowId
-            })
-          });
-
-          if (copyResponse.ok) {
-            const copyData = await copyResponse.json();
-            workflowIdToOpen = copyData.workflow_id;
-            console.log('[App] Workflow copied successfully, new ID:', workflowIdToOpen);
-
-            // Load the copied workflow
-            const loaded = await loadWorkflow(workflowIdToOpen);
-            if (loaded) {
-              workflowToOpen = loaded.workflow;
-              activeOutputsToRestore = loaded.activeOutputs;
-            }
-          } else {
-            const errorText = await copyResponse.text();
-            console.error('[App] Failed to copy preset workflow:', errorText);
-            throw new Error(`Failed to copy preset workflow: ${errorText}`);
-          }
-        } else {
-          // Workflow belongs to current user, load it normally
+        if (isStandalone()) {
           const loaded = await loadWorkflow(w.id);
           if (loaded) {
             workflowToOpen = loaded.workflow;
             activeOutputsToRestore = loaded.activeOutputs;
+          }
+        } else {
+          const currentUserId = getCurrentUserId();
+          const { isPreset } = await checkWorkflowOwnership(w.id, currentUserId);
+
+          if (isPreset) {
+            const generateUUID = () => {
+              return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+              });
+            };
+            const newWorkflowId = generateUUID();
+            const copyResponse = await apiRequest(`/api/v1/workflow/${w.id}/copy`, {
+              method: 'POST',
+              body: JSON.stringify({ workflow_id: newWorkflowId })
+            });
+            if (copyResponse.ok) {
+              const copyData = await copyResponse.json();
+              workflowIdToOpen = copyData.workflow_id;
+              const loaded = await loadWorkflow(workflowIdToOpen);
+              if (loaded) {
+                workflowToOpen = loaded.workflow;
+                activeOutputsToRestore = loaded.activeOutputs;
+              }
+            } else {
+              throw new Error(await copyResponse.text());
+            }
+          } else {
+            const loaded = await loadWorkflow(w.id);
+            if (loaded) {
+              workflowToOpen = loaded.workflow;
+              activeOutputsToRestore = loaded.activeOutputs;
+            }
           }
         }
       } catch (error) {
@@ -836,13 +904,15 @@ const App: React.FC = () => {
     // 获取当前的 LightX2V 配置（从主应用或环境变量）
     const config = getLightX2VConfig(null);
 
-    // Use temporary ID for new workflow (backend will generate the real workflow_id)
-    const tempWorkflowId = `temp-${Date.now()}`;
+    // 纯前端部署使用 UUID；有后端时用 temp- 由后端分配正式 ID
+    const newWorkflowId = isStandalone()
+      ? (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`)
+      : `temp-${Date.now()}`;
 
     // Create workflow in database
     try {
       const tempFlow: WorkflowState = {
-        id: tempWorkflowId, // Temporary ID, will be replaced by backend
+        id: newWorkflowId,
         name: t('untitled'),
         nodes: [],
         connections: [],
@@ -873,9 +943,9 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('[App] Failed to create workflow in database, creating local workflow:', error);
-      // Fallback to local workflow (keep temp ID)
+      // Fallback to local workflow (use same ID: UUID in standalone, temp- when backend failed)
       const newFlow: WorkflowState = {
-        id: tempWorkflowId,
+        id: newWorkflowId,
         name: t('untitled'),
         nodes: [],
         connections: [],
@@ -893,7 +963,7 @@ const App: React.FC = () => {
       setWorkflow(newFlow);
       setCurrentView('EDITOR');
       if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', `#workflow/${tempWorkflowId}`);
+        window.history.replaceState(null, '', `#workflow/${newWorkflowId}`);
       }
     }
     // History will be automatically initialized by useUndoRedo when workflow changes
@@ -919,7 +989,7 @@ const App: React.FC = () => {
 
   // expandedResultData, activeResultsList, and handleManualResultEdit are now provided by useResultManagement Hook
   const expandedResultData = resultManagement.expandedResultData;
-  const activeResultsList = resultManagement.activeResultsList;
+  const resultEntries = resultManagement.resultEntries;
   const handleManualResultEdit = resultManagement.handleManualResultEdit;
 
 
@@ -1266,6 +1336,42 @@ const App: React.FC = () => {
     setSelectedRunId(null);
   }, []);
 
+  const sourceNodes = React.useMemo(() => {
+    if (!workflow) return [];
+    return selectedRunId
+      ? (workflow.history.find(r => r.id === selectedRunId)?.nodesSnapshot || [])
+      : workflow.nodes;
+  }, [workflow, selectedRunId]);
+
+  const sourceOutputs = React.useMemo(() => {
+    if (!workflow) return activeOutputs;
+    // When no run selected: merge node.outputValue so preview works after load/refresh (e.g. LightX2VResultRef)
+    if (!selectedRunId) {
+      const fromNodes = Object.fromEntries(
+        workflow.nodes
+          .filter((n) => n.outputValue !== undefined && n.outputValue !== null)
+          .map((n) => [n.id, n.outputValue])
+      );
+      return { ...fromNodes, ...activeOutputs };
+    }
+    const run = workflow.history.find(r => r.id === selectedRunId);
+    const outputs = run?.outputs || {};
+    const normalize = (v: any): any => {
+      if (v == null) return v;
+      if (typeof v === 'object' && !Array.isArray(v)) {
+        if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
+        if (v.type === 'url' && typeof v.data === 'string') return v.data;
+        if (v.type === 'text' && v.data !== undefined) return v.data;
+        if (v.type === 'json' && v.data !== undefined) return v.data;
+      }
+      if (Array.isArray(v)) return v.map(normalize);
+      return v;
+    };
+    const fromRun = Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, normalize(v)]));
+    // 用 activeOutputs 覆盖 run 快照，使 AI 聊天或手动修改的 outputValue 能即时反映到画布
+    return { ...fromRun, ...activeOutputs };
+  }, [workflow, selectedRunId, activeOutputs]);
+
   if (currentView === 'DASHBOARD') {
     return (
       <div className="flex flex-col h-full">
@@ -1273,6 +1379,7 @@ const App: React.FC = () => {
           lang={lang}
           myWorkflows={myWorkflows}
           communityWorkflows={communityWorkflows}
+          hideCommunityTab={isStandalone()}
           activeTab={activeTab}
           onToggleLang={toggleLang}
           onCreateWorkflow={handleCreateWorkflow}
@@ -1289,20 +1396,13 @@ const App: React.FC = () => {
 
   if (!workflow) return null;
 
-  const sourceNodes = selectedRunId
-    ? (workflow.history.find(r => r.id === selectedRunId)?.nodesSnapshot || [])
-    : workflow.nodes;
-
-  const sourceOutputs = selectedRunId
-    ? (workflow.history.find(r => r.id === selectedRunId)?.outputs || {})
-    : activeOutputs;
-
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-200 selection:bg-indigo-500/30 font-sans overflow-hidden">
       <ExpandedOutputModal
         lang={lang}
         expandedOutput={modalState.expandedOutput}
         expandedResultData={expandedResultData}
+        resolveLightX2VResultRef={resolveLightX2VResultRef}
         isEditingResult={modalState.isEditingResult}
         tempEditValue={modalState.tempEditValue}
           onClose={() => {
@@ -1366,7 +1466,7 @@ const App: React.FC = () => {
           try {
             await saveWorkflowToDatabase(workflow, { name: workflow.name });
             // Also save to localStorage as backup
-            saveWorkflowToLocal(workflow);
+            await saveWorkflowToLocal(workflow);
             setWorkflow(prev => prev ? { ...prev, isDirty: false } : null);
             // 手动保存后重置自动保存计时器
             if (autoSaveHook) {
@@ -1375,7 +1475,7 @@ const App: React.FC = () => {
           } catch (error) {
             console.error('[App] Failed to save workflow to database:', error);
             // Fallback to localStorage
-            saveWorkflowToLocal(workflow);
+            await saveWorkflowToLocal(workflow);
           }
         }}
         onPause={() => {
@@ -1422,6 +1522,9 @@ const App: React.FC = () => {
         onDeleteNode={deleteSelectedNode}
         onReplaceNode={replaceNode}
         onRunWorkflow={runWorkflow}
+        onCancelNodeRun={cancelNodeRun}
+        pendingRunNodeIds={pendingRunNodeIds}
+        resolveLightX2VResultRef={resolveLightX2VResultRef}
           onSetReplaceMenu={modalState.setShowReplaceMenu}
           onSetOutputQuickAdd={modalState.setShowOutputQuickAdd}
           onSetModelSelect={modalState.setShowModelSelect}
@@ -1455,11 +1558,10 @@ const App: React.FC = () => {
         onGlobalInputChange={handleGlobalInputChange}
           onShowCloneVoiceModal={() => modalState.setShowCloneVoiceModal(true)}
         resultsCollapsed={modalState.resultsCollapsed}
-        activeResultsList={activeResultsList}
-          onToggleResultsCollapsed={() => modalState.setResultsCollapsed(!modalState.resultsCollapsed)}
-        onSelectRun={setSelectedRunId}
+        resultEntries={resultEntries}
+        onToggleResultsCollapsed={() => modalState.setResultsCollapsed(!modalState.resultsCollapsed)}
         onToggleShowIntermediate={() => setWorkflow(p => p ? ({ ...p, showIntermediateResults: !p.showIntermediateResults }) : null)}
-          onExpandOutput={modalState.setExpandedOutput}
+        onExpandOutput={(nodeId, fieldId, runId) => modalState.setExpandedOutput({ nodeId, fieldId, runId })}
         onPinOutputToCanvas={pinOutputToCanvas}
         isAIChatOpen={modalState.isAIChatOpen}
         isAIChatCollapsed={modalState.isAIChatCollapsed}
@@ -1478,10 +1580,18 @@ const App: React.FC = () => {
           }
         }}
         onToggleAIChatCollapse={() => modalState.setIsAIChatCollapsed(!modalState.isAIChatCollapsed)}
+        aiChatMode={aiChatMode}
+        onAIChatModeChange={setAiChatMode}
         aiChatHistory={aiChatWorkflow.chatHistory}
         isAIProcessing={aiChatWorkflow.isProcessing}
         onAISendMessage={aiChatWorkflow.handleUserInput}
         onAIClearHistory={aiChatWorkflow.clearChatHistory}
+        chatContextNodes={aiChatWorkflow.chatContextNodes}
+        onAddNodeToChatContext={(nodeId, name) => {
+          aiChatWorkflow.addNodeToChatContext(nodeId, name);
+          setSidebarDefaultTab('chat');
+        }}
+        onRemoveNodeFromChatContext={aiChatWorkflow.removeNodeFromChatContext}
         aiModel={aiChatWorkflow.aiModel}
         onAIModelChange={aiChatWorkflow.setAiModel}
         onAIUndo={(messageId) => {
@@ -1489,23 +1599,26 @@ const App: React.FC = () => {
           aiChatWorkflow.undoMessageOperations(messageId);
         }}
             onAIRetry={(messageId) => {
-              // 重试：找到对应的用户消息并重新发送
+              // 重试：找到对应的用户消息并重新发送，并把上次失败的报错信息附加进去供 AI 参考
               const history = aiChatWorkflow.chatHistory;
               const assistantMessageIndex = history.findIndex(m => m.id === messageId);
 
               if (assistantMessageIndex >= 0) {
-                // 找到当前 assistant 消息之前最近的一条用户消息
-                let userMessage = null;
+                const failedMsg = history[assistantMessageIndex];
+                const errorParts: string[] = [];
+                if (failedMsg.error) errorParts.push(failedMsg.error);
+                if (failedMsg.operationResults?.length) {
+                  failedMsg.operationResults
+                    .filter((r: { success?: boolean; error?: string }) => !r.success && r.error)
+                    .forEach((r: { error?: string }) => errorParts.push(r.error!));
+                }
+                const errorText = errorParts.length > 0 ? errorParts.join('; ') : '';
 
-                // 先检查前一条消息是否是用户消息（最常见的情况）
+                let userMessage = null;
                 if (assistantMessageIndex > 0) {
                   const prevMessage = history[assistantMessageIndex - 1];
-                  if (prevMessage && prevMessage.role === 'user') {
-                    userMessage = prevMessage;
-                  }
+                  if (prevMessage && prevMessage.role === 'user') userMessage = prevMessage;
                 }
-
-                // 如果前一条不是用户消息，向前查找最近的一条用户消息
                 if (!userMessage) {
                   for (let i = assistantMessageIndex - 1; i >= 0; i--) {
                     if (history[i].role === 'user') {
@@ -1515,9 +1628,11 @@ const App: React.FC = () => {
                   }
                 }
 
-                // 如果找到了用户消息，重新发送
                 if (userMessage) {
-                  aiChatWorkflow.handleUserInput(userMessage.content, {
+                  const contentToSend = errorText
+                    ? `${userMessage.content}\n\n[上次执行失败，错误信息：${errorText}。请根据错误修正后重试。]`
+                    : userMessage.content;
+                  aiChatWorkflow.handleUserInput(contentToSend, {
                     image: userMessage.image,
                     useSearch: userMessage.useSearch
                   });

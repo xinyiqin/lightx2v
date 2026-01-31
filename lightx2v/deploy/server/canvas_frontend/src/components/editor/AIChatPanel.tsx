@@ -159,6 +159,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     onRetry={onRetry ? () => onRetry(message.id) : undefined}
                     thinking={message.thinking}
                     isStreaming={message.isStreaming}
+                    choices={message.choices}
+                    onChoiceClick={message.choices?.length ? (choice) => onSendMessage(choice) : undefined}
                   />
                 ))}
                 {isProcessing && (

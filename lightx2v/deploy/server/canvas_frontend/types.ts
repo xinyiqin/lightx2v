@@ -18,6 +18,7 @@ export interface Port {
   id: string;
   type: DataType;
   label: string;
+  label_zh?: string;
 }
 
 export interface ModelDefaultParams {

@@ -176,7 +176,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                       <div className="flex items-center gap-2">
                         <input
                           value={o.id}
-                          placeholder="Field ID (e.g. prompt)"
+                          placeholder={t('field_id_placeholder')}
                           onChange={e => {
                             const n = [...selectedNode.data.customOutputs];
                             n[i].id = e.target.value;
@@ -196,7 +196,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                       </div>
                       <textarea
                         value={o.description || ''}
-                        placeholder="Instructions for AI (intent, constraints)..."
+                        placeholder={t('custom_instruction_placeholder')}
                         onChange={e => {
                           const n = [...selectedNode.data.customOutputs];
                           n[i].description = e.target.value;
@@ -275,7 +275,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                               type="text"
                               value={voiceSearchQuery}
                               onChange={e => setVoiceSearchQuery(e.target.value)}
-                              placeholder="Search voices..."
+                              placeholder={t('search_voices_placeholder')}
                               className="w-full bg-slate-800 rounded-xl pl-10 pr-3 py-2 text-xs border border-slate-700 text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#90dce1]"
                             />
                           </div>
@@ -617,7 +617,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                           onUpdateNodeData(selectedNode.id, 'inputOverrides', newOverrides);
                         }}
                         className="w-full h-32 bg-slate-900/50 border border-slate-800 rounded-xl p-3 text-[10px] text-slate-300 resize-none focus:border-[#90dce1] focus:ring-0 transition-all font-mono"
-                        placeholder={lang === 'zh' ? '编辑字段内容...' : 'Edit field content...'}
+                        placeholder={t('edit_field_placeholder')}
                       />
                       {overrideValue !== undefined && (
                         <div className="flex items-center gap-2 text-[8px] text-amber-400">

@@ -5,16 +5,67 @@ import {
   geminiText, geminiImage, geminiSpeech, geminiVideo,
   lightX2VTask, lightX2VTTS, lightX2VVoiceCloneTTS,
   deepseekText, doubaoText, ppchatGeminiText,
-  getLightX2VConfigForModel
+  getLightX2VConfigForModel,
+  lightX2VCancelTask,
+  lightX2VTaskQuery
 } from '../../services/geminiService';
+import { isStandalone } from '../config/runtimeMode';
 import { removeGeminiWatermark } from '../../services/watermarkRemover';
 import { useTranslation, Language } from '../i18n/useTranslation';
 import { saveNodeOutputData, getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
 import { apiRequest } from '../utils/apiClient';
+import { resolveLightX2VResultRef as resolveLightX2VResultRefUtil } from '../utils/resultRef';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
-import { getAssetPath } from '../utils/assetPath';
+import { getAssetPath, getAssetBasePath } from '../utils/assetPath';
+
+/** LightX2V 结果引用：用 task_id + output_name 代替过期 CDN URL，需要时通过 result_url 解析 */
+export type LightX2VResultRef = { __type: 'lightx2v_result'; task_id: string; output_name: string; is_cloud: boolean };
+export function isLightX2VResultRef(val: any): val is LightX2VResultRef {
+  return val != null && typeof val === 'object' && !Array.isArray(val) &&
+    (val as any).__type === 'lightx2v_result' &&
+    typeof (val as any).task_id === 'string' &&
+    typeof (val as any).output_name === 'string';
+}
+function toLightX2VResultRef(task_id: string, output_name: string, is_cloud: boolean): LightX2VResultRef {
+  return { __type: 'lightx2v_result', task_id, output_name, is_cloud };
+}
+
+/** 将多路 in-image 输入扁平为一维图片列表（多连接或多图时每路可能是数组，需合并） */
+function flattenImageInput(raw: any): string[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    const flat = raw.flatMap((item: any) =>
+      Array.isArray(item) ? item : item != null ? [item] : []
+    );
+    return flat.filter((x: any) => x != null && typeof x === 'string') as string[];
+  }
+  return typeof raw === 'string' ? [raw] : [];
+}
+
+/** 将图片 URL/路径转为 data URL，供 Doubao/PPChat 等只接受 data URL 或 http URL 的 API 使用，避免 Invalid base64 image_url */
+async function ensureImageInputsAsDataUrls(imgs: string[]): Promise<string[]> {
+  return Promise.all(imgs.map(async (img) => {
+    if (typeof img !== 'string') return img;
+    if (img.startsWith('data:') || (img.startsWith('http') && !img.startsWith('//'))) return img;
+    if (!img.startsWith('/') || img.startsWith('//')) return img;
+    const url = getAssetPath(img);
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result as string);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.error('[WorkflowExecution] Failed to fetch image for text-generation:', img, e);
+      return img;
+    }
+  }));
+}
 
 interface UseWorkflowExecutionProps {
   workflow: WorkflowState | null;
@@ -34,9 +85,11 @@ interface UseWorkflowExecutionProps {
     lightX2VVoiceList: any;
   };
   lang: Language;
+  /** 纯前端部署时，执行结束后用此回调持久化到本地，避免调用已禁用的后端 API */
+  onSaveExecutionToLocal?: (workflowState: WorkflowState) => Promise<void>;
 }
 
-export const useWorkflowExecution = ({
+function useWorkflowExecutionImpl({
   workflow,
   setWorkflow,
   activeOutputs,
@@ -51,8 +104,9 @@ export const useWorkflowExecution = ({
   setGlobalError,
   updateNodeData,
   voiceList,
-  lang
-}: UseWorkflowExecutionProps) => {
+  lang,
+  onSaveExecutionToLocal
+}: UseWorkflowExecutionProps) {
   const { t } = useTranslation(lang);
 
   const getDescendants = useCallback((nodeId: string, connections: Connection[]): Set<string> => {
@@ -79,23 +133,20 @@ export const useWorkflowExecution = ({
       return node && (node.toolId.includes('lightx2v') || node.toolId.includes('video') || node.toolId === 'avatar-gen' || ((node.toolId === 'text-to-image' || node.toolId === 'image-to-image') && node.data.model?.startsWith('Qwen')));
     });
 
-    if (usesLightX2V) {
+    if (usesLightX2V && !isStandalone()) {
       const config = getLightX2VConfig(workflow);
-      // 检查是否有 apiClient（在主应用环境中，url 可以为空字符串，使用相对路径）
       const apiClient = (window as any).__API_CLIENT__;
-      // 如果有 apiClient，只需要检查 token；否则需要检查 url 和 token
       if (apiClient) {
-        // 在主应用环境中，只需要有 token 即可（url 为空字符串表示使用相对路径）
         if (!config.token?.trim()) {
           errors.push({ message: t('missing_env_msg'), type: 'ENV' });
         }
       } else {
-        // 独立运行模式，需要 url 和 token
-      if (!config.url?.trim() || !config.token?.trim()) {
-        errors.push({ message: t('missing_env_msg'), type: 'ENV' });
+        if (!config.url?.trim() || !config.token?.trim()) {
+          errors.push({ message: t('missing_env_msg'), type: 'ENV' });
         }
       }
     }
+    // 仅前端模式：不校验 LIGHTX2V 环境，运行到相关节点时由请求结果决定
 
     workflow.nodes.forEach(node => {
       if (!nodesToRunIds.has(node.id)) return;
@@ -143,8 +194,49 @@ export const useWorkflowExecution = ({
     return errors;
   }, [workflow, getLightX2VConfig, t, lang]);
 
-  const runWorkflow = useCallback(async (startNodeId?: string, onlyOne?: boolean) => {
-    if (!workflow || workflow.isRunning) return;
+  /** Queue item: may be cancelled; each job has id and affectedNodeIds for per-node cancel and pending UI. */
+  type QueueJob = { id: string; startNodeId?: string; onlyOne?: boolean; cancelled?: boolean; affectedNodeIds: Set<string> };
+  const executionQueueRef = React.useRef<QueueJob[]>([]);
+  const runningJobCountRef = React.useRef(0);
+  const MAX_CONCURRENT_JOBS = 3;
+  const runningJobsByJobIdRef = React.useRef<Map<string, { affectedNodeIds: Set<string>; taskIdsByNodeId: Map<string, string>; abortController: AbortController }>>(new Map());
+  const [pendingRunNodeIds, setPendingRunNodeIds] = React.useState<string[]>([]);
+
+  const getAffectedNodeIds = useCallback((startNodeId?: string, onlyOne?: boolean): Set<string> => {
+    if (!workflow) return new Set();
+    if (startNodeId) {
+      if (onlyOne) return new Set([startNodeId]);
+      const desc = getDescendants(startNodeId, workflow.connections);
+      desc.add(startNodeId);
+      return desc;
+    }
+    return new Set(workflow.nodes.map(n => n.id));
+  }, [workflow, getDescendants]);
+
+  const refreshPendingNodeIds = useCallback(() => {
+    const fromQueue = executionQueueRef.current
+      .filter(j => !j.cancelled)
+      .flatMap(j => [...j.affectedNodeIds]);
+    const fromRunning = Array.from(runningJobsByJobIdRef.current.values()).flatMap((j: { affectedNodeIds: Set<string> }) => [...j.affectedNodeIds]);
+    setPendingRunNodeIds([...new Set([...fromQueue, ...fromRunning])]);
+  }, []);
+
+  /** Resolve LightX2V result ref to a fresh URL via result_url (backend or cloud). Uses cache and proxy when standalone. */
+  const resolveLightX2VResultRef = useCallback((ref: LightX2VResultRef): Promise<string> => {
+    return resolveLightX2VResultRefUtil(ref);
+  }, []);
+
+  /** Runs one job (full or single node). Called by processQueue. Does not set isRunning false (processQueue does when queue empty). */
+  const executeOneRun = useCallback(async (jobId: string, startNodeId?: string, onlyOne?: boolean) => {
+    if (!workflow) return;
+
+    const jobInfo = runningJobsByJobIdRef.current.get(jobId);
+    if (!jobInfo) return;
+    const jobAbortSignal = jobInfo.abortController.signal;
+    const registerTaskId = (nodeId: string, taskId: string) => {
+      runningTaskIdsRef.current.set(nodeId, taskId);
+      jobInfo.taskIdsByNodeId.set(nodeId, taskId);
+    };
 
     // Reset pause state when starting a new workflow
     setIsPaused(false);
@@ -296,7 +388,7 @@ export const useWorkflowExecution = ({
     const runId = `run-${Date.now()}`;
 
     // Initialize sessionOutputs for input nodes (use their existing values)
-    if (workflow.id && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+    if (workflow.id && (isStandalone() || workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
       for (const node of workflow.nodes) {
         if (!nodesToRunIds.has(node.id)) continue;
 
@@ -379,14 +471,22 @@ export const useWorkflowExecution = ({
                 const conns = incomingConns.filter(c => c.targetPortId === port.id);
                 if (conns.length > 0) {
                   const values = (await Promise.all(conns.map(async (c) => {
+                  const sourceNode = workflow.nodes.find(n => n.id === c.sourceNodeId);
+                  // 文本生成大模型输出若为对象（字典），传入下游时自动转为 JSON 字符串
+                  const ensureStringIfObjectFromTextGen = (raw: any) => {
+                    if (sourceNode?.toolId === 'text-generation' && typeof raw === 'object' && raw !== null && !Array.isArray(raw))
+                      return JSON.stringify(raw);
+                    return raw;
+                  };
                   // First check if source node has executed and has output in sessionOutputs
                   if (sessionOutputs[c.sourceNodeId] !== undefined) {
                     const sourceRes = sessionOutputs[c.sourceNodeId];
-                    return (typeof sourceRes === 'object' && sourceRes !== null && c.sourcePortId in sourceRes) ? sourceRes[c.sourcePortId] : sourceRes;
+                    let raw = (typeof sourceRes === 'object' && sourceRes !== null && c.sourcePortId in sourceRes) ? sourceRes[c.sourcePortId] : sourceRes;
+                    if (isLightX2VResultRef(raw)) raw = await resolveLightX2VResultRef(raw);
+                    return ensureStringIfObjectFromTextGen(raw);
                   }
                   // If not executed yet, check if it's an input node and read from node.data.value
                   // This handles the case where input nodes haven't been executed but their values are needed
-                  const sourceNode = workflow.nodes.find(n => n.id === c.sourceNodeId);
                   if (sourceNode) {
                     const sourceTool = TOOLS.find(t => t.id === sourceNode.toolId);
                     if (sourceTool?.category === 'Input') {
@@ -400,12 +500,17 @@ export const useWorkflowExecution = ({
                           if (img.startsWith('data:') || (!img.startsWith('http') && img.includes(','))) {
                             return img;
                           }
+                          // Standalone: resolve local:// from IndexedDB
+                          if (img.startsWith('local://')) {
+                            const dataUrl = await getWorkflowFileByFileId(workflow.id, img);
+                            return dataUrl || img;
+                          }
                           // If it's a file path (starts with /), load and convert to base64
                           if (img.startsWith('/')) {
                             try {
                               // 修复资源路径：如果在 qiankun 环境，确保路径包含 /canvas/
                               let imagePath = img;
-                              const basePath = (window as any).__ASSET_BASE_PATH__ || '/canvas';
+                              const basePath = getAssetBasePath();
                               if (img.startsWith('/assets/') && !img.startsWith('/canvas/')) {
                                 imagePath = `${basePath}${img}`;
                               }
@@ -424,11 +529,15 @@ export const useWorkflowExecution = ({
                           }
                           return img;
                         }));
-                      } else if (sourceNode.toolId === 'audio-input' && inputValue && typeof inputValue === 'string' && inputValue.startsWith('/')) {
+                      } else if (sourceNode.toolId === 'audio-input' && inputValue && typeof inputValue === 'string') {
+                        if (inputValue.startsWith('local://')) {
+                          const dataUrl = await getWorkflowFileByFileId(workflow.id, inputValue);
+                          if (dataUrl) inputValue = dataUrl;
+                        } else if (inputValue.startsWith('/')) {
                         // Convert audio file path to base64 data URL
                         // 修复资源路径：如果在 qiankun 环境，确保路径包含 /canvas/
                         let audioPath = inputValue;
-                        const basePath = (window as any).__ASSET_BASE_PATH__ || '/canvas';
+                        const basePath = getAssetBasePath();
                         if (inputValue.startsWith('/assets/') && !inputValue.startsWith('/canvas/')) {
                           audioPath = `${basePath}${inputValue}`;
                         }
@@ -445,11 +554,13 @@ export const useWorkflowExecution = ({
                           console.error(`Failed to load audio ${inputValue}:`, e);
                           // Keep original path if loading fails
                         }
+                        }
                       }
 
                       // Check if this is a multi-output node (like text-generation with customOutputs)
                       if (sourceNode.toolId === 'text-generation' && sourceNode.data.customOutputs && typeof inputValue === 'object' && inputValue !== null) {
-                        return c.sourcePortId in inputValue ? inputValue[c.sourcePortId] : inputValue;
+                        const raw = c.sourcePortId in inputValue ? inputValue[c.sourcePortId] : inputValue;
+                        return ensureStringIfObjectFromTextGen(raw);
                       }
                       return inputValue;
                     }
@@ -457,7 +568,8 @@ export const useWorkflowExecution = ({
                     // This handles nodes that were executed in previous runs
                     const prevOutput = activeOutputs[c.sourceNodeId];
                     if (prevOutput !== undefined) {
-                      return (typeof prevOutput === 'object' && prevOutput !== null && c.sourcePortId in prevOutput) ? prevOutput[c.sourcePortId] : prevOutput;
+                      const raw = (typeof prevOutput === 'object' && prevOutput !== null && c.sourcePortId in prevOutput) ? prevOutput[c.sourcePortId] : prevOutput;
+                      return ensureStringIfObjectFromTextGen(raw);
                     }
               }
               return undefined;
@@ -479,6 +591,11 @@ export const useWorkflowExecution = ({
                       // If it's already a data URL or base64, return as is
                       if (img.startsWith('data:') || (!img.startsWith('http') && img.includes(','))) {
                         return img;
+                      }
+                      // Standalone: resolve local:// from IndexedDB
+                      if (img.startsWith('local://')) {
+                        const dataUrl = await getWorkflowFileByFileId(workflow.id, img);
+                        return dataUrl || img;
                       }
                       // If it's a workflow input path or task result path, use directly
                       if (img.includes('/assets/workflow/input') || img.includes('/assets/task/') ||
@@ -512,15 +629,13 @@ export const useWorkflowExecution = ({
                   break;
                 case 'audio-input':
                   const audioValue = node.data.value;
-                  // For workflow input paths or URLs, use directly (no conversion needed)
-                  // Only convert local file paths (starting with /) that are not workflow/task paths
                   if (audioValue && typeof audioValue === 'string') {
-                    // If it's already a data URL or base64, return as is
-                    if (audioValue.startsWith('data:') || (!audioValue.startsWith('http') && audioValue.includes(','))) {
+                    if (audioValue.startsWith('local://')) {
+                      result = await getWorkflowFileByFileId(workflow.id, audioValue) || audioValue;
+                    } else if (audioValue.startsWith('data:') || (!audioValue.startsWith('http') && audioValue.includes(','))) {
                       result = audioValue;
                     } else if (audioValue.includes('/assets/workflow/input') || audioValue.includes('/assets/task/') ||
                                audioValue.startsWith('http://') || audioValue.startsWith('https://')) {
-                      // If it's a workflow input path or task result path or URL, use directly
                       result = audioValue;
                     } else if (audioValue.startsWith('/')) {
                       // If it's a local file path (starts with /) that's not a workflow/task path, load and convert to base64
@@ -546,7 +661,15 @@ export const useWorkflowExecution = ({
                     result = audioValue;
                   }
                   break;
-                case 'video-input': result = node.data.value; break;
+                case 'video-input': {
+                  const vidVal = node.data.value;
+                  if (typeof vidVal === 'string' && vidVal.startsWith('local://')) {
+                    result = await getWorkflowFileByFileId(workflow.id, vidVal) || vidVal;
+                  } else {
+                    result = vidVal;
+                  }
+                  break;
+                }
                 case 'web-search': result = await geminiText(nodeInputs['in-text'] || "Search query", true, 'basic', undefined, model); break;
                 case 'text-generation':
                   const outputFields = (node.data.customOutputs || []).map((o: any) => ({ id: o.id, description: o.description || o.label }));
@@ -555,11 +678,13 @@ export const useWorkflowExecution = ({
                   if (model && model.startsWith('deepseek-')) {
                     result = await deepseekText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model, outputFields, useSearch);
                   } else if (model && model.startsWith('doubao-')) {
-                    const imageInput = nodeInputs['in-image'];
-                    result = await doubaoText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model, outputFields, imageInput, useSearch);
+                    const imageInputRaw = flattenImageInput(nodeInputs['in-image']);
+                    const imageInput = imageInputRaw.length > 0 ? await ensureImageInputsAsDataUrls(imageInputRaw) : undefined;
+                    result = await doubaoText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model, outputFields, imageInput?.length ? imageInput : undefined, useSearch);
                   } else if (model && model.startsWith('ppchat-')) {
-                    const imageInput = nodeInputs['in-image'];
-                    result = await ppchatGeminiText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model.replace('ppchat-', ''), outputFields, imageInput);
+                    const imageInputRaw = flattenImageInput(nodeInputs['in-image']);
+                    const imageInput = imageInputRaw.length > 0 ? await ensureImageInputsAsDataUrls(imageInputRaw) : undefined;
+                    result = await ppchatGeminiText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model.replace('ppchat-', ''), outputFields, imageInput?.length ? imageInput : undefined);
                   } else {
                   result = await geminiText(nodeInputs['in-text'] || "...", false, node.data.mode, node.data.customInstruction, model, outputFields);
                   }
@@ -581,24 +706,39 @@ export const useWorkflowExecution = ({
                       'output_image',
                       node.data.aspectRatio,
                       undefined,
-                      (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                      abortControllerRef.current?.signal
+                      (taskId) => registerTaskId(node.id, taskId),
+                      jobAbortSignal
                     );
+                    const t2iTid = jobInfo.taskIdsByNodeId.get(node.id);
+                    if (t2iTid) result = toLightX2VResultRef(t2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'image-to-image':
                   if (model === 'gemini-2.5-flash-image') {
-                    // For Gemini, if multiple images are provided, combine them intelligently
-                    const geminiImgs = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'] : (nodeInputs['in-image'] ? [nodeInputs['in-image']] : []);
+                    const geminiImgs = flattenImageInput(nodeInputs['in-image']);
                     result = await geminiImage(nodeInputs['in-text'] || "Transform", geminiImgs.length > 0 ? geminiImgs : undefined, node.data.aspectRatio || "1:1", model);
                   } else {
-                    // For LightX2V i2i, handle multiple images:
-                    // - Server supports multiple images via array input
-                    // - If multiple images provided, pass all of them to the server
-                    // - Server will handle them as input_image_1, input_image_2, etc.
-                    const i2iImgs = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'] : (nodeInputs['in-image'] ? [nodeInputs['in-image']] : []);
-                    // Pass all images to the server (single image or array of images)
-                    const imageInput = i2iImgs.length === 0 ? undefined : (i2iImgs.length === 1 ? i2iImgs[0] : i2iImgs);
+                    // For LightX2V i2i: 多路 in-image 扁平为一维；参考主应用 other.js，多图统一用 base64 提交（后端不接受 type=url 的数组）
+                    const i2iImgs = flattenImageInput(nodeInputs['in-image']);
+                    const i2iImgsBase64 = await Promise.all(i2iImgs.map(async (img) => {
+                      if (typeof img !== 'string') return img;
+                      if (img.startsWith('data:') || (!img.startsWith('http') && !img.startsWith('/'))) return img;
+                      const url = (img.startsWith('/') && !img.startsWith('//')) ? getAssetPath(img) : img;
+                      try {
+                        const res = await fetch(url);
+                        const blob = await res.blob();
+                        return await new Promise<string>((resolve, reject) => {
+                          const r = new FileReader();
+                          r.onloadend = () => resolve(r.result as string);
+                          r.onerror = reject;
+                          r.readAsDataURL(blob);
+                        });
+                      } catch (e) {
+                        console.error('[WorkflowExecution] Failed to fetch image for i2i:', img, e);
+                        return img;
+                      }
+                    }));
+                    const imageInput = i2iImgsBase64.length === 0 ? undefined : (i2iImgsBase64.length === 1 ? i2iImgsBase64[0] : i2iImgsBase64);
                     // Get config for this specific model (handles -cloud suffix)
                     const i2iModelConfig = getLightX2VConfigForModel(model || 'Qwen-Image-Edit-2511');
                     result = await lightX2VTask(
@@ -613,9 +753,11 @@ export const useWorkflowExecution = ({
                       'output_image',
                       node.data.aspectRatio,
                       undefined,
-                      (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                      abortControllerRef.current?.signal
+                      (taskId) => registerTaskId(node.id, taskId),
+                      jobAbortSignal
                     );
+                    const i2iTid = jobInfo.taskIdsByNodeId.get(node.id);
+                    if (i2iTid) result = toLightX2VResultRef(i2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'gemini-watermark-remover':
@@ -716,9 +858,11 @@ export const useWorkflowExecution = ({
                     'output_video',
                     node.data.aspectRatio,
                     undefined,
-                    (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                    abortControllerRef.current?.signal
+                    (taskId) => registerTaskId(node.id, taskId),
+                    jobAbortSignal
                   );
+                  const t2vTid = jobInfo.taskIdsByNodeId.get(node.id);
+                  if (t2vTid) result = toLightX2VResultRef(t2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 case 'video-gen-image':
                   const startImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
@@ -735,9 +879,11 @@ export const useWorkflowExecution = ({
                     'output_video',
                     node.data.aspectRatio,
                     undefined,
-                    (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                    abortControllerRef.current?.signal
+                    (taskId) => registerTaskId(node.id, taskId),
+                    jobAbortSignal
                   );
+                  const i2vTid = jobInfo.taskIdsByNodeId.get(node.id);
+                  if (i2vTid) result = toLightX2VResultRef(i2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 case 'video-gen-dual-frame':
                     const dualStart = Array.isArray(nodeInputs['in-image-start']) ? nodeInputs['in-image-start'][0] : nodeInputs['in-image-start'];
@@ -756,9 +902,11 @@ export const useWorkflowExecution = ({
                         'output_video',
                         node.data.aspectRatio,
                         undefined,
-                        (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                        abortControllerRef.current?.signal
+                        (taskId) => registerTaskId(node.id, taskId),
+                        jobAbortSignal
                     );
+                    const flf2vTid = jobInfo.taskIdsByNodeId.get(node.id);
+                    if (flf2vTid) result = toLightX2VResultRef(flf2vTid, 'output_video', (model || '').endsWith('-cloud'));
                     break;
                 case 'character-swap':
                   const swapImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
@@ -779,9 +927,11 @@ export const useWorkflowExecution = ({
                       'output_video',
                       node.data.aspectRatio,
                       swapVid,
-                      (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                      abortControllerRef.current?.signal
+                      (taskId) => registerTaskId(node.id, taskId),
+                      jobAbortSignal
                     );
+                    const animateTid = jobInfo.taskIdsByNodeId.get(node.id);
+                    if (animateTid) result = toLightX2VResultRef(animateTid, 'output_video', (model || '').endsWith('-cloud'));
                   } else {
                   result = await geminiVideo(nodeInputs['in-text'] || "Swap character", swapImg, "16:9", "720p", swapVid, model);
                   }
@@ -803,9 +953,11 @@ export const useWorkflowExecution = ({
                     'output_video',
                     undefined,
                     undefined,
-                    (taskId) => runningTaskIdsRef.current.set(node.id, taskId),
-                    abortControllerRef.current?.signal
+                    (taskId) => registerTaskId(node.id, taskId),
+                    jobAbortSignal
                   );
+                  const s2vTid = jobInfo.taskIdsByNodeId.get(node.id);
+                  if (s2vTid) result = toLightX2VResultRef(s2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 default: result = "Processed";
               }
@@ -991,8 +1143,9 @@ export const useWorkflowExecution = ({
         totalTime: runTotalTime
       };
 
-      // Save output files to database (if workflow has a database ID)
-      if (workflow.id && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+      // Save output files to database (if workflow has a database ID). 纯前端不请求后端，跳过保存避免 ✗ Save returned null 警告
+      const shouldSaveOutputs = workflow.id && !isStandalone() && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i));
+      if (shouldSaveOutputs) {
         try {
           console.log(`[WorkflowExecution] Starting to save outputs for workflow ${workflow.id}, sessionOutputs keys:`, Object.keys(sessionOutputs));
           // Save output files for each node (async, don't block execution)
@@ -1015,7 +1168,8 @@ export const useWorkflowExecution = ({
 
             // Use node.outputValue if available (more reliable), otherwise fall back to sessionOutputs
             const outputToSave = node.outputValue !== undefined ? node.outputValue : output;
-            console.log(`[WorkflowExecution] Node ${nodeId} (${node.toolId}) outputToSave type:`, typeof outputToSave, outputToSave ? (typeof outputToSave === 'string' ? (outputToSave.length > 100 ? outputToSave.substring(0, 100) + '...' : outputToSave) : 'object/array') : 'empty');
+            const isRef = isLightX2VResultRef(outputToSave);
+            console.log(`[WorkflowExecution] Node ${nodeId} (${node.toolId}) outputToSave:`, isRef ? 'LightX2VResultRef' : typeof outputToSave, isRef ? (outputToSave as LightX2VResultRef).task_id : (outputToSave && typeof outputToSave === 'object' ? 'object' : outputToSave ? 'string' : 'empty'));
 
             // Check if outputToSave is empty or invalid
             if (!outputToSave || (typeof outputToSave === 'string' && outputToSave.length === 0)) {
@@ -1023,9 +1177,28 @@ export const useWorkflowExecution = ({
               continue;
             }
 
-            // Handle different output formats - save ALL types of outputs (data URLs, text, JSON, task result URLs)
-            if (outputToSave && typeof outputToSave === 'object' && !Array.isArray(outputToSave)) {
-              // Multi-output node (outputValue is a Record<portId, value>)
+            // Handle different output formats - save ALL types of outputs (data URLs, text, JSON, task result refs)
+            // LightX2VResultRef must be treated as single object so task_id is persisted; do NOT treat as multi-output
+            if (isLightX2VResultRef(outputToSave)) {
+              const firstOutputPort = tool.outputs[0];
+              if (firstOutputPort) {
+                console.log(`[WorkflowExecution] Saving single-output node ${nodeId}/${firstOutputPort.id} (LightX2VResultRef):`, outputToSave.task_id);
+                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
+                savePromises.push(
+                  saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
+                    .then(result => {
+                      if (result) console.log(`[WorkflowExecution] ✓ Saved node output data (ref) for ${nodeId}/${firstOutputPort.id}:`, result);
+                      else console.warn(`[WorkflowExecution] ✗ Save returned null for ${nodeId}/${firstOutputPort.id}`);
+                      return result;
+                    })
+                    .catch(err => {
+                      console.error(`[WorkflowExecution] ✗ Error saving node output data for ${nodeId}/${firstOutputPort.id}:`, err);
+                      throw err;
+                    })
+                );
+              }
+            } else if (outputToSave && typeof outputToSave === 'object' && !Array.isArray(outputToSave)) {
+              // Multi-output node (outputValue is a Record<portId, value>), not a LightX2VResultRef
               for (const [portId, value] of Object.entries(outputToSave)) {
                 // Save all types: data URLs, text, JSON, task result URLs
                 if ((typeof value === 'string' && value.length > 0) || (typeof value === 'object' && value !== null && !Array.isArray(value))) {
@@ -1154,7 +1327,8 @@ export const useWorkflowExecution = ({
               if (!meta) return;
               const saveResult = result.value;
               const fileUrl = saveResult.file_url || saveResult.url;
-              const shouldReplaceWithUrl = fileUrl && isDataUrl(meta.value);
+              // Never replace LightX2VResultRef with URL so task_id stays in node.outputValue for result_url resolution
+              const shouldReplaceWithUrl = fileUrl && isDataUrl(meta.value) && !isLightX2VResultRef(meta.value);
 
               if (meta.kind === 'multi') {
                 if (!updatedOutputs[meta.nodeId] || typeof updatedOutputs[meta.nodeId] !== 'object') {
@@ -1281,7 +1455,7 @@ export const useWorkflowExecution = ({
       // Note: History will be updated after saves complete (see Promise.all above)
       // For now, add the run with optimized outputs (will be updated with data_id references later)
       setWorkflow(prev => prev ? ({ ...prev, history: [newRun, ...prev.history].slice(0, 5) }) : null);
-      setSelectedRunId(newRun.id);
+      // 不再进入快照视图，始终保持在编辑模式
 
       // Save execution state (nodes with status, activeOutputs) to database
       // Capture values before async operations to avoid closure issues
@@ -1352,6 +1526,31 @@ export const useWorkflowExecution = ({
 
             // Use save queue to avoid conflicts with manual saves
             await workflowSaveQueue.enqueue(workflowId, async () => {
+              // 纯前端部署：只持久化到本地，不请求后端
+              if (isStandalone() && onSaveExecutionToLocal) {
+                // preset-* 在仅前端时自动分配新 UUID，再保存到本地
+                const newId = workflowId.startsWith('preset-')
+                  ? (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+                  : workflowId;
+                const updatedWorkflow: WorkflowState = {
+                  ...workflow,
+                  id: newId,
+                  nodes: nodesToSave,
+                  history: historyToSave,
+                  updatedAt: Date.now()
+                };
+                await onSaveExecutionToLocal(updatedWorkflow);
+                if (newId !== workflowId) {
+                  setWorkflow(prev => prev ? { ...prev, id: newId } : null);
+                  if (window.history && window.history.replaceState) {
+                    window.history.replaceState(null, '', `#workflow/${newId}`);
+                  }
+                  console.log('[WorkflowExecution] Preset workflow saved to local with new ID:', newId);
+                } else {
+                  console.log('[WorkflowExecution] Execution state saved to local (standalone)');
+                }
+                return;
+              }
               if (isPreset) {
                 // If preset workflow, create new workflow first
                 try {
@@ -1543,8 +1742,15 @@ export const useWorkflowExecution = ({
       });
       setSelectedRunId(null);
     } finally {
-      setWorkflow(prev => prev ? ({ ...prev, isRunning: false }) : null);
+      const j = runningJobsByJobIdRef.current.get(jobId);
+      if (j) {
+        j.taskIdsByNodeId.forEach((taskId, nodeId) => {
+          if (runningTaskIdsRef.current.get(nodeId) === taskId) runningTaskIdsRef.current.delete(nodeId);
+        });
+        runningJobsByJobIdRef.current.delete(jobId);
+      }
     }
+    // isRunning is cleared by processQueue when queue becomes empty
   }, [
     workflow,
     setWorkflow,
@@ -1553,17 +1759,104 @@ export const useWorkflowExecution = ({
     isPausedRef,
     setIsPaused,
     runningTaskIdsRef,
-    abortControllerRef,
+    runningJobsByJobIdRef,
     getLightX2VConfig,
     getDescendants,
+    resolveLightX2VResultRef,
     validateWorkflow,
     setValidationErrors,
     setSelectedRunId,
     setGlobalError,
     updateNodeData,
     voiceList,
+    onSaveExecutionToLocal,
     t
   ]);
+
+  const processQueue = useCallback(() => {
+    const queue = executionQueueRef.current;
+    while (queue.length > 0 && runningJobCountRef.current < MAX_CONCURRENT_JOBS) {
+      const job = queue.shift()!;
+      if (job.cancelled) {
+        refreshPendingNodeIds();
+        continue;
+      }
+      const jobId = job.id;
+      const jobInfo = {
+        affectedNodeIds: job.affectedNodeIds,
+        taskIdsByNodeId: new Map<string, string>(),
+        abortController: new AbortController()
+      };
+      runningJobsByJobIdRef.current.set(jobId, jobInfo);
+      runningJobCountRef.current += 1;
+      executeOneRun(jobId, job.startNodeId, job.onlyOne).finally(() => {
+        runningJobCountRef.current -= 1;
+        refreshPendingNodeIds();
+        processQueue();
+      });
+    }
+    if (runningJobCountRef.current === 0 && executionQueueRef.current.length === 0) {
+      setWorkflow(prev => prev ? ({ ...prev, isRunning: false }) : null);
+    }
+    refreshPendingNodeIds();
+  }, [executeOneRun, setWorkflow, refreshPendingNodeIds]);
+
+  /** Enqueue a run (full workflow or single/from-node); up to 3 jobs run at once. */
+  const runWorkflow = useCallback((startNodeId?: string, onlyOne?: boolean) => {
+    if (!workflow) return;
+    const affectedNodeIds = getAffectedNodeIds(startNodeId, onlyOne);
+    const job: QueueJob = {
+      id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      startNodeId,
+      onlyOne,
+      cancelled: false,
+      affectedNodeIds
+    };
+    executionQueueRef.current.push(job);
+    setWorkflow(prev => prev ? ({ ...prev, isRunning: true }) : null);
+    refreshPendingNodeIds();
+    processQueue();
+  }, [workflow, setWorkflow, processQueue, getAffectedNodeIds, refreshPendingNodeIds]);
+
+  /** Cancel the run for a given node: if queued, mark job cancelled; if running, send cancel to backend and abort. */
+  const cancelNodeRun = useCallback((nodeId: string) => {
+    const queue = executionQueueRef.current;
+    const queuedIndex = queue.findIndex(j => !j.cancelled && j.affectedNodeIds.has(nodeId));
+    if (queuedIndex !== -1) {
+      queue[queuedIndex].cancelled = true;
+      refreshPendingNodeIds();
+      return;
+    }
+    for (const [jid, jobInfo] of runningJobsByJobIdRef.current) {
+      if (jobInfo.affectedNodeIds.has(nodeId)) {
+        jobInfo.taskIdsByNodeId.forEach((taskId) => {
+          (async () => {
+            try {
+              if (isStandalone()) {
+                const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+                const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+                await lightX2VCancelTask(cloudUrl, cloudToken, taskId);
+              } else {
+                await apiRequest(`/api/v1/task/cancel?task_id=${taskId}`, { method: 'GET' });
+              }
+            } catch (e) {
+              console.warn('[WorkflowExecution] Cancel task failed:', taskId, e);
+            }
+          })();
+        });
+        jobInfo.abortController.abort();
+        const affectedIds = new Set(jobInfo.affectedNodeIds);
+        setWorkflow(prev => prev ? {
+          ...prev,
+          nodes: prev.nodes.map(n => affectedIds.has(n.id) && n.status === NodeStatus.RUNNING
+            ? { ...n, status: NodeStatus.IDLE, error: 'Cancelled' }
+            : n)
+        } : null);
+        refreshPendingNodeIds();
+        break;
+      }
+    }
+  }, [refreshPendingNodeIds, setWorkflow]);
 
   // Stop workflow execution by cancelling all running tasks
   const stopWorkflow = useCallback(async () => {
@@ -1572,6 +1865,10 @@ export const useWorkflowExecution = ({
       return;
     }
 
+    executionQueueRef.current = [];
+    runningJobsByJobIdRef.current.forEach((jobInfo) => jobInfo.abortController.abort());
+    runningJobsByJobIdRef.current.clear();
+    setPendingRunNodeIds([]);
     console.log('[WorkflowExecution] Stopping workflow...');
 
     // Cancel all running tasks via API
@@ -1586,11 +1883,18 @@ export const useWorkflowExecution = ({
     const cancelPromises = taskIds.map(async (taskId) => {
       try {
         console.log(`[WorkflowExecution] Sending cancel request for task ${taskId}...`);
-        const response = await apiRequest(`/api/v1/task/cancel?task_id=${taskId}`, {
-          method: 'GET'
-        });
+        let response: Response;
+        if (isStandalone()) {
+          const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+          const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+          response = await lightX2VCancelTask(cloudUrl, cloudToken, String(taskId));
+        } else {
+          response = await apiRequest(`/api/v1/task/cancel?task_id=${taskId}`, {
+            method: 'GET'
+          });
+        }
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json().catch(() => ({}));
           console.log(`[WorkflowExecution] Task ${taskId} cancelled successfully:`, data);
         } else {
           const errorText = await response.text();
@@ -1604,6 +1908,34 @@ export const useWorkflowExecution = ({
     // Wait for all cancellation requests to complete
     await Promise.all(cancelPromises);
 
+    // Query current task status for each running task (taskId -> nodeId map before clear)
+    const taskIdToNodeId = new Map<string, string>();
+    runningTaskIdsRef.current.forEach((tid, nid) => taskIdToNodeId.set(tid, nid));
+
+    const cancelledNodeIds = new Set<string>();
+    const queryPromises = taskIds.map(async (taskId) => {
+      try {
+        let status: string;
+        if (isStandalone()) {
+          const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+          const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+          const info = await lightX2VTaskQuery(cloudUrl, cloudToken, String(taskId));
+          status = info.status;
+        } else {
+          const res = await apiRequest(`/api/v1/task/query?task_id=${taskId}`, { method: 'GET' });
+          const data = res.ok ? (await res.json().catch(() => ({})) as { status?: string }) : {};
+          status = data.status || 'UNKNOWN';
+        }
+        if (status === 'CANCELLED') {
+          const nodeId = taskIdToNodeId.get(String(taskId));
+          if (nodeId) cancelledNodeIds.add(nodeId);
+        }
+      } catch (_) {
+        // ignore query errors
+      }
+    });
+    await Promise.all(queryPromises);
+
     // Clear running task IDs
     runningTaskIdsRef.current.clear();
 
@@ -1614,18 +1946,21 @@ export const useWorkflowExecution = ({
       abortControllerRef.current = new AbortController();
     }
 
-    // Stop workflow execution
-    setWorkflow(prev => prev ? ({ ...prev, isRunning: false }) : null);
-
-    // Update all running nodes to IDLE status
+    // Stop workflow execution and update node statuses (cancelled nodes get error message)
     setWorkflow(prev => {
       if (!prev) return null;
       return {
         ...prev,
-        nodes: prev.nodes.map(n =>
-          n.status === NodeStatus.RUNNING ? { ...n, status: NodeStatus.IDLE, error: undefined } : n
-        ),
-        isRunning: false
+        isRunning: false,
+        nodes: prev.nodes.map(n => {
+          if (n.status !== NodeStatus.RUNNING) return n;
+          const cancelled = cancelledNodeIds.has(n.id);
+          return {
+            ...n,
+            status: NodeStatus.IDLE,
+            error: cancelled ? 'Cancelled' : undefined
+          };
+        })
       };
     });
 
@@ -1635,7 +1970,12 @@ export const useWorkflowExecution = ({
   return {
     runWorkflow,
     stopWorkflow,
+    cancelNodeRun,
+    pendingRunNodeIds,
+    resolveLightX2VResultRef,
     validateWorkflow,
     getDescendants
   };
-};
+}
+
+export const useWorkflowExecution = useWorkflowExecutionImpl;
