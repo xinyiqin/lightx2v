@@ -30,7 +30,7 @@ import { formatTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries } from '../../utils/historyEntry';
-import { uploadNodeInputFile, getLocalFileDataUrl, getWorkflowFileByFileId } from '../../utils/workflowFileManager';
+import { getLocalFileDataUrl, getWorkflowFileByFileId, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { TextNodePreview } from '../previews/TextNodePreview';
@@ -639,12 +639,12 @@ export const Node: React.FC<NodeProps> = ({
     return new File([u8arr], `${namePrefix}-${Date.now()}${ext}`, { type: mimeType });
   };
 
-  const persistDataUrl = async (dataUrl: string, namePrefix: string) => {
+  // 与文本输入一致：有后端时仅保留 data URL，执行时才存库；standalone 时写入 IndexedDB 得到 local://
+  const persistDataUrl = async (dataUrl: string, namePrefix: string): Promise<string> => {
     if (!outputPortId || !isWorkflowReady(workflow.id)) return dataUrl;
     try {
-      const file = dataUrlToFile(dataUrl, namePrefix);
-      const result = await uploadNodeInputFile(workflow.id!, node.id, outputPortId, file);
-      return result?.file_url || dataUrl;
+      const localRef = await persistDataUrlToLocal(dataUrl, namePrefix);
+      return localRef ?? dataUrl;
     } catch (err) {
       console.error('[Node] Failed to persist data URL:', err);
       return dataUrl;
@@ -683,6 +683,7 @@ export const Node: React.FC<NodeProps> = ({
       persistDataUrl(node.data.value, 'audio-input').then((url) => {
         if (url !== node.data.value) {
           onUpdateNodeData(node.id, 'value', url);
+          onUpdateNodeData(node.id, 'outputValue', url);
         }
       });
     }
@@ -690,12 +691,9 @@ export const Node: React.FC<NodeProps> = ({
       const values = node.data.value as string[];
       const edits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
       const persist = async () => {
-        const updatedValues = await Promise.all(values.map((val, idx) => {
-          if (val.startsWith('data:')) {
-            return persistDataUrl(val, `image-input-${idx}`);
-          }
-          return val;
-        }));
+        const updatedValues = await Promise.all(values.map((val, idx) =>
+          val.startsWith('data:') ? persistDataUrl(val, `image-input-${idx}`) : val
+        ));
         if (updatedValues.some((val, idx) => val !== values[idx])) {
           const updatedEdits = updatedValues.map((val, idx) => {
             const display = resolveMediaSrc(val);
@@ -709,6 +707,7 @@ export const Node: React.FC<NodeProps> = ({
           });
           onUpdateNodeData(node.id, 'imageEdits', updatedEdits);
           onUpdateNodeData(node.id, 'value', updatedValues);
+          onUpdateNodeData(node.id, 'outputValue', updatedValues);
         }
       };
       persist();
@@ -717,6 +716,7 @@ export const Node: React.FC<NodeProps> = ({
       persistDataUrl(node.data.value, 'video-input').then((url) => {
         if (url !== node.data.value) {
           onUpdateNodeData(node.id, 'value', url);
+          onUpdateNodeData(node.id, 'outputValue', url);
         }
       });
     }
@@ -747,29 +747,26 @@ export const Node: React.FC<NodeProps> = ({
         return;
       }
 
-      // 上传所有文件
-      const uploadPromises = files.map((file: File) =>
-        uploadNodeInputFile(workflow.id!, node.id, outputPort.id, file)
-          .then(result => {
-            if (result) {
-              return result.file_url;
-            }
-            return null;
-          })
-          .catch(err => {
-            console.error(`[Node] Error uploading file:`, err);
-            return null;
-          })
+      // 与文本输入一致：仅暂存 data URL，执行该节点（下游用到）时才存库
+      const dataUrlPromises = files.map((file: File) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        })
       );
+      const dataUrls = await Promise.all(dataUrlPromises);
 
-      const fileUrls = await Promise.all(uploadPromises);
-      const validUrls = fileUrls.filter((url: string | null) => url !== null);
-
-      if (validUrls.length > 0) {
-        // 更新 node.data.value，始终使用数组格式
+      if (dataUrls.length > 0) {
         const currentValue = node.data.value || [];
-        const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
-        const newValue = isMultiple ? [...existingUrls, ...validUrls] : validUrls[0];
+        const existing = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
+        const newValue = isMultiple ? [...existing, ...dataUrls] : dataUrls[0];
+        const newOutputValue = isMultiple
+          ? (Array.isArray(node.outputValue) ? [...node.outputValue, ...dataUrls] : dataUrls)
+          : dataUrls[0];
+
+        onUpdateNodeData(node.id, 'outputValue', newOutputValue);
         onUpdateNodeData(node.id, 'value', newValue);
         if (node.toolId === 'audio-input' && newValue) {
           onUpdateNodeData(node.id, 'audioOriginal', newValue);

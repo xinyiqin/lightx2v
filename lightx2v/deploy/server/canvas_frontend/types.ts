@@ -130,6 +130,14 @@ export interface Connection {
 
 export type NodeHistoryEntryKind = 'text' | 'json' | 'file' | 'lightx2v_result';
 
+/** 节点输出中“已存文件”的引用，与 NodeHistoryEntryKind 的 file 一致，用于 outputValue / 连线值 */
+export interface FileReference {
+  type: 'file';
+  file_id: string;
+  file_url: string;
+  ext?: string;
+}
+
 export type NodeHistoryValue =
   | { text: string }
   | { json: any }

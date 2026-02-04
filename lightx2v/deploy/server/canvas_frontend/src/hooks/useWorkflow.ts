@@ -264,76 +264,8 @@ export const useWorkflow = () => {
         // Extract execution state from nodes (status, error, executionTime)
         // Nodes already contain execution state, so we just save them as-is
 
-        // Clean input node values: save base64 data URLs as files and replace with file paths
-        // This prevents storing large base64 data in workflow JSON
+        // 输入节点与文本输入一致：执行时才存库，保存工作流时保留 data URL / ref
         const cleanedNodes = [...latestWorkflow.nodes];
-
-        for (let i = 0; i < cleanedNodes.length; i++) {
-          const node = cleanedNodes[i];
-          const tool = TOOLS.find(t => t.id === node.toolId);
-          if (!tool || tool.category !== 'Input') {
-            // Not an input node, skip
-            continue;
-          }
-
-          const nodeValue = node.data.value;
-          if (!nodeValue) {
-            continue;
-          }
-
-          // Check if it's a base64 data URL
-          const isDataURL = (val: any): boolean => {
-            if (typeof val === 'string') {
-              return val.startsWith('data:');
-            }
-            if (Array.isArray(val)) {
-              return val.some(item => typeof item === 'string' && item.startsWith('data:'));
-            }
-            return false;
-          };
-
-          // Check if it's already a saved path or file reference (backend file_id)
-          const isSavedPath = (val: any): boolean => {
-            if (val && typeof val === 'object' && (val.type === 'reference' || val.file_id)) {
-              return true;
-            }
-            if (typeof val === 'string') {
-              return val.startsWith('./assets/workflow/input') ||
-                     val.startsWith('./assets/task/') ||
-                     val.startsWith('/assets/workflow/input') ||
-                     val.startsWith('/assets/task/') ||
-                     val.startsWith('/api/v1/workflow/') ||
-                     (val.startsWith('http://') || val.startsWith('https://'));
-            }
-            if (Array.isArray(val)) {
-              return val.every(item => {
-                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) return true;
-                if (typeof item !== 'string') return false;
-                return item.startsWith('./assets/workflow/input') ||
-                       item.startsWith('./assets/task/') ||
-                       item.startsWith('/assets/workflow/input') ||
-                       item.startsWith('/assets/task/') ||
-                       item.startsWith('/api/v1/workflow/') ||
-                       item.startsWith('http://') ||
-                       item.startsWith('https://');
-              });
-            }
-            return false;
-          };
-
-          // Remove base64 data - it should not be saved to database
-          // Input files are kept as base64 in memory and saved only during execution
-          if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
-            // Remove base64 data from node.data.value
-            cleanedNodes[i] = {
-              ...cleanedNodes[i],
-              data: {
-                ...cleanedNodes[i].data,
-                value: Array.isArray(nodeValue) ? [] : undefined
-              }
-            };
-          }
-        }
 
         const stripBase64FromOutput = (value: any): any => {
           if (typeof value === 'string') {
@@ -345,7 +277,7 @@ export const useWorkflow = () => {
               .filter(v => v !== '' && v !== null && v !== undefined);
           }
           if (value && typeof value === 'object') {
-            if (value.type === 'reference' || value.file_id) {
+            if (value.type === 'file' || value.file_id) {
               return value;
             }
             // Preserve LightX2VResultRef (task_id + output_name) so saved workflow can resolve result_url
@@ -376,7 +308,7 @@ export const useWorkflow = () => {
           };
 
           const isSavedPath = (val: any): boolean => {
-            if (val && typeof val === 'object' && (val.type === 'reference' || val.file_id)) {
+            if (val && typeof val === 'object' && (val.type === 'file' || val.file_id)) {
               return true;
             }
             if (typeof val === 'string') {
@@ -389,7 +321,7 @@ export const useWorkflow = () => {
             }
             if (Array.isArray(val)) {
               return val.every(item => {
-                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) return true;
+                if (item && typeof item === 'object' && (item.type === 'file' || item.file_id)) return true;
                 if (typeof item !== 'string') return false;
                 return item.startsWith('./assets/workflow/input') ||
                        item.startsWith('./assets/task/') ||
@@ -415,8 +347,11 @@ export const useWorkflow = () => {
         };
 
         // Clean node outputValue to avoid persisting base64 in workflow nodes
+        // 输入节点与文本输入一致：执行时才存库，保存工作流时保留 data URL 不 strip
         for (let i = 0; i < cleanedNodes.length; i++) {
           const node = cleanedNodes[i];
+          const nodeTool = TOOLS.find(t => t.id === node.toolId);
+          if (nodeTool?.category === 'Input') continue;
           if (node.outputValue !== undefined) {
             const cleanedOutputValue = stripBase64FromOutput(node.outputValue);
             if (Array.isArray(cleanedOutputValue)) {
@@ -461,7 +396,7 @@ export const useWorkflow = () => {
               const resolved: any[] = [];
               for (let idx = 0; idx < nodeValue.length; idx++) {
                 const item = nodeValue[idx];
-                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) {
+                if (item && typeof item === 'object' && (item.type === 'file' || item.file_id)) {
                   resolved.push(item);
                   continue;
                 }

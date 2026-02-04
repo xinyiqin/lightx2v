@@ -19,7 +19,6 @@ import {
 import { WorkflowState, WorkflowNode, Port, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
-import { uploadNodeInputFile } from '../../utils/workflowFileManager';
 
 interface NodeConfigPanelProps {
   lang: Language;
@@ -789,16 +788,19 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                                   return;
                                 }
 
-                                const result = await uploadNodeInputFile(workflow.id!, item.nodeId, outputPort.id, file);
-                                if (result) {
-                                  // 更新 node.data.value，始终使用数组格式
-                                  const currentValue = node.data.value || [];
-                                  const existingUrls = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
-                                  const newValue = item.dataType === DataType.IMAGE
-                                    ? [...existingUrls, result.file_url]
-                                    : [result.file_url];
-                                  onUpdateNodeData(item.nodeId, 'value', newValue);
-                                }
+                                const dataUrl = await new Promise<string>((resolve, reject) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => resolve(reader.result as string);
+                                  reader.onerror = reject;
+                                  reader.readAsDataURL(file);
+                                });
+                                const currentValue = node.data.value || [];
+                                const existing = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
+                                const newValue = item.dataType === DataType.IMAGE
+                                  ? [...existing, dataUrl]
+                                  : dataUrl;
+                                onUpdateNodeData(item.nodeId, 'outputValue', newValue);
+                                onUpdateNodeData(item.nodeId, 'value', newValue);
                               } else {
                                 // 对于非源节点的全局输入，暂时保持原逻辑（base64）
                                 const base64 = await new Promise<string>((resolve) => {

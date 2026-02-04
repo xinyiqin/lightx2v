@@ -18,7 +18,7 @@ function normalizeOutputForDisplay(v: any): any {
   if (typeof v === 'object' && !Array.isArray(v)) {
     if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
     if (v.type === 'url' && typeof v.data === 'string') return v.data;
-    if (v.type === 'reference' && v.file_id) return { _type: 'reference', file_id: v.file_id, _note: 'Data will be loaded on demand' };
+    if (v.type === 'file' && v.file_id) return { _type: 'file', file_id: v.file_id, _note: 'Data will be loaded on demand' };
     if (v.type === 'text' && v.data !== undefined) return v.data;
     if (v.type === 'json' && v.data !== undefined) return v.data;
   }
@@ -63,7 +63,7 @@ export const useResultManagement = ({
     if (content && typeof content === 'object' && !Array.isArray(content)) {
       if (content.type === 'data_url' && typeof content._full_data === 'string') content = content._full_data;
       else if (content.type === 'url' && typeof content.data === 'string') content = content.data;
-      else if (content.type === 'reference' && content.file_id) content = { _type: 'reference', file_id: content.file_id, _note: 'Data will be loaded on demand' };
+      else if (content.type === 'file' && content.file_id) content = { _type: 'file', file_id: content.file_id, _note: 'Data will be loaded on demand' };
       else if (content.type === 'text' && content.data !== undefined) content = content.data;
       else if (content.type === 'json' && content.data !== undefined) content = content.data;
     }

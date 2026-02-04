@@ -111,7 +111,7 @@ export const buildHistoryValue = (value: any): HistoryValueBuilderResult | null 
       };
     }
     // Backend-stored file: persist fileId (and optional url, ext); backend resolves by fileId
-    if (value.type === 'reference' || value.file_id) {
+    if (value.type === 'file' || value.file_id) {
       return {
         kind: 'file',
         value: {
@@ -273,7 +273,7 @@ export const historyEntryToDisplayValue = (entry: NodeHistoryEntry): any => {
       if (fileValue.dataUrl) return fileValue.dataUrl;
       if (fileValue.url) return { type: 'url', data: fileValue.url, ext: fileValue.ext };
       if (fileValue.fileId) {
-        return { type: 'reference', file_id: fileValue.fileId, ext: fileValue.ext };
+        return { type: 'file', file_id: fileValue.fileId, ext: fileValue.ext };
       }
       return null;
     }

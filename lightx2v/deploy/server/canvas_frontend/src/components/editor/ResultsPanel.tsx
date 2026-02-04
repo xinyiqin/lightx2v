@@ -191,7 +191,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         <p className="text-[10px] text-amber-400 font-bold uppercase">{lang === 'zh' ? '排队中' : 'Pending'}</p>
                       </div>
                     ) : type === DataType.TEXT ? (
-                      typeof res === 'object' && res !== null && !Array.isArray(res) && (res as any)._type !== 'reference' ? (
+                      typeof res === 'object' && res !== null && !Array.isArray(res) && (res as any)._type !== 'file' ? (
                         <div className="space-y-2">
                           {Object.entries(res).map(([k, v]) => (
                             <div

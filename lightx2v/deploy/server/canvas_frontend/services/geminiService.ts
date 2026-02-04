@@ -370,32 +370,27 @@ export const lightX2VTask = async (
     // - Server will decode each and save as input_image_1, input_image_2, etc.
     if (Array.isArray(val) && val.length > 0) {
       // Process each image: extract base64 from data URLs, keep URLs as-is
+      const isPathOrHttpUrl = (s: string) =>
+        s.startsWith('http://') || s.startsWith('https://') || s.startsWith('./') ||
+        s.startsWith('/assets') || s.startsWith('/api');
+
       const processedImages = val.map(img => {
         if (typeof img !== 'string') return img;
-        // Check if it's a URL (absolute http/https, or relative path starting with ./ or /)
-        if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/')) {
-          // URL - server will fetch it via fetch_resource
+        if (isPathOrHttpUrl(img)) {
           return img;
-        } else {
-          // Base64 - extract base64 part if it's a data URL (data:image/...;base64,...)
-          // Server code checks for "data:image" prefix and splits on ","
-          if (img.startsWith('data:image')) {
-            return img.split(',')[1];
-          } else if (img.includes(',')) {
-            // Handle other data URL formats
-            return img.split(',')[1];
-          } else {
-            // Already pure base64
-            return img;
-          }
         }
+        if (img.startsWith('data:image')) {
+          return img.split(',')[1];
+        }
+        if (img.includes(',')) {
+          return img.split(',')[1];
+        }
+        return img;
       });
 
-      // Server expects: { type: "base64", data: ["base64string1", "base64string2", ...] }
-      // OR { type: "url", data: ["url1", "url2", ...] } — backend supports multi-URL (see deploy/common/utils.py preload_data)
+      // 不能仅用 startsWith('/') 判 URL：JPEG base64 以 "/9j/4AAQ" 开头，会被误判为 url 导致 Submit error
       const hasUrl = processedImages.some(img =>
-        typeof img === 'string' &&
-        (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/'))
+        typeof img === 'string' && isPathOrHttpUrl(img)
       );
       const type = hasUrl ? "url" : "base64";
 

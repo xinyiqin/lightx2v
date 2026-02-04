@@ -8,7 +8,7 @@
  * - 列表缩略图：WorkflowCard 里 previewImage 为 local:// 时用 getLocalFileDataUrl 异步解析后显示
  */
 
-import { apiRequest } from './apiClient';
+import { apiRequest, getAccessToken } from './apiClient';
 import { isStandalone } from '../config/runtimeMode';
 
 const LOCAL_FILES_DB = 'canvas_local_files';
@@ -382,8 +382,70 @@ export async function reuseNodeOutputHistory(
 }
 
 /**
+ * 将输入节点的文件通过 node output/save 存到数据库，与节点生成文件时的保存逻辑一致。
+ * 返回 file 类型引用 { type: 'file', file_id, file_url, ext }，用于写入 node.outputValue。
+ */
+export async function saveInputFileViaOutputSave(
+  workflowId: string,
+  nodeId: string,
+  portId: string,
+  fileOrDataUrl: File | string
+): Promise<{ type: 'file'; file_id: string; file_url: string; ext?: string } | null> {
+  try {
+    let dataUrl: string;
+    let ext = '.bin';
+    if (typeof fileOrDataUrl === 'string') {
+      dataUrl = fileOrDataUrl;
+      if (dataUrl.startsWith('data:')) {
+        const header = dataUrl.split(',')[0] || '';
+        const mime = header.split(':')[1]?.split(';')[0] || '';
+        const extMap: Record<string, string> = {
+          'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+          'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg'
+        };
+        ext = extMap[mime] || '.bin';
+      }
+    } else {
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileOrDataUrl);
+      });
+      const name = fileOrDataUrl.name || '';
+      if (name.includes('.')) ext = '.' + name.split('.').pop()!.toLowerCase();
+    }
+
+    if (isStandalone()) {
+      const key = `localFile_${workflowId}_${nodeId}_${portId}_${Date.now()}_${crypto.randomUUID()}`;
+      const file = typeof fileOrDataUrl === 'string'
+        ? await (async () => {
+            const res = await fetch(fileOrDataUrl);
+            const blob = await res.blob();
+            return new File([blob], 'file' + ext, { type: blob.type || 'application/octet-stream' });
+          })()
+        : fileOrDataUrl;
+      await saveLocalFile(key, file);
+      const localRef = `local://${key}`;
+      return { type: 'file', file_id: key, file_url: localRef, ext };
+    }
+
+    const result = await saveNodeOutputs(workflowId, nodeId, { [portId]: dataUrl });
+    const r = result?.[portId];
+    if (!r?.file_id) return null;
+    const file_url = r.file_url ?? r.url ?? `/api/v1/workflow/${workflowId}/file/${r.file_id}`;
+    return { type: 'file', file_id: r.file_id, file_url, ext: r.ext };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[WorkflowFileManager] saveInputFileViaOutputSave failed:`, msg);
+    throw error;
+  }
+}
+
+/**
  * 直接上传文件到工作流节点输出（用于输入节点）
- * 有后端时保存到服务器；纯前端时保存到 IndexedDB，返回 local://key
+ * 有后端时通过 output/save 保存；纯前端时保存到 IndexedDB。
+ * @deprecated 新逻辑请用 saveInputFileViaOutputSave，并写入 node.outputValue。
  */
 export async function uploadNodeInputFile(
   workflowId: string,
@@ -392,61 +454,9 @@ export async function uploadNodeInputFile(
   file: File,
   index: number = 0
 ): Promise<{ file_id: string; file_path: string; file_url: string } | null> {
-  try {
-    if (isStandalone()) {
-      const key = `localFile_${workflowId}_${nodeId}_${portId}_${index}_${crypto.randomUUID()}`;
-      await saveLocalFile(key, file);
-      const localRef = `local://${key}`;
-      return {
-        file_id: key,
-        file_path: localRef,
-        file_url: localRef
-      };
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('port_id', portId);
-
-    const token = localStorage.getItem('accessToken');
-    const url = `/api/v1/workflow/${workflowId}/node/${nodeId}/output/upload${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      body: formData,
-      headers: token ? {
-        'Authorization': `Bearer ${token}`
-      } : {}
-    });
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') || '';
-      let errorMessage = `Failed to upload file: ${response.status} ${response.statusText}`;
-
-      if (contentType.includes('application/json')) {
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.message || errorMessage;
-        } catch (e) {
-          // Ignore
-        }
-      }
-
-      console.error(`[WorkflowFileManager] Error uploading file for ${nodeId}/${portId}:`, errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-    return {
-      file_id: result.file_id,
-      file_path: result.file_path,
-      file_url: result.file_url
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`[WorkflowFileManager] Error uploading file for ${nodeId}/${portId}:`, errorMessage);
-    throw error;
-  }
+  const ref = await saveInputFileViaOutputSave(workflowId, nodeId, portId, file);
+  if (!ref) return null;
+  return { file_id: ref.file_id, file_path: ref.file_url, file_url: ref.file_url };
 }
 
 /**
@@ -473,7 +483,7 @@ export async function uploadLocalUrlAsNodeOutput(
   portId: string,
   localUrl: string,
   index: number = 0
-): Promise<{ type: 'reference'; file_id: string; file_url: string; ext?: string } | null> {
+): Promise<{ type: 'file'; file_id: string; file_url: string; ext?: string } | null> {
   try {
     const path = localUrl.startsWith('./') ? localUrl.slice(1) : localUrl;
     const urlToFetch = path.startsWith('http') ? path : (typeof window !== 'undefined' ? window.location.origin : '') + path;
@@ -486,7 +496,7 @@ export async function uploadLocalUrlAsNodeOutput(
     if (!result) return null;
     const ext = name.includes('.') ? '.' + name.split('.').pop()!.toLowerCase() : undefined;
     return {
-      type: 'reference',
+      type: 'file',
       file_id: result.file_id,
       file_url: result.file_url,
       ext: ext || undefined
@@ -509,20 +519,15 @@ export async function getWorkflowFileByFileId(
     if (fileId.startsWith('local://')) {
       return getLocalFileDataUrl(fileId);
     }
-    // Use apiRequest to ensure Authorization header is set
-    const url = `/api/v1/workflow/${workflowId}/file/${fileId}`;
-
-    // Get token for Authorization header
-    const sharedStore = (window as any).__SHARED_STORE__;
-    const token = sharedStore ? sharedStore.getState('token') : localStorage.getItem('accessToken');
-
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (isStandalone()) {
+      return null;
     }
-
+    // 与上传接口一致：显式带 Authorization，保证与 POST /output/upload 相同的 token 方式
+    const token = getAccessToken();
+    const url = `/api/v1/workflow/${workflowId}/file/${fileId}`;
     const response = await fetch(url, {
-      headers
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
 
     if (!response.ok) {

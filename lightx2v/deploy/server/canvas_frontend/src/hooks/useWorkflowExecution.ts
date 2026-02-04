@@ -14,7 +14,7 @@ import {
 import { isStandalone } from '../config/runtimeMode';
 import { removeGeminiWatermark } from '../../services/watermarkRemover';
 import { useTranslation, Language } from '../i18n/useTranslation';
-import { saveNodeOutputs, getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
+import { saveNodeOutputs, saveInputFileViaOutputSave, getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
 import { apiRequest } from '../utils/apiClient';
 import { resolveLightX2VResultRef as resolveLightX2VResultRefUtil } from '../utils/resultRef';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
@@ -330,21 +330,19 @@ function useWorkflowExecutionImpl({
     const executedInSession = new Set<string>();
     const sessionOutputs: Record<string, any> = {};
 
+    // 本次运行所需的上游节点（含图片输入等，用于「执行时存库」）
+    const nodesNeededAsInputs = new Set<string>();
+    workflow.connections.forEach(conn => {
+      if (nodesToRunIds.has(conn.targetNodeId) && !nodesToRunIds.has(conn.sourceNodeId)) {
+        nodesNeededAsInputs.add(conn.sourceNodeId);
+      }
+    });
+
     // If running from a specific node, preserve outputs from nodes that won't be re-run
-    // Otherwise, clear all outputs for a fresh start
     if (startNodeId) {
       // Preserve outputs from node.outputValue for nodes that won't be re-run
       workflow.nodes.forEach(n => {
         if (!nodesToRunIds.has(n.id) && n.outputValue != null) sessionOutputs[n.id] = n.outputValue;
-      });
-
-      // Load intermediate files for nodes that are not being re-run but are needed as inputs
-      // Find all nodes that are not in nodesToRunIds but are connected to nodes that will run
-      const nodesNeededAsInputs = new Set<string>();
-      workflow.connections.forEach(conn => {
-        if (nodesToRunIds.has(conn.targetNodeId) && !nodesToRunIds.has(conn.sourceNodeId)) {
-          nodesNeededAsInputs.add(conn.sourceNodeId);
-        }
       });
 
       // Load intermediate files for nodes needed as inputs
@@ -361,14 +359,8 @@ function useWorkflowExecutionImpl({
           const tool = TOOLS.find(t => t.id === node.toolId);
           if (!tool) continue;
 
-          // Skip Input nodes - their output is node.data.value, not stored in data_store
-          if (tool.category === 'Input') {
-            // For Input nodes, use node.data.value directly
-            if (node.data.value) {
-              sessionOutputs[nodeId] = node.data.value;
-            }
-            continue;
-          }
+          // Skip Input nodes：由下方「执行时存库」逻辑统一处理（outputs/save + sessionOutputs）
+          if (tool.category === 'Input') continue;
 
           if (!tool.outputs) continue;
 
@@ -414,21 +406,122 @@ function useWorkflowExecutionImpl({
       }
     }
 
-    // Input nodes should already have files uploaded (as URLs), not base64 data
-    // Files are uploaded immediately when user selects them, so we just use the existing URLs
-    // Skip saving input node outputs during execution - they should already be saved during upload
-
-    // Initialize sessionOutputs for input nodes (use their existing values)
+    // 输入节点与文本输入一致：执行时才存库。此处若为 data URL 则先 save 再写入 sessionOutputs 为 ref
     if (workflow.id && (isStandalone() || workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
-      for (const node of workflow.nodes) {
-        if (!nodesToRunIds.has(node.id)) continue;
-
+      const INPUT_PORT_ID: Record<string, string> = {
+        'image-input': 'out-image',
+        'audio-input': 'out-audio',
+        'video-input': 'out-video'
+      };
+      // 参与本次运行的输入节点 = 在 nodesToRunIds 中 或 作为上游在 nodesNeededAsInputs 中（如图片输入→图生图）
+      const inputNodesToProcess = (node: typeof workflow.nodes[0]) => {
         const tool = TOOLS.find(t => t.id === node.toolId);
-        if (!tool || tool.category !== 'Input') continue;
+        if (!tool || tool.category !== 'Input') return false;
+        return nodesToRunIds.has(node.id) || nodesNeededAsInputs.has(node.id);
+      };
+      for (const node of workflow.nodes) {
+        if (!inputNodesToProcess(node)) continue;
 
-        const nodeValue = node.data.value;
-        if (nodeValue) {
-          // Use existing value (should already be a file path/URL, not base64)
+        const tool = TOOLS.find(t => t.id === node.toolId)!;
+
+        // 文本输入节点：执行时以 data.value 为准，并同步到 outputValue，避免与界面不一致
+        if (node.toolId === 'text-input') {
+          const textVal = node.data.value ?? '';
+          sessionOutputs[node.id] = textVal;
+          if (node.outputValue !== textVal) {
+            setWorkflow(prev => {
+              if (!prev) return null;
+              return { ...prev, nodes: prev.nodes.map(n => n.id === node.id ? { ...n, outputValue: textVal } : n) };
+            });
+          }
+          continue;
+        }
+
+        const nodeValue = node.outputValue != null ? node.outputValue : node.data.value;
+        if (nodeValue == null) continue;
+
+        const portId = INPUT_PORT_ID[node.toolId];
+        const isDataUrl = (v: any) => typeof v === 'string' && v.startsWith('data:');
+        const isRef = (v: any) => v && typeof v === 'object' && (v.type === 'file' || v.file_id);
+
+        if (portId && Array.isArray(nodeValue) && nodeValue.length > 0) {
+          const newOutputValue: any[] = [];
+          let hasNewRefs = false;
+          for (const item of nodeValue) {
+            if (isDataUrl(item)) {
+              try {
+                const ref = await saveInputFileViaOutputSave(workflow.id, node.id, portId, item);
+                if (ref) {
+                  newOutputValue.push(ref);
+                  hasNewRefs = true;
+                } else {
+                  newOutputValue.push(item);
+                }
+              } catch (e) {
+                console.warn('[WorkflowExecution] Save input node file at run time failed:', e);
+                newOutputValue.push(item);
+              }
+            } else {
+              newOutputValue.push(item);
+            }
+          }
+          if (hasNewRefs) {
+            const runTs = Date.now();
+            // 多图：每条 ref 一条历史记录，便于节点展示多张缩略图
+            const newEntries: NodeHistoryEntry[] = [];
+            for (let i = 0; i < newOutputValue.length; i++) {
+              const entry = createHistoryEntryFromValue({
+                id: `node-${node.id}-${runTs}-${i}`,
+                timestamp: runTs,
+                value: newOutputValue[i],
+                executionTime: 0
+              });
+              if (entry) newEntries.push(entry);
+            }
+            setWorkflow(prev => {
+              if (!prev) return null;
+              const nextNodes = prev.nodes.map(n => n.id === node.id ? { ...n, outputValue: newOutputValue } : n);
+              const nextHistory = { ...(prev.nodeOutputHistory || {}) };
+              if (newEntries.length > 0) {
+                const prevList = normalizeHistoryEntries(nextHistory[node.id] || []);
+                nextHistory[node.id] = [...newEntries, ...prevList].slice(0, MAX_NODE_HISTORY);
+              }
+              return { ...prev, nodes: nextNodes, nodeOutputHistory: nextHistory };
+            });
+          }
+          sessionOutputs[node.id] = newOutputValue;
+        } else if (portId && isDataUrl(nodeValue)) {
+          try {
+            const ref = await saveInputFileViaOutputSave(workflow.id, node.id, portId, nodeValue);
+            if (ref) {
+              const runTs = Date.now();
+              const entry = createHistoryEntryFromValue({
+                id: `node-${node.id}-${runTs}`,
+                timestamp: runTs,
+                value: ref,
+                executionTime: 0
+              });
+              setWorkflow(prev => {
+                if (!prev) return null;
+                const nextNodes = prev.nodes.map(n => n.id === node.id ? { ...n, outputValue: ref } : n);
+                const nextHistory = { ...(prev.nodeOutputHistory || {}) };
+                if (entry) {
+                  const prevList = normalizeHistoryEntries(nextHistory[node.id] || []);
+                  nextHistory[node.id] = [entry, ...prevList].slice(0, MAX_NODE_HISTORY);
+                }
+                return { ...prev, nodes: nextNodes, nodeOutputHistory: nextHistory };
+              });
+              sessionOutputs[node.id] = ref;
+            } else {
+              sessionOutputs[node.id] = nodeValue;
+            }
+          } catch (e) {
+            console.warn('[WorkflowExecution] Save input node file at run time failed:', e);
+            sessionOutputs[node.id] = nodeValue;
+          }
+        } else if (isRef(nodeValue) || (Array.isArray(nodeValue) && nodeValue.every((v: any) => isRef(v)))) {
+          sessionOutputs[node.id] = nodeValue;
+        } else {
           sessionOutputs[node.id] = nodeValue;
         }
       }
@@ -511,11 +604,25 @@ function useWorkflowExecutionImpl({
                       return JSON.stringify(raw);
                     return raw;
                   };
-                  // First check if source node has executed and has output in sessionOutputs
+                  // First check if source node has output in sessionOutputs (incl. input nodes after run-time save)
                   if (sessionOutputs[c.sourceNodeId] !== undefined) {
                     const sourceRes = sessionOutputs[c.sourceNodeId];
                     let raw = (typeof sourceRes === 'object' && sourceRes !== null && c.sourcePortId in sourceRes) ? sourceRes[c.sourcePortId] : sourceRes;
                     if (isLightX2VResultRef(raw)) raw = await resolveLightX2VResultRef(raw);
+                    // 输入节点等可能为 file ref：解析为 data URL 再传给下游（flattenImageInput 等只认 string）
+                    const isRef = (v: any) => v && typeof v === 'object' && (v.type === 'file' || v.file_id);
+                    if (isRef(raw)) {
+                      const idToFetch = (raw as { file_url?: string }).file_url?.startsWith('local://')
+                        ? (raw as { file_url: string }).file_url
+                        : (raw as { file_id: string }).file_id;
+                      raw = await getWorkflowFileByFileId(workflow.id, idToFetch) || (raw as { file_url?: string }).file_url || raw;
+                    } else if (Array.isArray(raw) && raw.some((v: any) => isRef(v))) {
+                      raw = await Promise.all(raw.map(async (v: any) => {
+                        if (!isRef(v)) return v;
+                        const id = (v as { file_url?: string }).file_url?.startsWith('local://') ? (v as { file_url: string }).file_url : (v as { file_id: string }).file_id;
+                        return getWorkflowFileByFileId(workflow.id, id) || (v as { file_url?: string }).file_url || v;
+                      }));
+                    }
                     return ensureStringIfObjectFromTextGen(raw);
                   }
                   // If not executed yet, check if it's an input node and read from node.data.value
@@ -530,7 +637,7 @@ function useWorkflowExecutionImpl({
                       if (sourceNode.toolId === 'image-input' && Array.isArray(inputValue) && inputValue.length > 0) {
                         inputValue = await Promise.all(inputValue.map(async (img: string | { type?: string; file_id?: string; file_url?: string }) => {
                           // Backend file reference: resolve file_id to data URL
-                          if (img && typeof img === 'object' && (img.type === 'reference' || img.file_id)) {
+                          if (img && typeof img === 'object' && (img.type === 'file' || img.file_id)) {
                             const dataUrl = await getWorkflowFileByFileId(workflow.id, (img as { file_id: string }).file_id);
                             return dataUrl || (img as { file_url?: string }).file_url || img;
                           }
@@ -597,6 +704,32 @@ function useWorkflowExecutionImpl({
                           // Keep original path if loading fails
                         }
                         }
+                      } else if (sourceNode.toolId === 'video-input' && inputValue) {
+                        if (inputValue && typeof inputValue === 'object' && (inputValue as { type?: string; file_id?: string }).file_id) {
+                          const dataUrl = await getWorkflowFileByFileId(workflow.id, (inputValue as { file_id: string }).file_id);
+                          if (dataUrl) inputValue = dataUrl;
+                        } else if (typeof inputValue === 'string' && inputValue.startsWith('local://')) {
+                          const dataUrl = await getWorkflowFileByFileId(workflow.id, inputValue);
+                          if (dataUrl) inputValue = dataUrl;
+                        } else if (typeof inputValue === 'string' && inputValue.startsWith('/')) {
+                          let videoPath = inputValue;
+                          const basePath = getAssetBasePath();
+                          if (inputValue.startsWith('/assets/') && !inputValue.startsWith('/canvas/')) {
+                            videoPath = `${basePath}${inputValue}`;
+                          }
+                          try {
+                            const response = await fetch(videoPath);
+                            const blob = await response.blob();
+                            inputValue = await new Promise<string>((resolve, reject) => {
+                              const reader = new FileReader();
+                              reader.onloadend = () => resolve(reader.result as string);
+                              reader.onerror = reject;
+                              reader.readAsDataURL(blob);
+                            });
+                          } catch (e) {
+                            console.error(`Failed to load video ${inputValue}:`, e);
+                          }
+                        }
                       }
 
                       // Check if this is a multi-output node (like text-generation with customOutputs)
@@ -623,15 +756,19 @@ function useWorkflowExecutionImpl({
               const model = node.data.model;
               switch (node.toolId) {
                 case 'text-input': result = node.data.value || ""; break;
-                case 'image-input':
-                  const imageValue = node.data.value || [];
+                case 'image-input': {
+                  const rawImage = node.outputValue ?? node.data.value;
+                  const imageValue = Array.isArray(rawImage) ? rawImage : (rawImage != null ? [rawImage] : []);
                   // For workflow input paths or URLs, use directly (no conversion needed)
                   // Only convert local file paths (starting with /) that are not workflow/task paths
                   if (Array.isArray(imageValue) && imageValue.length > 0) {
                     const convertedImages = await Promise.all(imageValue.map(async (img: string | { type?: string; file_id?: string; file_url?: string }) => {
-                      // Backend file reference: resolve file_id to data URL
-                      if (img && typeof img === 'object' && (img.type === 'reference' || (img as { file_id?: string }).file_id)) {
-                        const dataUrl = await getWorkflowFileByFileId(workflow.id, (img as { file_id: string }).file_id);
+                      // Backend/standalone file reference: resolve to data URL (file_id 或 local:// 的 file_url)
+                      if (img && typeof img === 'object' && (img.type === 'file' || (img as { file_id?: string }).file_id)) {
+                        const idToFetch = (img as { file_url?: string }).file_url?.startsWith('local://')
+                          ? (img as { file_url: string }).file_url
+                          : (img as { file_id: string }).file_id;
+                        const dataUrl = await getWorkflowFileByFileId(workflow.id, idToFetch);
                         return dataUrl || (img as { file_url?: string }).file_url || img;
                       }
                       if (typeof img !== 'string') return img;
@@ -674,10 +811,14 @@ function useWorkflowExecutionImpl({
                     result = imageValue;
                   }
                   break;
+                }
                 case 'audio-input': {
-                  const audioValue = node.data.value;
+                  const audioValue = node.outputValue ?? node.data.value;
                   if (audioValue && typeof audioValue === 'object' && (audioValue as { file_id?: string }).file_id) {
-                    result = await getWorkflowFileByFileId(workflow.id, (audioValue as { file_id: string }).file_id) || (audioValue as { file_url?: string }).file_url || audioValue;
+                    const idToFetch = (audioValue as { file_url?: string }).file_url?.startsWith('local://')
+                      ? (audioValue as { file_url: string }).file_url
+                      : (audioValue as { file_id: string }).file_id;
+                    result = await getWorkflowFileByFileId(workflow.id, idToFetch) || (audioValue as { file_url?: string }).file_url || audioValue;
                   } else if (audioValue && typeof audioValue === 'string') {
                     if (audioValue.startsWith('local://')) {
                       result = await getWorkflowFileByFileId(workflow.id, audioValue) || audioValue;
@@ -712,11 +853,39 @@ function useWorkflowExecutionImpl({
                   break;
                 }
                 case 'video-input': {
-                  const vidVal = node.data.value;
+                  const vidVal = node.outputValue ?? node.data.value;
                   if (vidVal && typeof vidVal === 'object' && (vidVal as { file_id?: string }).file_id) {
-                    result = await getWorkflowFileByFileId(workflow.id, (vidVal as { file_id: string }).file_id) || (vidVal as { file_url?: string }).file_url || vidVal;
-                  } else if (typeof vidVal === 'string' && vidVal.startsWith('local://')) {
-                    result = await getWorkflowFileByFileId(workflow.id, vidVal) || vidVal;
+                    const idToFetch = (vidVal as { file_url?: string }).file_url?.startsWith('local://')
+                      ? (vidVal as { file_url: string }).file_url
+                      : (vidVal as { file_id: string }).file_id;
+                    result = await getWorkflowFileByFileId(workflow.id, idToFetch) || (vidVal as { file_url?: string }).file_url || vidVal;
+                  } else if (typeof vidVal === 'string') {
+                    if (vidVal.startsWith('local://')) {
+                      result = await getWorkflowFileByFileId(workflow.id, vidVal) || vidVal;
+                    } else if (vidVal.startsWith('data:') || (!vidVal.startsWith('http') && vidVal.includes(','))) {
+                      result = vidVal;
+                    } else if (vidVal.includes('/assets/workflow/input') || vidVal.includes('/assets/task/') ||
+                               vidVal.startsWith('http://') || vidVal.startsWith('https://')) {
+                      result = vidVal;
+                    } else if (vidVal.startsWith('/')) {
+                      try {
+                        const basePath = getAssetBasePath();
+                        const videoPath = vidVal.startsWith('/assets/') && !vidVal.startsWith('/canvas/') ? `${basePath}${vidVal}` : vidVal;
+                        const response = await fetch(videoPath);
+                        const blob = await response.blob();
+                        result = await new Promise<string>((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onloadend = () => resolve(reader.result as string);
+                          reader.onerror = reject;
+                          reader.readAsDataURL(blob);
+                        });
+                      } catch (e) {
+                        console.error(`Failed to load video ${vidVal}:`, e);
+                        result = vidVal;
+                      }
+                    } else {
+                      result = vidVal;
+                    }
                   } else {
                     result = vidVal;
                   }
@@ -1402,7 +1571,7 @@ function useWorkflowExecutionImpl({
               const fileUrl = saveResult.file_url || saveResult.url;
               // Never replace LightX2VResultRef with URL so task_id stays in node.outputValue for result_url resolution
               const shouldReplaceWithUrl = fileUrl && isDataUrl(meta.value) && !isLightX2VResultRef(meta.value);
-              const refPayload = { type: 'reference' as const, file_id: saveResult.file_id, ext: saveResult.ext };
+              const refPayload = { type: 'file' as const, file_id: saveResult.file_id, ext: saveResult.ext };
               const urlPayload = { type: 'url' as const, data: fileUrl, ext: saveResult.ext };
 
               if (meta.kind === 'multi') {

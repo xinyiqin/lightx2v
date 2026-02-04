@@ -2466,7 +2466,7 @@ async def _append_port_output_to_workflow(
         data = output_data
         if data.get("__type") is None and "json" in data and isinstance(data.get("json"), dict):
             data = data["json"]
-        if data.get("type") == "reference" and data.get("file_id"):
+        if data.get("type") in ("reference", "file") and data.get("file_id"):
             file_id_val = data.get("file_id")
             ext_val = data.get("ext") or ".bin"
             entry = {
@@ -2756,7 +2756,7 @@ async def api_v1_workflow_node_output_upload(request: Request, file: UploadFile 
 
 
 @app.get("/api/v1/workflow/{workflow_id}/file/{file_id}")
-async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access)):
+async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access_from_query)):
     try:
         workflow_id = request.path_params["workflow_id"]
         file_id = request.path_params["file_id"]
