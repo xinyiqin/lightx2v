@@ -231,13 +231,7 @@ Output ONLY the JSON, no additional text or markdown.`;
         isDirty: true,
         isRunning: false,
         globalInputs: {},
-        env: {
-          lightx2v_url: "",
-          lightx2v_token: ""
-        },
-        history: [],
-        updatedAt: Date.now(),
-        showIntermediateResults: true
+        updatedAt: Date.now()
       };
 
       // Set workflow and open editor

@@ -25,7 +25,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.pool = None
         self.metrics_monitor = metrics_monitor
         self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t"]
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "history_metadata", "data_store", "chat_history"]
+        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "chat_history", "tags", "node_output_history"]
 
     async def init(self):
         await self.upgrade_db()
@@ -80,6 +80,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
             (3, "Add podcasts table", self.upgrade_v3),
             (4, "Add voice clones table", self.upgrade_v4),
             (5, "Add workflows table, workflow thumsup", self.upgrade_v5),
+            (6, "Add workflow tags/history fields and drop legacy stores", self.upgrade_v6),
         ]
         logger.info(f"upgrade_db: {self.db_url}")
         cur_ver = await self.query_version()
@@ -289,9 +290,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         last_run_t TIMESTAMPTZ,
                         nodes JSONB NOT NULL,
                         connections JSONB NOT NULL,
-                        history_metadata JSONB,
                         extra_info JSONB,
-                        data_store JSONB,
                         chat_history JSONB,
                         visibility VARCHAR(16),
                         tag VARCHAR(16),
@@ -317,6 +316,59 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return True
         except:  # noqa
             logger.error(f"upgrade_v5 error: {traceback.format_exc()}")
+            return False
+        finally:
+            await self.release_conn(conn)
+
+    async def upgrade_v6(self, version, description):
+        conn = await self.get_conn()
+        try:
+            async with conn.transaction(isolation="read_uncommitted"):
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb
+                    """
+                )
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    ADD COLUMN IF NOT EXISTS node_output_history JSONB DEFAULT '{{}}'::jsonb
+                    """
+                )
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    ADD COLUMN IF NOT EXISTS author_id VARCHAR(256)
+                    """
+                )
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    ADD COLUMN IF NOT EXISTS author_name VARCHAR(256)
+                    """
+                )
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    DROP COLUMN IF EXISTS history_metadata
+                    """
+                )
+                await conn.execute(
+                    f"""
+                    ALTER TABLE {self.table_workflows}
+                    DROP COLUMN IF EXISTS data_store
+                    """
+                )
+                await conn.execute(
+                    f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)",
+                    version,
+                    description,
+                    datetime.now(),
+                )
+                return True
+        except:  # noqa
+            logger.error(f"upgrade_v6 error: {traceback.format_exc()}")
             return False
         finally:
             await self.release_conn(conn)
@@ -1246,8 +1298,8 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     f"""
                     INSERT INTO {self.table_workflows}
                     (workflow_id, user_id, name, description, create_t, update_t, last_run_t,
-                     nodes, connections, history_metadata, extra_info, data_store, chat_history, visibility, tag)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                     nodes, connections, extra_info, chat_history, visibility, tag, tags, node_output_history, author_id, author_name)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                     """,
                     workflow_data["workflow_id"],
                     workflow_data["user_id"],
@@ -1258,12 +1310,14 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     workflow_data.get("last_run_t"),
                     workflow_data.get("nodes", []),
                     workflow_data.get("connections", []),
-                    workflow_data.get("history_metadata", []),
                     workflow_data.get("extra_info", {}),
-                    workflow_data.get("data_store", {"outputs": {}}),
                     workflow_data.get("chat_history", []),
                     workflow_data.get("visibility", "private"),
                     workflow_data.get("tag", ""),
+                    workflow_data.get("tags", []),
+                    workflow_data.get("node_output_history", {}),
+                    workflow_data.get("author_id"),
+                    workflow_data.get("author_name"),
                 )
                 return True
         except:  # noqa

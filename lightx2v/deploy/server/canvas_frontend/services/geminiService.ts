@@ -69,7 +69,8 @@ export const geminiText = async (
   mode = 'basic',
   customInstruction?: string,
   model = 'gemini-3-pro-preview',
-  outputFields?: OutputField[]
+  outputFields?: OutputField[],
+  imageInput?: string | string[] | any[]
 ): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -94,9 +95,25 @@ export const geminiText = async (
     ? `${baseInstruction}\n\nIMPORTANT: You MUST generate content for each field: ${outputKeys.join(', ')}.`
     : baseInstruction;
 
+  let contents: string | { parts: any[] };
+  if (imageInput) {
+    const inputs = Array.isArray(imageInput) ? imageInput : [imageInput];
+    const flatInputs = inputs.flat().filter((img: any) => img && typeof img === 'string');
+    const parts: any[] = [{ text: prompt }];
+    flatInputs.forEach((img: string) => {
+      const mimeMatch = img.startsWith('data:') ? img.match(/^data:([^;]+);/) : null;
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+      const data = img.includes(',') ? img.split(',')[1] : img;
+      parts.push({ inlineData: { data, mimeType } });
+    });
+    contents = { parts };
+  } else {
+    contents = prompt;
+  }
+
   const response = await ai.models.generateContent({
     model: model,
-    contents: prompt,
+    contents,
     config: {
       systemInstruction: finalInstruction,
       tools: useSearch ? [{ googleSearch: {} }] : undefined,
@@ -375,8 +392,7 @@ export const lightX2VTask = async (
       });
 
       // Server expects: { type: "base64", data: ["base64string1", "base64string2", ...] }
-      // OR { type: "url", data: ["url1", "url2", ...] }
-      // Check if any item is a URL (absolute or relative)
+      // OR { type: "url", data: ["url1", "url2", ...] } — backend supports multi-URL (see deploy/common/utils.py preload_data)
       const hasUrl = processedImages.some(img =>
         typeof img === 'string' &&
         (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('./') || img.startsWith('/'))
@@ -1862,7 +1878,8 @@ export const deepseekChat = async (
 export async function* deepseekChatStream(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   model = 'deepseek-v3-2-251201',
-  responseFormat: 'json_object' | 'text' = 'json_object'
+  responseFormat: 'json_object' | 'text' = 'json_object',
+  signal?: AbortSignal
 ): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
 
@@ -1981,7 +1998,8 @@ export async function* deepseekChatStream(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(requestBody),
+    signal
   });
 
   if (!response.ok) {
@@ -2008,6 +2026,7 @@ export async function* deepseekChatStream(
 
   try {
     while (true) {
+      if (signal?.aborted) break;
       const { done, value } = await reader.read();
 
       if (done) break;
@@ -2134,7 +2153,8 @@ export async function* deepseekChatStream(
 export async function* ppchatChatCompletionsStream(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   model = 'gemini-3-pro-preview',
-  responseFormat: 'json_object' | 'text' = 'json_object'
+  responseFormat: 'json_object' | 'text' = 'json_object',
+  signal?: AbortSignal
 ): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
   const apiKey = process.env.PPCHAT_API_KEY;
   if (!apiKey) {
@@ -2169,7 +2189,8 @@ export async function* ppchatChatCompletionsStream(
   const response = await fetch('https://api.ppchat.vip/v1/chat/completions', {
     method: 'POST',
     headers: headers,
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(requestBody),
+    signal
   });
 
   if (!response.ok) {
@@ -2195,6 +2216,7 @@ export async function* ppchatChatCompletionsStream(
 
   try {
     while (true) {
+      if (signal?.aborted) break;
       const { done, value } = await reader.read();
 
       if (done) break;

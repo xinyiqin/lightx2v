@@ -160,12 +160,14 @@ export const Header: React.FC<HeaderProps> = ({
           <Plus size={18} /> {t('create_workflow')}
         </button>
 
-        <UserCard
-          user={user}
-          lang={lang}
-          onLogin={handleLogin}
-          onLogout={handleLogout}
-        />
+        {!isStandalone() && (
+          <UserCard
+            user={user}
+            lang={lang}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+          />
+        )}
       </div>
     </header>
   );

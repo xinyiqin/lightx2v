@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, TriangleAlert } from 'lucide-react';
-import { Language } from '../../i18n/useTranslation';
+import { useTranslation, Language } from '../../i18n/useTranslation';
 
 interface ErrorModalProps {
   error: { message: string; details?: string } | null;
@@ -9,7 +9,11 @@ interface ErrorModalProps {
 }
 
 export const ErrorModal: React.FC<ErrorModalProps> = ({ error, lang, onClose }) => {
+  const { t } = useTranslation(lang);
   if (!error) return null;
+
+  const message = (error.message === 'Fetch is aborted' ? t('fetch_aborted') : error.message);
+  const details = (error.details === 'Fetch is aborted' ? t('fetch_aborted') : error.details);
 
   return (
     <div
@@ -47,17 +51,17 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({ error, lang, onClose }) 
               {lang === 'zh' ? '错误信息' : 'Error Message'}
             </span>
             <div className="p-3 bg-red-500/5 border border-red-500/10 rounded-xl text-sm text-red-400 leading-relaxed font-medium">
-              {error.message}
+              {message}
             </div>
           </div>
-          {error.details && (
+          {details && (
             <div className="space-y-2">
               <details>
                 <summary className="text-[10px] text-slate-500 font-black uppercase tracking-widest cursor-pointer hover:text-slate-400">
                   {lang === 'zh' ? '详细信息' : 'Details'}
                 </summary>
                 <pre className="mt-2 p-3 bg-slate-950/50 border border-slate-800 rounded-xl text-xs text-slate-400 overflow-auto max-h-[200px] custom-scrollbar">
-                  {error.details}
+                  {details}
                 </pre>
               </details>
             </div>

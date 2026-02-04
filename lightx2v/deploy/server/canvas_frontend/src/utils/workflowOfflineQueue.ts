@@ -37,16 +37,7 @@ class WorkflowOfflineQueue {
    * 压缩工作流数据（移除不必要的字段以减小体积）
    */
   private compressWorkflowData(workflowData: any): any {
-    // 移除历史记录中的大字段，只保留必要信息
     const compressed = { ...workflowData };
-    if (compressed.history_metadata) {
-      compressed.history_metadata = compressed.history_metadata.map((run: any) => ({
-        run_id: run.run_id,
-        timestamp: run.timestamp,
-        totalTime: run.totalTime,
-        node_ids: run.node_ids
-      }));
-    }
     // 移除节点中的大字段（如base64数据）
     if (compressed.nodes) {
       compressed.nodes = compressed.nodes.map((node: any) => {

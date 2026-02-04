@@ -18,16 +18,19 @@ import {
   ChevronDown,
   CheckCircle2 as CheckCircle,
   Globe,
-  Bot
+  Bot,
+  Clock,
+  History
 } from 'lucide-react';
-import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition } from '../../../types';
+import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition, NodeHistoryEntry } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
 import { formatTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
-import { uploadNodeInputFile, getLocalFileDataUrl } from '../../utils/workflowFileManager';
+import { historyEntryToDisplayValue, normalizeHistoryEntries } from '../../utils/historyEntry';
+import { uploadNodeInputFile, getLocalFileDataUrl, getWorkflowFileByFileId } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { TextNodePreview } from '../previews/TextNodePreview';
@@ -35,11 +38,183 @@ import { ImageNodePreview } from '../previews/ImageNodePreview';
 import { AudioNodePreview } from '../previews/AudioNodePreview';
 import { VideoNodePreview } from '../previews/VideoNodePreview';
 
+const HistoryEntryItem: React.FC<{
+  entry: NodeHistoryEntry;
+  lang: Language;
+  onSelect: () => void;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
+  outputDataType?: string;
+  resolveAudioUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
+  resolveVideoUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
+}> = ({ entry, lang, onSelect, resolveLightX2VResultRef, outputDataType, resolveAudioUrl, resolveVideoUrl }) => {
+  let preview = '';
+  let isLightX2VResult = false;
+  let lightX2VRef: LightX2VResultRef | null = null;
+  if (entry.kind === 'text') {
+    const textVal = (entry.value as { text?: string })?.text ?? '';
+    preview = textVal.length > 40 ? textVal.slice(0, 40) + '…' : textVal;
+  } else if (entry.kind === 'json') {
+    const jsonVal = (entry.value as { json?: any })?.json ?? entry.value;
+    const s = JSON.stringify(jsonVal);
+    preview = s.length > 40 ? s.slice(0, 40) + '…' : s;
+  } else if (entry.kind === 'file') {
+    const fileVal = entry.value as {
+      dataUrl?: string;
+      url?: string;
+      fileId?: string;
+    };
+    if (fileVal.dataUrl) preview = lang === 'zh' ? '[内联文件]' : '[Inline file]';
+    else if (fileVal.url) preview = lang === 'zh' ? '[URL]' : '[URL]';
+    else if (fileVal.fileId) preview = lang === 'zh' ? '[已存文件]' : '[Stored file]';
+    else preview = lang === 'zh' ? '[文件]' : '[File]';
+  } else if (entry.kind === 'lightx2v_result') {
+    const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
+    preview = `${val.taskId || ''} ${val.outputName || ''}`.trim() || (lang === 'zh' ? '[视频结果]' : '[Video]');
+    isLightX2VResult = true;
+    if (val.taskId) {
+      lightX2VRef = {
+        __type: 'lightx2v_result',
+        task_id: val.taskId,
+        output_name: val.outputName || 'output',
+        is_cloud: !!val.isCloud,
+      };
+    }
+  }
+  const [resolvedUrl, setResolvedUrl] = React.useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = React.useState<string | null>(null);
+  const audioElRef = React.useRef<HTMLAudioElement | null>(null);
+  React.useEffect(() => {
+    if (!lightX2VRef || !resolveLightX2VResultRef) return;
+    let cancelled = false;
+    resolveLightX2VResultRef(lightX2VRef).then((url) => {
+      if (!cancelled) setResolvedUrl(url);
+    }).catch(() => {
+      if (!cancelled) setResolvedUrl(null);
+    });
+    return () => { cancelled = true; setResolvedUrl(null); };
+  }, [lightX2VRef?.task_id, lightX2VRef?.output_name, lightX2VRef?.is_cloud, resolveLightX2VResultRef]);
+  const isAudio = outputDataType === DataType.AUDIO && !!resolveAudioUrl;
+  React.useEffect(() => {
+    if (!isAudio || !resolveAudioUrl) return;
+    let cancelled = false;
+    resolveAudioUrl(entry).then((url) => {
+      if (!cancelled && url) setAudioUrl(url);
+    }).catch(() => {
+      if (!cancelled) setAudioUrl(null);
+    });
+    return () => { cancelled = true; setAudioUrl(null); };
+  }, [isAudio, resolveAudioUrl, entry.id]);
+  const handlePlayAudio = React.useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioUrl) return;
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.currentTime = 0;
+    }
+    const audio = new Audio(audioUrl);
+    audioElRef.current = audio;
+    audio.play().catch(() => {});
+    audio.onended = () => { audioElRef.current = null; };
+  }, [audioUrl]);
+  const isImage = isLightX2VResult && (entry.value as { outputName?: string })?.outputName === 'output_image';
+  const outputName = (entry.value as { outputName?: string })?.outputName || '';
+  const isLightX2VAudio = isLightX2VResult && outputName === 'output_audio';
+  const hasThumbnail = isLightX2VResult && !isLightX2VAudio && resolveLightX2VResultRef && lightX2VRef;
+  const isVideo = outputDataType === DataType.VIDEO && !!resolveVideoUrl;
+  const [videoUrl, setVideoUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!isVideo || !resolveVideoUrl || entry.kind === 'lightx2v_result') return;
+    let cancelled = false;
+    resolveVideoUrl(entry).then((url) => {
+      if (!cancelled && url) setVideoUrl(url);
+    }).catch(() => {
+      if (!cancelled) setVideoUrl(null);
+    });
+    return () => { cancelled = true; setVideoUrl(null); };
+  }, [isVideo, resolveVideoUrl, entry.id, entry.kind]);
+  const hasVideoFileThumbnail = isVideo && entry.kind === 'file' && videoUrl;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+      className="w-full px-3 py-2 text-left text-[10px] text-slate-300 hover:bg-[#90dce1]/20 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50 last:border-b-0"
+    >
+      {(hasThumbnail || hasVideoFileThumbnail) ? (
+        <span className="flex-shrink-0 w-1/2 min-w-[72px] aspect-square rounded overflow-hidden bg-slate-700 flex items-center justify-center">
+          {hasVideoFileThumbnail ? (
+            <video
+              src={videoUrl!}
+              className="w-full h-full object-cover"
+              muted
+              preload="metadata"
+              onMouseOver={(e) => {
+                const v = e.currentTarget;
+                if (v.readyState < 2) v.load();
+                v.play().catch(() => {});
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+              }}
+            />
+          ) : resolvedUrl ? (
+            isImage ? (
+              <img src={resolvedUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <video
+                src={resolvedUrl}
+                className="w-full h-full object-cover"
+                muted
+                preload="metadata"
+                onMouseOver={(e) => {
+                  const v = e.currentTarget;
+                  if (v.readyState < 2) v.load();
+                  v.play().catch(() => {});
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.pause();
+                  e.currentTarget.currentTime = 0;
+                }}
+              />
+            )
+          ) : (
+            <span className="text-[8px] text-slate-500">…</span>
+          )}
+        </span>
+      ) : null}
+      <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+        {!hasThumbnail && !hasVideoFileThumbnail && <span className="truncate">{preview || (lang === 'zh' ? '—' : '—')}</span>}
+        {entry.timestamp ? (
+          <span className="text-[9px] text-slate-500">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+        ) : null}
+      </span>
+      {isAudio && (
+        <span className="flex-shrink-0">
+          {audioUrl ? (
+            <button
+              type="button"
+              onClick={handlePlayAudio}
+              className="p-1.5 rounded-lg bg-[#90dce1]/20 hover:bg-[#90dce1]/40 text-[#90dce1] transition-colors"
+              title={lang === 'zh' ? '播放' : 'Play'}
+            >
+              <PlayIcon size={14} />
+            </button>
+          ) : (
+            <span className="inline-block p-1.5 text-slate-600" title={lang === 'zh' ? '加载中…' : 'Loading…'}>…</span>
+          )}
+        </span>
+      )}
+    </button>
+  );
+};
+
 interface NodeProps {
   node: WorkflowNode;
   workflow: WorkflowState;
   isSelected: boolean;
-  activeOutputs: Record<string, any>;
   sourceOutputs: Record<string, any>;
   nodeHeight: number;
   onSelect: (nodeId: string) => void;
@@ -107,7 +282,6 @@ export const Node: React.FC<NodeProps> = ({
   node,
   workflow,
   isSelected,
-  activeOutputs,
   sourceOutputs,
   nodeHeight,
   onSelect,
@@ -140,7 +314,7 @@ export const Node: React.FC<NodeProps> = ({
   onSetShowVideoEditor,
   onSetConnecting,
   onAddConnection,
-  onClearSelectedRunId,
+  onClearSelectedRunId = () => {},
   getReplaceableTools,
   getCompatibleToolsForOutput,
   quickAddInput,
@@ -170,8 +344,8 @@ export const Node: React.FC<NodeProps> = ({
         onNodeHeightChange(node.id, currentHeight);
       }
     }
-  }, [node.id, onNodeHeightChange, node.data, outputs.length, activeOutputs[node.id], node.status]);
-  // Prefer sourceOutputs (activeOutputs / run), then node.outputValue so saved refs show after load/refresh
+  }, [node.id, onNodeHeightChange, node.data, outputs.length, node.outputValue, node.status]);
+  // sourceOutputs = node.outputValue per node; fallback to node.outputValue for saved refs after load
   const nodeResultRaw = sourceOutputs[node.id] ?? node.outputValue ?? (tool.category === 'Input' ? node.data.value : null);
   // Extract actual value from reference/optimized objects (for history or 纯前端 run.outputs)
   const nodeResult =
@@ -259,7 +433,9 @@ export const Node: React.FC<NodeProps> = ({
   const durationText =
     node.status === NodeStatus.RUNNING
       ? ((performance.now() - (node.startTime || performance.now())) / 1000).toFixed(1) + 's'
-      : formatTime(node.executionTime);
+      : node.status === NodeStatus.PENDING
+        ? (lang === 'zh' ? '排队中' : 'Pending')
+        : formatTime(node.executionTime);
 
   const isInputNode = tool.category === 'Input';
   const hasData =
@@ -269,7 +445,7 @@ export const Node: React.FC<NodeProps> = ({
 
   const handleNodeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onClearSelectedRunId();
+    onClearSelectedRunId?.();
     onSelect(node.id);
   };
 
@@ -326,7 +502,7 @@ export const Node: React.FC<NodeProps> = ({
 
   const handlePortMouseUp = (port: Port, direction: 'in' | 'out') => () => {
     if (connecting && connecting.direction !== direction && connecting.type === port.type) {
-      onClearSelectedRunId();
+      onClearSelectedRunId?.();
       if (direction === 'in') {
         onAddConnection({
           id: `conn-${Date.now()}`,
@@ -349,6 +525,86 @@ export const Node: React.FC<NodeProps> = ({
   };
 
   const [isUploading, setIsUploading] = React.useState(false);
+  const [showHistoryDropdown, setShowHistoryDropdown] = React.useState(false);
+  const historyDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  const nodeHistoryEntries = React.useMemo(() => {
+    const raw = workflow.nodeOutputHistory?.[node.id] ?? [];
+    return normalizeHistoryEntries(raw as any[]);
+  }, [workflow.nodeOutputHistory, node.id]);
+
+  const handleHistoryEntrySelect = React.useCallback(
+    (entry: NodeHistoryEntry) => {
+      const displayValue = historyEntryToDisplayValue(entry);
+      if (displayValue != null) {
+        onUpdateNodeData(node.id, 'outputValue', displayValue);
+      }
+      setShowHistoryDropdown(false);
+    },
+    [node.id, onUpdateNodeData]
+  );
+
+  const resolveAudioUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry): Promise<string | null> => {
+    if (entry.kind === 'lightx2v_result') {
+      const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
+      const outputName = val.outputName || 'output';
+      if (outputName !== 'output_audio') return null;
+      if (!resolveLightX2VResultRef || !val.taskId) return null;
+      const ref: LightX2VResultRef = {
+        __type: 'lightx2v_result',
+        task_id: val.taskId,
+        output_name: outputName,
+        is_cloud: !!val.isCloud
+      };
+      return resolveLightX2VResultRef(ref).catch(() => null);
+    }
+    if (entry.kind === 'file') {
+      const fileVal = entry.value as { dataUrl?: string; url?: string; fileId?: string };
+      if (fileVal.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
+      if (fileVal.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      const fid = fileVal.fileId;
+      if (fid && workflow.id) return getWorkflowFileByFileId(workflow.id, fid);
+      return null;
+    }
+    return null;
+  }, [workflow.id, resolveLightX2VResultRef, resolveMediaSrc]);
+
+  const resolveVideoUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry): Promise<string | null> => {
+    if (entry.kind === 'lightx2v_result') {
+      const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
+      const outputName = val.outputName || 'output';
+      if (outputName !== 'output_video' && outputName !== 'output') return null;
+      if (!resolveLightX2VResultRef || !val.taskId) return null;
+      const ref: LightX2VResultRef = {
+        __type: 'lightx2v_result',
+        task_id: val.taskId,
+        output_name: outputName,
+        is_cloud: !!val.isCloud
+      };
+      return resolveLightX2VResultRef(ref).catch(() => null);
+    }
+    if (entry.kind === 'file') {
+      const fileVal = entry.value as { dataUrl?: string; url?: string; fileId?: string };
+      if (fileVal.dataUrl?.startsWith('data:video/')) return fileVal.dataUrl;
+      if (fileVal.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      const fid = fileVal.fileId;
+      if (fid && workflow.id) return getWorkflowFileByFileId(workflow.id, fid);
+      return null;
+    }
+    return null;
+  }, [workflow.id, resolveLightX2VResultRef, resolveMediaSrc]);
+
+  React.useEffect(() => {
+    if (!showHistoryDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (historyDropdownRef.current && !historyDropdownRef.current.contains(e.target as Node)) {
+        setShowHistoryDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showHistoryDropdown]);
+
   const outputPortId = outputs[0]?.id;
   const isWorkflowReady = (id?: string) => {
     if (!id) return false;
@@ -550,7 +806,7 @@ export const Node: React.FC<NodeProps> = ({
   return (
     <div
       ref={nodeRef}
-      className={`node-element absolute bg-slate-900 border transition-all z-10 group ${
+      className={`node-element absolute bg-slate-900 border transition-all z-10 group pointer-events-auto ${
         isInputNode
           ? 'w-80 rounded-[2.5rem] shadow-2xl'
           : 'w-56 rounded-3xl shadow-2xl'
@@ -629,7 +885,7 @@ export const Node: React.FC<NodeProps> = ({
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                const nodeName = lang === 'zh' ? tool.name_zh : tool.name;
+                const nodeName = node.name ?? (lang === 'zh' ? tool.name_zh : tool.name);
                 onAddNodeToChat(node.id, nodeName);
               }}
               className="p-2 bg-[#90dce1] text-slate-900 rounded-full shadow-lg hover:bg-[#7accd0] transition-all active:scale-90"
@@ -644,19 +900,27 @@ export const Node: React.FC<NodeProps> = ({
       {/* Node Header */}
       <div
         className={`px-4 py-3 border-b flex items-center justify-between bg-slate-800/40 rounded-t-3xl ${
-          node.status === NodeStatus.RUNNING ? 'animate-pulse bg-[#90dce1]/10 border-[#90dce1]/20' : ''
+          node.status === NodeStatus.RUNNING
+            ? 'animate-pulse bg-[#90dce1]/10 border-[#90dce1]/20'
+            : node.status === NodeStatus.PENDING
+              ? 'bg-amber-500/10 border-amber-500/20'
+              : ''
         }`}
       >
         <div className="flex items-center gap-2 truncate flex-1 min-w-0">
           <div
             className={`p-1.5 rounded-lg shrink-0 ${
-              node.status === NodeStatus.RUNNING ? 'bg-[#90dce1] text-white' : 'bg-slate-800 text-slate-400'
+              node.status === NodeStatus.RUNNING
+                ? 'bg-[#90dce1] text-white'
+                : node.status === NodeStatus.PENDING
+                  ? 'bg-amber-500/80 text-white'
+                  : 'bg-slate-800 text-slate-400'
             }`}
           >
             {React.createElement(getIcon(tool.icon), { size: 10 })}
           </div>
           <span className="text-[10px] font-black uppercase truncate tracking-widest">
-            {lang === 'zh' ? tool.name_zh : tool.name}
+            {node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)}
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -677,10 +941,14 @@ export const Node: React.FC<NodeProps> = ({
               <Maximize2 size={12} />
             </button>
           )}
-          {(node.status === NodeStatus.RUNNING || node.executionTime !== undefined) && (
+          {(node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.executionTime !== undefined) && (
             <span
               className={`text-[8px] font-bold ${
-                node.status === NodeStatus.RUNNING ? 'text-[#90dce1]' : 'text-slate-500'
+                node.status === NodeStatus.RUNNING
+                  ? 'text-[#90dce1]'
+                  : node.status === NodeStatus.PENDING
+                    ? 'text-amber-400'
+                    : 'text-slate-500'
               }`}
             >
               {durationText}
@@ -688,8 +956,52 @@ export const Node: React.FC<NodeProps> = ({
           )}
 
           {!isInputNode && (
+            <div className="relative" ref={historyDropdownRef}>
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHistoryDropdown((v) => !v);
+                }}
+                className={`p-1 rounded transition-colors ${
+                  nodeHistoryEntries.length > 0
+                    ? 'text-slate-400 hover:text-[#90dce1] opacity-0 group-hover:opacity-100'
+                    : 'text-slate-600 cursor-default opacity-0 group-hover:opacity-50'
+                }`}
+                title={lang === 'zh' ? '历史结果' : 'History'}
+              >
+                <History size={12} />
+              </button>
+              {showHistoryDropdown && (
+                <div
+                  className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {nodeHistoryEntries.length > 0 ? (
+                    nodeHistoryEntries.map((entry) => (
+                      <HistoryEntryItem
+                        key={entry.id}
+                        entry={entry}
+                        lang={lang}
+                        onSelect={() => handleHistoryEntrySelect(entry)}
+                        resolveLightX2VResultRef={resolveLightX2VResultRef}
+                        outputDataType={firstOutputType}
+                        resolveAudioUrl={resolveAudioUrlForEntry}
+                        resolveVideoUrl={resolveVideoUrlForEntry}
+                      />
+                    ))
+                  ) : (
+                    <div className="px-3 py-4 text-[10px] text-slate-500 text-center">
+                      {lang === 'zh' ? '暂无历史记录' : 'No history'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {!isInputNode && (
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {node.status === NodeStatus.RUNNING || (pendingRunNodeIds && pendingRunNodeIds.includes(node.id)) ? (
+              {node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || (pendingRunNodeIds && pendingRunNodeIds.includes(node.id)) ? (
                 <button
                   title={lang === 'zh' ? '取消运行' : 'Cancel run'}
                   onClick={(e) => {
@@ -727,6 +1039,7 @@ export const Node: React.FC<NodeProps> = ({
             </div>
           )}
 
+          {node.status === NodeStatus.PENDING && <Clock size={12} className="text-amber-400" />}
           {node.status === NodeStatus.SUCCESS && <CheckCircle2 size={12} className="text-emerald-500" />}
           {node.status === NodeStatus.ERROR && <AlertCircle size={12} className="text-red-500" />}
         </div>

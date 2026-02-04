@@ -1,118 +1,132 @@
 // --- Presets Data ---
 
 import { WorkflowState, NodeStatus } from './types';
-import { getAccessToken } from './src/utils/apiClient';
 
 export const PRESET_WORKFLOWS: WorkflowState[] = [
-  // 宫崎骏风格治愈动画视频工作流
+  // 9分镜治愈动画：文本生成分镜脚本 → 9镜画面链式生图(9:16) + 9镜图生视频
   {
-    id: 'preset-miyazaki-healing-video',
-    name: '宫崎骏风格治愈动画视频',
+    id: 'preset-9shot-healing-video',
+    name: '9分镜治愈动画',
     updatedAt: Date.now(),
+    isDirty: false,
+    isRunning: false,
+    globalInputs: {},
+    connections: [
+      { id: 'h9-c-p1-img1', sourceNodeId: 'node-p1', sourcePortId: 'out-text', targetNodeId: 'node-img1', targetPortId: 'in-text' },
+      { id: 'h9-c-img1-img2', sourceNodeId: 'node-img1', sourcePortId: 'out-image', targetNodeId: 'node-img2', targetPortId: 'in-image' },
+      { id: 'h9-c-img2-img3', sourceNodeId: 'node-img2', sourcePortId: 'out-image', targetNodeId: 'node-img3', targetPortId: 'in-image' },
+      { id: 'h9-c-img3-img4', sourceNodeId: 'node-img3', sourcePortId: 'out-image', targetNodeId: 'node-img4', targetPortId: 'in-image' },
+      { id: 'h9-c-img4-img5', sourceNodeId: 'node-img4', sourcePortId: 'out-image', targetNodeId: 'node-img5', targetPortId: 'in-image' },
+      { id: 'h9-c-img5-img6', sourceNodeId: 'node-img5', sourcePortId: 'out-image', targetNodeId: 'node-img6', targetPortId: 'in-image' },
+      { id: 'h9-c-img6-img7', sourceNodeId: 'node-img6', sourcePortId: 'out-image', targetNodeId: 'node-img7', targetPortId: 'in-image' },
+      { id: 'h9-c-img7-img8', sourceNodeId: 'node-img7', sourcePortId: 'out-image', targetNodeId: 'node-img8', targetPortId: 'in-image' },
+      { id: 'h9-c-img8-img9', sourceNodeId: 'node-img8', sourcePortId: 'out-image', targetNodeId: 'node-img9', targetPortId: 'in-image' },
+      { id: 'h9-c-p2-img2', sourceNodeId: 'node-p2', sourcePortId: 'out-text', targetNodeId: 'node-img2', targetPortId: 'in-text' },
+      { id: 'h9-c-p3-img3', sourceNodeId: 'node-p3', sourcePortId: 'out-text', targetNodeId: 'node-img3', targetPortId: 'in-text' },
+      { id: 'h9-c-p4-img4', sourceNodeId: 'node-p4', sourcePortId: 'out-text', targetNodeId: 'node-img4', targetPortId: 'in-text' },
+      { id: 'h9-c-p5-img5', sourceNodeId: 'node-p5', sourcePortId: 'out-text', targetNodeId: 'node-img5', targetPortId: 'in-text' },
+      { id: 'h9-c-p6-img6', sourceNodeId: 'node-p6', sourcePortId: 'out-text', targetNodeId: 'node-img6', targetPortId: 'in-text' },
+      { id: 'h9-c-p7-img7', sourceNodeId: 'node-p7', sourcePortId: 'out-text', targetNodeId: 'node-img7', targetPortId: 'in-text' },
+      { id: 'h9-c-p8-img8', sourceNodeId: 'node-p8', sourcePortId: 'out-text', targetNodeId: 'node-img8', targetPortId: 'in-text' },
+      { id: 'h9-c-p9-img9', sourceNodeId: 'node-p9', sourcePortId: 'out-text', targetNodeId: 'node-img9', targetPortId: 'in-text' },
+      { id: 'h9-c-img1-vid1', sourceNodeId: 'node-img1', sourcePortId: 'out-image', targetNodeId: 'node-vid1', targetPortId: 'in-image' },
+      { id: 'h9-c-m1-vid1', sourceNodeId: 'node-m1', sourcePortId: 'out-text', targetNodeId: 'node-vid1', targetPortId: 'in-text' },
+      { id: 'h9-c-img2-vid2', sourceNodeId: 'node-img2', sourcePortId: 'out-image', targetNodeId: 'node-vid2', targetPortId: 'in-image' },
+      { id: 'h9-c-m2-vid2', sourceNodeId: 'node-m2', sourcePortId: 'out-text', targetNodeId: 'node-vid2', targetPortId: 'in-text' },
+      { id: 'h9-c-img3-vid3', sourceNodeId: 'node-img3', sourcePortId: 'out-image', targetNodeId: 'node-vid3', targetPortId: 'in-image' },
+      { id: 'h9-c-m3-vid3', sourceNodeId: 'node-m3', sourcePortId: 'out-text', targetNodeId: 'node-vid3', targetPortId: 'in-text' },
+      { id: 'h9-c-img4-vid4', sourceNodeId: 'node-img4', sourcePortId: 'out-image', targetNodeId: 'node-vid4', targetPortId: 'in-image' },
+      { id: 'h9-c-m4-vid4', sourceNodeId: 'node-m4', sourcePortId: 'out-text', targetNodeId: 'node-vid4', targetPortId: 'in-text' },
+      { id: 'h9-c-img5-vid5', sourceNodeId: 'node-img5', sourcePortId: 'out-image', targetNodeId: 'node-vid5', targetPortId: 'in-image' },
+      { id: 'h9-c-m5-vid5', sourceNodeId: 'node-m5', sourcePortId: 'out-text', targetNodeId: 'node-vid5', targetPortId: 'in-text' },
+      { id: 'h9-c-img6-vid6', sourceNodeId: 'node-img6', sourcePortId: 'out-image', targetNodeId: 'node-vid6', targetPortId: 'in-image' },
+      { id: 'h9-c-m6-vid6', sourceNodeId: 'node-m6', sourcePortId: 'out-text', targetNodeId: 'node-vid6', targetPortId: 'in-text' },
+      { id: 'h9-c-img7-vid7', sourceNodeId: 'node-img7', sourcePortId: 'out-image', targetNodeId: 'node-vid7', targetPortId: 'in-image' },
+      { id: 'h9-c-m7-vid7', sourceNodeId: 'node-m7', sourcePortId: 'out-text', targetNodeId: 'node-vid7', targetPortId: 'in-text' },
+      { id: 'h9-c-img8-vid8', sourceNodeId: 'node-img8', sourcePortId: 'out-image', targetNodeId: 'node-vid8', targetPortId: 'in-image' },
+      { id: 'h9-c-m8-vid8', sourceNodeId: 'node-m8', sourcePortId: 'out-text', targetNodeId: 'node-vid8', targetPortId: 'in-text' },
+      { id: 'h9-c-img9-vid9', sourceNodeId: 'node-img9', sourcePortId: 'out-image', targetNodeId: 'node-vid9', targetPortId: 'in-image' },
+      { id: 'h9-c-m9-vid9', sourceNodeId: 'node-m9', sourcePortId: 'out-text', targetNodeId: 'node-vid9', targetPortId: 'in-text' }
+    ],
     nodes: [
       {
-        id: 'node-scene-text',
-        toolId: 'text-input',
-        x: 100,
-        y: 120,
+        id: 'node-script',
+        toolId: 'text-generation',
+        x: 80,
+        y: 200,
         data: {
-          value: '宫崎骏风格的治愈场景：宁静的乡村小屋，远处是连绵的绿色山丘，天空中有几朵白云，温暖的阳光洒在大地上，远处有风车在缓缓转动。整体色调柔和，充满自然气息。'
+          value: '请生成一个9分镜治愈动画的分镜脚本。每镜输出两行：第一行「画面」描述该镜的静态画面（治愈、柔和、自然风格），第二行「运镜」描述该镜的镜头运动或画面内动作。保持9镜风格统一，竖屏构图。',
+          model: 'deepseek-v3-2-251201',
+          mode: 'basic',
+          customOutputs: [{ id: 'out-text', label: '分镜脚本', description: '9镜画面与运镜提示词' }]
         },
-        status: NodeStatus.IDLE,
-        error: null
+        status: NodeStatus.IDLE
       },
-      {
-        id: 'node-scene-image',
-        toolId: 'text-to-image',
-        x: 500,
-        y: 120,
-        data: {
-          value: '',
-          model: 'Qwen-Image-2512',
-          aspectRatio: '16:9'
-        },
-        status: NodeStatus.IDLE,
-        error: null
-      },
-      {
-        id: 'node-motion-text',
-        toolId: 'text-input',
-        x: 500,
-        y: 320,
-        data: {
-          value: '镜头缓慢向前推进，云朵在天空中缓缓飘动，风车叶片缓慢旋转，阳光透过云层洒下光影变化，整体氛围宁静治愈，多个镜头自然过渡'
-        },
-        status: NodeStatus.IDLE,
-        error: null
-      },
-      {
-        id: 'node-video',
-        toolId: 'video-gen-image',
-        x: 900,
-        y: 220,
-        data: {
-          value: '',
-          model: 'Wan2.2_I2V_A14B_distilled'
-        },
-        status: NodeStatus.IDLE,
-        error: null
-      }
-    ],
-    connections: [
-      {
-        id: 'conn-scene-text-to-image',
-        sourceNodeId: 'node-scene-text',
-        sourcePortId: 'out-text',
-        targetNodeId: 'node-scene-image',
-        targetPortId: 'in-text'
-      },
-      {
-        id: 'conn-image-to-video',
-        sourceNodeId: 'node-scene-image',
-        sourcePortId: 'out-image',
-        targetNodeId: 'node-video',
-        targetPortId: 'in-image'
-      },
-      {
-        id: 'conn-motion-to-video',
-        sourceNodeId: 'node-motion-text',
-        sourcePortId: 'out-text',
-        targetNodeId: 'node-video',
-        targetPortId: 'in-text'
-      }
-    ],
-    isDirty: false,
-    isRunning: false,
-    globalInputs: {},
-    env: {
-      lightx2v_url: (process.env.LIGHTX2V_URL || 'https://x2v.light-ai.top').trim(),
-      lightx2v_token: (process.env.LIGHTX2V_TOKEN || '').trim()
-    },
-    history: [],
-    showIntermediateResults: true
+      { id: 'node-p1', toolId: 'text-input', x: 80, y: 380, status: NodeStatus.IDLE, data: { value: '第1镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p2', toolId: 'text-input', x: 80, y: 452, status: NodeStatus.IDLE, data: { value: '第2镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p3', toolId: 'text-input', x: 80, y: 524, status: NodeStatus.IDLE, data: { value: '第3镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p4', toolId: 'text-input', x: 80, y: 596, status: NodeStatus.IDLE, data: { value: '第4镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p5', toolId: 'text-input', x: 80, y: 668, status: NodeStatus.IDLE, data: { value: '第5镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p6', toolId: 'text-input', x: 80, y: 740, status: NodeStatus.IDLE, data: { value: '第6镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p7', toolId: 'text-input', x: 80, y: 812, status: NodeStatus.IDLE, data: { value: '第7镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p8', toolId: 'text-input', x: 80, y: 884, status: NodeStatus.IDLE, data: { value: '第8镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-p9', toolId: 'text-input', x: 80, y: 956, status: NodeStatus.IDLE, data: { value: '第9镜画面（从上方分镜脚本复制）' } },
+      { id: 'node-m1', toolId: 'text-input', x: 280, y: 380, status: NodeStatus.IDLE, data: { value: '第1镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m2', toolId: 'text-input', x: 280, y: 452, status: NodeStatus.IDLE, data: { value: '第2镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m3', toolId: 'text-input', x: 280, y: 524, status: NodeStatus.IDLE, data: { value: '第3镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m4', toolId: 'text-input', x: 280, y: 596, status: NodeStatus.IDLE, data: { value: '第4镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m5', toolId: 'text-input', x: 280, y: 668, status: NodeStatus.IDLE, data: { value: '第5镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m6', toolId: 'text-input', x: 280, y: 740, status: NodeStatus.IDLE, data: { value: '第6镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m7', toolId: 'text-input', x: 280, y: 812, status: NodeStatus.IDLE, data: { value: '第7镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m8', toolId: 'text-input', x: 280, y: 884, status: NodeStatus.IDLE, data: { value: '第8镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-m9', toolId: 'text-input', x: 280, y: 956, status: NodeStatus.IDLE, data: { value: '第9镜运镜（从上方分镜脚本复制）' } },
+      { id: 'node-img1', toolId: 'text-to-image', x: 520, y: 380, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img2', toolId: 'image-to-image', x: 520, y: 452, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img3', toolId: 'image-to-image', x: 520, y: 524, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img4', toolId: 'image-to-image', x: 520, y: 596, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img5', toolId: 'image-to-image', x: 520, y: 668, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img6', toolId: 'image-to-image', x: 520, y: 740, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img7', toolId: 'image-to-image', x: 520, y: 812, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img8', toolId: 'image-to-image', x: 520, y: 884, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-img9', toolId: 'image-to-image', x: 520, y: 956, status: NodeStatus.IDLE, data: { value: '', model: 'Qwen-Image-2512', aspectRatio: '9:16' } },
+      { id: 'node-vid1', toolId: 'video-gen-image', x: 880, y: 380, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid2', toolId: 'video-gen-image', x: 880, y: 452, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid3', toolId: 'video-gen-image', x: 880, y: 524, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid4', toolId: 'video-gen-image', x: 880, y: 596, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid5', toolId: 'video-gen-image', x: 880, y: 668, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid6', toolId: 'video-gen-image', x: 880, y: 740, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid7', toolId: 'video-gen-image', x: 880, y: 812, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid8', toolId: 'video-gen-image', x: 880, y: 884, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } },
+      { id: 'node-vid9', toolId: 'video-gen-image', x: 880, y: 956, status: NodeStatus.IDLE, data: { value: '', model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '9:16' } }
+    ]
   },
-  // 电商产品精修 + 首尾帧视频：产品图 → Doubao 生成精修/运镜提示 → 图生图 → 首尾帧视频（首帧=原图，尾帧=精修图）
+  // 电商多视角产品精修 + 图生视频：产品图 → Doubao 生成正面/侧面/背面/俯视精修提示 + 各视角运镜动效 → 4 个图生图 → 4 个图生视频（强调动效与运镜）
   {
     id: 'preset-ecommerce-product-video',
-    name: '电商产品精修首尾帧视频',
+    name: '电商多视角产品精修',
     updatedAt: Date.now(),
     isDirty: false,
     isRunning: false,
-    env: {
-      lightx2v_url: (process.env.LIGHTX2V_URL || 'https://x2v.light-ai.top').trim(),
-      lightx2v_token: (process.env.LIGHTX2V_TOKEN || '').trim()
-    },
     globalInputs: {},
-    history: [],
-    showIntermediateResults: true,
     connections: [
       { id: 'ec-c1', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-llm', targetPortId: 'in-image' },
       { id: 'ec-c2', sourceNodeId: 'ec-node-refinement-hint', sourcePortId: 'out-text', targetNodeId: 'ec-node-llm', targetPortId: 'in-text' },
-      { id: 'ec-c3', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i', targetPortId: 'in-image' },
-      { id: 'ec-c4', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_prompt', targetNodeId: 'ec-node-i2i', targetPortId: 'in-text' },
-      { id: 'ec-c5', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-video', targetPortId: 'in-image-start' },
-      { id: 'ec-c6', sourceNodeId: 'ec-node-i2i', sourcePortId: 'out-image', targetNodeId: 'ec-node-video', targetPortId: 'in-image-end' },
-      { id: 'ec-c7', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_prompt', targetNodeId: 'ec-node-video', targetPortId: 'in-text' }
+      { id: 'ec-c3', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i-front', targetPortId: 'in-image' },
+      { id: 'ec-c4', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_front', targetNodeId: 'ec-node-i2i-front', targetPortId: 'in-text' },
+      { id: 'ec-c5', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i-side', targetPortId: 'in-image' },
+      { id: 'ec-c6', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_side', targetNodeId: 'ec-node-i2i-side', targetPortId: 'in-text' },
+      { id: 'ec-c7', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i-back', targetPortId: 'in-image' },
+      { id: 'ec-c8', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_back', targetNodeId: 'ec-node-i2i-back', targetPortId: 'in-text' },
+      { id: 'ec-c9', sourceNodeId: 'ec-node-product', sourcePortId: 'out-image', targetNodeId: 'ec-node-i2i-top', targetPortId: 'in-image' },
+      { id: 'ec-c10', sourceNodeId: 'ec-node-llm', sourcePortId: 'refinement_top', targetNodeId: 'ec-node-i2i-top', targetPortId: 'in-text' },
+      { id: 'ec-c11', sourceNodeId: 'ec-node-i2i-front', sourcePortId: 'out-image', targetNodeId: 'ec-node-vid-front', targetPortId: 'in-image' },
+      { id: 'ec-c12', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_front', targetNodeId: 'ec-node-vid-front', targetPortId: 'in-text' },
+      { id: 'ec-c13', sourceNodeId: 'ec-node-i2i-side', sourcePortId: 'out-image', targetNodeId: 'ec-node-vid-side', targetPortId: 'in-image' },
+      { id: 'ec-c14', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_side', targetNodeId: 'ec-node-vid-side', targetPortId: 'in-text' },
+      { id: 'ec-c15', sourceNodeId: 'ec-node-i2i-back', sourcePortId: 'out-image', targetNodeId: 'ec-node-vid-back', targetPortId: 'in-image' },
+      { id: 'ec-c16', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_back', targetNodeId: 'ec-node-vid-back', targetPortId: 'in-text' },
+      { id: 'ec-c17', sourceNodeId: 'ec-node-i2i-top', sourcePortId: 'out-image', targetNodeId: 'ec-node-vid-top', targetPortId: 'in-image' },
+      { id: 'ec-c18', sourceNodeId: 'ec-node-llm', sourcePortId: 'motion_top', targetNodeId: 'ec-node-vid-top', targetPortId: 'in-text' }
     ],
     nodes: [
       {
@@ -137,40 +151,97 @@ export const PRESET_WORKFLOWS: WorkflowState[] = [
         id: 'ec-node-llm',
         toolId: 'text-generation',
         x: 280,
-        y: 160,
+        y: 120,
         status: NodeStatus.IDLE,
         data: {
           model: 'doubao-seed-1-6-vision-250815',
           mode: 'custom',
-          customInstruction: `你是一位电商主图与视频脚本专家。用户会提供一张产品图（in-image）和一段精修要求（in-text，可修改），请结合两者生成两个字段，语言与用户输入一致（默认中文）。
+          customInstruction: `你是一位电商主图与多视角精修、动效运镜专家。用户会提供一张产品图（in-image）和一段精修要求（in-text，可修改），请结合两者生成八个字段，语言与用户输入一致（默认中文）。每个字段只输出该段文本，不要加字段名或前缀。
 
-refinement_prompt（精修提示词）：
-- 以用户 in-text 的精修要求为基础，可直接采用或稍作润色/补全，得到一段可直接用作图生图 prompt 的文本
-- 只输出该段文本，不要加字段名或前缀
+精修提示词（用于图生图）：
+refinement_front：以 in-text 为基础，描述产品正面视角的精修效果（正视图、平视、主视觉面）。
+refinement_side：描述产品侧面视角的精修效果（如 45° 侧视、侧面质感与光影）。
+refinement_back：描述产品背面视角的精修效果（背面细节、标签、风格一致）。
+refinement_top：描述产品俯视或局部细节的精修效果（顶视图、细节特写、材质纹理）。
 
-motion_prompt（运镜提示词）：
-- 用于首尾帧视频（从原图过渡到精修图）的运镜/过渡描述
-- 根据产品图与精修方向，简短描述从原图到精修图的画面变化（如光线与质感逐渐增强、画面保持稳定等），适合作为图生视频的 motion 提示
-- 只输出一段简短描述，不要加字段名或前缀`,
+运镜/动效提示词（用于图生视频，强调镜头运动与画面动效）：
+motion_front：正面精修图的动效与运镜，如缓慢推进、轻微旋转、光影流动、产品高光闪烁等。
+motion_side：侧面视角的运镜与动效，如绕产品缓慢旋转、侧面光影变化、质感凸显等。
+motion_back：背面视角的运镜与动效，如从背面向正面过渡、背面细节渐显等。
+motion_top：俯视/细节的运镜与动效，如俯拍缓慢下移、细节特写推镜、材质纹理微动等。`,
           customOutputs: [
-            { id: 'refinement_prompt', label: '精修提示词', description: '用于图生图的电商主图精修提示' },
-            { id: 'motion_prompt', label: '运镜提示词', description: '用于首尾帧视频的过渡/运镜描述' }
+            { id: 'refinement_front', label: '正面精修', description: '正面视角图生图精修提示' },
+            { id: 'refinement_side', label: '侧面精修', description: '侧面视角图生图精修提示' },
+            { id: 'refinement_back', label: '背面精修', description: '背面视角图生图精修提示' },
+            { id: 'refinement_top', label: '俯视/细节精修', description: '俯视或细节图生图精修提示' },
+            { id: 'motion_front', label: '正面运镜动效', description: '正面图生视频的运镜与动效' },
+            { id: 'motion_side', label: '侧面运镜动效', description: '侧面图生视频的运镜与动效' },
+            { id: 'motion_back', label: '背面运镜动效', description: '背面图生视频的运镜与动效' },
+            { id: 'motion_top', label: '俯视运镜动效', description: '俯视图生视频的运镜与动效' }
           ]
         }
       },
       {
-        id: 'ec-node-i2i',
+        id: 'ec-node-i2i-front',
         toolId: 'image-to-image',
         x: 560,
-        y: 180,
+        y: 80,
         status: NodeStatus.IDLE,
         data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '3:4' }
       },
       {
-        id: 'ec-node-video',
-        toolId: 'video-gen-dual-frame',
+        id: 'ec-node-i2i-side',
+        toolId: 'image-to-image',
+        x: 560,
+        y: 200,
+        status: NodeStatus.IDLE,
+        data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-i2i-back',
+        toolId: 'image-to-image',
+        x: 560,
+        y: 320,
+        status: NodeStatus.IDLE,
+        data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-i2i-top',
+        toolId: 'image-to-image',
+        x: 560,
+        y: 440,
+        status: NodeStatus.IDLE,
+        data: { model: 'Qwen-Image-Edit-2511', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-vid-front',
+        toolId: 'video-gen-image',
         x: 900,
-        y: 220,
+        y: 80,
+        status: NodeStatus.IDLE,
+        data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-vid-side',
+        toolId: 'video-gen-image',
+        x: 900,
+        y: 200,
+        status: NodeStatus.IDLE,
+        data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-vid-back',
+        toolId: 'video-gen-image',
+        x: 900,
+        y: 320,
+        status: NodeStatus.IDLE,
+        data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '3:4' }
+      },
+      {
+        id: 'ec-node-vid-top',
+        toolId: 'video-gen-image',
+        x: 900,
+        y: 440,
         status: NodeStatus.IDLE,
         data: { model: 'Wan2.2_I2V_A14B_distilled', aspectRatio: '3:4' }
       }
@@ -183,10 +254,7 @@ motion_prompt（运镜提示词）：
     updatedAt: Date.now(),
     isDirty: false,
     isRunning: false,
-    env: { lightx2v_url: '', lightx2v_token: '' },
     globalInputs: {},
-    history: [],
-    showIntermediateResults: true,
     connections: [
       { id: 'anim-c1', sourceNodeId: 'anim-char', sourcePortId: 'out-image', targetNodeId: 'anim-planner', targetPortId: 'in-image' },
       { id: 'anim-c2', sourceNodeId: 'anim-story', sourcePortId: 'out-text', targetNodeId: 'anim-planner', targetPortId: 'in-text' },
@@ -198,19 +266,19 @@ motion_prompt（运镜提示词）：
       { id: 'anim-c8', sourceNodeId: 'anim-planner', sourcePortId: 'shot3_image_prompt', targetNodeId: 'anim-i2i-3', targetPortId: 'in-text' },
       { id: 'anim-c9', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-4', targetPortId: 'in-image' },
       { id: 'anim-c10', sourceNodeId: 'anim-planner', sourcePortId: 'shot4_image_prompt', targetNodeId: 'anim-i2i-4', targetPortId: 'in-text' },
-      { id: 'anim-c11', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-5', targetPortId: 'in-image' },
+      { id: 'anim-c11', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-5', targetPortId: 'in-image' },
       { id: 'anim-c12', sourceNodeId: 'anim-planner', sourcePortId: 'shot5_image_prompt', targetNodeId: 'anim-i2i-5', targetPortId: 'in-text' },
       { id: 'anim-c13', sourceNodeId: 'anim-i2i-5', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-6', targetPortId: 'in-image' },
       { id: 'anim-c14', sourceNodeId: 'anim-planner', sourcePortId: 'shot6_image_prompt', targetNodeId: 'anim-i2i-6', targetPortId: 'in-text' },
       { id: 'anim-c15', sourceNodeId: 'anim-i2i-6', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-7', targetPortId: 'in-image' },
       { id: 'anim-c16', sourceNodeId: 'anim-planner', sourcePortId: 'shot7_image_prompt', targetNodeId: 'anim-i2i-7', targetPortId: 'in-text' },
-      { id: 'anim-c17', sourceNodeId: 'anim-i2i-7', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-8', targetPortId: 'in-image' },
+      { id: 'anim-c17', sourceNodeId: 'anim-char', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-8', targetPortId: 'in-image' },
       { id: 'anim-c18', sourceNodeId: 'anim-planner', sourcePortId: 'shot8_image_prompt', targetNodeId: 'anim-i2i-8', targetPortId: 'in-text' },
       { id: 'anim-c19', sourceNodeId: 'anim-i2i-8', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-9', targetPortId: 'in-image' },
       { id: 'anim-c20', sourceNodeId: 'anim-planner', sourcePortId: 'shot9_image_prompt', targetNodeId: 'anim-i2i-9', targetPortId: 'in-text' },
       { id: 'anim-c21', sourceNodeId: 'anim-i2i-9', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-10', targetPortId: 'in-image' },
       { id: 'anim-c22', sourceNodeId: 'anim-planner', sourcePortId: 'shot10_image_prompt', targetNodeId: 'anim-i2i-10', targetPortId: 'in-text' },
-      { id: 'anim-c23', sourceNodeId: 'anim-i2i-10', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-11', targetPortId: 'in-image' },
+      { id: 'anim-c23', sourceNodeId: 'anim-char', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-11', targetPortId: 'in-image' },
       { id: 'anim-c24', sourceNodeId: 'anim-planner', sourcePortId: 'shot11_image_prompt', targetNodeId: 'anim-i2i-11', targetPortId: 'in-text' },
       { id: 'anim-c25', sourceNodeId: 'anim-i2i-11', sourcePortId: 'out-image', targetNodeId: 'anim-i2i-12', targetPortId: 'in-image' },
       { id: 'anim-c26', sourceNodeId: 'anim-planner', sourcePortId: 'shot12_image_prompt', targetNodeId: 'anim-i2i-12', targetPortId: 'in-text' },
@@ -220,8 +288,8 @@ motion_prompt（运镜提示词）：
       { id: 'anim-c30', sourceNodeId: 'anim-planner', sourcePortId: 'shot2_video_prompt', targetNodeId: 'anim-v-2', targetPortId: 'in-text' },
       { id: 'anim-c31', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-v-3', targetPortId: 'in-image' },
       { id: 'anim-c32', sourceNodeId: 'anim-planner', sourcePortId: 'shot3_video_prompt', targetNodeId: 'anim-v-3', targetPortId: 'in-text' },
-      { id: 'anim-c33', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-start' },
-      { id: 'anim-c34', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-end' },
+      { id: 'anim-c33', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-start' },
+      { id: 'anim-c34', sourceNodeId: 'anim-i2i-3', sourcePortId: 'out-image', targetNodeId: 'anim-v-4', targetPortId: 'in-image-end' },
       { id: 'anim-c35', sourceNodeId: 'anim-planner', sourcePortId: 'shot4_video_prompt', targetNodeId: 'anim-v-4', targetPortId: 'in-text' },
       { id: 'anim-c36', sourceNodeId: 'anim-i2i-4', sourcePortId: 'out-image', targetNodeId: 'anim-v-5', targetPortId: 'in-image' },
       { id: 'anim-c37', sourceNodeId: 'anim-planner', sourcePortId: 'shot5_video_prompt', targetNodeId: 'anim-v-5', targetPortId: 'in-text' },
@@ -254,20 +322,28 @@ motion_prompt（运镜提示词）：
         data: {
           model: 'doubao-seed-1-6-vision-250815',
           mode: 'custom',
-          customInstruction: `你是一位日系二次元动画分镜师。用户会提供一张角色参考图（默认初音未来或用户自定）和一段故事概述（默认：初音未来的日常，从早上睡醒到晚上睡觉）。请生成12个分镜的详细描述，所有输出字段使用中文。
+          customInstruction: `你是一位日系二次元动画分镜师。用户会提供一张角色参考图和一段故事概述。请生成12个分镜的详细描述，所有输出字段使用中文。描述要非常细化，明确人物在场景中的具体状态、姿势、表情、动作。
 
 人物一致性（绝对关键）：
 - 第一镜：基于用户提供的角色图，描述「该角色在某一场景中的姿态与表情」，保持与参考图一致的发型、发色、服装、五官。
-- 第二镜及以后：基于「上一张图」进行修改，描述「在该新场景/时刻中角色在做什么、表情与动作」，严格保持同一人物的发型、发色、服装特征、五官风格，像同一个人连续出现。若中途换装或换发型，后续镜头需保持与前一镜一致。
+- 第二镜及以后：基于「上一张图」或「用户角色参考图」进行修改（见下方空镜规则），描述「在该新场景/时刻中角色在做什么、表情与动作」，严格保持同一人物的发型、发色、服装特征、五官风格。空镜的下一镜：必须基于「用户提供的角色参考图」描述，不要用空镜图当参考，否则无法延续人物一致性。
 
 场景与风格：
-- 场景可自由切换（卧室→窗边→厨房→户外→…），不要求场景一致，按时间线推进即可。
-- 画风统一：全部为日系二次元动画风格；光线与色调随剧情时间（清晨/午后/傍晚/夜晚）自然变化。
-- 可有2～3个无人物镜头：如窗外云卷云舒、闹钟特写、夕阳空镜等，用于氛围与转场，风格与整体一致。
+- 场景可自由切换（卧室→窗边→厨房→户外→…），按时间线推进即可。
+- 画风统一：全部为日系二次元动画风格；光线与色调随剧情时间自然变化。
+- 可有2～3个无人物镜头（空镜）：如窗外云卷云舒、闹钟特写、夕阳空镜等。空镜图必须强调「画面中没有任何人物」「仅场景与氛围」「风格与整体一致」——否则改图工具容易把人物加进去。
 
 输出字段（共24个，只输出该镜头的描述文本，不要加字段名或前缀）：
-- shot1_image_prompt ～ shot12_image_prompt：每镜的单张画面描述，直接用于图生图。有角色时强调「在上一张图/参考图基础上保持人物一致并改为…」；无人物镜只描述场景与氛围。
-- shot1_video_prompt ～ shot12_video_prompt：每镜的短视频动效/运镜描述。其中 shot4、shot7、shot10 对应「场景切换」镜头，必须强调转场与运镜（如镜头从上一场景拉远/推近到新场景、淡入淡出、光线过渡、空间切换等）；其余为单镜头内的动作与轻微运镜。`,
+
+- shot1_image_prompt ～ shot12_image_prompt（生图）：
+  - 有角色时：必须明确写出人物的身体姿势与朝向，例如「背影」「侧脸」「正脸」「坐着」「站着」「躺着」等，再描述衣着与在场景中的状态（例如「人物背影，穿着睡衣盖着被子在睡觉」「人物侧脸，背对镜头站卧室窗边，双手正在准备拉开窗帘」）。若是背影或看不到脸的角度，不要写面部表情描述，避免误导模型。
+  - 空镜时：只描述场景与氛围，明确无人物、仅风格一致。
+  - 图生视频用的首帧图 = 该分镜下的首帧动作/姿态，即视频第一帧应呈现的状态（如「人物背对镜头站窗边，双手正在准备拉开窗帘」而非该动作结束后的状态）。
+
+- shot1_video_prompt ～ shot12_video_prompt（生视频）：
+  - 重点描述表情、动作和运镜。例如「睡眼惺忪，睁眼揉了揉眼睛，坐起来打了个大哈欠」。若该镜画面是背影或看不到脸，只描述身体动作与运镜，不要写面部表情，避免误导模型。
+  - shot4、shot7、shot10 为「场景切换」镜头，本工作流中：shot4 视频 = 空镜（第4张图）作首帧、上一镜有人物图作尾帧，需强调「人物走进画面」以及人物走进画面的具体动作；若某镜是空镜作尾帧、有人物作首帧，则强调「人物走出画面」或「运镜/画面移动到…」完成转场。空镜也可只用单图生视频做运镜（无首尾帧）。
+  - 人物静止不动的场景（看书、睡觉、发呆、画画等）可用首尾帧表达时间流逝：例如先用图生图从白天改到夜晚，再首帧→尾帧生成表现时间流逝的视频。`,
           customOutputs: [
             { id: 'shot1_image_prompt', label: '分镜1 画面', description: '第1镜图生图提示' },
             { id: 'shot1_video_prompt', label: '分镜1 运镜', description: '第1镜视频运镜' },
@@ -328,13 +404,7 @@ motion_prompt（运镜提示词）：
     updatedAt: Date.now(),
     isDirty: false,
     isRunning: false,
-    env: {
-      lightx2v_url: "",
-      lightx2v_token: ""
-    },
     globalInputs: {},
-    history: [],
-    showIntermediateResults: true,
     connections: [
       { id: 'c1', sourceNodeId: 'ip-node-url', sourcePortId: 'out-text', targetNodeId: 'ip-node-ai', targetPortId: 'in-text' },
       { id: 'c2', sourceNodeId: 'ip-node-image-ref', sourcePortId: 'out-image', targetNodeId: 'ip-node-ai', targetPortId: 'in-image' },
@@ -397,13 +467,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         // Input to AI Chat
         { id: 'prod-c1', sourceNodeId: 'prod-node-person', sourcePortId: 'out-image', targetNodeId: 'prod-node-planner', targetPortId: 'in-image' },
@@ -521,13 +585,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         { id: 'c1', sourceNodeId: 'node-img-in', sourcePortId: 'out-image', targetNodeId: 'node-i2i-gen', targetPortId: 'in-image' },
         { id: 'c2', sourceNodeId: 'node-text-in', sourcePortId: 'out-text', targetNodeId: 'node-logic', targetPortId: 'in-text' },
@@ -582,13 +640,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         // Input to first image and planner
         { id: 'c1', sourceNodeId: 'node-char-img', sourcePortId: 'out-image', targetNodeId: 'node-i2i-1', targetPortId: 'in-image' },
@@ -757,13 +809,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         // Input to AI Chat
         { id: 'c1', sourceNodeId: 'node-char-img', sourcePortId: 'out-image', targetNodeId: 'node-planner', targetPortId: 'in-image' },
@@ -920,13 +966,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         { id: 'c1', sourceNodeId: 'chibi-node-person', sourcePortId: 'out-image', targetNodeId: 'chibi-node-ai', targetPortId: 'in-image' },
         { id: 'c2', sourceNodeId: 'chibi-node-input', sourcePortId: 'out-text', targetNodeId: 'chibi-node-ai', targetPortId: 'in-text' },
@@ -997,13 +1037,7 @@ motion_prompt（运镜提示词）：
       updatedAt: Date.now(),
       isDirty: false,
       isRunning: false,
-      env: {
-        lightx2v_url: "",
-        lightx2v_token: ""
-      },
       globalInputs: {},
-      history: [],
-      showIntermediateResults: true,
       connections: [
         // Input to planner
         { id: 'oner-c1', sourceNodeId: 'oner-node-desc', sourcePortId: 'out-text', targetNodeId: 'oner-node-planner', targetPortId: 'in-text' },
@@ -1129,13 +1163,7 @@ motion_prompt（运镜提示词）：
         updatedAt: Date.now(),
         isDirty: false,
         isRunning: false,
-        env: {
-          lightx2v_url: "",
-          lightx2v_token: ""
-        },
         globalInputs: {},
-        history: [],
-        showIntermediateResults: true,
         connections: [
           { id: 'c1', sourceNodeId: 'node-input', sourcePortId: 'out-text', targetNodeId: 'node-planner', targetPortId: 'in-text' },
           { id: 'c2', sourceNodeId: 'node-planner', sourcePortId: 'start_img_prompt', targetNodeId: 'node-start-frame', targetPortId: 'in-text' },
@@ -1175,13 +1203,7 @@ motion_prompt（运镜提示词）：
         updatedAt: Date.now(),
         isDirty: false,
         isRunning: false,
-        env: {
-          lightx2v_url: "",
-          lightx2v_token: ""
-        },
         globalInputs: {},
-        history: [],
-        showIntermediateResults: false,
         connections: [
           { id: 'c1', sourceNodeId: 'node-prompt', sourcePortId: 'out-text', targetNodeId: 'node-chat', targetPortId: 'in-text' },
           { id: 'c2', sourceNodeId: 'node-chat', sourcePortId: 'image_prompt', targetNodeId: 'node-image', targetPortId: 'in-text' },
@@ -1248,21 +1270,3 @@ motion_prompt（运镜提示词）：
         ]
       },
 ];
-
-/**
- * 获取预设工作流列表，并在运行时更新 token
- * 使用统一的 getAccessToken 函数，它会优先使用初始化时设置的全局 token
- */
-export function getPresetWorkflows(): WorkflowState[] {
-  // 使用统一的 getAccessToken 函数获取 token（已考虑用户登录状态）
-  const token = getAccessToken();
-
-  // 返回更新了 token 的预设工作流副本
-  return PRESET_WORKFLOWS.map(workflow => ({
-    ...workflow,
-    env: {
-      ...workflow.env,
-      lightx2v_token: token
-    }
-  }));
-}

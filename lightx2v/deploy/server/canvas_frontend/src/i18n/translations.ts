@@ -19,6 +19,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     run_time: 'Run Time',
     tool_palette: 'Tool Palette',
     settings: 'Settings',
+    node_name: 'Node name',
+    node_name_placeholder: 'Custom name (optional)',
     select_model: 'Select Model',
     structured_outputs: 'Structured Outputs',
     add_output: 'Add Output',
@@ -34,6 +36,12 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     quick_add_source: 'Quick add source',
     run_this_only: 'Run This Only',
     run_from_here: 'Run From Here',
+    workflow_description: 'Description',
+    workflow_description_placeholder: 'Describe what this workflow does...',
+    workflow_tags: 'Tags',
+    workflow_tags_placeholder: 'Add a tag...',
+    add_tag: 'Add',
+    remove_tag: 'Remove tag',
     global_inputs: 'Global Inputs',
     all_inputs_automated: 'All inputs are automated.',
     execution_error: 'Execution Error',
@@ -80,7 +88,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     model_list_empty: 'Model list is empty — check environment or API config',
     chat_mode_edit: 'Workflow Edit',
     chat_mode_ideation: 'Ideation',
-    generate_workflow_directly: 'Generate workflow directly'
+    generate_workflow_directly: 'Generate workflow directly',
+    fetch_aborted: 'Fetch is aborted'
   },
   zh: {
     app_name: 'LightX2V OmniFlow',
@@ -100,6 +109,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     run_time: '运行时长',
     tool_palette: '工具箱',
     settings: '节点设置',
+    node_name: '节点名称',
+    node_name_placeholder: '自定义名称（选填）',
     select_model: '选择模型',
     structured_outputs: '结构化输出',
     add_output: '添加输出字段',
@@ -115,6 +126,12 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     quick_add_source: '快速添加输入源',
     run_this_only: '仅运行此节点',
     run_from_here: '从此开始运行',
+    workflow_description: '工作流描述',
+    workflow_description_placeholder: '描述该工作流的用途与步骤…',
+    workflow_tags: '标签',
+    workflow_tags_placeholder: '输入标签…',
+    add_tag: '添加',
+    remove_tag: '移除标签',
     global_inputs: '全局输入参数',
     all_inputs_automated: '所有输入已自动关联。',
     execution_error: '执行错误',
@@ -169,6 +186,7 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     edit_field_placeholder: '编辑字段内容...',
     chat_mode_edit: '工作流编辑',
     chat_mode_ideation: '构思模式',
-    generate_workflow_directly: '直接生成工作流'
+    generate_workflow_directly: '直接生成工作流',
+    fetch_aborted: '请求已取消'
   }
 };

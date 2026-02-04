@@ -1,53 +1,51 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { WorkflowState, WorkflowNode, Connection, ToolDefinition, Port, DataType } from '../../types';
+import {
+  WorkflowState,
+  WorkflowNode,
+  Connection,
+  ToolDefinition,
+  Port,
+  DataType,
+  ChatMessage,
+  ChatImage,
+  ChatSource,
+  ChatOperation,
+  ChatOperationResult
+} from '../../types';
 import { TOOLS } from '../../constants';
+import { isStandalone } from '../config/runtimeMode';
+import { getWorkflowChat, putWorkflowChat } from '../utils/workflowFileManager';
 import { deepseekChat, deepseekChatStream, deepseekText, ppchatChatCompletions, ppchatChatCompletionsStream, ppchatGeminiText, doubaoText, lightX2VGetVoiceList, lightX2VGetCloneVoiceList } from '../../services/geminiService';
 import { useTranslation, Language } from '../i18n/useTranslation';
 
-interface Operation {
-  type: 'add_node' | 'delete_node' | 'update_node' | 'replace_node' |
-        'add_connection' | 'delete_connection' | 'move_node';
-  details: any;
-}
+// Re-export for backward compatibility (other components import from useAIChatWorkflow)
+export type { ChatMessage, ChatImage, ChatSource };
 
-interface OperationResult {
-  success: boolean;
-  operation: Operation;
-  result?: any;
-  error?: string;
-  affectedElements?: {
-    nodeIds?: string[];
-    connectionIds?: string[];
+type Operation = ChatOperation;
+type OperationResult = ChatOperationResult;
+
+/** 用于左侧「执行中」步骤列表的简短标签 */
+function getOperationLabel(op: Operation, lang: 'zh' | 'en'): string {
+  const zh: Record<string, string> = {
+    add_node: '添加节点',
+    delete_node: '删除节点',
+    update_node: '修改节点',
+    replace_node: '替换节点',
+    add_connection: '添加连接',
+    delete_connection: '删除连接',
+    move_node: '移动节点'
   };
-}
-
-export interface ChatImage {
-  data: string;
-  mimeType: string;
-}
-
-export interface ChatSource {
-  title?: string;
-  url: string;
-  siteName?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  image?: ChatImage;
-  useSearch?: boolean;
-  sources?: ChatSource[];
-  timestamp: number;
-  operations?: Operation[];
-  operationResults?: OperationResult[];
-  error?: string;
-  historyCheckpoint?: number; // 执行操作前的历史索引，用于撤销
-  thinking?: string; // 思考过程（流式输出时显示）
-  isStreaming?: boolean; // 是否正在流式输出
-  /** 当 AI 返回 type=conversation 且信息不足时，可附带选项供用户点击，点击后以该选项作为下一条用户消息发送 */
-  choices?: string[];
+  const en: Record<string, string> = {
+    add_node: 'Add node',
+    delete_node: 'Delete node',
+    update_node: 'Update node',
+    replace_node: 'Replace node',
+    add_connection: 'Add connection',
+    delete_connection: 'Delete connection',
+    move_node: 'Move node'
+  };
+  const t = lang === 'zh' ? zh : en;
+  return t[op.type] ?? op.type;
 }
 
 export interface AIChatSendOptions {
@@ -118,6 +116,11 @@ export const useAIChatWorkflow = ({
   // 使用 state 存储对话历史（用于 UI 显示）
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(workflow?.chatHistory || []);
   const [isProcessing, setIsProcessing] = useState(false);
+  /** AI 已返回 workflow 类型，正在解析并执行操作时的进度（用于左侧动效） */
+  const [isExecutingOperations, setIsExecutingOperations] = useState(false);
+  const [executingProgress, setExecutingProgress] = useState({ current: 0, total: 0 });
+  /** 当前执行的操作步骤标签列表（用于方案 C 步骤列表） */
+  const [executingStepLabels, setExecutingStepLabels] = useState<string[]>([]);
   const [aiModel, setAiModel] = useState<string>('deepseek-v3-2-251201'); // AI模型选择
   const [aiVoiceList, setAiVoiceList] = useState<{ voices?: any[]; emotions?: string[]; languages?: any[] } | null>(null);
   const [loadingAiVoiceList, setLoadingAiVoiceList] = useState(false);
@@ -125,6 +128,8 @@ export const useAIChatWorkflow = ({
   const [aiCloneVoiceList, setAiCloneVoiceList] = useState<any[]>([]);
   const [loadingAiCloneVoiceList, setLoadingAiCloneVoiceList] = useState(false);
   const aiCloneVoiceListLoadedRef = useRef<string>('');
+  /** 当前请求的 AbortController，用于用户点击「停止」取消生成 */
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [highlightedElements, setHighlightedElements] = useState<{
     nodeIds?: string[];
     connectionIds?: string[];
@@ -137,18 +142,48 @@ export const useAIChatWorkflow = ({
     workflowRef.current = workflow;
   }, [workflow]);
 
-  // 当工作流变化时，加载对话历史
+  // 当工作流变化时，加载对话历史（独立存储 or 内嵌）
   useEffect(() => {
-    if (workflow?.chatHistory && workflow.chatHistory.length > 0) {
-      chatHistoryRef.current = workflow.chatHistory;
-      setChatHistory(workflow.chatHistory);
-      console.log('[AI Chat] 从工作流加载对话历史:', workflow.chatHistory.length, '条消息');
-    } else {
+    const wfId = workflow?.id;
+    if (!wfId) {
       chatHistoryRef.current = [];
       setChatHistory([]);
-      console.log('[AI Chat] 工作流没有对话历史，初始化为空');
+      return;
     }
-  }, [workflow?.id]); // 当工作流 ID 变化时重新加载
+
+    if (isStandalone()) {
+      const fromWorkflow = workflow?.chatHistory;
+      const list = Array.isArray(fromWorkflow) && fromWorkflow.length > 0 ? fromWorkflow : [];
+      chatHistoryRef.current = list;
+      setChatHistory(list);
+      return;
+    }
+
+    let cancelled = false;
+    getWorkflowChat(wfId).then((data) => {
+      if (cancelled) return;
+      const list = data?.messages ?? [];
+      if (list.length > 0) {
+        chatHistoryRef.current = list;
+        setChatHistory(list);
+        console.log('[AI Chat] 从独立存储加载对话历史:', list.length, '条消息');
+      } else if (workflow?.chatHistory && workflow.chatHistory.length > 0) {
+        chatHistoryRef.current = workflow.chatHistory;
+        setChatHistory(workflow.chatHistory);
+        console.log('[AI Chat] 从工作流（兼容）加载对话历史:', workflow.chatHistory.length, '条消息');
+      } else {
+        chatHistoryRef.current = [];
+        setChatHistory([]);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        const fallback = workflow?.chatHistory ?? [];
+        chatHistoryRef.current = fallback;
+        setChatHistory(fallback);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [workflow?.id]);
 
   // 添加消息到历史记录（同时更新 ref 和 state）
   const addMessageToHistory = useCallback((message: ChatMessage) => {
@@ -165,36 +200,45 @@ export const useAIChatWorkflow = ({
     });
   }, []);
 
-  // 当对话历史更新时，同步到工作流（使用 ref 中的完整历史）
+  // 当对话历史更新时，同步到存储（独立 API 或 workflow）
+  const syncChatDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!workflow) {
-      console.log('[AI Chat] 工作流不存在，跳过同步对话历史');
+    if (!workflow?.id) return;
+
+    const currentChatHistory = chatHistoryRef.current || [];
+    const toPersist = currentChatHistory.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      image: m.image,
+      useSearch: m.useSearch,
+      sources: m.sources,
+      timestamp: m.timestamp,
+      error: m.error
+    }));
+
+    if (isStandalone()) {
+      const workflowChatHistory = workflow.chatHistory || [];
+      const needsUpdate =
+        currentChatHistory.length !== workflowChatHistory.length ||
+        JSON.stringify(currentChatHistory) !== JSON.stringify(workflowChatHistory);
+      if (needsUpdate) {
+        setWorkflow({ ...workflow, chatHistory: currentChatHistory, isDirty: true });
+      }
       return;
     }
 
-    // 使用 ref 中的完整历史记录
-    const currentChatHistory = chatHistoryRef.current || [];
-    const workflowChatHistory = workflow.chatHistory || [];
-
-    // 检查是否需要更新（长度不同或内容不同）
-    const needsUpdate =
-      currentChatHistory.length !== workflowChatHistory.length ||
-      JSON.stringify(currentChatHistory) !== JSON.stringify(workflowChatHistory);
-
-    if (needsUpdate) {
-      console.log('[AI Chat] 同步对话历史到工作流:', {
-        refHistoryLength: currentChatHistory.length,
-        workflowLength: workflowChatHistory.length,
-        willUpdate: true
+    if (syncChatDebounceRef.current) clearTimeout(syncChatDebounceRef.current);
+    syncChatDebounceRef.current = setTimeout(() => {
+      syncChatDebounceRef.current = null;
+      putWorkflowChat(workflow.id, toPersist).then((ok) => {
+        if (ok) console.log('[AI Chat] 对话历史已保存到独立存储');
       });
-
-      setWorkflow({
-        ...workflow,
-        chatHistory: currentChatHistory,
-        isDirty: true // 标记为已修改
-      });
-    }
-  }, [chatHistory, workflow?.id]); // 当 chatHistory state 变化时同步到工作流
+    }, 800);
+    return () => {
+      if (syncChatDebounceRef.current) clearTimeout(syncChatDebounceRef.current);
+    };
+  }, [chatHistory, workflow?.id, workflow]);
 
   // 获取前10个音色信息（必要时从后端/云端拉取）
   const getTopVoicesInfo = useCallback(async (): Promise<string> => {
@@ -312,6 +356,7 @@ export const useAIChatWorkflow = ({
     const allToolIds = TOOLS.map(t => t.id).join(', ');
 
     return `Available Tools:\n\n${toolsInfo}\n\n**重要：可用的toolId列表（只能使用这些toolId，不能创建不存在的工具）：**
+**重要：模型选择规则（必须遵守）：** 每个工具的 model 参数**必须**从该工具上方列出的 Models 列表中选择，不能使用列表外的模型ID，不能推荐或假设具体模型名称。若不指定 model，系统将使用该工具的默认模型。
 ${allToolIds}
 
 数据类型说明：
@@ -321,6 +366,7 @@ ${allToolIds}
 - VIDEO: 视频类型，只能连接到VIDEO类型的输入端口
 
 **Input 类型节点的使用规则（非常重要！）：**
+**全局要求：** 无论用户需求多么简单或复杂，生成或修改的每一个工作流都必须至少包含一个 Input 类型节点（text-input, image-input, audio-input, video-input）作为最初始的用户输入层，方便用户后续直接修改输入内容。如果当前工作流缺少 Input 节点，应先添加与场景匹配的 Input 节点，再继续设置其他节点。
 Input 类型的节点（text-input, image-input, audio-input, video-input）**仅作为最初始的第一层用户输入节点**，用于方便用户后续手动更改输入内容。这些节点应该：
 1. **只在工作流的最开始使用**，作为用户可以直接编辑的输入源
 2. **不要在工作流的中间层添加 Input 节点**，中间层应该直接通过输出端口（port）连接到下游节点的输入端口
@@ -432,7 +478,6 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
         "x": 100,
         "y": 200,
         "data": { "value": "默认文本" },
-        "model": "gemini-1.5-pro",
         "nodeId": "text_input_1"
       }
     }
@@ -472,7 +517,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
    - 常用toolId: "text-input"（文本输入）, "text-to-image"（文生图）, "image-to-image"（图生图）, "video-gen-image"（图生视频）, "video-gen-text"（文生视频）, "text-generation"（文本生成）, "video-input"（视频输入）, "image-input"（图像输入）, "audio-input"（音频输入）
    - **参数设置规则：**
      * 可以在data中指定任意参数，例如: {"data": {"value": "文本内容", "aspectRatio": "16:9", "voiceType": "zh_female_vv_uranus_bigtts"}}
-     * 可以在顶层指定model，例如: {"model": "Qwen-Image-2512"}，这等同于 {"data": {"model": "Qwen-Image-2512"}}
+     * 若需指定模型，可在顶层指定 model，且**必须**从该工具在 Available Tools 中的 Models 列表里选择，例如: {"model": "该工具Models列表中的某个id"}
      * **如果某个参数没有在data中指定，系统会自动使用该工具和模型的默认值**
      * 例如：文生图节点默认aspectRatio为"1:1"，TTS节点（lightx2v模型）默认voiceType为"zh_female_vv_uranus_bigtts"、emotionScale为3等
      * 你只需要指定需要修改的参数，其他参数会自动使用默认值
@@ -495,6 +540,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
        - 生成数字人视频脚本：设置customInstruction指导生成语音脚本、语调指令、肖像提示、动作提示，设置customOutputs定义这些输出字段
        - 生成多分镜视频规划：设置customInstruction指导生成多个分镜的图像提示和运镜描述，设置customOutputs定义每个分镜的输出字段
        - 生成TTS文本和语气：设置customInstruction指导同时生成TTS文本和语气指令，设置customOutputs定义这两个输出字段
+       - **TTS 文本撰写规则：** 当 text-generation 节点用于生成 TTS 文本（如 speech_text 字段）时，输出必须是纯粹的语音内容，禁止在括号中附加动作、舞台指令或其他系统说明。语气、情感、节奏等指令应放在 customInstruction、tone 或其他上下文字段里；动作、表情、镜头等内容则放在后续（如果有）的数字人视频提示词节点中。
      * **重要提示：**
        - **对于复杂场景，优先考虑使用 text-generation 节点作为第一步的规划器**
        - customInstruction应该详细说明每个输出字段的用途和要求
@@ -557,7 +603,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
      * ❌ 错误：text-generation → text-input → text-to-image（中间层不应该添加 Input 节点）
      * ❌ 错误：image-to-image → image-input → video-gen-image（中间层不应该添加 Input 节点）
 6. **参数设置：**
-   - 如果工具有模型选项，可以在顶层指定model，例如: {"model": "Qwen-Image-2512"}
+   - **模型必须从当前可用列表选择：** 若工具有模型选项（见 Available Tools 中该工具的 Models 列表），指定 model 时**必须**使用该列表中的某一项，不能使用列表外或臆造的模型ID。不指定时系统使用该工具默认模型。
    - 可以在data中指定任意参数，例如: {"data": {"value": "文本", "aspectRatio": "16:9"}}
    - **不需要指定所有参数，系统会自动使用默认值**
    - 文生图/图生图节点默认aspectRatio为"1:1"，视频节点默认aspectRatio为"16:9"
@@ -588,8 +634,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
    - customInstruction应该详细说明每个输出字段的用途、格式要求和语言要求
    - customOutputs中的id会作为输出端口ID，后续可以通过add_connection连接到其他节点
    - 例如：如果用户说"生成数字人视频脚本"，应该创建一个text-generation节点，设置customInstruction指导生成语音脚本、语调指令、肖像提示、动作提示，设置customOutputs定义这四个输出字段
-7. 文生图节点建议使用model: "Qwen-Image-2512"
-8. 图生视频节点建议使用model: "Wan2.2_I2V_A14B_distilled"
+7. **禁止推荐具体模型：** 不要推荐或写出具体模型名称（如某文生图/图生视频模型）。需要指定 model 时，仅从 Available Tools 里该工具当前的 Models 列表中选取；不指定则使用系统默认。
 
 **操作执行顺序的关键规则（非常重要！）：**
 1. **所有操作是按顺序执行的，后面的操作依赖于前面操作的结果**
@@ -1350,9 +1395,10 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     }
   }, [executeAddNode, executeDeleteNode, executeUpdateNode, executeReplaceNode, executeAddConnection, executeDeleteConnection]);
 
-  // 批量执行操作
+  // 批量执行操作；onStep(current, total) 用于左侧「执行中」动效
   const executeOperations = useCallback(async (
-    operations: Operation[]
+    operations: Operation[],
+    onStep?: (current: number, total: number) => void
   ): Promise<{ success: boolean; results: OperationResult[]; errors: string[] }> => {
     const results: OperationResult[] = [];
     const errors: string[] = [];
@@ -1369,9 +1415,12 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     // 同一批操作中的“运行中”工作流：前面 update_node 等已应用到此副本，供后续 add_connection 查找新 port（如 customOutputs 更新后的 shot1_image）
     let runningWorkflow: WorkflowState | null = getWorkflow?.() ?? workflow ?? null;
 
+    const total = operations.length;
+    onStep?.(0, total);
     for (let i = 0; i < operations.length; i++) {
       const operation = operations[i];
       const result = await executeOperation(operation, createdNodes, tempIdToNodeId, undefined, runningWorkflow ?? undefined);
+      onStep?.(i + 1, total);
 
       // 如果执行了 replace_node 或 update_node（包含 toolId），等待一小段时间让状态更新
       // 这样后续的 add_connection 操作可以获取到更新后的节点状态
@@ -1462,6 +1511,8 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     if (!workflow || isProcessing || (!trimmedInput && !hasImage)) return;
 
     setIsProcessing(true);
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
     const useSearch = options.useSearch ?? false;
     const imageDataUrl = options.image
       ? `data:${options.image.mimeType};base64,${options.image.data}`
@@ -1496,6 +1547,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
     // 获取当前完整的历史记录（从 ref 获取，确保是最新的）
     const currentHistory = chatHistoryRef.current;
 
+    let assistantMessageId: string | null = null;
     try {
       // 构建AI Prompt（带上选中节点上下文）
       const systemPrompt = await buildAIPrompt(effectiveUserMessage);
@@ -1543,7 +1595,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       const isDoubaoModel = aiModel.startsWith('doubao-');
 
       // 创建初始的 assistant 消息用于流式更新
-      const assistantMessageId = `msg-${Date.now()}-assistant`;
+      assistantMessageId = `msg-${Date.now()}-assistant`;
       let assistantMessage: ChatMessage = {
         id: assistantMessageId,
         role: 'assistant',
@@ -1633,7 +1685,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
           assistantMessage.content = aiResponse;
         } else {
           // DeepSeek 模型使用流式 API
-          for await (const chunk of deepseekChatStream(messages, aiModel, 'json_object')) {
+          for await (const chunk of deepseekChatStream(messages, aiModel, 'json_object', signal)) {
             if (chunk.type === 'thinking') {
               thinkingText += chunk.text;
               // 更新思考过程
@@ -1672,7 +1724,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
           // Gemini 模型使用流式 API
           const geminiModelId = aiModel.replace('ppchat-', '');
           try {
-            for await (const chunk of ppchatChatCompletionsStream(messages, geminiModelId, 'json_object')) {
+            for await (const chunk of ppchatChatCompletionsStream(messages, geminiModelId, 'json_object', signal)) {
               if (chunk.type === 'content') {
                 contentText += chunk.text;
                 aiResponse += chunk.text;
@@ -1776,7 +1828,7 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
           assistantMessage.content = aiResponse;
         } else {
           // 默认使用 DeepSeek 流式 API
-          for await (const chunk of deepseekChatStream(messages, aiModel, 'json_object')) {
+          for await (const chunk of deepseekChatStream(messages, aiModel, 'json_object', signal)) {
             if (chunk.type === 'thinking') {
               thinkingText += chunk.text;
               assistantMessage.thinking = thinkingText;
@@ -2014,8 +2066,16 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       const historyCheckpoint = getCurrentHistoryIndex ? getCurrentHistoryIndex() : undefined;
       assistantMessage.historyCheckpoint = historyCheckpoint;
 
-      // 执行操作
-      const executionResult = await executeOperations(operations);
+      // 执行操作（汇报进度供左侧动效）
+      const stepLabels = operations.map(op => getOperationLabel(op, lang));
+      setIsExecutingOperations(true);
+      setExecutingProgress({ current: 0, total: operations.length });
+      setExecutingStepLabels(stepLabels);
+      const executionResult = await executeOperations(operations, (current, total) => {
+        setExecutingProgress({ current, total });
+      });
+      setIsExecutingOperations(false);
+      setExecutingStepLabels([]);
 
       // 更新已存在的AI回复消息
       const errorDetails = executionResult.errors.length > 0
@@ -2060,18 +2120,52 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
       // 发送完成后清空对话上下文节点，下次需重新选择
       clearChatContextNodes();
     } catch (error: any) {
-      const errorMessage: ChatMessage = {
-        id: `msg-${Date.now()}-error`,
-        role: 'assistant',
-        content: `错误: ${error.message || String(error)}`,
-        timestamp: Date.now(),
-        error: error.message || String(error)
-      };
-      addMessageToHistory(errorMessage);
+      const isAbort = error?.name === 'AbortError' || (typeof error?.message === 'string' && error.message.toLowerCase().includes('abort'));
+      if (isAbort) {
+        if (assistantMessageId) {
+          setChatHistory(prev => {
+            const updated = prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: lang === 'zh' ? '已停止生成' : 'Generation stopped', isStreaming: false }
+                : msg
+            );
+            chatHistoryRef.current = updated;
+            return updated;
+          });
+        } else {
+          addMessageToHistory({
+            id: `msg-${Date.now()}-stop`,
+            role: 'assistant',
+            content: lang === 'zh' ? '已停止生成' : 'Generation stopped',
+            timestamp: Date.now()
+          });
+        }
+      } else {
+        const raw = error.message || String(error);
+        const displayMsg = raw === 'Fetch is aborted' ? t('fetch_aborted') : raw;
+        const errorMessage: ChatMessage = {
+          id: `msg-${Date.now()}-error`,
+          role: 'assistant',
+          content: (lang === 'zh' ? '错误: ' : 'Error: ') + displayMsg,
+          timestamp: Date.now(),
+          error: displayMsg
+        };
+        addMessageToHistory(errorMessage);
+      }
     } finally {
+      abortControllerRef.current = null;
+      setIsExecutingOperations(false);
+      setExecutingStepLabels([]);
       setIsProcessing(false);
     }
   }, [workflow, isProcessing, buildAIPrompt, executeOperations, addMessageToHistory, chatContextNodes, lang, clearChatContextNodes]);
+
+  /** 停止当前 AI 生成（仅对流式请求有效） */
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  }, []);
 
   // 清除对话历史
   const clearChatHistory = useCallback(() => {
@@ -2099,8 +2193,15 @@ ${toolsDesc}${voicesInfo}${cloneVoicesInfo}
   return {
     chatHistory,
     isProcessing,
+    /** AI 已生成并正在执行工作流操作时为 true，用于左侧「执行中」动效 */
+    isExecutingOperations,
+    /** 执行进度 { current, total }，配合 isExecutingOperations 显示步骤 */
+    executingProgress,
+    /** 当前执行步骤的标签列表（添加节点、添加连接等），用于步骤列表逐条打勾 */
+    executingStepLabels,
     highlightedElements,
     handleUserInput,
+    stopGeneration,
     clearChatHistory,
     setHighlightedElements,
     aiModel,

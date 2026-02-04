@@ -36,7 +36,6 @@ interface EditorHeaderProps {
   lang: Language;
   workflow: WorkflowState;
   view: ViewState;
-  selectedRunId: string | null;
   isPaused: boolean;
   isRunning: boolean;
   isSaving?: boolean;
@@ -63,7 +62,6 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   lang,
   workflow,
   view,
-  selectedRunId,
   isPaused,
   isRunning,
   isSaving = false,
@@ -263,7 +261,6 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         <button
           onClick={() => {
             console.log('[工作流] 当前工作流数据:', workflow);
-            console.log('[工作流] JSON:', JSON.stringify(workflow, null, 2));
           }}
           className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-300 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all border border-slate-800/80"
           title={lang === 'zh' ? '在控制台打印当前工作流数据' : 'Print current workflow to console'}
@@ -344,12 +341,14 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           {isRunning && !isPaused ? t('executing') : t('run_fabric')}
         </button>
 
-        <UserCard
-          user={user}
-          lang={lang}
-          onLogin={handleLogin}
-          onLogout={handleLogout}
-        />
+        {!isStandalone() && (
+          <UserCard
+            user={user}
+            lang={lang}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+          />
+        )}
       </div>
     </header>
   );

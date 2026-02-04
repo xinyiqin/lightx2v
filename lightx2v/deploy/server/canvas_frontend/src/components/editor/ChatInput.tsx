@@ -1,6 +1,9 @@
-import React, { useState, KeyboardEvent } from 'react';
+import React, { useState, useRef, KeyboardEvent } from 'react';
 import { Send } from 'lucide-react';
 import { Language } from '../../i18n/useTranslation';
+
+/** IME 刚结束组合后的一小段时间内，Enter 视为选字确认，不发送 */
+const IME_ENTER_IGNORE_MS = 150;
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -14,6 +17,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   lang
 }) => {
   const [input, setInput] = useState('');
+  const isComposingRef = useRef(false);
+  const lastCompositionEndRef = useRef(0);
 
   const handleSend = () => {
     if (input.trim() && !isProcessing) {
@@ -23,11 +28,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME 组合输入中（如中文选字）按 Enter 时不发送，等组合完毕后再按 Enter 才发送
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSend();
+    // 中文等 IME：组合中或刚结束组合后按 Enter 不发送，仅用于选字/确认
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (e.nativeEvent.isComposing || isComposingRef.current) {
+      return;
     }
+    if (Date.now() - lastCompositionEndRef.current < IME_ENTER_IGNORE_MS) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    handleSend();
   };
 
   return (
@@ -36,6 +47,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onCompositionStart={() => { isComposingRef.current = true; }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+            lastCompositionEndRef.current = Date.now();
+          }}
           onKeyDown={handleKeyDown}
           placeholder={lang === 'zh' ? '描述你想要对工作流做的修改...' : 'Describe the changes you want to make to the workflow...'}
           className="flex-1 bg-slate-900/70 border border-slate-700/60 rounded-2xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-[#90dce1]/40 focus:border-[#90dce1]/60 transition-all"

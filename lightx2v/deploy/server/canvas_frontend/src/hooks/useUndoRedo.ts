@@ -53,10 +53,8 @@ export const useUndoRedo = ({
           // Exclude: status, error, executionTime, startTime, outputValue
         })),
         connections: w.connections,
-        globalInputs: w.globalInputs,
-        env: w.env,
-        showIntermediateResults: w.showIntermediateResults
-        // Exclude: isDirty, isRunning, history, updatedAt
+        globalInputs: w.globalInputs
+        // Exclude: isDirty, isRunning, showIntermediateResults (localStorage), updatedAt
       };
     };
 

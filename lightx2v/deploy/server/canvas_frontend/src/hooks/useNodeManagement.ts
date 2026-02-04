@@ -8,9 +8,7 @@ interface UseNodeManagementProps {
   setWorkflow: React.Dispatch<React.SetStateAction<WorkflowState | null>>;
   selectedNodeId: string | null;
   setSelectedNodeId: (id: string | null) => void;
-  selectedRunId: string | null;
   setValidationErrors: (errors: { message: string; type: 'ENV' | 'INPUT' }[]) => void;
-  setActiveOutputs: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   canvasRef: React.RefObject<HTMLDivElement>;
   screenToWorldCoords: (x: number, y: number) => { x: number; y: number };
   view: { x: number; y: number; zoom: number };
@@ -23,9 +21,7 @@ export const useNodeManagement = ({
   setWorkflow,
   selectedNodeId,
   setSelectedNodeId,
-  selectedRunId,
   setValidationErrors,
-  setActiveOutputs,
   canvasRef,
   screenToWorldCoords,
   view,
@@ -34,8 +30,7 @@ export const useNodeManagement = ({
 }: UseNodeManagementProps) => {
   const { t } = useTranslation(lang);
 
-  const addNode = useCallback((tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean, forceEditMode?: boolean) => {
-    if (selectedRunId && !forceEditMode) return null;
+  const addNode = useCallback((tool: ToolDefinition, x?: number, y?: number, dataOverride?: Record<string, any>, nodeId?: string, allowOverwrite?: boolean, _forceEditMode?: boolean) => {
     const defaultData: Record<string, any> = { ...dataOverride };
 
     // 先处理 TTS 节点的特殊逻辑（需要在通用模型选择之前）
@@ -112,11 +107,10 @@ export const useNodeManagement = ({
     setWorkflow(prev => prev ? ({ ...prev, nodes: [...prev.nodes, newNode], isDirty: true }) : null);
     setSelectedNodeId(newNodeId);
     return newNode;
-  }, [screenToWorldCoords, selectedRunId, t, canvasRef, setWorkflow, setSelectedNodeId, workflow]);
+  }, [screenToWorldCoords, t, canvasRef, setWorkflow, setSelectedNodeId, workflow]);
 
   const deleteNode = useCallback((nodeId: string) => {
     if (!nodeId) return;
-    if (selectedRunId) return;
     setWorkflow(prev => prev ? ({
       ...prev,
       nodes: prev.nodes.filter(n => n.id !== nodeId),
@@ -126,7 +120,7 @@ export const useNodeManagement = ({
     if (selectedNodeId === nodeId) {
       setSelectedNodeId(null);
     }
-  }, [selectedNodeId, selectedRunId, setWorkflow, setSelectedNodeId]);
+  }, [selectedNodeId, setWorkflow, setSelectedNodeId]);
 
   const updateNodeData = useCallback((nodeId: string, key: string, value: any) => {
     setValidationErrors([]);
@@ -152,11 +146,9 @@ export const useNodeManagement = ({
       return;
     }
 
-    if (selectedRunId) return;
 
-    // 支持直接修改节点的输出值（如文本生成节点已生成的内容），同步到 node.outputValue 与 activeOutputs，供展示与下游执行使用
+    // 支持直接修改节点的输出值（如文本生成节点已生成的内容），outputValue 是唯一数据源
     if (key === 'outputValue') {
-      setActiveOutputs(ao => ({ ...ao, [nodeId]: value }));
       setWorkflow(prev => {
         if (!prev) return null;
         return {
@@ -170,24 +162,24 @@ export const useNodeManagement = ({
 
     setWorkflow(prev => {
       if (!prev) return null;
-      const targetNode = prev.nodes.find(n => n.id === nodeId);
-      const tool = targetNode ? TOOLS.find(t => t.id === targetNode.toolId) : null;
-
-      if (tool?.category === 'Input' && key === 'value') {
-        setActiveOutputs(ao => {
-          const next = { ...ao };
-          delete next[nodeId];
-          return next;
-        });
-      }
-
       return {
         ...prev,
         nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, status: NodeStatus.IDLE, data: { ...n.data, [key]: value } } : n),
         isDirty: true
       };
     });
-  }, [selectedRunId, setValidationErrors, setWorkflow, setActiveOutputs]);
+  }, [setValidationErrors, setWorkflow]);
+
+  const updateNodeName = useCallback((nodeId: string, name: string) => {
+    setWorkflow(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        isDirty: true,
+        nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, name: name.trim() || undefined } : n)
+      };
+    });
+  }, [setWorkflow]);
 
   const getReplaceableTools = useCallback((nodeId: string): ToolDefinition[] => {
     if (!workflow) return [];
@@ -307,7 +299,6 @@ export const useNodeManagement = ({
   }, [workflow, getNodeOutputs, setWorkflow]);
 
   const quickAddInput = useCallback((node: WorkflowNode, port: Port) => {
-    if (selectedRunId) return;
     const toolIdMap: Record<DataType, string> = {
       [DataType.TEXT]: 'text-input',
       [DataType.IMAGE]: 'image-input',
@@ -351,10 +342,9 @@ export const useNodeManagement = ({
       };
     });
     setSelectedNodeId(newNodeId);
-  }, [selectedRunId, setWorkflow, setSelectedNodeId]);
+  }, [setWorkflow, setSelectedNodeId]);
 
   const quickAddOutput = useCallback((node: WorkflowNode, port: Port, toolId: string) => {
-    if (selectedRunId) return;
     const targetTool = TOOLS.find(t => t.id === toolId);
     if (!targetTool) return;
 
@@ -398,7 +388,7 @@ export const useNodeManagement = ({
       };
     });
     setSelectedNodeId(newNodeId);
-  }, [selectedRunId, t, setWorkflow, setSelectedNodeId]);
+  }, [t, setWorkflow, setSelectedNodeId]);
 
   const pinOutputToCanvas = useCallback((value: any, type: DataType) => {
     const toolIdMap: Record<DataType, string> = {
@@ -421,6 +411,7 @@ export const useNodeManagement = ({
     addNode,
     deleteNode,
     updateNodeData,
+    updateNodeName,
     getReplaceableTools,
     replaceNode,
     quickAddInput,

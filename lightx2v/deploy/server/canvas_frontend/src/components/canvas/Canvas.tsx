@@ -20,7 +20,6 @@ interface CanvasProps {
     startY: number;
   } | null;
   mousePos: { x: number; y: number };
-  activeOutputs: Record<string, any>;
   nodeHeights: Map<string, number>;
   sourceNodes: WorkflowNode[];
   sourceOutputs: Record<string, any>;
@@ -75,7 +74,6 @@ interface CanvasProps {
     targetNodeId: string;
     targetPortId: string;
   }) => void;
-  onClearSelectedRunId?: () => void;
   getReplaceableTools?: (nodeId: string) => ToolDefinition[];
   getCompatibleToolsForOutput?: (outputType: DataType) => ToolDefinition[];
   quickAddInput?: (node: WorkflowNode, port: Port) => void;
@@ -92,7 +90,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   selectedConnectionId,
   connecting,
   mousePos,
-  activeOutputs,
   nodeHeights,
   sourceNodes,
   sourceOutputs,
@@ -133,7 +130,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   onSetShowVideoEditor = () => {},
   onSetConnecting = () => {},
   onAddConnection = () => {},
-  onClearSelectedRunId = () => {},
   getReplaceableTools = () => [],
   getCompatibleToolsForOutput = () => [],
   quickAddInput = () => {},
@@ -163,8 +159,8 @@ export const Canvas: React.FC<CanvasProps> = ({
           height: '100%'
         }}
       >
-        {/* SVG for connections */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 overflow-visible">
+        {/* SVG for connections - no pointer-events-none so connection hit areas and delete button receive clicks; nodes wrapper has pointer-events-none so empty area clicks reach here */}
+        <svg className="absolute inset-0 w-full h-full z-0 overflow-visible">
           {workflow.connections.map((c) => {
             const sNode = sourceNodes.find((n) => n.id === c.sourceNodeId);
             const tNode = sourceNodes.find((n) => n.id === c.targetNodeId);
@@ -215,14 +211,14 @@ export const Canvas: React.FC<CanvasProps> = ({
           )}
         </svg>
 
-        {/* Nodes */}
+        {/* Nodes - wrapper z-[1] above SVG; pointer-events-none so clicks on empty area pass through to connection layer; each Node still receives clicks (pointer-events auto by default) */}
+        <div className="absolute inset-0 z-[1] pointer-events-none">
         {sourceNodes.map((node) => (
           <Node
             key={node.id}
             node={node}
             workflow={workflow}
             isSelected={selectedNodeId === node.id}
-            activeOutputs={activeOutputs}
             sourceOutputs={sourceOutputs}
             nodeHeight={nodeHeights.get(node.id) || 140}
             onSelect={onNodeSelect}
@@ -254,7 +250,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             onSetShowVideoEditor={onSetShowVideoEditor}
             onSetConnecting={onSetConnecting}
             onAddConnection={onAddConnection}
-            onClearSelectedRunId={onClearSelectedRunId}
             getReplaceableTools={getReplaceableTools}
             getCompatibleToolsForOutput={getCompatibleToolsForOutput}
             quickAddInput={quickAddInput}
@@ -265,6 +260,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             resolveLightX2VResultRef={resolveLightX2VResultRef}
           />
         ))}
+        </div>
       </div>
     </main>
   );

@@ -1,5 +1,7 @@
 import React, { useCallback, useRef } from 'react';
-import { WorkflowState, Connection, NodeStatus, GenerationRun } from '../../types';
+import { WorkflowState, Connection, NodeStatus, NodeHistoryEntry } from '../../types';
+
+const MAX_NODE_HISTORY = 20;
 import { TOOLS } from '../../constants';
 import {
   geminiText, geminiImage, geminiSpeech, geminiVideo,
@@ -12,13 +14,14 @@ import {
 import { isStandalone } from '../config/runtimeMode';
 import { removeGeminiWatermark } from '../../services/watermarkRemover';
 import { useTranslation, Language } from '../i18n/useTranslation';
-import { saveNodeOutputData, getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
+import { saveNodeOutputs, getNodeOutputData, getWorkflowFileByFileId } from '../utils/workflowFileManager';
 import { apiRequest } from '../utils/apiClient';
 import { resolveLightX2VResultRef as resolveLightX2VResultRefUtil } from '../utils/resultRef';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
 import { getAssetPath, getAssetBasePath } from '../utils/assetPath';
+import { createHistoryEntryFromValue, normalizeHistoryEntries } from '../utils/historyEntry';
 
 /** LightX2V 结果引用：用 task_id + output_name 代替过期 CDN URL，需要时通过 result_url 解析 */
 export type LightX2VResultRef = { __type: 'lightx2v_result'; task_id: string; output_name: string; is_cloud: boolean };
@@ -44,13 +47,51 @@ function flattenImageInput(raw: any): string[] {
   return typeof raw === 'string' ? [raw] : [];
 }
 
-/** 将图片 URL/路径转为 data URL，供 Doubao/PPChat 等只接受 data URL 或 http URL 的 API 使用，避免 Invalid base64 image_url */
+/** 将本地 URL/路径转为 data URL（同源或 /assets），供云端提交使用 */
+async function ensureLocalInputAsDataUrl(input: any): Promise<any> {
+  if (typeof input !== 'string') return input;
+  if (input.startsWith('data:')) return input;
+  if (input.startsWith('//')) return input;
+
+  const isHttp = input.startsWith('http');
+  const isLocalAsset = input.includes('/assets/task/result') || input.includes('/assets/workflow/input') || input.startsWith('/assets/');
+  const isSameOrigin = typeof window !== 'undefined' && isHttp && input.startsWith(window.location.origin);
+  const isLocalPath = !isHttp && input.startsWith('/');
+
+  if (!isLocalPath && !isSameOrigin && !isLocalAsset) return input;
+
+  const url = isHttp ? input : getAssetPath(input);
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(r.result as string);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error('[WorkflowExecution] Failed to fetch local input for base64:', input, e);
+    return input;
+  }
+}
+
+async function ensureLocalInputsAsDataUrls(inputs: any[]): Promise<any[]> {
+  return Promise.all(inputs.map((v) => ensureLocalInputAsDataUrl(v)));
+}
+
+/** 将图片 URL/路径转为 data URL（本地资源优先），供需要 base64 的 API 使用 */
 async function ensureImageInputsAsDataUrls(imgs: string[]): Promise<string[]> {
   return Promise.all(imgs.map(async (img) => {
     if (typeof img !== 'string') return img;
-    if (img.startsWith('data:') || (img.startsWith('http') && !img.startsWith('//'))) return img;
-    if (!img.startsWith('/') || img.startsWith('//')) return img;
-    const url = getAssetPath(img);
+    if (img.startsWith('data:')) return img;
+    if (img.startsWith('//')) return img;
+    const isHttp = img.startsWith('http');
+    const isLocalAsset = img.includes('/assets/task/result') || img.includes('/assets/workflow/input');
+    const isSameOrigin = typeof window !== 'undefined' && isHttp && img.startsWith(window.location.origin);
+    if (isHttp && !isSameOrigin && !isLocalAsset) return img;
+    if (!isHttp && !img.startsWith('/')) return img;
+    const url = isHttp ? img : getAssetPath(img);
     try {
       const res = await fetch(url);
       const blob = await res.blob();
@@ -70,15 +111,12 @@ async function ensureImageInputsAsDataUrls(imgs: string[]): Promise<string[]> {
 interface UseWorkflowExecutionProps {
   workflow: WorkflowState | null;
   setWorkflow: React.Dispatch<React.SetStateAction<WorkflowState | null>>;
-  activeOutputs: Record<string, any>;
-  setActiveOutputs: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   isPausedRef: React.MutableRefObject<boolean>;
   setIsPaused: (paused: boolean) => void;
   runningTaskIdsRef: React.MutableRefObject<Map<string, string>>;
   abortControllerRef: React.MutableRefObject<AbortController | null>;
   getLightX2VConfig: (workflow: WorkflowState | null) => { url: string; token: string };
   setValidationErrors: (errors: { message: string; type: 'ENV' | 'INPUT' }[]) => void;
-  setSelectedRunId: (runId: string | null) => void;
   setGlobalError: (error: { message: string; details?: string } | null) => void;
   updateNodeData: (nodeId: string, key: string, value: any) => void;
   voiceList: {
@@ -92,15 +130,12 @@ interface UseWorkflowExecutionProps {
 function useWorkflowExecutionImpl({
   workflow,
   setWorkflow,
-  activeOutputs,
-  setActiveOutputs,
   isPausedRef,
   setIsPaused,
   runningTaskIdsRef,
   abortControllerRef,
   getLightX2VConfig,
   setValidationErrors,
-  setSelectedRunId,
   setGlobalError,
   updateNodeData,
   voiceList,
@@ -158,7 +193,7 @@ function useWorkflowExecutionImpl({
         const isEmpty = (Array.isArray(val) && val.length === 0) || !val;
         if (isEmpty) {
           errors.push({
-            message: `${lang === 'zh' ? tool.name_zh : tool.name} (${t('executing')})`,
+            message: `${node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)} (${t('executing')})`,
             type: 'INPUT'
           });
         }
@@ -174,7 +209,7 @@ function useWorkflowExecutionImpl({
 
         if (!isConnected && !hasGlobalVal) {
           errors.push({
-            message: `${lang === 'zh' ? tool.name_zh : tool.name} -> ${port.label}`,
+            message: `${node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)} -> ${port.label}`,
             type: 'INPUT'
           });
         }
@@ -184,7 +219,7 @@ function useWorkflowExecutionImpl({
       if (node.toolId === 'lightx2v-voice-clone') {
         if (!node.data.speakerId) {
           errors.push({
-            message: `${lang === 'zh' ? tool.name_zh : tool.name}: ${t('select_cloned_voice')}`,
+            message: `${node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)}: ${t('select_cloned_voice')}`,
             type: 'INPUT'
           });
         }
@@ -242,7 +277,6 @@ function useWorkflowExecutionImpl({
     setIsPaused(false);
     isPausedRef.current = false;
 
-    setSelectedRunId(null);
     const runStartTime = performance.now();
     let nodesToRunIds: Set<string>;
     if (startNodeId) {
@@ -290,7 +324,7 @@ function useWorkflowExecutionImpl({
     setWorkflow(prev => prev ? ({
       ...prev,
       isRunning: true,
-      nodes: prev.nodes.map(n => nodesToRunIds.has(n.id) ? { ...n, status: NodeStatus.IDLE, error: undefined, executionTime: undefined, startTime: undefined } : n)
+      nodes: prev.nodes.map(n => nodesToRunIds.has(n.id) ? { ...n, status: NodeStatus.PENDING, error: undefined, executionTime: undefined, startTime: undefined } : n)
     }) : null);
 
     const executedInSession = new Set<string>();
@@ -299,9 +333,9 @@ function useWorkflowExecutionImpl({
     // If running from a specific node, preserve outputs from nodes that won't be re-run
     // Otherwise, clear all outputs for a fresh start
     if (startNodeId) {
-      // Preserve outputs from nodes that won't be re-run
-      Object.entries(activeOutputs).forEach(([nodeId, val]) => {
-        if (!nodesToRunIds.has(nodeId)) sessionOutputs[nodeId] = val;
+      // Preserve outputs from node.outputValue for nodes that won't be re-run
+      workflow.nodes.forEach(n => {
+        if (!nodesToRunIds.has(n.id) && n.outputValue != null) sessionOutputs[n.id] = n.outputValue;
       });
 
       // Load intermediate files for nodes that are not being re-run but are needed as inputs
@@ -321,7 +355,7 @@ function useWorkflowExecutionImpl({
           const node = workflow.nodes.find(n => n.id === nodeId);
           if (!node) continue;
 
-          // If we already have the output in activeOutputs, skip loading
+          // If we already have the output, skip loading
           if (sessionOutputs[nodeId] !== undefined) continue;
 
           const tool = TOOLS.find(t => t.id === node.toolId);
@@ -370,22 +404,19 @@ function useWorkflowExecutionImpl({
             new Promise(resolve => setTimeout(resolve, 3000))
           ]);
         }
-      }
 
-      setActiveOutputs(prev => {
-        const next = { ...prev, ...sessionOutputs };
-        nodesToRunIds.forEach(id => delete next[id]);
-        return next;
-      });
-    } else {
-      // Full workflow run: clear all outputs to prevent memory accumulation
-      setActiveOutputs({});
+        // Fallback: for non-Input nodes still missing, use node.outputValue (e.g. after connection change, standalone mode)
+        for (const nodeId of nodesNeededAsInputs) {
+          if (sessionOutputs[nodeId] !== undefined) continue;
+          const n = workflow.nodes.find(nn => nn.id === nodeId);
+          if (n?.outputValue != null) sessionOutputs[nodeId] = n.outputValue;
+        }
+      }
     }
 
     // Input nodes should already have files uploaded (as URLs), not base64 data
     // Files are uploaded immediately when user selects them, so we just use the existing URLs
     // Skip saving input node outputs during execution - they should already be saved during upload
-    const runId = `run-${Date.now()}`;
 
     // Initialize sessionOutputs for input nodes (use their existing values)
     if (workflow.id && (isStandalone() || workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
@@ -406,9 +437,11 @@ function useWorkflowExecutionImpl({
     // Get LightX2V config once at the start of workflow execution
     const lightX2VConfig = getLightX2VConfig(workflow);
 
-    try {
+      try {
       // Execute nodes in parallel by layer, with max 3 concurrent executions
       const MAX_CONCURRENT = 3;
+      // Accumulate nodeId -> duration across all batches for history entries (state updates are async)
+      const executionTimeByNodeId: Record<string, number> = {};
 
       while (executedInSession.size < workflow.nodes.filter(n => nodesToRunIds.has(n.id)).length) {
         // Check if workflow is paused, wait until resumed
@@ -495,7 +528,13 @@ function useWorkflowExecutionImpl({
 
                       // Convert file paths to base64 data URLs for image and audio inputs
                       if (sourceNode.toolId === 'image-input' && Array.isArray(inputValue) && inputValue.length > 0) {
-                        inputValue = await Promise.all(inputValue.map(async (img: string) => {
+                        inputValue = await Promise.all(inputValue.map(async (img: string | { type?: string; file_id?: string; file_url?: string }) => {
+                          // Backend file reference: resolve file_id to data URL
+                          if (img && typeof img === 'object' && (img.type === 'reference' || img.file_id)) {
+                            const dataUrl = await getWorkflowFileByFileId(workflow.id, (img as { file_id: string }).file_id);
+                            return dataUrl || (img as { file_url?: string }).file_url || img;
+                          }
+                          if (typeof img !== 'string') return img;
                           // If it's already a data URL or base64, return as is
                           if (img.startsWith('data:') || (!img.startsWith('http') && img.includes(','))) {
                             return img;
@@ -529,11 +568,14 @@ function useWorkflowExecutionImpl({
                           }
                           return img;
                         }));
-                      } else if (sourceNode.toolId === 'audio-input' && inputValue && typeof inputValue === 'string') {
-                        if (inputValue.startsWith('local://')) {
+                      } else if (sourceNode.toolId === 'audio-input' && inputValue) {
+                        if (inputValue && typeof inputValue === 'object' && (inputValue as { type?: string; file_id?: string }).file_id) {
+                          const dataUrl = await getWorkflowFileByFileId(workflow.id, (inputValue as { file_id: string }).file_id);
+                          if (dataUrl) inputValue = dataUrl;
+                        } else if (typeof inputValue === 'string' && inputValue.startsWith('local://')) {
                           const dataUrl = await getWorkflowFileByFileId(workflow.id, inputValue);
                           if (dataUrl) inputValue = dataUrl;
-                        } else if (inputValue.startsWith('/')) {
+                        } else if (typeof inputValue === 'string' && inputValue.startsWith('/')) {
                         // Convert audio file path to base64 data URL
                         // 修复资源路径：如果在 qiankun 环境，确保路径包含 /canvas/
                         let audioPath = inputValue;
@@ -564,9 +606,8 @@ function useWorkflowExecutionImpl({
                       }
                       return inputValue;
                     }
-                    // For other nodes that haven't executed, try to read from previously executed outputs
-                    // This handles nodes that were executed in previous runs
-                    const prevOutput = activeOutputs[c.sourceNodeId];
+                    // For other nodes that haven't executed, try node.outputValue (e.g. from load or previous run)
+                    const prevOutput = sourceNode?.outputValue;
                     if (prevOutput !== undefined) {
                       const raw = (typeof prevOutput === 'object' && prevOutput !== null && c.sourcePortId in prevOutput) ? prevOutput[c.sourcePortId] : prevOutput;
                       return ensureStringIfObjectFromTextGen(raw);
@@ -587,7 +628,13 @@ function useWorkflowExecutionImpl({
                   // For workflow input paths or URLs, use directly (no conversion needed)
                   // Only convert local file paths (starting with /) that are not workflow/task paths
                   if (Array.isArray(imageValue) && imageValue.length > 0) {
-                    const convertedImages = await Promise.all(imageValue.map(async (img: string) => {
+                    const convertedImages = await Promise.all(imageValue.map(async (img: string | { type?: string; file_id?: string; file_url?: string }) => {
+                      // Backend file reference: resolve file_id to data URL
+                      if (img && typeof img === 'object' && (img.type === 'reference' || (img as { file_id?: string }).file_id)) {
+                        const dataUrl = await getWorkflowFileByFileId(workflow.id, (img as { file_id: string }).file_id);
+                        return dataUrl || (img as { file_url?: string }).file_url || img;
+                      }
+                      if (typeof img !== 'string') return img;
                       // If it's already a data URL or base64, return as is
                       if (img.startsWith('data:') || (!img.startsWith('http') && img.includes(','))) {
                         return img;
@@ -627,9 +674,11 @@ function useWorkflowExecutionImpl({
                     result = imageValue;
                   }
                   break;
-                case 'audio-input':
+                case 'audio-input': {
                   const audioValue = node.data.value;
-                  if (audioValue && typeof audioValue === 'string') {
+                  if (audioValue && typeof audioValue === 'object' && (audioValue as { file_id?: string }).file_id) {
+                    result = await getWorkflowFileByFileId(workflow.id, (audioValue as { file_id: string }).file_id) || (audioValue as { file_url?: string }).file_url || audioValue;
+                  } else if (audioValue && typeof audioValue === 'string') {
                     if (audioValue.startsWith('local://')) {
                       result = await getWorkflowFileByFileId(workflow.id, audioValue) || audioValue;
                     } else if (audioValue.startsWith('data:') || (!audioValue.startsWith('http') && audioValue.includes(','))) {
@@ -661,9 +710,12 @@ function useWorkflowExecutionImpl({
                     result = audioValue;
                   }
                   break;
+                }
                 case 'video-input': {
                   const vidVal = node.data.value;
-                  if (typeof vidVal === 'string' && vidVal.startsWith('local://')) {
+                  if (vidVal && typeof vidVal === 'object' && (vidVal as { file_id?: string }).file_id) {
+                    result = await getWorkflowFileByFileId(workflow.id, (vidVal as { file_id: string }).file_id) || (vidVal as { file_url?: string }).file_url || vidVal;
+                  } else if (typeof vidVal === 'string' && vidVal.startsWith('local://')) {
                     result = await getWorkflowFileByFileId(workflow.id, vidVal) || vidVal;
                   } else {
                     result = vidVal;
@@ -686,7 +738,9 @@ function useWorkflowExecutionImpl({
                     const imageInput = imageInputRaw.length > 0 ? await ensureImageInputsAsDataUrls(imageInputRaw) : undefined;
                     result = await ppchatGeminiText(nodeInputs['in-text'] || "...", node.data.mode, node.data.customInstruction, model.replace('ppchat-', ''), outputFields, imageInput?.length ? imageInput : undefined);
                   } else {
-                  result = await geminiText(nodeInputs['in-text'] || "...", false, node.data.mode, node.data.customInstruction, model, outputFields);
+                    const imageInputRaw = flattenImageInput(nodeInputs['in-image']);
+                    const imageInput = imageInputRaw.length > 0 ? await ensureImageInputsAsDataUrls(imageInputRaw) : undefined;
+                    result = await geminiText(nodeInputs['in-text'] || "...", false, node.data.mode, node.data.customInstruction, model, outputFields, imageInput?.length ? imageInput : undefined);
                   }
                   break;
                 case 'text-to-image':
@@ -738,6 +792,7 @@ function useWorkflowExecutionImpl({
                         return img;
                       }
                     }));
+                    // Backend supports multi-image (single or array of URL/base64); use first image only if backend did not support multi
                     const imageInput = i2iImgsBase64.length === 0 ? undefined : (i2iImgsBase64.length === 1 ? i2iImgsBase64[0] : i2iImgsBase64);
                     // Get config for this specific model (handles -cloud suffix)
                     const i2iModelConfig = getLightX2VConfigForModel(model || 'Qwen-Image-Edit-2511');
@@ -864,17 +919,20 @@ function useWorkflowExecutionImpl({
                   const t2vTid = jobInfo.taskIdsByNodeId.get(node.id);
                   if (t2vTid) result = toLightX2VResultRef(t2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
-                case 'video-gen-image':
+                case 'video-gen-image': {
                   const startImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
                   // Get config for this specific model (handles -cloud suffix)
                   const i2vModelConfig = getLightX2VConfigForModel(model || 'Wan2.2_I2V_A14B_distilled');
+                  const startImgForSubmit = i2vModelConfig.isCloud
+                    ? (await ensureLocalInputsAsDataUrls(flattenImageInput(startImg)))[0]
+                    : startImg;
                   result = await lightX2VTask(
                     i2vModelConfig.url,
                     i2vModelConfig.token,
                     'i2v',
                     model || 'Wan2.2_I2V_A14B_distilled',
                     nodeInputs['in-text'] || "",
-                    startImg,
+                    startImgForSubmit,
                     undefined, undefined,
                     'output_video',
                     node.data.aspectRatio,
@@ -885,20 +943,27 @@ function useWorkflowExecutionImpl({
                   const i2vTid = jobInfo.taskIdsByNodeId.get(node.id);
                   if (i2vTid) result = toLightX2VResultRef(i2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
-                case 'video-gen-dual-frame':
+                }
+                case 'video-gen-dual-frame': {
                     const dualStart = Array.isArray(nodeInputs['in-image-start']) ? nodeInputs['in-image-start'][0] : nodeInputs['in-image-start'];
                     const dualEnd = Array.isArray(nodeInputs['in-image-end']) ? nodeInputs['in-image-end'][0] : nodeInputs['in-image-end'];
                     // Get config for this specific model (handles -cloud suffix)
                     const flf2vModelConfig = getLightX2VConfigForModel(model || 'Wan2.2_I2V_A14B_distilled');
+                    const dualStartForSubmit = flf2vModelConfig.isCloud
+                      ? (await ensureLocalInputsAsDataUrls(flattenImageInput(dualStart)))[0]
+                      : dualStart;
+                    const dualEndForSubmit = flf2vModelConfig.isCloud
+                      ? (await ensureLocalInputsAsDataUrls(flattenImageInput(dualEnd)))[0]
+                      : dualEnd;
                     result = await lightX2VTask(
                         flf2vModelConfig.url,
                         flf2vModelConfig.token,
                         'flf2v',
                         model || 'Wan2.2_I2V_A14B_distilled',
                         nodeInputs['in-text'] || "",
-                        dualStart,
+                        dualStartForSubmit,
                         undefined,
-                        dualEnd,
+                        dualEndForSubmit,
                         'output_video',
                         node.data.aspectRatio,
                         undefined,
@@ -908,6 +973,7 @@ function useWorkflowExecutionImpl({
                     const flf2vTid = jobInfo.taskIdsByNodeId.get(node.id);
                     if (flf2vTid) result = toLightX2VResultRef(flf2vTid, 'output_video', (model || '').endsWith('-cloud'));
                     break;
+                }
                 case 'character-swap':
                   const swapImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
                   const swapVid = Array.isArray(nodeInputs['in-video']) ? nodeInputs['in-video'][0] : nodeInputs['in-video'];
@@ -916,17 +982,19 @@ function useWorkflowExecutionImpl({
                   if (model === 'wan2.2_animate' || model?.endsWith('-cloud')) {
                     // Get config for this specific model (handles -cloud suffix)
                     const animateModelConfig = getLightX2VConfigForModel(model);
+                    const swapImgForSubmit = animateModelConfig.isCloud ? await ensureLocalInputAsDataUrl(swapImg) : swapImg;
+                    const swapVidForSubmit = animateModelConfig.isCloud ? await ensureLocalInputAsDataUrl(swapVid) : swapVid;
                     result = await lightX2VTask(
                       animateModelConfig.url,
                       animateModelConfig.token,
                       'animate',
                       model,
                       nodeInputs['in-text'] || "",
-                      swapImg,
+                      swapImgForSubmit,
                       undefined, undefined,
                       'output_video',
                       node.data.aspectRatio,
-                      swapVid,
+                      swapVidForSubmit,
                       (taskId) => registerTaskId(node.id, taskId),
                       jobAbortSignal
                     );
@@ -941,14 +1009,16 @@ function useWorkflowExecutionImpl({
                   const avatarAudio = Array.isArray(nodeInputs['in-audio']) ? nodeInputs['in-audio'][0] : nodeInputs['in-audio'];
                   // Get config for this specific model (handles -cloud suffix)
                   const s2vModelConfig = getLightX2VConfigForModel(model || "SekoTalk");
+                  const avatarImgForSubmit = s2vModelConfig.isCloud ? await ensureLocalInputAsDataUrl(avatarImg) : avatarImg;
+                  const avatarAudioForSubmit = s2vModelConfig.isCloud ? await ensureLocalInputAsDataUrl(avatarAudio) : avatarAudio;
                   result = await lightX2VTask(
                     s2vModelConfig.url,
                     s2vModelConfig.token,
                     's2v',
                     model || "SekoTalk",
                     nodeInputs['in-text'] || "A person talking naturally.",
-                    avatarImg || "",
-                    avatarAudio || "",
+                    avatarImgForSubmit || "",
+                    avatarAudioForSubmit || "",
                     undefined,
                     'output_video',
                     undefined,
@@ -992,23 +1062,14 @@ function useWorkflowExecutionImpl({
           const successfulResults: Array<{ nodeId: string; result: any; duration: number }> = [];
           const failedNodes: Array<{ nodeId: string; error: any; duration: number }> = [];
 
+          // Fill nodeId -> duration for this batch (executionTimeByNodeId is declared above the loop)
           results.forEach((settledResult, index) => {
             const node = batch[index];
             if (settledResult.status === 'fulfilled') {
               const { nodeId, result, duration } = settledResult.value;
+              executionTimeByNodeId[nodeId] = duration;
               sessionOutputs[nodeId] = result;
-              setActiveOutputs(prev => ({ ...prev, [nodeId]: result }));
-              // Update node with result and execution state - IMPORTANT: set outputValue so it can be saved
-              setWorkflow(prev => prev ? ({
-                ...prev,
-                nodes: prev.nodes.map(n => n.id === nodeId ? {
-                  ...n,
-                  status: NodeStatus.SUCCESS,
-                  executionTime: duration,
-                  outputValue: result, // Set outputValue so it can be saved
-                  completedAt: Date.now()
-                } : n)
-              }) : null);
+              successfulResults.push({ nodeId, result, duration });
               executedInSession.add(nodeId);
 
               // Note: Immediate save is skipped here - we'll save all outputs together after execution completes
@@ -1018,6 +1079,7 @@ function useWorkflowExecutionImpl({
               if (errorInfo && errorInfo.error) {
                 // Error was already handled in the catch block, just mark as executed
                 executedInSession.add(errorInfo.nodeId);
+                executionTimeByNodeId[errorInfo.nodeId] = errorInfo.duration || 0;
                 // Ensure error is a string
                 const errorMessage = errorInfo.error instanceof Error
                   ? errorInfo.error.message
@@ -1028,6 +1090,7 @@ function useWorkflowExecutionImpl({
               } else {
                 // Unhandled error
                 const nodeDuration = performance.now() - (node.startTime || performance.now());
+                executionTimeByNodeId[node.id] = nodeDuration;
                 const errorMessage = settledResult.reason instanceof Error
                   ? settledResult.reason.message
                   : (typeof settledResult.reason === 'string'
@@ -1039,23 +1102,15 @@ function useWorkflowExecutionImpl({
             }
           });
 
-          // Batch update state for successful results
+          // Batch update state for successful results (outputValue is the single source of truth)
           if (successfulResults.length > 0) {
-            setActiveOutputs(prev => {
-              const next = { ...prev };
-              successfulResults.forEach(({ nodeId, result }) => {
-                next[nodeId] = result;
-              });
-              return next;
-            });
-
             setWorkflow(prev => {
               if (!prev) return null;
               const updatedNodes = [...prev.nodes];
-              successfulResults.forEach(({ nodeId, duration }) => {
-                const index = updatedNodes.findIndex(n => n.id === nodeId);
-                if (index >= 0) {
-                  updatedNodes[index] = { ...updatedNodes[index], status: NodeStatus.SUCCESS, executionTime: duration };
+              successfulResults.forEach(({ nodeId, result, duration }) => {
+                const idx = updatedNodes.findIndex(n => n.id === nodeId);
+                if (idx >= 0) {
+                  updatedNodes[idx] = { ...updatedNodes[idx], status: NodeStatus.SUCCESS, executionTime: duration, outputValue: result, completedAt: Date.now() };
                 }
               });
               return { ...prev, nodes: updatedNodes };
@@ -1085,75 +1140,74 @@ function useWorkflowExecutionImpl({
         }
       }
       const runTotalTime = performance.now() - runStartTime;
+      const runTimestamp = Date.now();
 
-      // Generate runId first (will be used for saving outputs and creating history)
-      const runId = `run-${Date.now()}`;
-
-      // Optimize history storage: only keep essential data, limit history size
-      // Create a lightweight snapshot without deep copying all node data
+      // Optimize history storage: only keep essential data
+      // Create a lightweight snapshot for nodeOutputHistory entry
       const lightweightNodesSnapshot = workflow.nodes.map(n => ({
         id: n.id,
         toolId: n.toolId,
         x: n.x,
         y: n.y,
         status: n.status,
-        data: { ...n.data }, // Shallow copy of data
+        data: { ...n.data },
         error: n.error,
         executionTime: n.executionTime,
         completedAt: n.completedAt
       }));
 
-      // Optimize history outputs: don't save full base64 data, save references instead
-      // For data URLs, we'll save references (file_id or data_id) if available
-      // For text, we can save directly (small size)
-      const optimizedOutputs: Record<string, any> = {};
-
+      // Optimize outputs: don't save full base64 in history, save references / small data
+      const historyReadyOutputs: Record<string, any> = {};
       for (const [nodeId, output] of Object.entries(sessionOutputs)) {
         if (typeof output === 'string' && output.startsWith('data:')) {
-          // Data URL - save as reference (will be replaced with data_id after save)
-          // For now, mark it as a data URL that needs to be saved
-          optimizedOutputs[nodeId] = {
+          historyReadyOutputs[nodeId] = {
             type: 'data_url',
-            data: output.substring(0, 100) + '...', // Truncate for memory efficiency
-            _full_data: output // Keep full data temporarily for saving
+            data: output.substring(0, 100) + '...',
+            _full_data: output
           };
         } else if (typeof output === 'string') {
-          // Plain text - save directly (small size)
-          optimizedOutputs[nodeId] = {
-            type: 'text',
-            data: output
-          };
+          historyReadyOutputs[nodeId] = { type: 'text', data: output };
+        } else if (isLightX2VResultRef(output)) {
+          // Keep LightX2V ref as-is so createHistoryEntryFromValue produces kind: 'lightx2v_result'
+          historyReadyOutputs[nodeId] = output;
         } else if (typeof output === 'object' && output !== null) {
-          // JSON object - save directly (usually small)
-          optimizedOutputs[nodeId] = {
-            type: 'json',
-            data: output
-          };
+          historyReadyOutputs[nodeId] = { type: 'json', data: output };
         } else {
-          // Other types
-          optimizedOutputs[nodeId] = output;
+          historyReadyOutputs[nodeId] = output;
         }
       }
 
-      const newRun: GenerationRun = {
-        id: runId,
-        timestamp: Date.now(),
-        outputs: optimizedOutputs, // Use optimized outputs (references instead of full data)
-        nodesSnapshot: lightweightNodesSnapshot,
-        totalTime: runTotalTime
-      };
-
       // Save output files to database (if workflow has a database ID). 纯前端不请求后端，跳过保存避免 ✗ Save returned null 警告
-      const shouldSaveOutputs = workflow.id && !isStandalone() && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i));
+      const hasValidDbId = workflow.id && (workflow.id.startsWith('workflow-') || workflow.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i));
+      const shouldSaveOutputs = hasValidDbId && !isStandalone();
+
+      // Per-node history: only for nodes in this run set that were actually executed (not upstream nodes whose output was just read as input).
+      const nodeHistoryUpdates: Record<string, NodeHistoryEntry[]> = {};
+      if (!shouldSaveOutputs) {
+        for (const nodeId of executedInSession) {
+          if (!nodesToRunIds.has(nodeId)) continue; // Only nodes we chose to run get history
+          const node = workflow.nodes.find(n => n.id === nodeId);
+          const entry = createHistoryEntryFromValue({
+            id: `node-${nodeId}-${runTimestamp}`,
+            timestamp: runTimestamp,
+            value: historyReadyOutputs[nodeId] ?? sessionOutputs[nodeId],
+            executionTime: executionTimeByNodeId[nodeId] ?? node?.executionTime
+          });
+          if (!entry) continue;
+          const prevListRaw = (workflow.nodeOutputHistory && workflow.nodeOutputHistory[nodeId]) || [];
+          const prevList = normalizeHistoryEntries(prevListRaw);
+          nodeHistoryUpdates[nodeId] = [entry, ...prevList].slice(0, MAX_NODE_HISTORY);
+        }
+      }
       if (shouldSaveOutputs) {
         try {
           console.log(`[WorkflowExecution] Starting to save outputs for workflow ${workflow.id}, sessionOutputs keys:`, Object.keys(sessionOutputs));
           // Save output files for each node (async, don't block execution)
-          // Pass runId to associate saves with workflow history
-          const savePromises: Promise<{ file_id?: string; data_id: string; file_url?: string; url?: string } | null>[] = [];
+          const savePromises: Promise<any>[] = [];
           const saveMeta: Array<{ nodeId: string; portId: string; value: any; kind: 'single' | 'multi' | 'array'; index?: number }> = [];
 
           for (const [nodeId, output] of Object.entries(sessionOutputs)) {
+            if (!nodesToRunIds.has(nodeId) || !executedInSession.has(nodeId)) continue; // Only save outputs for nodes we actually ran in this run
             const node = workflow.nodes.find(n => n.id === nodeId);
             if (!node) {
               console.warn(`[WorkflowExecution] Node ${nodeId} not found in workflow.nodes`);
@@ -1179,48 +1233,63 @@ function useWorkflowExecutionImpl({
 
             // Handle different output formats - save ALL types of outputs (data URLs, text, JSON, task result refs)
             // LightX2VResultRef must be treated as single object so task_id is persisted; do NOT treat as multi-output
+            const scheduleSinglePortSave = (
+              portId: string,
+              value: any,
+              label: string,
+              kind: 'single' | 'array' = 'single',
+              index?: number,
+              previousPromise?: Promise<any>
+            ) => {
+              const metaEntry: { nodeId: string; portId: string; value: any; kind: 'single' | 'multi' | 'array'; index?: number } = {
+                nodeId,
+                portId,
+                value,
+                kind
+              };
+              if (kind === 'array' && index !== undefined) metaEntry.index = index;
+              saveMeta.push(metaEntry);
+              const performSave = () =>
+                saveNodeOutputs(workflow.id, nodeId, { [portId]: value })
+                .then(result => {
+                  if (result && result[portId]) {
+                    console.log(`[WorkflowExecution] ✓ Saved ${label}:`, result[portId]);
+                  } else {
+                    console.warn(`[WorkflowExecution] ✗ Save returned null for ${label}`);
+                  }
+                  return result;
+                })
+                .catch(err => {
+                  console.error(`[WorkflowExecution] ✗ Error saving ${label}:`, err);
+                  throw err;
+                });
+              const promise = previousPromise ? previousPromise.then(() => performSave()) : performSave();
+              savePromises.push(promise);
+              return promise;
+            };
+
             if (isLightX2VResultRef(outputToSave)) {
               const firstOutputPort = tool.outputs[0];
               if (firstOutputPort) {
                 console.log(`[WorkflowExecution] Saving single-output node ${nodeId}/${firstOutputPort.id} (LightX2VResultRef):`, outputToSave.task_id);
-                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
-                savePromises.push(
-                  saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
-                    .then(result => {
-                      if (result) console.log(`[WorkflowExecution] ✓ Saved node output data (ref) for ${nodeId}/${firstOutputPort.id}:`, result);
-                      else console.warn(`[WorkflowExecution] ✗ Save returned null for ${nodeId}/${firstOutputPort.id}`);
-                      return result;
-                    })
-                    .catch(err => {
-                      console.error(`[WorkflowExecution] ✗ Error saving node output data for ${nodeId}/${firstOutputPort.id}:`, err);
-                      throw err;
-                    })
+                scheduleSinglePortSave(
+                  firstOutputPort.id,
+                  outputToSave,
+                  `node ${nodeId}/${firstOutputPort.id} (LightX2VResultRef)`
                 );
               }
             } else if (outputToSave && typeof outputToSave === 'object' && !Array.isArray(outputToSave)) {
-              // Multi-output node (outputValue is a Record<portId, value>), not a LightX2VResultRef
+              // Multi-output node (e.g. text-generation with customOutputs). Save as single kind:json entry.
+              const outputsToSave: Record<string, string | object> = {};
               for (const [portId, value] of Object.entries(outputToSave)) {
-                // Save all types: data URLs, text, JSON, task result URLs
                 if ((typeof value === 'string' && value.length > 0) || (typeof value === 'object' && value !== null && !Array.isArray(value))) {
-                  console.log(`[WorkflowExecution] Saving multi-output node ${nodeId}/${portId}:`, typeof value === 'string' ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : 'object');
-                  saveMeta.push({ nodeId, portId, value, kind: 'multi' });
-                  savePromises.push(
-                    saveNodeOutputData(workflow.id, nodeId, portId, value, runId)
-                      .then(result => {
-                        if (result) {
-                          console.log(`[WorkflowExecution] ✓ Saved node output data for ${nodeId}/${portId}:`, result);
-                        } else {
-                          console.warn(`[WorkflowExecution] ✗ Save returned null for ${nodeId}/${portId}`);
-                        }
-                        return result;
-                      })
-                      .catch(err => {
-                        console.error(`[WorkflowExecution] ✗ Error saving node output data for ${nodeId}/${portId}:`, err);
-                        // Don't return null, throw to be caught by Promise.allSettled
-                        throw err;
-                      })
-                  );
+                  outputsToSave[portId] = value;
                 }
+              }
+              if (Object.keys(outputsToSave).length > 0) {
+                console.log(`[WorkflowExecution] Saving multi-output node ${nodeId} as single JSON (${Object.keys(outputsToSave).length} fields)`);
+                saveMeta.push({ nodeId, portId: '__json__', value: outputToSave, kind: 'multi' });
+                savePromises.push(saveNodeOutputs(workflow.id, nodeId, outputsToSave));
               }
             } else if (typeof outputToSave === 'string' && outputToSave.length > 0) {
               // Single output node - use first output port (save data URLs, plain text, and task result URLs, including CDN URLs)
@@ -1228,22 +1297,10 @@ function useWorkflowExecutionImpl({
               if (firstOutputPort) {
                 const isUrl = outputToSave.startsWith('http://') || outputToSave.startsWith('https://') || outputToSave.startsWith('./assets/');
                 console.log(`[WorkflowExecution] Saving single-output node ${nodeId}/${firstOutputPort.id} (${isUrl ? 'URL' : 'text'}):`, outputToSave.length > 100 ? outputToSave.substring(0, 100) + '...' : outputToSave);
-                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
-                savePromises.push(
-                  saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
-                    .then(result => {
-                      if (result) {
-                        console.log(`[WorkflowExecution] ✓ Saved node output data for ${nodeId}/${firstOutputPort.id}:`, result);
-                      } else {
-                        console.warn(`[WorkflowExecution] ✗ Save returned null for ${nodeId}/${firstOutputPort.id}`);
-                      }
-                      return result;
-                    })
-                    .catch(err => {
-                      console.error(`[WorkflowExecution] ✗ Error saving node output data for ${nodeId}/${firstOutputPort.id}:`, err);
-                      // Don't return null, throw to be caught by Promise.allSettled
-                      throw err;
-                    })
+                scheduleSinglePortSave(
+                  firstOutputPort.id,
+                  outputToSave,
+                  `node ${nodeId}/${firstOutputPort.id} (${isUrl ? 'URL' : 'text'})`
                 );
               } else {
                 console.warn(`[WorkflowExecution] Node ${nodeId} (${node.toolId}) has no output ports defined`);
@@ -1252,51 +1309,56 @@ function useWorkflowExecutionImpl({
               // JSON object output
               const firstOutputPort = tool.outputs[0];
               if (firstOutputPort) {
-                saveMeta.push({ nodeId, portId: firstOutputPort.id, value: outputToSave, kind: 'single' });
-                savePromises.push(
-                  saveNodeOutputData(workflow.id, nodeId, firstOutputPort.id, outputToSave, runId)
-                    .then(result => {
-                      if (result) {
-                        console.log(`[WorkflowExecution] Saved node output data for ${nodeId}/${firstOutputPort.id}:`, result);
-                      }
-                      return result;
-                    })
-                    .catch(err => {
-                      console.error(`[WorkflowExecution] Error saving node output data for ${nodeId}/${firstOutputPort.id}:`, err);
-                      return null;
-                    })
+                scheduleSinglePortSave(
+                  firstOutputPort.id,
+                  outputToSave,
+                  `node ${nodeId}/${firstOutputPort.id} (JSON object)`
                 );
               }
             } else if (Array.isArray(outputToSave)) {
-              // Array output - save each item (data URLs, text, or JSON)
+              // Array output: if each item maps to a distinct port, use saveNodeOutputs; else sequentially save per port
               const firstOutputPort = tool.outputs[0];
               if (firstOutputPort) {
-                for (let i = 0; i < outputToSave.length; i++) {
-                  const item = outputToSave[i];
-                  const portId = tool.outputs.length > 1 ? tool.outputs[i]?.id || firstOutputPort.id : firstOutputPort.id;
-                  // Save all types in array
-                  if ((typeof item === 'string' && item.length > 0) || (typeof item === 'object' && item !== null)) {
-                    saveMeta.push({ nodeId, portId, value: item, kind: 'array', index: i });
-                    savePromises.push(
-                      saveNodeOutputData(workflow.id, nodeId, portId, item, runId)
-                        .then(result => {
-                          if (result) {
-                            console.log(`[WorkflowExecution] Saved node output data for ${nodeId}/${portId}:`, result);
-                          }
-                          return result;
-                        })
-                        .catch(err => {
-                          console.error(`[WorkflowExecution] Error saving node output data for ${nodeId}/${portId}:`, err);
-                          return null;
-                        })
-                    );
+                const canBatch = tool.outputs.length >= outputToSave.length;
+                if (canBatch) {
+                  const outputsToSave: Record<string, string | object> = {};
+                  for (let i = 0; i < outputToSave.length; i++) {
+                    const item = outputToSave[i];
+                    const portId = tool.outputs.length > 1 ? tool.outputs[i]?.id || firstOutputPort.id : firstOutputPort.id;
+                    if ((typeof item === 'string' && item.length > 0) || (typeof item === 'object' && item !== null)) {
+                      outputsToSave[portId] = item;
+                      saveMeta.push({ nodeId, portId, value: item, kind: 'array', index: i });
+                    }
+                  }
+                  if (Object.keys(outputsToSave).length > 0) {
+                    console.log(`[WorkflowExecution] Saving array-output node ${nodeId} (${Object.keys(outputsToSave).length} ports) in one request`);
+                    const nodeSavePromise = saveNodeOutputs(workflow.id, nodeId, outputsToSave);
+                    for (const _ of Object.keys(outputsToSave)) {
+                      savePromises.push(nodeSavePromise);
+                    }
+                  }
+                } else {
+                  let arrSeq: Promise<any> = Promise.resolve();
+                  for (let i = 0; i < outputToSave.length; i++) {
+                    const item = outputToSave[i];
+                    const portId = tool.outputs.length > 1 ? tool.outputs[i]?.id || firstOutputPort.id : firstOutputPort.id;
+                    if ((typeof item === 'string' && item.length > 0) || (typeof item === 'object' && item !== null)) {
+                      arrSeq = scheduleSinglePortSave(
+                        portId,
+                        item,
+                        `node ${nodeId}/${portId} (array item ${i + 1})`,
+                        'array',
+                        i,
+                        arrSeq
+                      );
+                    }
                   }
                 }
               }
             }
           }
 
-          // Wait for all saves to complete and update history outputs with data_id references
+          // Wait for all saves to complete and update history outputs with file_id references
           Promise.allSettled(savePromises).then(results => {
             // Check for any failed saves
             const failedSaves: string[] = [];
@@ -1315,8 +1377,8 @@ function useWorkflowExecutionImpl({
               });
             }
 
-            // Update history outputs with data_id references (replace data URLs with references)
-            const updatedOutputs: Record<string, any> = { ...optimizedOutputs };
+            // Update history outputs with file_id references (replace data URLs with references)
+            const updatedOutputs: Record<string, any> = { ...historyReadyOutputs };
             const outputReplacements: Array<{ nodeId: string; portId: string; value: any; kind: 'single' | 'multi' | 'array'; index?: number }> = [];
 
             const isDataUrl = (value: any) => typeof value === 'string' && value.startsWith('data:');
@@ -1325,40 +1387,47 @@ function useWorkflowExecutionImpl({
               if (result.status !== 'fulfilled' || !result.value) return;
               const meta = saveMeta[idx];
               if (!meta) return;
-              const saveResult = result.value;
+              const rawResult = result.value;
+              // __json__: whole object stored as one entry; use as refOutput for history, no per-port replacement
+              if (meta.portId === '__json__') {
+                updatedOutputs[meta.nodeId] = meta.value;
+                return;
+              }
+              const perPortResult = typeof rawResult === 'object' && rawResult !== null && !Array.isArray(rawResult)
+                ? (rawResult as Record<string, { file_id?: string; file_url?: string; url?: string; ext?: string } | null | undefined>)
+                : null;
+              let saveResult: { file_id?: string; file_url?: string; url?: string; ext?: string } | null =
+                perPortResult?.[meta.portId] ?? null;
+              if (!saveResult || !saveResult.file_id) return;
               const fileUrl = saveResult.file_url || saveResult.url;
               // Never replace LightX2VResultRef with URL so task_id stays in node.outputValue for result_url resolution
               const shouldReplaceWithUrl = fileUrl && isDataUrl(meta.value) && !isLightX2VResultRef(meta.value);
+              const refPayload = { type: 'reference' as const, file_id: saveResult.file_id, ext: saveResult.ext };
+              const urlPayload = { type: 'url' as const, data: fileUrl, ext: saveResult.ext };
 
               if (meta.kind === 'multi') {
                 if (!updatedOutputs[meta.nodeId] || typeof updatedOutputs[meta.nodeId] !== 'object') {
                   updatedOutputs[meta.nodeId] = {};
                 }
-                updatedOutputs[meta.nodeId][meta.portId] = shouldReplaceWithUrl
-                  ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
-                  : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+                updatedOutputs[meta.nodeId][meta.portId] = shouldReplaceWithUrl ? urlPayload : refPayload;
               } else if (meta.kind === 'single') {
                 if (typeof meta.value === 'string' && meta.value.startsWith('data:')) {
-                  updatedOutputs[meta.nodeId] = shouldReplaceWithUrl
-                    ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
-                    : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+                  updatedOutputs[meta.nodeId] = shouldReplaceWithUrl ? urlPayload : refPayload;
                 } else if (typeof meta.value === 'string') {
                   const isTaskResultUrl = meta.value.startsWith('./assets/task/result') ||
                                          meta.value.startsWith('http://') ||
                                          meta.value.startsWith('https://');
                   updatedOutputs[meta.nodeId] = isTaskResultUrl
-                    ? { type: 'url', data_id: saveResult.data_id, data: meta.value }
-                    : { type: 'text', data_id: saveResult.data_id, data: meta.value };
+                    ? { type: 'url', data: meta.value, ext: saveResult.ext }
+                    : { type: 'text', data: meta.value };
                 } else {
-                  updatedOutputs[meta.nodeId] = { type: 'json', data_id: saveResult.data_id, data: meta.value };
+                  updatedOutputs[meta.nodeId] = { type: 'json', data: meta.value };
                 }
               } else if (meta.kind === 'array') {
                 if (!Array.isArray(updatedOutputs[meta.nodeId])) {
                   updatedOutputs[meta.nodeId] = [];
                 }
-                const entry = shouldReplaceWithUrl
-                  ? { type: 'url', data_id: saveResult.data_id, data: fileUrl }
-                  : { type: 'reference', data_id: saveResult.data_id, file_id: saveResult.file_id };
+                const entry = shouldReplaceWithUrl ? urlPayload : refPayload;
                 (updatedOutputs[meta.nodeId] as any[])[meta.index ?? 0] = entry;
               }
 
@@ -1373,12 +1442,9 @@ function useWorkflowExecutionImpl({
               }
             });
 
-            // Update the run with optimized outputs
+            // Update node outputValues with saved file/url references (no run concept)
             setWorkflow(prev => {
               if (!prev) return null;
-              const updatedHistory = prev.history.map(run =>
-                run.id === runId ? { ...run, outputs: updatedOutputs } : run
-              );
               const updatedNodes = prev.nodes.map(node => {
                 const updates = outputReplacements.filter(r => r.nodeId === node.id);
                 if (updates.length === 0) return node;
@@ -1403,28 +1469,59 @@ function useWorkflowExecutionImpl({
                 const singleUpdate = updates.find(update => update.kind === 'single');
                 return singleUpdate ? { ...node, outputValue: singleUpdate.value } : node;
               });
-              return { ...prev, history: updatedHistory, nodes: updatedNodes };
+              return { ...prev, nodes: updatedNodes };
             });
 
+            // Add one nodeOutputHistory entry per saved node (ref format); only for nodes that were in this run
+            const nodeIdsWithSaves = new Set<string>();
+            results.forEach((result, idx) => {
+              if (result.status === 'fulfilled' && result.value && saveMeta[idx] && nodesToRunIds.has(saveMeta[idx].nodeId)) {
+                nodeIdsWithSaves.add(saveMeta[idx].nodeId);
+              }
+            });
+            if (nodeIdsWithSaves.size > 0) {
+              setWorkflow(prev => {
+                if (!prev) return prev;
+                const nextHistory = { ...(prev.nodeOutputHistory || {}) };
+                for (const nodeId of nodeIdsWithSaves) {
+                  const refOutput = updatedOutputs[nodeId];
+                  if (refOutput == null) continue;
+                  const node = workflow.nodes.find(n => n.id === nodeId);
+                  const newEntry = createHistoryEntryFromValue({
+                    id: `node-${nodeId}-${runTimestamp}`,
+                    timestamp: runTimestamp,
+                    value: refOutput,
+                    executionTime: executionTimeByNodeId[nodeId] ?? node?.executionTime
+                  });
+                  if (!newEntry) continue;
+                  const prevListRaw = nextHistory[nodeId] || [];
+                  const prevList = normalizeHistoryEntries(prevListRaw);
+                  nextHistory[nodeId] = [newEntry, ...prevList].slice(0, MAX_NODE_HISTORY);
+                }
+                return { ...prev, nodeOutputHistory: nextHistory };
+              });
+            }
+
             if (outputReplacements.length > 0) {
-              setActiveOutputs(prev => {
-                const next = { ...prev };
-                outputReplacements.forEach(update => {
-                  if (update.kind === 'multi') {
-                    const existing = next[update.nodeId];
-                    next[update.nodeId] = {
-                      ...(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}),
-                      [update.portId]: update.value
-                    };
-                  } else if (update.kind === 'array') {
-                    const existing = Array.isArray(next[update.nodeId]) ? [...next[update.nodeId]] : [];
-                    existing[update.index ?? 0] = update.value;
-                    next[update.nodeId] = existing;
-                  } else {
-                    next[update.nodeId] = update.value;
-                  }
-                });
-                return next;
+              setWorkflow(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  nodes: prev.nodes.map(n => {
+                    const update = outputReplacements.find(u => u.nodeId === n.id);
+                    if (!update) return n;
+                    if (update.kind === 'multi') {
+                      const existing = n.outputValue && typeof n.outputValue === 'object' && !Array.isArray(n.outputValue) ? n.outputValue : {};
+                      return { ...n, outputValue: { ...existing, [update.portId]: update.value } };
+                    }
+                    if (update.kind === 'array') {
+                      const existing = Array.isArray(n.outputValue) ? [...n.outputValue] : [];
+                      existing[update.index ?? 0] = update.value;
+                      return { ...n, outputValue: existing };
+                    }
+                    return { ...n, outputValue: update.value };
+                  })
+                };
               });
             }
           }).catch(err => {
@@ -1434,11 +1531,7 @@ function useWorkflowExecutionImpl({
               message: 'Failed to process save results',
               details: errorMsg
             });
-            // Still update history even if some saves failed
-            setWorkflow(prev => {
-              if (!prev) return null;
-              return { ...prev, history: [newRun, ...prev.history].slice(0, 5) };
-            });
+            // nodeOutputHistory already updated below; no run to update
           });
         } catch (error) {
           console.error('[WorkflowExecution] Error initiating output file saves:', error);
@@ -1448,19 +1541,24 @@ function useWorkflowExecutionImpl({
           });
           // Don't fail the workflow execution if file saving fails
         }
-      } else {
-        console.warn(`[WorkflowExecution] Workflow ID ${workflow?.id} is not a valid database ID, skipping save`);
+      } else if (!isStandalone() && workflow?.id && !hasValidDbId) {
+       console.warn(`[WorkflowExecution] Workflow ID ${workflow.id} is not a valid database ID, skipping save`);
       }
 
-      // Note: History will be updated after saves complete (see Promise.all above)
-      // For now, add the run with optimized outputs (will be updated with data_id references later)
-      setWorkflow(prev => prev ? ({ ...prev, history: [newRun, ...prev.history].slice(0, 5) }) : null);
-      // 不再进入快照视图，始终保持在编辑模式
+      // Append per-node history (no run); keep legacy history empty for compat
+      setWorkflow(prev => prev ? ({
+        ...prev,
+        nodeOutputHistory: { ...prev.nodeOutputHistory, ...nodeHistoryUpdates }
+      }) : null);
 
-      // Save execution state (nodes with status, activeOutputs) to database
-      // Capture values before async operations to avoid closure issues
+      // Save execution state (nodes with status, outputValue) to database or local
+      // preset 工作流（仅前端或有后端）都进入此分支，以便分配新 UUID 再保存
       const workflowId = workflow.id;
-      const shouldSave = workflowId && (workflowId.startsWith('workflow-') || workflowId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i));
+      const shouldSave = workflowId && (
+        workflowId.startsWith('workflow-') ||
+        workflowId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) ||
+        workflowId.startsWith('preset-')
+      );
 
       if (shouldSave) {
         // Capture current state before async operation to avoid closure issues
@@ -1472,13 +1570,6 @@ function useWorkflowExecutionImpl({
           // For now, we'll use workflow directly, but note that input node values should be updated
           return workflow;
         };
-
-        const currentActiveOutputs = { ...sessionOutputs };
-        // Capture newRun to include it in history_metadata when saving
-        const capturedNewRun = { ...newRun };
-        // Capture current history (before adding newRun) and manually add newRun for saving
-        const currentHistory = workflow.history || [];
-        const historyToSave = [capturedNewRun, ...currentHistory].slice(0, 5);
 
         // Build nodes state from session execution results
         // IMPORTANT: Use the latest workflow state to ensure input node values are updated
@@ -1517,26 +1608,31 @@ function useWorkflowExecutionImpl({
           }
         });
 
+        const nextNodeOutputHistory = {
+          ...(workflow.nodeOutputHistory || {}),
+          ...nodeHistoryUpdates
+        };
+
         // Save execution state via API (using save queue to avoid conflicts)
         // Use setTimeout to defer and ensure state updates are complete
         setTimeout(async () => {
           try {
             const currentUserId = getCurrentUserId();
-            const { isPreset } = await checkWorkflowOwnership(workflowId, currentUserId);
+            const { owned } = await checkWorkflowOwnership(workflowId, currentUserId);
 
             // Use save queue to avoid conflicts with manual saves
             await workflowSaveQueue.enqueue(workflowId, async () => {
               // 纯前端部署：只持久化到本地，不请求后端
               if (isStandalone() && onSaveExecutionToLocal) {
-                // preset-* 在仅前端时自动分配新 UUID，再保存到本地
-                const newId = workflowId.startsWith('preset-')
+                // 不拥有（如 preset-*）时分配新 UUID 再保存到本地
+                const newId = !owned
                   ? (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
                   : workflowId;
                 const updatedWorkflow: WorkflowState = {
                   ...workflow,
                   id: newId,
                   nodes: nodesToSave,
-                  history: historyToSave,
+                nodeOutputHistory: nextNodeOutputHistory,
                   updatedAt: Date.now()
                 };
                 await onSaveExecutionToLocal(updatedWorkflow);
@@ -1545,43 +1641,29 @@ function useWorkflowExecutionImpl({
                   if (window.history && window.history.replaceState) {
                     window.history.replaceState(null, '', `#workflow/${newId}`);
                   }
-                  console.log('[WorkflowExecution] Preset workflow saved to local with new ID:', newId);
+                  console.log('[WorkflowExecution] Workflow saved to local with new ID:', newId);
                 } else {
                   console.log('[WorkflowExecution] Execution state saved to local (standalone)');
                 }
                 return;
               }
-              if (isPreset) {
-                // If preset workflow, create new workflow first
+              if (!owned) {
+                // 不拥有（预设/他人/404）：先创建新 UUID 工作流再保存
                 try {
-                  // Create new workflow with current structure
-                  // Create new workflow with the existing workflow_id (if it's a UUID)
-                // This ensures the frontend and backend use the same workflow_id
-                const createData: any = {
-                  name: workflow.name,
-                  description: '',
-                  nodes: nodesToSave,
-                  connections: workflow.connections, // Save connections
-                  history_metadata: historyToSave.map(run => ({
-                    run_id: run.id,
-                    timestamp: run.timestamp,
-                    totalTime: run.totalTime,
-                    node_ids: Object.keys(run.outputs || {}),
-                    nodes_snapshot: run.nodesSnapshot || [], // Save nodes snapshot
-                    outputs: run.outputs || {} // Save optimized outputs (references instead of full data)
-                  })),
-                  chat_history: workflow.chatHistory || [],
-                  extra_info: {
-                    active_outputs: currentActiveOutputs
-                  }
-                };
+                  const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                  const createData: any = {
+                    name: workflow.name,
+                    description: workflow.description ?? '',
+                    nodes: nodesToSave,
+                    connections: workflow.connections,
+                    tags: workflow.tags ?? [],
+                    node_output_history: nextNodeOutputHistory,
+                    workflow_id: newId
+                  };
 
-                // If workflow has a UUID, pass it to backend to use the same ID
-                if (workflowId && workflowId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-                  createData.workflow_id = workflowId;
-                }
-
-                const createResponse = await apiRequest('/api/v1/workflow/create', {
+                  const createResponse = await apiRequest('/api/v1/workflow/create', {
                     method: 'POST',
                     body: JSON.stringify(createData)
                   });
@@ -1589,60 +1671,19 @@ function useWorkflowExecutionImpl({
                   if (createResponse.ok) {
                     const data = await createResponse.json();
                     const finalWorkflowId = data.workflow_id;
-                    console.log('[WorkflowExecution] Created new workflow for preset:', finalWorkflowId);
-
-                    // Only update workflow state and URL if the ID changed
-                    // If we passed workflow_id and backend used it, finalWorkflowId should match workflowId
-                    if (finalWorkflowId !== workflowId) {
-                      // Update workflow state with new ID
-                      setWorkflow(prev => prev ? { ...prev, id: finalWorkflowId } : null);
-
-                      // Update URL
-                      if (window.history && window.history.replaceState) {
-                        window.history.replaceState(null, '', `#workflow/${finalWorkflowId}`);
-                      }
+                    console.log('[WorkflowExecution] Created new workflow (not owned):', finalWorkflowId);
+                    setWorkflow(prev => prev ? { ...prev, id: finalWorkflowId } : null);
+                    if (window.history && window.history.replaceState) {
+                      window.history.replaceState(null, '', `#workflow/${finalWorkflowId}`);
                     }
                   } else {
                     const errorText = await createResponse.text();
-                    // If 409 Conflict (workflow already exists), try to update instead
-                    if (createResponse.status === 409) {
-                      console.log('[WorkflowExecution] Workflow already exists (409), trying to update instead');
-                      // Try to update the existing workflow
-                      const updateResponse = await apiRequest(`/api/v1/workflow/${workflowId}`, {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                          nodes: nodesToSave,
-                          connections: workflow.connections, // Save connections
-                          history_metadata: historyToSave.map(run => ({
-                            run_id: run.id,
-                            timestamp: run.timestamp,
-                            totalTime: run.totalTime,
-                            node_ids: Object.keys(run.outputs || {}),
-                            nodes_snapshot: run.nodesSnapshot || [],
-                            outputs: run.outputs || {}
-                          })),
-                          extra_info: {
-                            active_outputs: currentActiveOutputs
-                          }
-                        })
-                      });
-
-                      if (updateResponse.ok) {
-                        console.log('[WorkflowExecution] Updated existing workflow instead of creating');
-                        return; // Success, no need to update ID
-                      } else {
-                        const updateErrorText = await updateResponse.text();
-                        throw new Error(`Failed to update existing workflow: ${updateErrorText}`);
-                      }
-                    } else {
-                      throw new Error(`Failed to create new workflow: ${errorText}`);
-                    }
+                    throw new Error(`Failed to create new workflow: ${errorText}`);
                   }
                 } catch (error) {
-                  console.error('[WorkflowExecution] Failed to create new workflow for preset:', error);
-                  // Show error to user
+                  console.error('[WorkflowExecution] Failed to create new workflow (not owned):', error);
                   setGlobalError({
-                    message: 'Failed to save execution state: preset workflow detected but creation failed',
+                    message: 'Failed to save execution state: workflow not owned but creation failed',
                     details: error instanceof Error ? error.message : String(error)
                   });
                 }
@@ -1654,17 +1695,7 @@ function useWorkflowExecutionImpl({
                     body: JSON.stringify({
                       nodes: nodesToSave,
                       connections: workflow.connections, // Save connections
-                      history_metadata: historyToSave.map(run => ({
-                        run_id: run.id,
-                        timestamp: run.timestamp,
-                        totalTime: run.totalTime,
-                        node_ids: Object.keys(run.outputs || {}),
-                        nodes_snapshot: run.nodesSnapshot || [], // Save nodes snapshot
-                        outputs: run.outputs || {} // Save optimized outputs (references instead of full data)
-                      })),
-                      extra_info: {
-                        active_outputs: currentActiveOutputs
-                      }
+                      node_output_history: nextNodeOutputHistory
                     })
                   });
 
@@ -1685,9 +1716,8 @@ function useWorkflowExecutionImpl({
                     // 添加到离线队列以便后续恢复
                     workflowOfflineQueue.addTask(workflowId, {
                       nodes: nodesToSave,
-                      extra_info: {
-                        active_outputs: currentActiveOutputs
-                      }
+                      connections: workflow.connections,
+                      node_output_history: nextNodeOutputHistory
                     });
                     console.log('[WorkflowExecution] Execution state save failed (network error), added to offline queue');
                   }
@@ -1715,9 +1745,8 @@ function useWorkflowExecutionImpl({
               // 添加到离线队列以便后续恢复
               workflowOfflineQueue.addTask(workflowId, {
                 nodes: nodesToSave,
-                extra_info: {
-                  active_outputs: currentActiveOutputs
-                }
+                connections: workflow.connections,
+                node_output_history: nextNodeOutputHistory
               });
               console.log('[WorkflowExecution] Execution state save failed (network error), added to offline queue');
             }
@@ -1740,7 +1769,6 @@ function useWorkflowExecutionImpl({
         message: errorMessage,
         details: e?.stack || (typeof e === 'string' ? e : JSON.stringify(e, null, 2))
       });
-      setSelectedRunId(null);
     } finally {
       const j = runningJobsByJobIdRef.current.get(jobId);
       if (j) {
@@ -1754,8 +1782,6 @@ function useWorkflowExecutionImpl({
   }, [
     workflow,
     setWorkflow,
-    activeOutputs,
-    setActiveOutputs,
     isPausedRef,
     setIsPaused,
     runningTaskIdsRef,
@@ -1765,7 +1791,6 @@ function useWorkflowExecutionImpl({
     resolveLightX2VResultRef,
     validateWorkflow,
     setValidationErrors,
-    setSelectedRunId,
     setGlobalError,
     updateNodeData,
     voiceList,
@@ -1848,7 +1873,7 @@ function useWorkflowExecutionImpl({
         const affectedIds = new Set(jobInfo.affectedNodeIds);
         setWorkflow(prev => prev ? {
           ...prev,
-          nodes: prev.nodes.map(n => affectedIds.has(n.id) && n.status === NodeStatus.RUNNING
+          nodes: prev.nodes.map(n => affectedIds.has(n.id) && (n.status === NodeStatus.RUNNING || n.status === NodeStatus.PENDING)
             ? { ...n, status: NodeStatus.IDLE, error: 'Cancelled' }
             : n)
         } : null);
@@ -1953,7 +1978,7 @@ function useWorkflowExecutionImpl({
         ...prev,
         isRunning: false,
         nodes: prev.nodes.map(n => {
-          if (n.status !== NodeStatus.RUNNING) return n;
+          if (n.status !== NodeStatus.RUNNING && n.status !== NodeStatus.PENDING) return n;
           const cancelled = cancelledNodeIds.has(n.id);
           return {
             ...n,

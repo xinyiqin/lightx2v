@@ -5,10 +5,24 @@ import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { isStandalone } from '../config/runtimeMode';
 
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds
+const MAX_NODE_HISTORY = 20;
+
+function trimNodeOutputHistory(hist: Record<string, unknown[]> | undefined): Record<string, unknown[]> {
+  if (!hist || typeof hist !== 'object') return {};
+  const out: Record<string, unknown[]> = {};
+  for (const [nodeId, entries] of Object.entries(hist)) {
+    if (Array.isArray(entries)) {
+      out[nodeId] = entries.slice(0, MAX_NODE_HISTORY);
+    }
+  }
+  return out;
+}
 
 interface UseWorkflowAutoSaveProps {
   workflow: WorkflowState | null;
   onSave?: (workflow: WorkflowState) => Promise<void>;
+  /** 在请求后端前确保工作流属于当前用户；若不拥有则先创建新 UUID 并更新状态，返回实际应使用的 id */
+  ensureWorkflowOwned?: (workflow: WorkflowState) => Promise<string>;
 }
 
 export interface UseWorkflowAutoSaveReturn {
@@ -23,7 +37,8 @@ export interface UseWorkflowAutoSaveReturn {
  */
 export const useWorkflowAutoSave = ({
   workflow,
-  onSave
+  onSave,
+  ensureWorkflowOwned
 }: UseWorkflowAutoSaveProps): UseWorkflowAutoSaveReturn => {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<number>(0);
@@ -73,14 +88,18 @@ export const useWorkflowAutoSave = ({
             return;
           }
           try {
-            const response = await apiRequest(`/api/v1/workflow/${workflow.id}/autosave`, {
+            const idToUse = ensureWorkflowOwned ? await ensureWorkflowOwned(workflow) : workflow.id;
+            const response = await apiRequest(`/api/v1/workflow/${idToUse}/autosave`, {
               method: 'POST',
               body: JSON.stringify({
-                workflow_id: workflow.id,
+                workflow_id: idToUse,
                 name: workflow.name,
+                description: workflow.description ?? '',
                 nodes: workflow.nodes,
                 connections: workflow.connections,
-                global_inputs: workflow.globalInputs
+                global_inputs: workflow.globalInputs,
+                tags: workflow.tags ?? [],
+                node_output_history: trimNodeOutputHistory(workflow.nodeOutputHistory)
               })
             });
 
@@ -112,7 +131,7 @@ export const useWorkflowAutoSave = ({
         autoSaveTimerRef.current = null;
       }
     };
-  }, [workflow?.isDirty, workflow?.id, workflow?.name, workflow?.nodes, workflow?.connections, workflow?.globalInputs, onSave]);
+  }, [workflow?.isDirty, workflow?.id, workflow?.name, workflow?.description, workflow?.nodes, workflow?.connections, workflow?.globalInputs, workflow?.tags, workflow?.nodeOutputHistory, onSave, ensureWorkflowOwned]);
 
   return {
     resetAutoSaveTimer

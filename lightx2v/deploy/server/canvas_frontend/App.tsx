@@ -15,7 +15,7 @@ import {
 import { TOOLS, updateLightX2VModels } from './constants';
 import {
   WorkflowNode, Connection, WorkflowState,
-  NodeStatus, DataType, Port, ToolDefinition, GenerationRun
+  NodeStatus, DataType, Port, ToolDefinition
 } from './types';
 import { geminiText, geminiImage, geminiSpeech, geminiVideo, lightX2VTask, lightX2VTTS, lightX2VVoiceClone, lightX2VVoiceCloneTTS, lightX2VGetVoiceList, lightX2VGetCloneVoiceList, lightX2VGetModelList, deepseekText, doubaoText, ppchatGeminiText } from './services/geminiService';
 import { removeGeminiWatermark } from './services/watermarkRemover';
@@ -34,6 +34,7 @@ import { useNodeManagement } from './src/hooks/useNodeManagement';
 import { useConnectionManagement } from './src/hooks/useConnectionManagement';
 import { useModalState } from './src/hooks/useModalState';
 import { useResultManagement } from './src/hooks/useResultManagement';
+import { useShowIntermediateResults } from './src/hooks/useShowIntermediateResults';
 import { useWorkflowExecution } from './src/hooks/useWorkflowExecution';
 import { useUndoRedo } from './src/hooks/useUndoRedo';
 import { useAIChatWorkflow } from './src/hooks/useAIChatWorkflow';
@@ -69,12 +70,13 @@ const App: React.FC = () => {
     loadWorkflows,
     deleteWorkflow: deleteWorkflowFromHook,
     updateWorkflowVisibility,
+    ensureWorkflowOwned,
     isLoading: isLoadingWorkflows,
     isSaving: isSavingWorkflow
   } = useWorkflow();
+  const [showIntermediateResults, setShowIntermediateResults] = useShowIntermediateResults();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [activeOutputs, setActiveOutputs] = useState<Record<string, any>>({});
 
   // Canvas ref
@@ -273,6 +275,7 @@ const App: React.FC = () => {
   // Use useWorkflowAutoSave Hook
   const autoSaveHook = useWorkflowAutoSave({
     workflow,
+    ensureWorkflowOwned,
     onSave: async (w) => {
       try {
         await saveWorkflowToDatabase(w, { name: w.name });
@@ -298,9 +301,7 @@ const App: React.FC = () => {
     setWorkflow,
     selectedNodeId,
     setSelectedNodeId,
-    selectedRunId,
     setValidationErrors,
-    setActiveOutputs,
     canvasRef,
     screenToWorldCoords,
     view,
@@ -314,18 +315,15 @@ const App: React.FC = () => {
     setWorkflow,
     selectedConnectionId,
     setSelectedConnectionId,
-    selectedRunId,
     setConnecting
   });
 
   // Use useResultManagement Hook
   const resultManagement = useResultManagement({
     workflow,
-    selectedRunId,
-    activeOutputs,
+    showIntermediateResults,
     expandedOutput: modalState.expandedOutput,
     tempEditValue: modalState.tempEditValue,
-    setActiveOutputs,
     setWorkflow,
     setExpandedOutput: modalState.setExpandedOutput,
     setIsEditingResult: modalState.setIsEditingResult,
@@ -352,8 +350,6 @@ const App: React.FC = () => {
     getLightX2VConfig,
     getCurrentHistoryIndex: undoRedo.getCurrentHistoryIndex,
     undoToIndex: undoRedo.undoToIndex,
-    activeOutputs,
-    clearSelectedRunId: () => setSelectedRunId(null),
     chatMode: aiChatMode
   });
 
@@ -361,15 +357,12 @@ const App: React.FC = () => {
   const workflowExecution = useWorkflowExecution({
     workflow,
     setWorkflow,
-    activeOutputs,
-    setActiveOutputs,
     isPausedRef,
     setIsPaused,
     runningTaskIdsRef,
     abortControllerRef,
     getLightX2VConfig,
     setValidationErrors,
-    setSelectedRunId,
     setGlobalError,
     updateNodeData: nodeManagement.updateNodeData,
     voiceList,
@@ -434,13 +427,7 @@ const App: React.FC = () => {
           if (isStandalone()) {
             const loaded = await loadWorkflow(workflowId);
             if (loaded) {
-              const config = getLightX2VConfig(null);
-              const newWorkflow = {
-                ...loaded.workflow,
-                env: { lightx2v_url: config.url, lightx2v_token: config.token }
-              };
-              setWorkflow(newWorkflow);
-              setActiveOutputs(loaded.activeOutputs);
+              setWorkflow(loaded.workflow);
               setCurrentView('EDITOR');
             }
             return;
@@ -480,16 +467,7 @@ const App: React.FC = () => {
                 // Load the copied workflow
                 const loaded = await loadWorkflow(copiedWorkflowId);
                 if (loaded) {
-                  const config = getLightX2VConfig(null);
-                  const newWorkflow = {
-                    ...loaded.workflow,
-                    env: {
-                      lightx2v_url: config.url,
-                      lightx2v_token: config.token
-                    }
-                  };
-                  setWorkflow(newWorkflow);
-                  setActiveOutputs(loaded.activeOutputs);
+                  setWorkflow(loaded.workflow);
                   setCurrentView('EDITOR');
 
                   // Update URL with new workflow ID
@@ -504,16 +482,7 @@ const App: React.FC = () => {
               // User's own workflow - load it directly
               const loaded = await loadWorkflow(workflowId);
               if (loaded) {
-                const config = getLightX2VConfig(null);
-                const newWorkflow = {
-                  ...loaded.workflow,
-                  env: {
-                    lightx2v_url: config.url,
-                    lightx2v_token: config.token
-                  }
-                };
-                setWorkflow(newWorkflow);
-                setActiveOutputs(loaded.activeOutputs);
+                setWorkflow(loaded.workflow);
                 setCurrentView('EDITOR');
               }
             }
@@ -547,12 +516,7 @@ const App: React.FC = () => {
             if (isStandalone()) {
               const loaded = await loadWorkflow(workflowId);
               if (loaded) {
-                const config = getLightX2VConfig(null);
-                setWorkflow({
-                  ...loaded.workflow,
-                  env: { lightx2v_url: config.url, lightx2v_token: config.token }
-                });
-                setActiveOutputs(loaded.activeOutputs);
+                setWorkflow(loaded.workflow);
                 setCurrentView('EDITOR');
               }
               return;
@@ -564,16 +528,7 @@ const App: React.FC = () => {
               // Only load user's own workflows on hash change (preset workflows should be copied first)
               const loaded = await loadWorkflow(workflowId);
               if (loaded) {
-                const config = getLightX2VConfig(null);
-                const newWorkflow = {
-                  ...loaded.workflow,
-                  env: {
-                    lightx2v_url: config.url,
-                    lightx2v_token: config.token
-                  }
-                };
-                setWorkflow(newWorkflow);
-                setActiveOutputs(loaded.activeOutputs);
+                setWorkflow(loaded.workflow);
                 setCurrentView('EDITOR');
               }
             } else if (isPreset) {
@@ -598,7 +553,7 @@ const App: React.FC = () => {
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [workflow, currentView, loadWorkflow, getLightX2VConfig, setWorkflow, setActiveOutputs, setCurrentView]);
+  }, [workflow, currentView, loadWorkflow, getLightX2VConfig, setWorkflow, setCurrentView]);
 
   useEffect(() => {
     let interval: any;
@@ -651,19 +606,7 @@ const App: React.FC = () => {
         isDirty: false,
         isRunning: false,
         globalInputs: wf.global_inputs || {},
-        env: {
-          lightx2v_url: '',
-          lightx2v_token: ''
-        },
-        history: (wf.history_metadata || []).map((meta: any) => ({
-          id: meta.run_id || `run-${meta.timestamp}`,
-          timestamp: meta.timestamp,
-          totalTime: meta.totalTime,
-          nodesSnapshot: [],
-          outputs: {}
-        })),
         updatedAt: wf.update_t ? wf.update_t * 1000 : Date.now(),
-        showIntermediateResults: false,
         visibility: wf.visibility || 'public',
         thumsupCount: wf.thumsup_count ?? 0,
         thumsupLiked: wf.thumsup_liked ?? false,
@@ -804,26 +747,22 @@ const App: React.FC = () => {
   }, [saveWorkflowToDatabase, saveWorkflowToLocal, setWorkflow, autoSaveHook, setGlobalError, t]);
 
   const openWorkflow = useCallback(async (w: WorkflowState) => {
-    setSelectedRunId(null);
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
     setValidationErrors([]);
-    setActiveOutputs({});
     voiceList.resetVoiceList(); // Reset voice list when switching workflows
     voiceList.resetCloneVoiceList(); // Reset clone voice list
 
     // Try to load from database if workflow has a database ID
     let workflowToOpen = w;
-    let activeOutputsToRestore: Record<string, any> = {};
     let workflowIdToOpen = w.id;
 
-    if (w.id && (w.id.startsWith('workflow-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) || isStandalone())) {
+    if (w.id && (w.id.startsWith('workflow-') || w.id.startsWith('preset-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) || isStandalone())) {
       try {
         if (isStandalone()) {
           const loaded = await loadWorkflow(w.id);
           if (loaded) {
             workflowToOpen = loaded.workflow;
-            activeOutputsToRestore = loaded.activeOutputs;
           }
         } else {
           const currentUserId = getCurrentUserId();
@@ -848,7 +787,6 @@ const App: React.FC = () => {
               const loaded = await loadWorkflow(workflowIdToOpen);
               if (loaded) {
                 workflowToOpen = loaded.workflow;
-                activeOutputsToRestore = loaded.activeOutputs;
               }
             } else {
               throw new Error(await copyResponse.text());
@@ -857,7 +795,6 @@ const App: React.FC = () => {
             const loaded = await loadWorkflow(w.id);
             if (loaded) {
               workflowToOpen = loaded.workflow;
-              activeOutputsToRestore = loaded.activeOutputs;
             }
           }
         }
@@ -866,22 +803,13 @@ const App: React.FC = () => {
       }
     }
 
-    // 获取当前的 LightX2V 配置（从主应用或环境变量）
-    const config = getLightX2VConfig(null);
-
-    // 更新工作流的 env 配置，使用动态获取的配置
     const newWorkflow = {
       ...workflowToOpen,
       id: workflowIdToOpen, // Use the correct workflow ID (original or copied)
       isDirty: false,
-      isRunning: false,
-      env: {
-        lightx2v_url: config.url,
-        lightx2v_token: config.token
-      }
+      isRunning: false
     };
     setWorkflow(newWorkflow);
-    setActiveOutputs(activeOutputsToRestore);
     setCurrentView('EDITOR');
 
     // Update URL to show workflow_id
@@ -890,19 +818,14 @@ const App: React.FC = () => {
     }
 
     // History will be automatically initialized by useUndoRedo when workflow changes
-  }, [loadWorkflow, getLightX2VConfig, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
+  }, [loadWorkflow, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors]);
 
   const createNewWorkflow = useCallback(async () => {
-    setSelectedRunId(null);
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
     setValidationErrors([]);
-    setActiveOutputs({});
     voiceList.resetVoiceList(); // Reset voice list when creating new workflow
     voiceList.resetCloneVoiceList(); // Reset clone voice list
-
-    // 获取当前的 LightX2V 配置（从主应用或环境变量）
-    const config = getLightX2VConfig(null);
 
     // 纯前端部署使用 UUID；有后端时用 temp- 由后端分配正式 ID
     const newWorkflowId = isStandalone()
@@ -919,13 +842,8 @@ const App: React.FC = () => {
         isDirty: false,
         isRunning: false,
         globalInputs: {},
-        env: {
-          lightx2v_url: config.url,
-          lightx2v_token: config.token
-        },
-        history: [],
         updatedAt: Date.now(),
-        showIntermediateResults: true,
+        createAt: Date.now(),
         visibility: 'private'
       };
 
@@ -935,7 +853,6 @@ const App: React.FC = () => {
       // Update workflow with backend-generated ID
       const finalFlow = { ...tempFlow, id: finalWorkflowId, isDirty: false };
       setWorkflow(finalFlow);
-      setActiveOutputs({});
       setCurrentView('EDITOR');
       // Update URL to show workflow_id
       if (window.history && window.history.replaceState) {
@@ -952,13 +869,8 @@ const App: React.FC = () => {
         isDirty: true,
         isRunning: false,
         globalInputs: {},
-        env: {
-          lightx2v_url: config.url,
-          lightx2v_token: config.token
-        },
-        history: [],
         updatedAt: Date.now(),
-        showIntermediateResults: true
+        createAt: Date.now()
       };
       setWorkflow(newFlow);
       setCurrentView('EDITOR');
@@ -967,7 +879,7 @@ const App: React.FC = () => {
       }
     }
     // History will be automatically initialized by useUndoRedo when workflow changes
-  }, [saveWorkflowToDatabase, loadWorkflow, getLightX2VConfig, t, voiceList, setWorkflow, setCurrentView, setSelectedRunId, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, setActiveOutputs]);
+  }, [saveWorkflowToDatabase, loadWorkflow, t, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors]);
 
   const handleCreateWorkflow = useCallback(() => {
     setSidebarDefaultTab('tools');
@@ -994,10 +906,17 @@ const App: React.FC = () => {
 
 
   const handleGlobalInputChange = useCallback((nodeId: string, portId: string, value: any) => {
-    if (selectedRunId) setSelectedRunId(null);
     setValidationErrors([]);
     setWorkflow(prev => prev ? ({ ...prev, globalInputs: { ...prev.globalInputs, [`${nodeId}-${portId}`]: value }, isDirty: true }) : null);
-  }, [selectedRunId]);
+  }, []);
+
+  const handleDescriptionChange = useCallback((description: string) => {
+    setWorkflow(prev => prev ? ({ ...prev, description, isDirty: true }) : null);
+  }, []);
+
+  const handleTagsChange = useCallback((tags: string[]) => {
+    setWorkflow(prev => prev ? ({ ...prev, tags, isDirty: true }) : null);
+  }, []);
 
   // addNode and pinOutputToCanvas are now provided by useNodeManagement Hook
   const addNode = nodeManagement.addNode;
@@ -1280,7 +1199,6 @@ const App: React.FC = () => {
 
     // Handle node dragging with workflow update
     if (draggingNode) {
-        if (selectedRunId) setSelectedRunId(null);
       const world = screenToWorldCoords(x, y);
       setWorkflow(prev => prev ? ({
         ...prev,
@@ -1292,7 +1210,7 @@ const App: React.FC = () => {
         isDirty: true
       }) : null);
     }
-  }, [draggingNode, selectedRunId, canvasHandleMouseMove, screenToWorldCoords]);
+  }, [draggingNode, canvasHandleMouseMove, screenToWorldCoords]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -1308,9 +1226,8 @@ const App: React.FC = () => {
   }, [canvasHandleMouseDown]);
 
   const handleNodeDragStart = useCallback((nodeId: string, offsetX: number, offsetY: number) => {
-    if (selectedRunId) setSelectedRunId(null);
     canvasHandleNodeDragStart(nodeId, offsetX, offsetY);
-  }, [selectedRunId, canvasHandleNodeDragStart]);
+  }, [canvasHandleNodeDragStart]);
 
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
     if (!draggingNode || draggingNode.id !== nodeId) return;
@@ -1332,45 +1249,18 @@ const App: React.FC = () => {
     canvasHandleNodeDragEnd();
   }, [canvasHandleNodeDragEnd]);
 
-  const clearSnapshot = useCallback(() => {
-    setSelectedRunId(null);
-  }, []);
+  const clearSnapshot = useCallback(() => {}, []);
 
-  const sourceNodes = React.useMemo(() => {
-    if (!workflow) return [];
-    return selectedRunId
-      ? (workflow.history.find(r => r.id === selectedRunId)?.nodesSnapshot || [])
-      : workflow.nodes;
-  }, [workflow, selectedRunId]);
+  const sourceNodes = React.useMemo(() => (workflow?.nodes ?? []), [workflow]);
 
   const sourceOutputs = React.useMemo(() => {
-    if (!workflow) return activeOutputs;
-    // When no run selected: merge node.outputValue so preview works after load/refresh (e.g. LightX2VResultRef)
-    if (!selectedRunId) {
-      const fromNodes = Object.fromEntries(
-        workflow.nodes
-          .filter((n) => n.outputValue !== undefined && n.outputValue !== null)
-          .map((n) => [n.id, n.outputValue])
-      );
-      return { ...fromNodes, ...activeOutputs };
-    }
-    const run = workflow.history.find(r => r.id === selectedRunId);
-    const outputs = run?.outputs || {};
-    const normalize = (v: any): any => {
-      if (v == null) return v;
-      if (typeof v === 'object' && !Array.isArray(v)) {
-        if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
-        if (v.type === 'url' && typeof v.data === 'string') return v.data;
-        if (v.type === 'text' && v.data !== undefined) return v.data;
-        if (v.type === 'json' && v.data !== undefined) return v.data;
-      }
-      if (Array.isArray(v)) return v.map(normalize);
-      return v;
-    };
-    const fromRun = Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, normalize(v)]));
-    // 用 activeOutputs 覆盖 run 快照，使 AI 聊天或手动修改的 outputValue 能即时反映到画布
-    return { ...fromRun, ...activeOutputs };
-  }, [workflow, selectedRunId, activeOutputs]);
+    if (!workflow) return {};
+    return Object.fromEntries(
+      workflow.nodes
+        .filter((n) => n.outputValue !== undefined && n.outputValue !== null)
+        .map((n) => [n.id, n.outputValue])
+    );
+  }, [workflow]);
 
   if (currentView === 'DASHBOARD') {
     return (
@@ -1429,10 +1319,8 @@ const App: React.FC = () => {
         view={view}
         selectedNodeId={selectedNodeId}
         selectedConnectionId={selectedConnectionId}
-        selectedRunId={selectedRunId}
         connecting={connecting}
         mousePos={mousePos}
-        activeOutputs={activeOutputs}
         nodeHeights={nodeHeightsRef.current}
         sourceNodes={sourceNodes}
         sourceOutputs={sourceOutputs}
@@ -1448,7 +1336,6 @@ const App: React.FC = () => {
         canvasRef={canvasRef}
         onBack={() => setCurrentView('DASHBOARD')}
         onWorkflowNameChange={(name) => {
-          if (selectedRunId) setSelectedRunId(null);
           setWorkflow(p => {
             if (!p) return null;
             const next = { ...p, name, isDirty: true };
@@ -1519,6 +1406,7 @@ const App: React.FC = () => {
         lightX2VVoiceList={voiceList.lightX2VVoiceList}
         cloneVoiceList={voiceList.cloneVoiceList}
         onUpdateNodeData={updateNodeData}
+        onUpdateNodeName={nodeManagement.updateNodeName}
         onDeleteNode={deleteSelectedNode}
         onReplaceNode={replaceNode}
         onRunWorkflow={runWorkflow}
@@ -1534,7 +1422,6 @@ const App: React.FC = () => {
           onSetShowVideoEditor={modalState.setShowVideoEditor}
         onSetConnecting={setConnecting}
         onAddConnection={addConnection}
-        onClearSelectedRunId={() => setSelectedRunId(null)}
         getReplaceableTools={getReplaceableTools}
         getCompatibleToolsForOutput={getCompatibleToolsForOutput}
         quickAddInput={quickAddInput}
@@ -1556,12 +1443,15 @@ const App: React.FC = () => {
         isFemaleVoice={voiceList.isFemaleVoice}
         loadingCloneVoiceList={voiceList.loadingCloneVoiceList}
         onGlobalInputChange={handleGlobalInputChange}
+          onDescriptionChange={handleDescriptionChange}
+          onTagsChange={handleTagsChange}
           onShowCloneVoiceModal={() => modalState.setShowCloneVoiceModal(true)}
         resultsCollapsed={modalState.resultsCollapsed}
         resultEntries={resultEntries}
         onToggleResultsCollapsed={() => modalState.setResultsCollapsed(!modalState.resultsCollapsed)}
-        onToggleShowIntermediate={() => setWorkflow(p => p ? ({ ...p, showIntermediateResults: !p.showIntermediateResults }) : null)}
-        onExpandOutput={(nodeId, fieldId, runId) => modalState.setExpandedOutput({ nodeId, fieldId, runId })}
+        showIntermediateResults={showIntermediateResults}
+        onToggleShowIntermediate={() => setShowIntermediateResults(v => !v)}
+        onExpandOutput={(nodeId, fieldId, runId) => modalState.setExpandedOutput({ nodeId, fieldId, historyEntryId: runId === 'current' ? undefined : runId })}
         onPinOutputToCanvas={pinOutputToCanvas}
         isAIChatOpen={modalState.isAIChatOpen}
         isAIChatCollapsed={modalState.isAIChatCollapsed}
@@ -1584,6 +1474,10 @@ const App: React.FC = () => {
         onAIChatModeChange={setAiChatMode}
         aiChatHistory={aiChatWorkflow.chatHistory}
         isAIProcessing={aiChatWorkflow.isProcessing}
+        isAIExecutingOperations={aiChatWorkflow.isExecutingOperations}
+        executingProgress={aiChatWorkflow.executingProgress}
+        executingStepLabels={aiChatWorkflow.executingStepLabels}
+        onAIStopGeneration={aiChatWorkflow.stopGeneration}
         onAISendMessage={aiChatWorkflow.handleUserInput}
         onAIClearHistory={aiChatWorkflow.clearChatHistory}
         chatContextNodes={aiChatWorkflow.chatContextNodes}

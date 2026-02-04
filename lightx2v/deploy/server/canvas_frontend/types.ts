@@ -1,4 +1,62 @@
-import { ChatMessage } from './src/hooks/useAIChatWorkflow';
+
+export interface ChatImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface ChatSource {
+  title?: string;
+  url: string;
+  siteName?: string;
+}
+
+export interface ChatOperation {
+  type: 'add_node' | 'delete_node' | 'update_node' | 'replace_node' |
+        'add_connection' | 'delete_connection' | 'move_node';
+  details: any;
+}
+
+export interface ChatOperationResult {
+  success: boolean;
+  operation: ChatOperation;
+  result?: any;
+  error?: string;
+  affectedElements?: { nodeIds?: string[]; connectionIds?: string[] };
+}
+
+export interface ChatMessagePersisted {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  image?: ChatImage;
+  useSearch?: boolean;
+  sources?: ChatSource[];
+  timestamp: number;
+  error?: string;
+}
+
+export interface ChatMessage extends ChatMessagePersisted {
+  operations?: ChatOperation[];
+  operationResults?: ChatOperationResult[];
+  historyCheckpoint?: number;
+  thinking?: string;
+  isStreaming?: boolean;
+  choices?: string[];
+}
+
+export interface ChatHistoryList {
+  workflowId: string;
+  messages: ChatMessagePersisted[];
+  updatedAt: number;
+}
+
+export type WorkflowChatHistoryMap = Record<string, ChatHistoryList>;
+
+export interface ChatHistoryListResponse {
+  workflow_id: string;
+  messages: ChatMessagePersisted[];
+  updated_at: number;
+}
 
 export enum DataType {
   TEXT = 'TEXT',
@@ -9,6 +67,7 @@ export enum DataType {
 
 export enum NodeStatus {
   IDLE = 'IDLE',
+  PENDING = 'PENDING',
   RUNNING = 'RUNNING',
   SUCCESS = 'SUCCESS',
   ERROR = 'ERROR'
@@ -28,7 +87,7 @@ export interface ModelDefaultParams {
 export interface ModelDefinition {
   id: string;
   name: string;
-  defaultParams?: ModelDefaultParams; // 该模型的默认参数
+  defaultParams?: ModelDefaultParams;
 }
 
 export interface ToolDefinition {
@@ -40,14 +99,15 @@ export interface ToolDefinition {
   description: string;
   description_zh: string;
   inputs: Port[];
-  outputs: Port[]; // Static outputs
+  outputs: Port[];
   icon: string;
   models?: ModelDefinition[];
-  defaultParams?: ModelDefaultParams; // 工具级别的默认参数（适用于所有模型）
+  defaultParams?: ModelDefaultParams;
 }
 
 export interface WorkflowNode {
   id: string;
+  name?: string;
   toolId: string;
   x: number;
   y: number;
@@ -55,9 +115,9 @@ export interface WorkflowNode {
   data: Record<string, any>; // For internal settings
   outputValue?: any; // For multi-output nodes, this is a Record<portId, value>
   error?: string;
-  executionTime?: number; // In milliseconds
-  startTime?: number; // performance.now() when node starts running
-  completedAt?: number; // Date.now() when node finishes
+  executionTime?: number;
+  startTime?: number;
+  completedAt?: number;
 }
 
 export interface Connection {
@@ -68,33 +128,54 @@ export interface Connection {
   targetPortId: string;
 }
 
-export interface GenerationRun {
+export type NodeHistoryEntryKind = 'text' | 'json' | 'file' | 'lightx2v_result';
+
+export type NodeHistoryValue =
+  | { text: string }
+  | { json: any }
+  | {
+      fileId?: string;
+      url?: string;
+      dataUrl?: string;
+      ext?: string;
+    }
+  | {
+      taskId: string;
+      outputName: string;
+      isCloud: boolean;
+    };
+
+export interface NodeHistoryEntry {
   id: string;
   timestamp: number;
-  outputs: Record<string, any>;
-  nodesSnapshot: WorkflowNode[];
-  totalTime?: number; // In milliseconds
+  executionTime?: number;
+  metadata?: Record<string, any>;
+  kind: NodeHistoryEntryKind;
+  value: NodeHistoryValue;
 }
 
 export interface WorkflowState {
   id: string;
   name: string;
+  description?: string;
   nodes: WorkflowNode[];
   connections: Connection[];
   isDirty: boolean;
   isRunning: boolean;
-  globalInputs: Record<string, any>; // Maps nodeID-portID to values
-  env: {
-    lightx2v_url: string;
-    lightx2v_token: string;
-  };
-  history: GenerationRun[];
-  chatHistory?: ChatMessage[]; // AI 对话历史
+  globalInputs: Record<string, any>;
+  nodeOutputHistory?: Record<string, NodeHistoryEntry[]>;
   updatedAt: number;
-  showIntermediateResults: boolean;
+  createAt?: number;
   visibility?: 'private' | 'public';
   thumsupCount?: number;
   thumsupLiked?: boolean;
   authorName?: string;
   authorId?: string;
+  userId?: string;
+  tags?: string[];
+  /**
+   * AI 对话历史（运行时，从独立 API 加载）
+   * 关联：通过 workflow.id 查询 GET /api/v1/workflow/{id}/chat
+   */
+  chatHistory?: ChatMessage[];
 }

@@ -20,7 +20,6 @@ interface EditorProps {
   view: ViewState;
   selectedNodeId: string | null;
   selectedConnectionId: string | null;
-  selectedRunId: string | null;
   connecting: {
     nodeId: string;
     portId: string;
@@ -85,6 +84,7 @@ interface EditorProps {
   lightX2VVoiceList?: { voices?: any[]; emotions?: string[]; languages?: any[] } | null;
   cloneVoiceList?: any[];
   onUpdateNodeData?: (nodeId: string, key: string, value: any) => void;
+  onUpdateNodeName?: (nodeId: string, name: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   onReplaceNode?: (nodeId: string, newToolId: string) => void;
   onRunWorkflow?: (nodeId?: string, runThisOnly?: boolean) => void;
@@ -112,7 +112,6 @@ interface EditorProps {
     targetNodeId: string;
     targetPortId: string;
   }) => void;
-  onClearSelectedRunId?: () => void;
   getReplaceableTools?: (nodeId: string) => ToolDefinition[];
   getCompatibleToolsForOutput?: (outputType: DataType) => ToolDefinition[];
   quickAddInput?: (node: WorkflowNode, port: Port) => void;
@@ -136,9 +135,12 @@ interface EditorProps {
   isFemaleVoice?: (voiceType: string) => boolean;
   loadingCloneVoiceList?: boolean;
   onGlobalInputChange?: (nodeId: string, portId: string, value: any) => void;
+  onDescriptionChange?: (description: string) => void;
+  onTagsChange?: (tags: string[]) => void;
   onShowCloneVoiceModal?: () => void;
   // ResultsPanel props
   resultsCollapsed?: boolean;
+  showIntermediateResults?: boolean;
   resultEntries?: import('../../hooks/useResultManagement').ResultEntry[];
   onToggleResultsCollapsed?: () => void;
   onToggleShowIntermediate?: () => void;
@@ -153,6 +155,10 @@ interface EditorProps {
   onToggleAIChatCollapse?: () => void;
   aiChatHistory?: any[];
   isAIProcessing?: boolean;
+  isAIExecutingOperations?: boolean;
+  executingProgress?: { current: number; total: number };
+  executingStepLabels?: string[];
+  onAIStopGeneration?: () => void;
   onAISendMessage?: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onAIClearHistory?: () => void;
   chatContextNodes?: { nodeId: string; name: string }[];
@@ -183,10 +189,8 @@ export const Editor: React.FC<EditorProps> = ({
   view,
   selectedNodeId,
   selectedConnectionId,
-  selectedRunId,
   connecting,
   mousePos,
-  activeOutputs,
   nodeHeights,
   sourceNodes,
   sourceOutputs,
@@ -242,6 +246,7 @@ export const Editor: React.FC<EditorProps> = ({
   lightX2VVoiceList,
   cloneVoiceList = [],
   onUpdateNodeData = () => {},
+  onUpdateNodeName = () => {},
   onDeleteNode = () => {},
   onReplaceNode = () => {},
   onRunWorkflow = () => {},
@@ -256,7 +261,6 @@ export const Editor: React.FC<EditorProps> = ({
   onSetShowVideoEditor = () => {},
   onSetConnecting = () => {},
   onAddConnection = () => {},
-  onClearSelectedRunId = () => {},
   getReplaceableTools = () => [],
   getCompatibleToolsForOutput = () => [],
   quickAddInput = () => {},
@@ -275,9 +279,12 @@ export const Editor: React.FC<EditorProps> = ({
   isFemaleVoice = () => false,
   loadingCloneVoiceList = false,
   onGlobalInputChange = () => {},
+  onDescriptionChange = () => {},
+  onTagsChange = () => {},
   onShowCloneVoiceModal = () => {},
   // ResultsPanel props
   resultsCollapsed = true,
+  showIntermediateResults = true,
   resultEntries = [],
   onToggleResultsCollapsed = () => {},
   onToggleShowIntermediate = () => {},
@@ -291,6 +298,10 @@ export const Editor: React.FC<EditorProps> = ({
   onToggleAIChatCollapse = () => {},
   aiChatHistory = [],
   isAIProcessing = false,
+  isAIExecutingOperations = false,
+  executingProgress = { current: 0, total: 0 },
+  executingStepLabels = [],
+  onAIStopGeneration = () => {},
   onAISendMessage = () => {},
   onAIClearHistory = () => {},
   chatContextNodes = [],
@@ -323,7 +334,6 @@ export const Editor: React.FC<EditorProps> = ({
         lang={lang}
         workflow={workflow}
         view={view}
-        selectedRunId={selectedRunId}
         isPaused={isPaused}
         isRunning={isRunning}
         canvasRef={canvasRef}
@@ -357,6 +367,10 @@ export const Editor: React.FC<EditorProps> = ({
           onChatInputFocused={onAIChatInputFocused}
           chatHistory={aiChatHistory}
           isProcessing={isAIProcessing}
+          isExecutingOperations={isAIExecutingOperations}
+          executingProgress={executingProgress}
+          executingStepLabels={executingStepLabels}
+          onStopGeneration={onAIStopGeneration}
           onSendMessage={onAISendMessage}
           onClearHistory={onAIClearHistory}
           chatContextNodes={chatContextNodes}
@@ -376,7 +390,6 @@ export const Editor: React.FC<EditorProps> = ({
           selectedConnectionId={selectedConnectionId}
           connecting={connecting}
           mousePos={mousePos}
-          activeOutputs={activeOutputs}
           nodeHeights={nodeHeights}
           sourceNodes={sourceNodes}
           sourceOutputs={sourceOutputs}
@@ -417,7 +430,6 @@ export const Editor: React.FC<EditorProps> = ({
           onSetShowVideoEditor={onSetShowVideoEditor}
           onSetConnecting={onSetConnecting}
           onAddConnection={onAddConnection}
-          onClearSelectedRunId={onClearSelectedRunId}
           getReplaceableTools={getReplaceableTools}
           getCompatibleToolsForOutput={getCompatibleToolsForOutput}
           quickAddInput={quickAddInput}
@@ -428,12 +440,11 @@ export const Editor: React.FC<EditorProps> = ({
         />
 
         {/* 右侧面板容器：NodeConfigPanel */}
-        <div className="flex flex-col w-80 border-l border-slate-800/60 bg-slate-900/40 backdrop-blur-xl z-30 relative">
+        <div className="flex flex-col min-h-0 w-80 border-l border-slate-800/60 bg-slate-900/40 backdrop-blur-xl z-30 relative overflow-hidden">
           <NodeConfigPanel
             lang={lang}
             workflow={workflow}
             selectedNodeId={selectedNodeId}
-            activeOutputs={activeOutputs}
             sourceOutputs={sourceOutputs}
             disconnectedInputs={disconnectedInputs}
             lightX2VVoiceList={lightX2VVoiceList}
@@ -449,8 +460,11 @@ export const Editor: React.FC<EditorProps> = ({
             cloneVoiceList={cloneVoiceList}
             loadingCloneVoiceList={loadingCloneVoiceList}
             onUpdateNodeData={onUpdateNodeData}
+            onUpdateNodeName={onUpdateNodeName}
             onDeleteNode={onDeleteNode}
             onGlobalInputChange={onGlobalInputChange}
+            onDescriptionChange={onDescriptionChange}
+            onTagsChange={onTagsChange}
             onShowCloneVoiceModal={onShowCloneVoiceModal}
             collapsed={nodeConfigPanelCollapsed}
           />
@@ -463,6 +477,10 @@ export const Editor: React.FC<EditorProps> = ({
             onClose={onToggleAIChat}
             chatHistory={aiChatHistory}
             isProcessing={isAIProcessing}
+            isExecutingOperations={isAIExecutingOperations}
+            executingProgress={executingProgress}
+            executingStepLabels={executingStepLabels}
+            onStopGeneration={onAIStopGeneration}
             onSendMessage={onAISendMessage}
             onClearHistory={onAIClearHistory}
             chatContextNodes={chatContextNodes}
@@ -514,6 +532,7 @@ export const Editor: React.FC<EditorProps> = ({
       <ResultsPanel
         lang={lang}
         workflow={workflow}
+        showIntermediateResults={showIntermediateResults}
         resultsCollapsed={resultsCollapsed}
         onToggleCollapsed={onToggleResultsCollapsed}
         resultEntries={resultEntries}

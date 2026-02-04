@@ -18,6 +18,10 @@ interface ToolPaletteProps {
   onChatInputFocused?: () => void;
   chatHistory?: ChatMessageType[];
   isProcessing?: boolean;
+  isExecutingOperations?: boolean;
+  executingProgress?: { current: number; total: number };
+  executingStepLabels?: string[];
+  onStopGeneration?: () => void;
   onSendMessage?: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onClearHistory?: () => void;
   chatContextNodes?: { nodeId: string; name: string }[];
@@ -41,6 +45,10 @@ export const ToolPalette: React.FC<ToolPaletteProps> = ({
   onChatInputFocused,
   chatHistory = [],
   isProcessing = false,
+  isExecutingOperations = false,
+  executingProgress = { current: 0, total: 0 },
+  executingStepLabels = [],
+  onStopGeneration = () => {},
   onSendMessage = () => {},
   onClearHistory,
   chatContextNodes = [],
@@ -183,6 +191,10 @@ export const ToolPalette: React.FC<ToolPaletteProps> = ({
                   onClose={() => {}}
                   chatHistory={chatHistory}
                   isProcessing={isProcessing}
+                  isExecutingOperations={isExecutingOperations}
+                  executingProgress={executingProgress}
+                  executingStepLabels={executingStepLabels}
+                  onStopGeneration={onStopGeneration}
                   onSendMessage={onSendMessage}
                   onClearHistory={onClearHistory}
                   chatContextNodes={chatContextNodes}

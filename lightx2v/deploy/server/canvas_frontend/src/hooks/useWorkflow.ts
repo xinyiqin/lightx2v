@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { WorkflowState, NodeStatus } from '../../types';
+import { WorkflowState, WorkflowNode, NodeHistoryEntry } from '../../types';
 import { apiRequest } from '../utils/apiClient';
-import { getNodeOutputData, getWorkflowFileByFileId, getLocalFileDataUrl, persistDataUrlToLocal } from '../utils/workflowFileManager';
+import { getWorkflowFileByFileId, getLocalFileDataUrl, persistDataUrlToLocal, uploadLocalUrlAsNodeOutput, isLocalAssetUrlToUpload } from '../utils/workflowFileManager';
 import { TOOLS } from '../../constants';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
 import { isStandalone } from '../config/runtimeMode';
+import { createHistoryEntryFromValue, normalizeHistoryMap } from '../utils/historyEntry';
 
 export const useWorkflow = () => {
   const [myWorkflows, setMyWorkflows] = useState<WorkflowState[]>([]);
@@ -50,19 +51,7 @@ export const useWorkflow = () => {
           isDirty: false,
           isRunning: false,
           globalInputs: wf.global_inputs || {},
-          env: {
-            lightx2v_url: '',
-            lightx2v_token: ''
-          },
-          history: (wf.history_metadata || []).map((meta: any) => ({
-            id: meta.run_id || `run-${meta.timestamp}`,
-            timestamp: meta.timestamp,
-            totalTime: meta.totalTime,
-            nodesSnapshot: [],
-            outputs: {}
-          })),
           updatedAt: wf.update_t * 1000, // Convert to milliseconds
-          showIntermediateResults: false,
           visibility: wf.visibility || 'private',
           thumsupCount: wf.thumsup_count ?? 0,
           thumsupLiked: wf.thumsup_liked ?? false
@@ -184,53 +173,11 @@ export const useWorkflow = () => {
       return node;
     });
 
-    // Clean history to remove base64 data but keep URLs before saving to avoid localStorage quota issues
-    const cleanedHistory = current.history.map(run => {
-      const cleanedOutputs: Record<string, any> = {};
-      // Keep URLs, but remove base64 data (data:image/..., data:video/..., data:audio/...)
-      Object.entries(run.outputs || {}).forEach(([nodeId, output]) => {
-        if (Array.isArray(output)) {
-          cleanedOutputs[nodeId] = output.map((item: any) => {
-            if (typeof item === 'string' && item.startsWith('data:')) {
-              // Remove base64 data URLs
-              return '';
-            }
-            return item; // Keep URLs (http/https) and other non-base64 data
-          }).filter((item: any) => item !== '');
-        } else if (typeof output === 'string') {
-          if (output.startsWith('data:')) {
-            // Remove base64 data URLs
-            cleanedOutputs[nodeId] = '';
-          } else {
-            // Keep regular URLs (http/https)
-            cleanedOutputs[nodeId] = output;
-          }
-        } else {
-          cleanedOutputs[nodeId] = output;
-        }
-      });
-      // Only keep outputs that have non-empty values
-      Object.keys(cleanedOutputs).forEach(key => {
-        if (cleanedOutputs[key] === '' || (Array.isArray(cleanedOutputs[key]) && cleanedOutputs[key].length === 0)) {
-          delete cleanedOutputs[key];
-        }
-      });
-
-      return {
-        id: run.id,
-        timestamp: run.timestamp,
-        totalTime: run.totalTime,
-        nodesSnapshot: run.nodesSnapshot,
-        outputs: cleanedOutputs // Keep URLs, remove base64 data
-      };
-    });
-
     const updated = {
       ...current,
       nodes: cleanedNodes, // Use cleaned nodes (no base64 data)
       updatedAt: Date.now(),
-      isDirty: false,
-      history: cleanedHistory
+      isDirty: false
     };
 
     setMyWorkflows(prev => {
@@ -241,53 +188,7 @@ export const useWorkflow = () => {
       try {
         localStorage.setItem('omniflow_user_data', JSON.stringify(next));
       } catch (e: any) {
-        if (e.name === 'QuotaExceededError' || e.code === 22) {
-          // If still too large, try to clean all workflows' history
-          const fullyCleaned = next.map(w => ({
-            ...w,
-            history: w.history.map(run => {
-              const cleanedOutputs: Record<string, any> = {};
-              Object.entries(run.outputs || {}).forEach(([nodeId, output]) => {
-                if (Array.isArray(output)) {
-                  cleanedOutputs[nodeId] = output.map((item: any) => {
-                    if (typeof item === 'string' && item.startsWith('data:')) {
-                      return '';
-                    }
-                    return item;
-                  }).filter((item: any) => item !== '');
-                } else if (typeof output === 'string') {
-                  if (!output.startsWith('data:')) {
-                    cleanedOutputs[nodeId] = output;
-                  }
-                } else {
-                  cleanedOutputs[nodeId] = output;
-                }
-              });
-              Object.keys(cleanedOutputs).forEach(key => {
-                if (cleanedOutputs[key] === '' || (Array.isArray(cleanedOutputs[key]) && cleanedOutputs[key].length === 0)) {
-                  delete cleanedOutputs[key];
-                }
-              });
-              return {
-                id: run.id,
-                timestamp: run.timestamp,
-                totalTime: run.totalTime,
-                nodesSnapshot: run.nodesSnapshot,
-                outputs: cleanedOutputs
-              };
-            })
-          }));
-          try {
-            localStorage.setItem('omniflow_user_data', JSON.stringify(fullyCleaned));
-            return fullyCleaned;
-          } catch (e2) {
-            console.error('Failed to save workflows even after cleaning:', e2);
-            return next;
-          }
-        } else {
-          console.error('Failed to save workflows:', e);
-          return next;
-        }
+        console.error('Failed to save workflows:', e);
       }
       return next;
     });
@@ -302,7 +203,7 @@ export const useWorkflow = () => {
   }, [saveWorkflowToLocal]);
 
   // Save workflow to database (and optionally localStorage)
-  const saveWorkflowToDatabase = useCallback(async (current: WorkflowState, options?: { name?: string; description?: string; activeOutputs?: Record<string, any> }): Promise<string> => {
+  const saveWorkflowToDatabase = useCallback(async (current: WorkflowState, options?: { name?: string; description?: string }): Promise<string> => {
     const workflowId = current.id;
 
     // 使用保存队列，避免并发保存冲突
@@ -312,12 +213,25 @@ export const useWorkflow = () => {
         ? workflowRef.current
         : current;
 
-      // 纯前端：仅写本地（含 data: -> IndexedDB -> local://），不请求后端
+      // preset 工作流（仅前端或有后端）保存时都先分配新 UUID，再按环境保存
+      let effectiveId = workflowId;
+      let toSave: WorkflowState = options?.name ? { ...latestWorkflow, name: options.name } : latestWorkflow;
+      if (workflowId.startsWith('preset-')) {
+        effectiveId = typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        toSave = { ...toSave, id: effectiveId };
+        setWorkflow(prev => (prev && prev.id === workflowId ? { ...prev, id: effectiveId } : prev));
+        if (typeof window !== 'undefined' && window.history?.replaceState) {
+          window.history.replaceState(null, '', `#workflow/${effectiveId}`);
+        }
+        console.log('[Workflow] Preset workflow assigned new ID on save:', effectiveId);
+      }
+
       if (isStandalone()) {
-        const toSave = options?.name ? { ...latestWorkflow, name: options.name } : latestWorkflow;
         await saveWorkflowToLocal(toSave);
         setIsSaving(false);
-        return workflowId;
+        return effectiveId;
       }
 
       let workflowData: any = null;
@@ -327,7 +241,7 @@ export const useWorkflow = () => {
         // 如果工作流已被删除，跳过保存
         // 注意：对于新创建的工作流（UUID格式），可能不在 myWorkflows 中，这是正常的，不需要查询
         const workflows = myWorkflows;
-        const workflowExists = workflows.some(w => w.id === workflowId);
+        const workflowExists = workflows.some(w => w.id === effectiveId);
 
         // 只有在工作流已存在且不在列表中时才检查（可能是被删除了）
         // 对于新创建的工作流（UUID格式），即使不在列表中也是正常的，不需要查询
@@ -378,8 +292,11 @@ export const useWorkflow = () => {
             return false;
           };
 
-          // Check if it's already a saved path
+          // Check if it's already a saved path or file reference (backend file_id)
           const isSavedPath = (val: any): boolean => {
+            if (val && typeof val === 'object' && (val.type === 'reference' || val.file_id)) {
+              return true;
+            }
             if (typeof val === 'string') {
               return val.startsWith('./assets/workflow/input') ||
                      val.startsWith('./assets/task/') ||
@@ -389,15 +306,17 @@ export const useWorkflow = () => {
                      (val.startsWith('http://') || val.startsWith('https://'));
             }
             if (Array.isArray(val)) {
-              return val.every(item => typeof item === 'string' && (
-                item.startsWith('./assets/workflow/input') ||
-                item.startsWith('./assets/task/') ||
-                item.startsWith('/assets/workflow/input') ||
-                item.startsWith('/assets/task/') ||
-                item.startsWith('/api/v1/workflow/') ||
-                item.startsWith('http://') ||
-                item.startsWith('https://')
-              ));
+              return val.every(item => {
+                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) return true;
+                if (typeof item !== 'string') return false;
+                return item.startsWith('./assets/workflow/input') ||
+                       item.startsWith('./assets/task/') ||
+                       item.startsWith('/assets/workflow/input') ||
+                       item.startsWith('/assets/task/') ||
+                       item.startsWith('/api/v1/workflow/') ||
+                       item.startsWith('http://') ||
+                       item.startsWith('https://');
+              });
             }
             return false;
           };
@@ -426,7 +345,7 @@ export const useWorkflow = () => {
               .filter(v => v !== '' && v !== null && v !== undefined);
           }
           if (value && typeof value === 'object') {
-            if (value.type === 'reference' || value.data_id) {
+            if (value.type === 'reference' || value.file_id) {
               return value;
             }
             // Preserve LightX2VResultRef (task_id + output_name) so saved workflow can resolve result_url
@@ -445,23 +364,6 @@ export const useWorkflow = () => {
           return value;
         };
 
-        // Store active_outputs in extra_info for resuming execution
-        const extraInfo: Record<string, any> = {};
-        if (options?.activeOutputs) {
-          const cleanedActiveOutputs: Record<string, any> = {};
-          for (const [nodeId, output] of Object.entries(options.activeOutputs)) {
-            const cleanedOutput = stripBase64FromOutput(output);
-            if (Array.isArray(cleanedOutput)) {
-              if (cleanedOutput.length > 0) cleanedActiveOutputs[nodeId] = cleanedOutput;
-            } else if (cleanedOutput && typeof cleanedOutput === 'object') {
-              if (Object.keys(cleanedOutput).length > 0) cleanedActiveOutputs[nodeId] = cleanedOutput;
-            } else if (cleanedOutput !== '' && cleanedOutput !== null && cleanedOutput !== undefined) {
-              cleanedActiveOutputs[nodeId] = cleanedOutput;
-            }
-          }
-          extraInfo.active_outputs = cleanedActiveOutputs;
-        }
-
         // Helper function to clean base64 data from node data.value
         const cleanNodeDataValue = (nodeData: any): any => {
           if (!nodeData || !nodeData.value) return nodeData;
@@ -474,6 +376,9 @@ export const useWorkflow = () => {
           };
 
           const isSavedPath = (val: any): boolean => {
+            if (val && typeof val === 'object' && (val.type === 'reference' || val.file_id)) {
+              return true;
+            }
             if (typeof val === 'string') {
               return val.startsWith('./assets/workflow/input') ||
                      val.startsWith('./assets/task/') ||
@@ -483,15 +388,17 @@ export const useWorkflow = () => {
                      (val.startsWith('http://') || val.startsWith('https://'));
             }
             if (Array.isArray(val)) {
-              return val.every(item => typeof item === 'string' && (
-                item.startsWith('./assets/workflow/input') ||
-                item.startsWith('./assets/task/') ||
-                item.startsWith('/assets/workflow/input') ||
-                item.startsWith('/assets/task/') ||
-                item.startsWith('/api/v1/workflow/') ||
-                item.startsWith('http://') ||
-                item.startsWith('https://')
-              ));
+              return val.every(item => {
+                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) return true;
+                if (typeof item !== 'string') return false;
+                return item.startsWith('./assets/workflow/input') ||
+                       item.startsWith('./assets/task/') ||
+                       item.startsWith('/assets/workflow/input') ||
+                       item.startsWith('/assets/task/') ||
+                       item.startsWith('/api/v1/workflow/') ||
+                       item.startsWith('http://') ||
+                       item.startsWith('https://');
+              });
             }
             return false;
           };
@@ -507,8 +414,6 @@ export const useWorkflow = () => {
           return nodeData;
         };
 
-        // Clean history_metadata outputs: remove base64 data URLs, keep only file paths/URLs
-        // This prevents storing large base64 data in workflow JSON
         // Clean node outputValue to avoid persisting base64 in workflow nodes
         for (let i = 0; i < cleanedNodes.length; i++) {
           const node = cleanedNodes[i];
@@ -535,107 +440,121 @@ export const useWorkflow = () => {
           }
         }
 
-        const cleanedHistoryMetadata = latestWorkflow.history.map(run => {
-          const cleanedOutputs: Record<string, any> = {};
-          // Keep URLs and file paths, but remove base64 data (data:image/..., data:video/..., data:audio/...)
-          Object.entries(run.outputs || {}).forEach(([nodeId, output]) => {
-            const cleanedOutput = stripBase64FromOutput(output);
-            if (Array.isArray(cleanedOutput)) {
-              if (cleanedOutput.length > 0) cleanedOutputs[nodeId] = cleanedOutput;
-            } else if (cleanedOutput && typeof cleanedOutput === 'object') {
-              if (Object.keys(cleanedOutput).length > 0) cleanedOutputs[nodeId] = cleanedOutput;
-            } else if (cleanedOutput !== '' && cleanedOutput !== null && cleanedOutput !== undefined) {
-              cleanedOutputs[nodeId] = cleanedOutput;
+        // 使用后端时，将输入节点中的本地 URL（如 /assets/girl.png）通过 save/upload 存到后端，数据库以 file 类型存储
+        const INPUT_PORT_ID: Record<string, string> = {
+          'image-input': 'out-image',
+          'video-input': 'out-video',
+          'audio-input': 'out-audio'
+        };
+        const resolveInputNodeLocalUrls = async (wfId: string, nodes: WorkflowNode[]): Promise<WorkflowNode[]> => {
+          const next = [...nodes];
+          for (let i = 0; i < next.length; i++) {
+            const node = next[i];
+            const tool = TOOLS.find(t => t.id === node.toolId);
+            if (!tool || tool.category !== 'Input') continue;
+            const portId = INPUT_PORT_ID[node.toolId];
+            if (!portId) continue;
+            const nodeValue = node.data?.value;
+            if (!nodeValue) continue;
+            const isLocalUrl = (s: string) => typeof s === 'string' && isLocalAssetUrlToUpload(s);
+            if (Array.isArray(nodeValue)) {
+              const resolved: any[] = [];
+              for (let idx = 0; idx < nodeValue.length; idx++) {
+                const item = nodeValue[idx];
+                if (item && typeof item === 'object' && (item.type === 'reference' || item.file_id)) {
+                  resolved.push(item);
+                  continue;
+                }
+                if (!isLocalUrl(item)) {
+                  resolved.push(item);
+                  continue;
+                }
+                const ref = await uploadLocalUrlAsNodeOutput(wfId, node.id, portId, item, idx);
+                resolved.push(ref || item);
+              }
+              next[i] = { ...next[i], data: { ...next[i].data, value: resolved } };
+            } else if (typeof nodeValue === 'string' && isLocalUrl(nodeValue)) {
+              const ref = await uploadLocalUrlAsNodeOutput(wfId, node.id, portId, nodeValue, 0);
+              next[i] = { ...next[i], data: { ...next[i].data, value: ref || nodeValue } };
             }
-          });
+          }
+          return next;
+        };
 
-          // Clean nodes_snapshot: remove base64 data from node.data.value
-          const cleanedNodesSnapshot = (run.nodesSnapshot || []).map((node: any) => {
-            if (node.data && node.data.value) {
-              return {
-                ...node,
-                data: cleanNodeDataValue(node.data)
-              };
+        let nodesToSave = cleanedNodes;
+        const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        if (!isStandalone() && effectiveId && isUuid(effectiveId)) {
+          nodesToSave = await resolveInputNodeLocalUrls(effectiveId, cleanedNodes);
+        }
+
+        // 使用最新的工作流状态构建保存数据（不再写入 history_metadata，执行历史按节点存 nodeOutputHistory / data_store）
+        const MAX_NODE_HISTORY = 20;
+        const trimNodeOutputHistory = (hist: Record<string, any[]>) => {
+          if (!hist || typeof hist !== 'object') return {};
+          const out: Record<string, any[]> = {};
+          for (const [nodeId, entries] of Object.entries(hist)) {
+            if (Array.isArray(entries)) {
+              out[nodeId] = entries.slice(0, MAX_NODE_HISTORY);
             }
-            return node;
-          });
-
-          return {
-            run_id: run.id,
-            timestamp: run.timestamp,
-            totalTime: run.totalTime,
-            node_ids: Object.keys(cleanedOutputs),
-            nodes_snapshot: cleanedNodesSnapshot, // Save cleaned nodes snapshot (no base64 data in node.data.value)
-            outputs: cleanedOutputs // Save cleaned outputs (no base64 data)
-          };
-        });
-
-        // 使用最新的工作流状态构建保存数据
-        const trimChatHistory = (history: any[]): any[] => {
-          if (!Array.isArray(history)) return [];
-          const recent = history.slice(-20);
-          return recent.map((msg: any) => {
-            if (!msg || typeof msg !== 'object') return msg;
-            // Remove assistant thinking process before saving
-            const { thinking, ...rest } = msg;
-            return rest;
-          });
+          }
+          return out;
         };
 
         workflowData = {
           name: options?.name || latestWorkflow.name,
-          description: options?.description || '',
-          nodes: cleanedNodes, // Use cleaned nodes (input nodes with base64 will be kept for now)
-          connections: latestWorkflow.connections, // Save connections
-          history_metadata: cleanedHistoryMetadata, // Use cleaned history metadata (no base64 data)
-          chat_history: trimChatHistory(latestWorkflow.chatHistory || []),
-          extra_info: extraInfo,
-          visibility: latestWorkflow.visibility || 'private'
+          description: options?.description ?? latestWorkflow.description ?? '',
+          nodes: nodesToSave,
+          connections: latestWorkflow.connections,
+          visibility: latestWorkflow.visibility || 'private',
+          tags: latestWorkflow.tags ?? [],
+          node_output_history: trimNodeOutputHistory(latestWorkflow.nodeOutputHistory ?? {})
         };
 
-        // Check if workflow exists in database
-        // UUID format (8-4-4-4-12) means it's a saved workflow, try to update first
+        // Check if workflow exists in database and user owns it (else create new UUID first)
         const isSavedWorkflow = workflowId && workflowId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
         const isTemporaryId = workflowId && (workflowId.startsWith('temp-') || workflowId.startsWith('flow-'));
 
-        // For saved workflows (UUID), try to update first
-        if (isSavedWorkflow) {
-          const updateResponse = await apiRequest(`/api/v1/workflow/${workflowId}`, {
+        const currentUserId = getCurrentUserId();
+        const { owned } = await checkWorkflowOwnership(effectiveId, currentUserId);
+        if (!owned) {
+          // 不拥有（预设、他人工作流或 404）：先分配新 UUID，走创建逻辑
+          effectiveId = typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+          toSave = { ...toSave, id: effectiveId };
+          setWorkflow(prev => (prev && prev.id === workflowId ? { ...prev, id: effectiveId } : prev));
+          if (typeof window !== 'undefined' && window.history?.replaceState) {
+            window.history.replaceState(null, '', `#workflow/${effectiveId}`);
+          }
+          console.log('[Workflow] Workflow not owned (preset/404), creating new with ID:', effectiveId);
+        }
+
+        // For saved workflows (UUID) that user owns, try to update first
+        if (isSavedWorkflow && owned) {
+          const updateResponse = await apiRequest(`/api/v1/workflow/${effectiveId}`, {
             method: 'PUT',
             body: JSON.stringify(workflowData)
           });
 
           if (updateResponse.ok) {
-            console.log('[Workflow] Workflow updated in database:', workflowId);
+            console.log('[Workflow] Workflow updated in database:', effectiveId);
             await saveWorkflowToLocal(latestWorkflow);
-            return workflowId;
+            return effectiveId;
           } else {
             const errorText = await updateResponse.text();
-            // If update fails with 404, workflow doesn't exist - create new one (let backend generate ID)
             if (updateResponse.status === 404) {
-              console.log('[Workflow] Workflow not found, creating new one (backend will generate ID)');
-              // Don't set workflow_id, let backend generate it
-            } else if (updateResponse.status === 400 || updateResponse.status === 403) {
-              // Ownership issue - check if it's a preset workflow
-              const currentUserId = getCurrentUserId();
-              const { isPreset } = await checkWorkflowOwnership(workflowId, currentUserId);
-
-              if (isPreset) {
-                console.log('[Workflow] Preset workflow detected, creating new one (backend will generate ID)');
-                // Don't set workflow_id, let backend generate it
-              } else {
-                throw new Error(`Failed to update workflow: ${errorText}`);
-              }
+              console.log('[Workflow] Workflow not found on update, creating new one');
             } else {
               throw new Error(`Failed to update workflow: ${errorText}`);
             }
           }
         }
 
-        // Create new workflow (backend will generate workflow_id)
-        // Don't set workflow_id for temporary IDs or when update failed
+        // Create new workflow (preset save uses effectiveId; temp/update-failed let backend generate)
+        if (effectiveId !== workflowId && effectiveId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+          workflowData.workflow_id = effectiveId;
+        }
         if (!isTemporaryId && !isSavedWorkflow) {
-          // This shouldn't happen, but if it does, let backend generate ID
           console.warn('[Workflow] Unknown workflow ID format, letting backend generate ID');
         }
 
@@ -792,8 +711,15 @@ export const useWorkflow = () => {
             await Promise.allSettled(remainingInputSavePromises);
           }
 
+          // 新建后：将输入节点中的本地 URL（如 /assets/girl.png）通过 upload 存到后端，再 PUT 节点（数据库以 file 类型存储）
+          const nodesAfterLocalUrls = await resolveInputNodeLocalUrls(newWorkflowId, finalCleanedNodes);
+          await apiRequest(`/api/v1/workflow/${newWorkflowId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ nodes: nodesAfterLocalUrls })
+          });
+
           // Always update workflow with backend-generated ID and cleaned nodes
-          const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: finalCleanedNodes };
+          const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: nodesAfterLocalUrls };
           setWorkflow(updatedWorkflow);
           workflowRef.current = updatedWorkflow;
           await saveWorkflowToLocal(updatedWorkflow);
@@ -814,7 +740,7 @@ export const useWorkflow = () => {
                                (error instanceof Error && error.message.includes('fetch')) ||
                                !navigator.onLine;
 
-        if (isNetworkError) {
+        if (isNetworkError && workflowData) {
           // Add to offline queue
           console.log('[Workflow] Network error detected, adding to offline queue');
           workflowOfflineQueue.addTask(workflowId, workflowData);
@@ -830,7 +756,7 @@ export const useWorkflow = () => {
   }, [saveWorkflowToLocal, setWorkflow, myWorkflows]);
 
   // Load a single workflow from API (or from localStorage in standalone)
-  const loadWorkflow = useCallback(async (workflowId: string): Promise<{ workflow: WorkflowState; activeOutputs: Record<string, any> } | null> => {
+  const loadWorkflow = useCallback(async (workflowId: string): Promise<{ workflow: WorkflowState } | null> => {
     try {
       if (isStandalone()) {
         const saved = localStorage.getItem('omniflow_user_data');
@@ -870,240 +796,205 @@ export const useWorkflow = () => {
             if (url) loadedOutputs[node.id] = url;
           }
         }
-        // 从最近一次运行的 history 恢复各节点执行结果预览（与 result 面板一致：data_url/url/text 等展开为实际值）
-        const normalizeHistoryOutput = (v: any): any => {
-          if (v == null) return v;
-          if (typeof v === 'object' && !Array.isArray(v)) {
-            if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
-            if (v.type === 'url' && typeof v.data === 'string') return v.data;
-            if (v.type === 'text' && v.data !== undefined) return v.data;
-            if (v.type === 'json' && v.data !== undefined) return v.data;
-          }
-          if (Array.isArray(v)) return v.map(normalizeHistoryOutput);
-          return v;
-        };
-        const latestRun = found.history?.[0];
-        if (latestRun?.outputs && typeof latestRun.outputs === 'object') {
-          for (const [nodeId, out] of Object.entries(latestRun.outputs)) {
-            const normalized = normalizeHistoryOutput(out);
-            if (normalized != null) loadedOutputs[nodeId] = normalized;
-          }
-        }
-        setWorkflow(found);
-        return { workflow: found, activeOutputs: loadedOutputs };
+        // Merge loadedOutputs into nodes (outputValue is the single source of truth)
+        const nodesWithOutputs = found.nodes.map((n: WorkflowNode) => ({
+          ...n,
+          outputValue: loadedOutputs[n.id] ?? n.outputValue
+        }));
+        const workflowWithOutputs = { ...found, nodes: nodesWithOutputs };
+        setWorkflow(workflowWithOutputs);
+        return { workflow: workflowWithOutputs };
       }
 
       const response = await apiRequest(`/api/v1/workflow/${workflowId}`);
       if (response.ok) {
         const wf = await response.json();
 
-        // Restore execution state from nodes (status, error, executionTime are already in nodes)
-        // Restore active_outputs from extra_info
-        const extraInfo = wf.extra_info || {};
-        let activeOutputs = extraInfo.active_outputs || {};
-
-        // Load node output data from data_store.outputs (new unified structure)
         const nodes = wf.nodes || [];
-        const loadPromises: Promise<any>[] = [];
-        const loadedOutputs: Record<string, any> = { ...activeOutputs };
+        const loadPromises: Promise<unknown>[] = [];
+        const loadedOutputs: Record<string, any> = {};
 
         for (const node of nodes) {
-          // Skip Input nodes - their output is node.data.value, not stored in data_store
           const tool = TOOLS.find(t => t.id === node.toolId);
-          if (tool && tool.category === 'Input') {
-            // For Input nodes, check node.data.value or data_store.outputs
-            // If it's a file path/URL, load it through the backend API
-            if (node.data.value) {
-              const nodeValue = node.data.value;
-              // Check if it's a file path/URL (not base64)
-              const isFilePath = (val: any): boolean => {
-                if (typeof val === 'string') {
-                  return val.startsWith('/api/v1/workflow/') ||
-                         val.startsWith('./assets/') ||
-                         val.startsWith('http://') ||
-                         val.startsWith('https://');
-                }
-                if (Array.isArray(val)) {
-                  return val.every(item => typeof item === 'string' && (
-                    item.startsWith('/api/v1/workflow/') ||
-                    item.startsWith('./assets/') ||
-                    item.startsWith('http://') ||
-                    item.startsWith('https://')
-                  ));
-                }
-                return false;
-              };
+          if (!tool) continue;
 
-              if (isFilePath(nodeValue)) {
-                // Load file(s) through backend API (await to ensure files are loaded before returning)
-                if (Array.isArray(nodeValue)) {
-                  // Multiple files
-                  const fileLoadPromises = nodeValue.map((path: string) => {
-                    if (path.startsWith('/api/v1/workflow/')) {
-                      // Extract file_id from path: /api/v1/workflow/{workflow_id}/file/{file_id}
-                      const match = path.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
-                      if (match) {
-                        const [, workflowId, fileId] = match;
-                        return getWorkflowFileByFileId(workflowId, fileId);
-                      }
-                    }
-                    // For other paths (./assets/, http://, https://), return as-is
-                    return Promise.resolve(path);
-                  });
-                  loadPromises.push(
-                    Promise.all(fileLoadPromises).then(dataUrls => {
-                      loadedOutputs[node.id] = dataUrls.filter((url: any) => url !== null);
-                      return dataUrls;
-                    }).catch(err => {
-                      console.error(`[Workflow] Error loading input files for node ${node.id}:`, err);
-                      // Fallback to original paths if loading fails
-                      loadedOutputs[node.id] = nodeValue;
-                      return nodeValue;
-                    })
-                  );
-                } else {
-                  // Single file
-                  if (nodeValue.startsWith('/api/v1/workflow/')) {
-                    // Extract file_id from path
-                    const match = nodeValue.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
+          if (tool.category === 'Input') {
+            const nodeValue = node.data?.value;
+            if (!nodeValue) continue;
+
+            const isFilePath = (val: any): boolean => {
+              if (typeof val === 'string') {
+                return val.startsWith('/api/v1/workflow/') ||
+                       val.startsWith('./assets/') ||
+                       val.startsWith('http://') ||
+                       val.startsWith('https://');
+              }
+              if (Array.isArray(val)) {
+                return val.every(item => typeof item === 'string' && (
+                  item.startsWith('/api/v1/workflow/') ||
+                  item.startsWith('./assets/') ||
+                  item.startsWith('http://') ||
+                  item.startsWith('https://')
+                ));
+              }
+              return false;
+            };
+
+            if (isFilePath(nodeValue)) {
+              if (Array.isArray(nodeValue)) {
+                const fileLoadPromises = nodeValue.map((path: string) => {
+                  if (path.startsWith('/api/v1/workflow/')) {
+                    const match = path.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
                     if (match) {
                       const [, workflowId, fileId] = match;
-                      loadPromises.push(
-                        getWorkflowFileByFileId(workflowId, fileId).then(dataUrl => {
-                          if (dataUrl) {
-                            loadedOutputs[node.id] = dataUrl;
-                          } else {
-                            // Fallback to original path if loading fails
-                            loadedOutputs[node.id] = nodeValue;
-                          }
-                        }).catch(err => {
-                          console.error(`[Workflow] Error loading input file for node ${node.id}:`, err);
-                          // Fallback to original path if loading fails
-                          loadedOutputs[node.id] = nodeValue;
-                        })
-                      );
-                    } else {
-                      // Invalid path format, use directly
-                      loadedOutputs[node.id] = nodeValue;
+                      return getWorkflowFileByFileId(workflowId, fileId);
                     }
+                  }
+                  return Promise.resolve(path);
+                });
+                loadPromises.push(
+                  Promise.all(fileLoadPromises).then(dataUrls => {
+                    loadedOutputs[node.id] = dataUrls.filter((url: any) => url !== null);
+                    return dataUrls;
+                  }).catch(err => {
+                    console.error(`[Workflow] Error loading input files for node ${node.id}:`, err);
+                    loadedOutputs[node.id] = nodeValue;
+                    return nodeValue;
+                  })
+                );
+              } else {
+                if (typeof nodeValue === 'string' && nodeValue.startsWith('/api/v1/workflow/')) {
+                  const match = nodeValue.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
+                  if (match) {
+                    const [, workflowId, fileId] = match;
+                    loadPromises.push(
+                      getWorkflowFileByFileId(workflowId, fileId).then(dataUrl => {
+                        if (dataUrl) {
+                          loadedOutputs[node.id] = dataUrl;
+                        } else {
+                          loadedOutputs[node.id] = nodeValue;
+                        }
+                      }).catch(err => {
+                        console.error(`[Workflow] Error loading input file for node ${node.id}:`, err);
+                        loadedOutputs[node.id] = nodeValue;
+                      })
+                    );
                   } else {
-                    // For other paths, use directly
                     loadedOutputs[node.id] = nodeValue;
                   }
+                } else {
+                  loadedOutputs[node.id] = nodeValue;
                 }
-              } else {
-                // Not a file path, use directly (shouldn't happen for saved workflows, but handle it)
-                loadedOutputs[node.id] = nodeValue;
               }
+            } else {
+              loadedOutputs[node.id] = nodeValue;
             }
             continue;
           }
 
-          // Only load output data for nodes that have been executed
-          if (node.status === NodeStatus.SUCCESS || node.status === NodeStatus.ERROR) {
-            if (tool && tool.outputs) {
-              // Load output data for each output port from data_store.outputs
-              for (const port of tool.outputs) {
-                // Try to load from data_store.outputs using new interface
-                loadPromises.push(
-                  getNodeOutputData(wf.workflow_id, node.id, port.id)
-                    .then(dataUrl => {
-                      if (dataUrl) {
-                        // Update activeOutputs with loaded file
-                        if (!loadedOutputs[node.id]) {
-                          loadedOutputs[node.id] = {};
-                        }
-                        if (tool.outputs.length === 1) {
-                          // Single output node
-                          loadedOutputs[node.id] = dataUrl;
-                        } else {
-                          // Multi-output node
-                          if (typeof loadedOutputs[node.id] !== 'object') {
-                            loadedOutputs[node.id] = {};
-                          }
-                          loadedOutputs[node.id][port.id] = dataUrl;
-                        }
-                      }
-                    })
-                    .catch(err => {
-                      // 404 errors are expected if the node output doesn't exist yet, don't log as error
-                      const errorMsg = err instanceof Error ? err.message : String(err);
-                      if (!errorMsg.includes('404') && !errorMsg.includes('not found')) {
-                        console.warn(`[Workflow] Failed to load node output data for ${node.id}/${port.id}:`, errorMsg);
-                      }
-                    })
-                );
-              }
-            }
+          if (node.outputValue != null) {
+            loadedOutputs[node.id] = node.outputValue;
           }
         }
 
-        // Wait for all output data to load (or timeout after 5 seconds)
-        await Promise.race([
-          Promise.all(loadPromises),
-          new Promise(resolve => setTimeout(resolve, 5000))
-        ]);
+        if (loadPromises.length > 0) {
+          await Promise.race([
+            Promise.all(loadPromises),
+            new Promise(resolve => setTimeout(resolve, 5000))
+          ]);
+        }
 
-        // Use loaded outputs, fallback to saved activeOutputs if loading failed
-        activeOutputs = Object.keys(loadedOutputs).length > 0 ? loadedOutputs : activeOutputs;
+        const extraInfo = wf.extra_info || {};
+        if (extraInfo.active_outputs && typeof extraInfo.active_outputs === 'object') {
+          Object.entries(extraInfo.active_outputs).forEach(([nodeId, value]) => {
+            if (loadedOutputs[nodeId] == null) {
+              loadedOutputs[nodeId] = value;
+            }
+          });
+        }
 
+        let normalizedHistory = normalizeHistoryMap(wf.node_output_history || {});
+        if ((!wf.node_output_history || Object.keys(normalizedHistory).length === 0) && wf.data_store?.outputs) {
+          const dataStoreOutputs = wf.data_store.outputs;
+          const legacyHistory: Record<string, NodeHistoryEntry[]> = {};
+          for (const nodeId of Object.keys(dataStoreOutputs)) {
+            const portData = dataStoreOutputs[nodeId];
+            if (!portData || typeof portData !== 'object') continue;
+            const portIds = Object.keys(portData);
+            if (portIds.length === 0) continue;
+            const histories = portIds.map((pid: string) => {
+              const h = portData[pid]?.history;
+              return Array.isArray(h) ? h : [];
+            });
+            const minLen = Math.min(...histories.map(h => h.length));
+            if (minLen === 0) continue;
+            const entries: NodeHistoryEntry[] = [];
+            for (let i = 0; i < minLen; i++) {
+              const firstRef = histories[0][i];
+              const ts = firstRef?.metadata?.created_at ?? Math.floor(Date.now() / 1000) * 1000;
+              const timestamp = typeof ts === 'number' ? (ts < 1e12 ? ts * 1000 : ts) : Date.now();
+              const id = `node-${nodeId}-${timestamp}`;
+              let output: any;
+              if (portIds.length === 1) {
+                output = histories[0][i];
+              } else {
+                output = {} as Record<string, any>;
+                portIds.forEach((pid, idx) => {
+                  output[pid] = histories[idx][i];
+                });
+              }
+              const entry = createHistoryEntryFromValue({ id, timestamp, value: output });
+              if (entry) entries.push(entry);
+            }
+            if (entries.length > 0) {
+              legacyHistory[nodeId] = entries;
+            }
+          }
+          normalizedHistory = normalizeHistoryMap(legacyHistory);
+        }
+
+        const createT = wf.create_t ?? wf.create_at;
+        const createAtMs = createT != null ? (createT < 1e12 ? createT * 1000 : createT) : undefined;
+
+        const nodesWithOutputs = nodes.map((n: WorkflowNode) => ({
+          ...n,
+          outputValue: loadedOutputs[n.id] ?? n.outputValue
+        }));
         const workflow: WorkflowState = {
           id: wf.workflow_id,
           name: wf.name,
-          nodes: nodes, // Contains execution state (status, error, executionTime)
+          description: wf.description ?? '',
+          nodes: nodesWithOutputs,
           connections: wf.connections || [],
           isDirty: false,
           isRunning: false,
           globalInputs: wf.global_inputs || {},
-          env: {
-            lightx2v_url: '',
-            lightx2v_token: ''
-          },
-          history: (wf.history_metadata || []).map((meta: any) => ({
-            id: meta.run_id || `run-${meta.timestamp}`,
-            timestamp: meta.timestamp,
-            totalTime: meta.totalTime,
-            nodesSnapshot: [],
-            outputs: {}
-          })),
+          nodeOutputHistory: normalizedHistory,
           chatHistory: wf.chat_history || [],
           updatedAt: wf.update_t * 1000,
-          showIntermediateResults: false,
+          createAt: createAtMs,
           visibility: wf.visibility || 'private',
           thumsupCount: wf.thumsup_count ?? 0,
-          thumsupLiked: wf.thumsup_liked ?? false
+          thumsupLiked: wf.thumsup_liked ?? false,
+          userId: wf.user_id,
+          tags: wf.tags ?? []
         };
         setWorkflow(workflow);
-        return { workflow, activeOutputs };
+        return { workflow };
       } else {
         console.warn('[Workflow] Failed to load workflow from API, trying localStorage');
-        // Fallback to localStorage：从最近一次运行恢复节点执行结果预览
+        // Fallback to localStorage：用节点的 outputValue 恢复执行结果预览（不依赖 nodeOutputHistory）
         const saved = localStorage.getItem('omniflow_user_data');
         if (saved) {
           const workflows = JSON.parse(saved);
           const found = workflows.find((w: WorkflowState) => w.id === workflowId);
           if (found) {
-            const fallbackOutputs: Record<string, any> = {};
-            const normalizeHistoryOutput = (v: any): any => {
-              if (v == null) return v;
-              if (typeof v === 'object' && !Array.isArray(v)) {
-                if (v.type === 'data_url' && typeof v._full_data === 'string') return v._full_data;
-                if (v.type === 'url' && typeof v.data === 'string') return v.data;
-                if (v.type === 'text' && v.data !== undefined) return v.data;
-                if (v.type === 'json' && v.data !== undefined) return v.data;
-              }
-              if (Array.isArray(v)) return v.map(normalizeHistoryOutput);
-              return v;
+            const normalizedFound: WorkflowState = {
+              ...found,
+              nodeOutputHistory: normalizeHistoryMap(found.nodeOutputHistory)
             };
-            const latestRun = found.history?.[0];
-            if (latestRun?.outputs && typeof latestRun.outputs === 'object') {
-              for (const [nodeId, out] of Object.entries(latestRun.outputs)) {
-                const normalized = normalizeHistoryOutput(out);
-                if (normalized != null) fallbackOutputs[nodeId] = normalized;
-              }
-            }
-            setWorkflow(found);
-            return { workflow: found, activeOutputs: fallbackOutputs };
+            setWorkflow(normalizedFound);
+            return { workflow: normalizedFound };
           }
         }
         return null;
@@ -1191,6 +1082,49 @@ export const useWorkflow = () => {
     }
   }, [setMyWorkflows, setWorkflow]);
 
+  /**
+   * 确保当前工作流属于当前用户；若不拥有（预设/404），则先创建新 UUID 并更新状态。
+   * 用于 update/保存/自动保存前统一逻辑：不拥有则先建新再操作。
+   * @returns 实际应使用的 workflow id（原 id 或新建的 UUID）
+   */
+  const ensureWorkflowOwned = useCallback(async (current: WorkflowState): Promise<string> => {
+    if (isStandalone()) return current.id;
+    const { owned } = await checkWorkflowOwnership(current.id, getCurrentUserId());
+    if (owned) return current.id;
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const MAX_NODE = 20;
+    const trimNodeHist = (hist: Record<string, any[]>) => {
+      if (!hist || typeof hist !== 'object') return {};
+      const out: Record<string, any[]> = {};
+      for (const [nodeId, entries] of Object.entries(hist)) {
+        if (Array.isArray(entries)) out[nodeId] = entries.slice(0, MAX_NODE);
+      }
+      return out;
+    };
+    const createData = {
+      name: current.name,
+      description: current.description ?? '',
+      nodes: current.nodes,
+      connections: current.connections,
+      workflow_id: newId,
+      tags: current.tags ?? [],
+      node_output_history: trimNodeHist(current.nodeOutputHistory ?? {})
+    };
+    const res = await apiRequest('/api/v1/workflow/create', { method: 'POST', body: JSON.stringify(createData) });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Failed to create workflow: ${text}`);
+    }
+    setWorkflow(prev => (prev && prev.id === current.id ? { ...prev, id: newId } : prev));
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      window.history.replaceState(null, '', `#workflow/${newId}`);
+    }
+    console.log('[Workflow] ensureWorkflowOwned: created new workflow', newId);
+    return newId;
+  }, [setWorkflow]);
+
   /** 获取当前最新工作流（用于 AI 等需要“实时”状态的场景，避免闭包拿到旧状态） */
   const getWorkflow = useCallback(() => workflowRef.current, []);
 
@@ -1207,6 +1141,7 @@ export const useWorkflow = () => {
     loadWorkflows,
     deleteWorkflow,
     updateWorkflowVisibility,
+    ensureWorkflowOwned,
     isSaving,
     isLoading
   };

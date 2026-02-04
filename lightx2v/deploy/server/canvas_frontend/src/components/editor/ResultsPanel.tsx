@@ -10,7 +10,8 @@ import {
   ArrowUpRight,
   AlertCircle,
   Volume2,
-  Video as VideoIcon
+  Video as VideoIcon,
+  Clock
 } from 'lucide-react';
 import { WorkflowState, NodeStatus, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
@@ -24,6 +25,7 @@ import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWork
 interface ResultsPanelProps {
   lang: Language;
   workflow: WorkflowState;
+  showIntermediateResults: boolean;
   resultsCollapsed: boolean;
   onToggleCollapsed: () => void;
   resultEntries: ResultEntry[];
@@ -53,6 +55,7 @@ function ResolvedImage({ content, resolveLightX2VResultRef, className }: { conte
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({
   lang,
   workflow,
+  showIntermediateResults,
   resultsCollapsed,
   onToggleCollapsed,
   resultEntries,
@@ -86,7 +89,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                 onClick={onToggleShowIntermediate}
                 className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-400 hover:text-indigo-300 transition-all"
               >
-                {workflow.showIntermediateResults ? (
+                {showIntermediateResults ? (
                   <ToggleRight size={16} className="text-#90dce1" />
                 ) : (
                   <ToggleLeft size={16} />
@@ -115,7 +118,9 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
               const elapsed =
                 node.status === NodeStatus.RUNNING
                   ? ((performance.now() - (node.startTime || performance.now())) / 1000).toFixed(1) + 's'
-                  : formatTime(node.executionTime);
+                  : node.status === NodeStatus.PENDING
+                    ? (lang === 'zh' ? '排队中' : 'Pending')
+                    : formatTime(node.executionTime);
 
               const expand = (fieldId?: string) => onExpandOutput(node.id, fieldId, runId);
 
@@ -125,6 +130,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                   className={`min-w-[320px] max-w-[420px] bg-slate-900/50 rounded-[32px] border p-6 flex flex-col shadow-2xl relative overflow-hidden group transition-all h-[190px] ${
                     node.status === NodeStatus.ERROR
                       ? 'border-red-500/30 bg-red-500/5'
+                      : node.status === NodeStatus.PENDING
+                      ? 'border-amber-500/30 bg-amber-500/5'
                       : isTerminal
                       ? 'border-emerald-500/30'
                       : 'border-slate-800/60'
@@ -134,10 +141,10 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[9px] font-black text-slate-500 uppercase flex items-center gap-2">
                         {React.createElement(getIcon(tool.icon), { size: 12 })}{' '}
-                        {lang === 'zh' ? tool.name_zh : tool.name}
+                        {node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)}
                       </span>
                       <span className="text-[8px] font-bold text-slate-600">
-                        {runId === 'current' && (node.status === NodeStatus.RUNNING || node.executionTime !== undefined)
+                        {runId === 'current' && (node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.executionTime !== undefined)
                           ? `${t('run_time')}: ${elapsed}`
                           : new Date(entry.runTimestamp).toLocaleTimeString()}
                       </span>
@@ -167,6 +174,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                     className={`flex-1 overflow-y-auto rounded-xl p-3 custom-scrollbar ${
                       node.status === NodeStatus.ERROR
                         ? 'bg-red-500/10 border border-red-500/20'
+                        : node.status === NodeStatus.PENDING
+                        ? 'bg-amber-500/10 border border-amber-500/20'
                         : 'bg-slate-950/40'
                     }`}
                   >
@@ -175,6 +184,11 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         <AlertCircle size={24} className="text-red-500 mb-2" />
                         <p className="text-[10px] text-red-400 font-bold uppercase mb-1">{t('execution_failed')}</p>
                         <p className="text-[9px] text-slate-400 line-clamp-3 leading-relaxed">{node.error}</p>
+                      </div>
+                    ) : node.status === NodeStatus.PENDING ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-2">
+                        <Clock size={24} className="text-amber-400 mb-2" />
+                        <p className="text-[10px] text-amber-400 font-bold uppercase">{lang === 'zh' ? '排队中' : 'Pending'}</p>
                       </div>
                     ) : type === DataType.TEXT ? (
                       typeof res === 'object' && res !== null && !Array.isArray(res) && (res as any)._type !== 'reference' ? (

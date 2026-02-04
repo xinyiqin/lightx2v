@@ -1,7 +1,7 @@
 import React from 'react';
 import { LayoutGrid, Users } from 'lucide-react';
 import { WorkflowState } from '../../../types';
-import { getPresetWorkflows } from '../../../preset_workflow';
+import { PRESET_WORKFLOWS } from '../../../preset_workflow';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { WorkflowCard } from './WorkflowCard';
 import { Header } from '../common/Header';
@@ -59,7 +59,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onAIGenerate={onAIGenerate}
       />
       <main className="flex-1 p-12 w-full overflow-y-auto custom-scrollbar relative">
-        <div className="max-w-7xl mx-auto space-y-12 pb-24 relative z-10">
+        <div className="w-full max-w-7xl mx-auto space-y-12 pb-24 relative z-10">
           <div className={`grid border-b border-slate-800/60 w-full max-w-4xl mx-auto ${hideCommunityTab ? 'grid-cols-2' : 'grid-cols-3'}`}>
             <button
               onClick={() => onSetActiveTab('MY')}
@@ -100,7 +100,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 w-full min-w-full">
             {activeTab === 'MY' ? (
               myWorkflows.length === 0 ? (
                 <div className="col-span-full py-32 flex flex-col items-center justify-center opacity-20">
@@ -145,7 +145,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 ))
               )
             ) : (
-              getPresetWorkflows().map((w) => (
+              PRESET_WORKFLOWS.map((w) => (
                 <WorkflowCard
                   key={w.id}
                   workflow={w}

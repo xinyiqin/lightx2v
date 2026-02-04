@@ -1,51 +1,55 @@
 import { apiRequest } from './apiClient';
 import { isStandalone } from '../config/runtimeMode';
 
+/** 仅前端模式下的默认用户 id，用于归属判断语义一致 */
+const DEFAULT_USER_ID_STANDALONE = 'default-user';
+
 /**
- * 检查工作流是否为预设工作流（不属于当前用户）
- * 纯前端模式：不请求后端，视为非预设
+ * 检查工作流是否属于当前用户（是否可更新/保存/自动保存）
+ * 返回 owned：当前用户是否拥有该工作流；!owned 时需先创建新 UUID 再操作。
+ * 纯前端模式：preset-* 视为不拥有，其他视为拥有（本地）。
  */
 export async function checkWorkflowOwnership(
   workflowId: string,
   currentUserId: string | null
-): Promise<{ isPreset: boolean; workflow: any | null }> {
+): Promise<{ owned: boolean; isPreset: boolean; workflow: any | null }> {
   if (!workflowId) {
-    return { isPreset: false, workflow: null };
+    return { owned: false, isPreset: false, workflow: null };
   }
   if (isStandalone()) {
-    return { isPreset: false, workflow: null };
+    const isPreset = workflowId.startsWith('preset-');
+    return { owned: !isPreset, isPreset, workflow: null };
   }
-  if (!currentUserId) {
-    return { isPreset: false, workflow: null };
-  }
+  const userId = currentUserId ?? DEFAULT_USER_ID_STANDALONE;
 
   try {
     const checkResponse = await apiRequest(`/api/v1/workflow/${workflowId}`);
 
     if (checkResponse.ok) {
       const existingWorkflow = await checkResponse.json();
-      // 如果工作流存在但不属于当前用户，则是预设工作流
-      if (existingWorkflow.user_id && existingWorkflow.user_id !== currentUserId) {
-        return { isPreset: true, workflow: null };
-      }
-      return { isPreset: false, workflow: existingWorkflow };
+      const belongsToUser = existingWorkflow.user_id && existingWorkflow.user_id === userId;
+      const isPreset = !belongsToUser;
+      return { owned: !!belongsToUser, isPreset, workflow: belongsToUser ? existingWorkflow : null };
     } else {
-      // 工作流不存在
-      return { isPreset: false, workflow: null };
+      // 工作流不存在（404 等）→ 不拥有，需先创建新 UUID
+      return { owned: false, isPreset: true, workflow: null };
     }
   } catch (error) {
     console.warn('[WorkflowUtils] Failed to check workflow ownership:', error);
-    // 出错时假设不是预设工作流，继续尝试更新
-    return { isPreset: false, workflow: null };
+    return { owned: false, isPreset: true, workflow: null };
   }
 }
 
 /**
  * 获取当前用户ID
- * @returns 当前用户ID或null
+ * 仅前端模式返回默认用户 id，便于归属判断一致。
+ * @returns 当前用户ID或null（非 standalone 时）；standalone 时为默认用户 id
  */
 export function getCurrentUserId(): string | null {
   try {
+    if (isStandalone()) {
+      return DEFAULT_USER_ID_STANDALONE;
+    }
     const sharedStore = (window as any).__SHARED_STORE__;
     if (sharedStore) {
       const user = sharedStore.getState('user');

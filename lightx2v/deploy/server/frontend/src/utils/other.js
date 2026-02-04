@@ -2,6 +2,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import i18n from './i18n'
 import router from '../router'
+import { sharedStore } from './sharedStore'
 export const t = i18n.global.t
 export const locale = i18n.global.locale
 
@@ -950,10 +951,12 @@ export const locale = i18n.global.locale
 
                 if (response.ok) {
                     localStorage.setItem('accessToken', data.access_token);
+                    sharedStore.setState('token', data.access_token);
                     if (data.refresh_token) {
                         localStorage.setItem('refreshToken', data.refresh_token);
                     }
                     localStorage.setItem('currentUser', JSON.stringify(data.user_info));
+                    sharedStore.setState('user', data.user_info);
                     currentUser.value = data.user_info;
 
                     // 登录成功后初始化数据
@@ -1046,10 +1049,12 @@ export const locale = i18n.global.locale
                     const data = await response.json();
                     console.log(data);
                     localStorage.setItem('accessToken', data.access_token);
+                    sharedStore.setState('token', data.access_token);
                     if (data.refresh_token) {
                         localStorage.setItem('refreshToken', data.refresh_token);
                     }
                     localStorage.setItem('currentUser', JSON.stringify(data.user_info));
+                    sharedStore.setState('user', data.user_info);
                     currentUser.value = data.user_info;
                     isLoggedIn.value = true;
 
@@ -1100,6 +1105,7 @@ export const locale = i18n.global.locale
             localStorage.removeItem('accessToken');
             localStorage.removeItem('refreshToken');
             localStorage.removeItem('currentUser');
+            sharedStore.clear();
             refreshPromise = null;
 
             clearAllCache();
@@ -6448,6 +6454,7 @@ export const locale = i18n.global.locale
                     const data = await response.json();
                     if (data.access_token) {
                         localStorage.setItem('accessToken', data.access_token);
+                        sharedStore.setState('token', data.access_token);
                     }
                     if (data.refresh_token) {
                         localStorage.setItem('refreshToken', data.refresh_token);
@@ -6455,6 +6462,7 @@ export const locale = i18n.global.locale
                     if (data.user_info) {
                         currentUser.value = data.user_info;
                         localStorage.setItem('currentUser', JSON.stringify(data.user_info));
+                        sharedStore.setState('user', data.user_info);
                     }
                     return true;
                 } catch (error) {

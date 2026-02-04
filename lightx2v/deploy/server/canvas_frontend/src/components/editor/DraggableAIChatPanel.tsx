@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { X, Bot, GripVertical, RotateCcw, ImagePlus, Globe, Send, Sparkle, Workflow, VideoIcon, Pencil, Lightbulb, Shuffle } from 'lucide-react';
+import { X, Bot, GripVertical, RotateCcw, ImagePlus, Globe, Send, Sparkle, Workflow, VideoIcon, Pencil, Lightbulb, Shuffle, CheckCircle2, Circle, Square } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { ChatMessage as ChatMessageType } from '../../hooks/useAIChatWorkflow';
@@ -10,6 +10,10 @@ interface DraggableAIChatPanelProps {
   onClose: () => void;
   chatHistory: ChatMessageType[];
   isProcessing: boolean;
+  isExecutingOperations?: boolean;
+  executingProgress?: { current: number; total: number };
+  executingStepLabels?: string[];
+  onStopGeneration?: () => void;
   onSendMessage: (message: string, options?: { image?: { data: string; mimeType: string }; useSearch?: boolean }) => void;
   onClearHistory?: () => void;
   chatContextNodes?: { nodeId: string; name: string }[];
@@ -36,6 +40,8 @@ const MIN_WIDTH = 300;
 const MIN_HEIGHT = 300;
 const AUTO_SCROLL_THRESHOLD = 160;
 const QUICK_TIP_DISPLAY_COUNT = 3;
+/** IME 刚结束组合后的一小段时间内，Enter 视为选字确认，不发送 */
+const IME_ENTER_IGNORE_MS = 150;
 
 function shuffleArray<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -89,6 +95,10 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   onClose,
   chatHistory,
   isProcessing,
+  isExecutingOperations = false,
+  executingProgress = { current: 0, total: 0 },
+  executingStepLabels = [],
+  onStopGeneration = () => {},
   onSendMessage,
   onClearHistory,
   chatContextNodes = [],
@@ -115,6 +125,8 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
   const headerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
+  const lastCompositionEndRef = useRef(0);
   const shouldAutoScrollRef = useRef(true);
 
   // 位置和大小状态
@@ -509,6 +521,52 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
 
       {/* Input */}
       <div className="p-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-3 shrink-0">
+        {/* 方案 B + C：Workflow 图标 + 进度条 + 步骤列表逐条打勾 */}
+        {isExecutingOperations && executingProgress.total > 0 && (
+          <div className="rounded-xl bg-[#90dce1]/10 border border-[#90dce1]/30 text-[#90dce1] overflow-hidden">
+            <div className="flex items-center gap-3 px-3 py-2">
+              <Workflow className="w-5 h-5 shrink-0 animate-pulse" aria-hidden />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold">
+                  {lang === 'zh' ? '正在应用操作' : 'Applying operations'}
+                  {' '}
+                  <span className="text-slate-300 font-mono">
+                    ({executingProgress.current}/{executingProgress.total})
+                  </span>
+                </p>
+                <div className="mt-1.5 h-1 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[#90dce1] transition-all duration-300"
+                    style={{ width: `${executingProgress.total ? (100 * executingProgress.current / executingProgress.total) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            {executingStepLabels.length > 0 && (
+              <ul className="px-3 pb-2.5 pt-0 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                {executingStepLabels.map((label, i) => {
+                  const done = i < executingProgress.current;
+                  const current = i === executingProgress.current;
+                  return (
+                    <li
+                      key={i}
+                      className={`flex items-center gap-2 text-[11px] transition-colors ${
+                        done ? 'text-emerald-400' : current ? 'text-[#90dce1] font-semibold' : 'text-slate-500'
+                      }`}
+                    >
+                      {done ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" aria-hidden />
+                      ) : (
+                        <Circle className={`w-3.5 h-3.5 shrink-0 ${current ? 'text-[#90dce1]' : 'text-slate-600'}`} aria-hidden />
+                      )}
+                      <span className="truncate">{label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
         {!isProcessing && (
           <div className="flex flex-wrap items-center gap-2">
             {visibleQuickTipEntries.map((entry) => {
@@ -608,44 +666,65 @@ export const DraggableAIChatPanel: React.FC<DraggableAIChatPanelProps> = ({
                 ref={chatInputRef}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                onCompositionStart={() => { isComposingRef.current = true; }}
+                onCompositionEnd={() => {
+                  isComposingRef.current = false;
+                  lastCompositionEndRef.current = Date.now();
+                }}
                 onKeyDown={(e) => {
-                  // IME 组合输入中（如中文选字）按 Enter 时不发送，等组合完毕后再按 Enter 才发送
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  if (e.key !== 'Enter' || e.shiftKey) return;
+                  if (e.nativeEvent.isComposing || isComposingRef.current) return;
+                  if (Date.now() - lastCompositionEndRef.current < IME_ENTER_IGNORE_MS) {
                     e.preventDefault();
-                    handleSend();
+                    return;
                   }
+                  e.preventDefault();
+                  handleSend();
                 }}
                 placeholder={lang === 'zh' ? '有什么我可以帮您的？' : 'Ask me anything...'}
                 className="w-full bg-slate-900/70 border border-slate-800 rounded-2xl py-3 pl-4 pr-20 text-[12px] text-slate-200 focus:ring-2 focus:ring-[#90dce1]/20 transition-all outline-none placeholder:text-slate-600 shadow-inner"
                 disabled={isProcessing}
               />
               <div className="absolute right-2 top-2 flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    if (isGeminiModel) return;
-                    setIsSearchEnabled(!isSearchEnabled);
-                  }}
-                  className={`p-1.5 rounded-xl transition-all border ${
-                    isSearchEnabled
-                      ? 'bg-[#90dce1]/10 border-[#90dce1]/50 text-[#90dce1]'
-                      : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400'
-                  } ${isGeminiModel ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  title={
-                    isGeminiModel
-                      ? (lang === 'zh' ? 'Gemini 模型不支持联网' : 'Gemini does not support web search')
-                      : (lang === 'zh' ? '联网搜索' : 'Web Search')
-                  }
-                  disabled={isProcessing || isGeminiModel}
-                >
-                  <Globe size={16} />
-                </button>
-                <button
-                  onClick={() => handleSend()}
-                  disabled={isProcessing || (!chatInput.trim() && !selectedImage)}
-                  className="p-1.5 bg-[#90dce1] text-slate-950 rounded-xl hover:bg-[#a6e4e8] transition-all disabled:opacity-20 disabled:grayscale shadow-lg active:scale-95"
-                >
-                  <Send size={16} />
-                </button>
+                {!isProcessing && (
+                  <button
+                    onClick={() => {
+                      if (isGeminiModel) return;
+                      setIsSearchEnabled(!isSearchEnabled);
+                    }}
+                    className={`p-1.5 rounded-xl transition-all border ${
+                      isSearchEnabled
+                        ? 'bg-[#90dce1]/10 border-[#90dce1]/50 text-[#90dce1]'
+                        : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400'
+                    } ${isGeminiModel ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    title={
+                      isGeminiModel
+                        ? (lang === 'zh' ? 'Gemini 模型不支持联网' : 'Gemini does not support web search')
+                        : (lang === 'zh' ? '联网搜索' : 'Web Search')
+                    }
+                    disabled={isGeminiModel}
+                  >
+                    <Globe size={16} />
+                  </button>
+                )}
+                {isProcessing ? (
+                  <button
+                    type="button"
+                    onClick={onStopGeneration}
+                    className="p-1.5 bg-red-500/90 hover:bg-red-500 text-white rounded-xl transition-all shadow-lg active:scale-95"
+                    title={lang === 'zh' ? '停止生成' : 'Stop generating'}
+                  >
+                    <Square size={14} className="fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!chatInput.trim() && !selectedImage}
+                    className="p-1.5 bg-[#90dce1] text-slate-950 rounded-xl hover:bg-[#a6e4e8] transition-all disabled:opacity-20 disabled:grayscale shadow-lg active:scale-95"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </div>
             </div>
           </div>

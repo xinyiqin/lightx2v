@@ -44,10 +44,10 @@ export const Connection: React.FC<ConnectionProps> = ({
   const y2 = targetNode.y + 71 + (inputPortIndex * 30); // Input port center Y
 
   const path = `M ${x1} ${y1} C ${x1 + 100} ${y1}, ${x2 - 100} ${y2}, ${x2} ${y2}`;
-  const isTargetRunning = targetNode.status === NodeStatus.RUNNING;
+  const isTargetRunning = targetNode.status === NodeStatus.RUNNING || targetNode.status === NodeStatus.PENDING;
 
   return (
-    <g>
+    <g style={{ pointerEvents: 'auto' }}>
       <path
         d={path}
         stroke="transparent"

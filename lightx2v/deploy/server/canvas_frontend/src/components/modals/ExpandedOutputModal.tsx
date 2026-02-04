@@ -55,6 +55,28 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
 
   if (!expandedOutput || !expandedResultData) return null;
 
+  const getDownloadUrl = (): string | null => {
+    const c = expandedResultData.content;
+    if (expandedResultData.type !== DataType.TEXT && isLightX2VResultRef(c) && resolvedMediaUrl) return resolvedMediaUrl;
+    if (typeof c === 'string') return c || null;
+    if (Array.isArray(c)) {
+      const first = c.find((item: any) => typeof item === 'string');
+      return first ?? null;
+    }
+    if (c && typeof c === 'object') {
+      return (
+        (typeof (c as any).url === 'string' && (c as any).url) ||
+        (typeof (c as any).file_url === 'string' && (c as any).file_url) ||
+        (typeof (c as any).path === 'string' && (c as any).path) ||
+        (typeof (c as any).src === 'string' && (c as any).src) ||
+        (typeof (c as any).data === 'string' && (c as any).data) ||
+        (typeof (c as any)._full_data === 'string' && (c as any)._full_data) ||
+        null
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-slate-950/90 backdrop-blur-2xl animate-in fade-in duration-300">
       <div className="bg-slate-900 border border-slate-800 rounded-[40px] shadow-2xl w-full max-w-5xl h-full flex flex-col relative overflow-hidden">
@@ -88,7 +110,15 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               </button>
             ) : (
               <button
-                onClick={() => downloadFile(expandedResultData.content, expandedResultData.label, expandedResultData.type)}
+                onClick={async () => {
+                  const url = getDownloadUrl();
+                  if (url == null) return;
+                  try {
+                    await downloadFile(url, expandedResultData.label, expandedResultData.type);
+                  } catch (e) {
+                    console.error('[ExpandedOutputModal] Download failed:', e);
+                  }
+                }}
                 className="p-3 bg-slate-800 hover:bg-slate-700 rounded-2xl transition-all active:scale-90"
               >
                 <Download size={20} />

@@ -12,7 +12,9 @@ import {
   ListPlus,
   CheckCircle2,
   X,
-  Globe
+  Globe,
+  Tag,
+  Plus
 } from 'lucide-react';
 import { WorkflowState, WorkflowNode, Port, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
@@ -23,7 +25,6 @@ interface NodeConfigPanelProps {
   lang: Language;
   workflow: WorkflowState;
   selectedNodeId: string | null;
-  activeOutputs: Record<string, any>;
   sourceOutputs: Record<string, any>;
   disconnectedInputs: Array<{
     nodeId: string;
@@ -45,8 +46,11 @@ interface NodeConfigPanelProps {
   cloneVoiceList: any[];
   loadingCloneVoiceList: boolean;
   onUpdateNodeData: (nodeId: string, key: string, value: any) => void;
+  onUpdateNodeName?: (nodeId: string, name: string) => void;
   onDeleteNode: (nodeId: string) => void;
   onGlobalInputChange: (nodeId: string, portId: string, value: any) => void;
+  onDescriptionChange?: (description: string) => void;
+  onTagsChange?: (tags: string[]) => void;
   onShowCloneVoiceModal: () => void;
   collapsed?: boolean;
   style?: React.CSSProperties;
@@ -56,7 +60,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   lang,
   workflow,
   selectedNodeId,
-  activeOutputs,
   sourceOutputs,
   disconnectedInputs,
   lightX2VVoiceList,
@@ -72,20 +75,25 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   cloneVoiceList,
   loadingCloneVoiceList,
   onUpdateNodeData,
+  onUpdateNodeName,
   onDeleteNode,
   onGlobalInputChange,
+  onDescriptionChange,
+  onTagsChange,
   onShowCloneVoiceModal,
   collapsed = false,
   style
 }) => {
   const { t } = useTranslation(lang);
   const [uploadingNodes, setUploadingNodes] = useState<Set<string>>(new Set());
+  const [newTagInput, setNewTagInput] = useState('');
   const selectedNode = selectedNodeId ? workflow.nodes.find(n => n.id === selectedNodeId) : null;
+  const tags = workflow.tags ?? [];
 
   if (selectedNodeId && selectedNode) {
       return (
         <aside
-          className={`flex flex-col z-30 transition-all ${collapsed ? 'h-0 overflow-hidden' : 'p-6 overflow-y-auto'}`}
+          className={`flex flex-col z-30 transition-all ${collapsed ? 'h-0 overflow-hidden' : 'flex-1 min-h-0 p-6 overflow-y-auto'}`}
           style={style}
       >
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
@@ -101,6 +109,21 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </button>
           </div>
           <div className="space-y-6">
+            {/* Node name */}
+            {onUpdateNodeName && (
+              <div className="space-y-2">
+                <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
+                  <Boxes size={12} /> {t('node_name')}
+                </span>
+                <input
+                  type="text"
+                  value={selectedNode.name ?? ''}
+                  onChange={e => onUpdateNodeName(selectedNode.id, e.target.value)}
+                  placeholder={t('node_name_placeholder')}
+                  className="w-full bg-slate-800/80 hover:bg-slate-800 rounded-xl p-3 text-xs border border-slate-700/60 hover:border-slate-600 text-slate-200 focus:outline-none focus:ring-2 focus:ring-#90dce1/50 focus:border-[#90dce1] transition-all placeholder:text-slate-500"
+                />
+              </div>
+            )}
             {/* Model Selection */}
             {TOOLS.find(t => t.id === selectedNode.toolId)?.models && (
               <div className="space-y-2">
@@ -563,7 +586,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   const isCustomOutput = sourceNode.data.customOutputs.some((o: any) => o.id === conn.sourcePortId);
                   if (!isCustomOutput) return null;
 
-                  const sourceOutput = activeOutputs[conn.sourceNodeId] || sourceOutputs[conn.sourceNodeId];
+                  const sourceOutput = sourceOutputs[conn.sourceNodeId];
                   let fieldValue = '';
                   if (sourceOutput && typeof sourceOutput === 'object' && conn.sourcePortId in sourceOutput) {
                     fieldValue = typeof sourceOutput[conn.sourcePortId] === 'string' ? sourceOutput[conn.sourcePortId] : JSON.stringify(sourceOutput[conn.sourcePortId], null, 2);
@@ -636,10 +659,78 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     );
   }
 
-  // Global Inputs Panel
+  // Global Inputs Panel (includes workflow description + global inputs)
   return (
-    <aside className="w-80 border-l border-slate-800/60 bg-slate-900/40 backdrop-blur-xl flex flex-col z-30 p-6 overflow-y-auto">
+    <aside className="w-80 border-l border-slate-800/60 bg-slate-900/40 backdrop-blur-xl flex flex-col flex-1 min-h-0 z-30 p-6 overflow-y-auto">
       <div className="space-y-12">
+        {/* Workflow description */}
+        <div className="space-y-6">
+          <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+            <Globe size={14} /> {t('workflow_description')}
+          </h2>
+          <textarea
+            value={workflow.description ?? ''}
+            onChange={e => onDescriptionChange?.(e.target.value)}
+            placeholder={t('workflow_description_placeholder')}
+            className="w-full min-h-[80px] bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs resize-y focus:border-[#90dce1] transition-all custom-scrollbar placeholder:text-slate-500"
+          />
+        </div>
+        {/* Workflow tags */}
+        <div className="space-y-6">
+          <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+            <Tag size={14} /> {t('workflow_tags')}
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {tags.map((tag, idx) => (
+              <span
+                key={`${tag}-${idx}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-[11px] text-slate-300"
+              >
+                {tag}
+                <button
+                  type="button"
+                  onClick={() => onTagsChange?.(tags.filter((_, i) => i !== idx))}
+                  className="p-0.5 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
+                  aria-label={t('remove_tag')}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newTagInput}
+              onChange={e => setNewTagInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const v = newTagInput.trim();
+                  if (v && !tags.includes(v)) {
+                    onTagsChange?.([...tags, v]);
+                    setNewTagInput('');
+                  }
+                }
+              }}
+              placeholder={t('workflow_tags_placeholder')}
+              className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-[#90dce1] transition-all placeholder:text-slate-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const v = newTagInput.trim();
+                if (v && !tags.includes(v)) {
+                  onTagsChange?.([...tags, v]);
+                  setNewTagInput('');
+                }
+              }}
+              className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:border-[#90dce1] hover:text-[#90dce1] transition-all flex items-center gap-1.5 text-xs font-bold uppercase"
+            >
+              <Plus size={12} /> {t('add_tag')}
+            </button>
+          </div>
+        </div>
         <div className="space-y-6">
           <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
             <Target size={14} /> {t('global_inputs')}

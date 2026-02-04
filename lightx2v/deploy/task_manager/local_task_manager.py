@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import time
+import uuid
 
 from loguru import logger
 
@@ -418,6 +420,43 @@ class LocalTaskManager(BaseTaskManager):
     def get_workflow_filename(self, workflow_id):
         return os.path.join(self.local_dir, f"workflow_{workflow_id}.json")
 
+    def get_workflow_chat_history_filename(self, workflow_id):
+        return os.path.join(self.local_dir, f"workflow_chat_history_{workflow_id}.json")
+
+    def load_workflow_chat_history(self, workflow_id, user_id=None):
+        """Load chat history for a workflow. Returns {"workflow_id", "messages", "updated_at"} or None."""
+        if user_id is not None:
+            workflow = self.load_workflow(workflow_id, user_id)
+            if not workflow:
+                return None
+        fpath = self.get_workflow_chat_history_filename(workflow_id)
+        if not os.path.exists(fpath):
+            return None
+        data = json.load(open(fpath))
+        messages = data.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+        return {
+            "workflow_id": workflow_id,
+            "messages": messages,
+            "updated_at": data.get("updated_at", int(time.time() * 1000)),
+        }
+
+    def _save_workflow_chat_history_impl(self, workflow_id, messages, user_id=None):
+        """Save chat history for a workflow. messages: list of ChatMessagePersisted."""
+        if user_id is not None:
+            workflow = self.load_workflow(workflow_id, user_id)
+            if not workflow:
+                raise Exception(f"Workflow {workflow_id} not found or not owned by user")
+        if not isinstance(messages, list):
+            messages = []
+        updated_at = int(time.time() * 1000)
+        data = {"workflow_id": workflow_id, "messages": messages, "updated_at": updated_at}
+        fpath = self.get_workflow_chat_history_filename(workflow_id)
+        with open(fpath, "w") as fout:
+            fout.write(json.dumps(data, indent=2, ensure_ascii=False))
+        return updated_at
+
     def get_voice_clone_filename(self, user_id, speaker_id):
         return os.path.join(self.local_dir, f"voice_clone_{user_id}_{speaker_id}.json")
 
@@ -505,6 +544,95 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, "w") as fout:
             fout.write(json.dumps(workflow, indent=4, ensure_ascii=False))
 
+    def _convert_legacy_history(self, workflow: dict):
+        data_store = workflow.get("data_store", {})
+        outputs = data_store.get("outputs", {})
+        if not isinstance(outputs, dict):
+            return
+
+        history_map: dict[str, list] = {}
+
+        for node_id, port_map in outputs.items():
+            if not isinstance(port_map, dict):
+                continue
+            node_entries: list[dict] = []
+            for port_id, port_data in port_map.items():
+                if not isinstance(port_data, dict):
+                    continue
+                history_list = port_data.get("history", [])
+                if not isinstance(history_list, list):
+                    continue
+                for raw in history_list:
+                    if not isinstance(raw, dict):
+                        continue
+                    metadata = raw.get("metadata", {}) or {}
+                    timestamp = metadata.get("created_at")
+                    if isinstance(timestamp, (int, float)):
+                        if timestamp < 1e12:
+                            timestamp = int(timestamp * 1000)
+                        else:
+                            timestamp = int(timestamp)
+                    else:
+                        timestamp = int(time.time() * 1000)
+                    entry_id = raw.get("data_id") or f"legacy-{uuid.uuid4()}"
+                    base_entry = {
+                        "id": entry_id,
+                        "timestamp": timestamp,
+                        "metadata": {
+                            **({k: v for k, v in metadata.items() if k != "created_at"}),
+                            "port_id": port_id,
+                        },
+                    }
+                    data_type = raw.get("data_type")
+                    if data_type == "text" or "text_value" in raw:
+                        entry = {
+                            **base_entry,
+                            "kind": "text",
+                            "text": raw.get("text_value", ""),
+                        }
+                    elif data_type == "json" or "json_value" in raw:
+                        entry = {
+                            **base_entry,
+                            "kind": "json",
+                            "value": raw.get("json_value"),
+                        }
+                    elif data_type == "url":
+                        entry = {
+                            **base_entry,
+                            "kind": "file",
+                            "value": {
+                                "fileId": raw.get("file_id") or raw.get("data_id"),
+                                "url": raw.get("url_value"),
+                            },
+                        }
+                    elif data_type == "file":
+                        file_paths = raw.get("file_path")
+                        storage_path = None
+                        if isinstance(file_paths, list) and file_paths:
+                            storage_path = file_paths[-1]
+                        elif isinstance(file_paths, str):
+                            storage_path = file_paths
+                        file_value: dict = {"fileId": raw.get("file_id") or raw.get("data_id")}
+                        if raw.get("url_value"):
+                            file_value["url"] = raw.get("url_value")
+                        entry = {**base_entry, "kind": "file", "value": file_value}
+                        if storage_path:
+                            entry.setdefault("metadata", {})["storage_path"] = storage_path
+                    else:
+                        entry = {
+                            **base_entry,
+                            "kind": "json",
+                            "value": raw,
+                        }
+                    node_entries.append(entry)
+            if node_entries:
+                history_map[node_id] = node_entries
+
+        if history_map:
+            workflow["node_output_history"] = history_map
+        if "data_store" in workflow:
+            del workflow["data_store"]
+
     def load_workflow(self, workflow_id, user_id=None, allow_public=True):
         fpath = self.get_workflow_filename(workflow_id)
         if not os.path.exists(fpath):
@@ -515,6 +643,8 @@ class LocalTaskManager(BaseTaskManager):
                 raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
         if data.get("tag") == "delete":
             raise Exception(f"Workflow {workflow_id} is deleted")
+        if "node_output_history" not in data and "data_store" in data:
+            self._convert_legacy_history(data)
         self.parse_dict(data)
         return data
 
@@ -534,16 +664,26 @@ class LocalTaskManager(BaseTaskManager):
             return False
 
         for key, value in updates.items():
-            if key in ["nodes", "connections", "history_metadata", "extra_info", "chat_history", "data_store"]:
+            if key in ["nodes", "connections", "extra_info", "tags", "node_output_history", "author_id", "author_name"]:
                 workflow[key] = value
             elif key in ["name", "description", "visibility"]:
                 workflow[key] = value
-            elif key == "last_run_t":
-                workflow["last_run_t"] = value
 
         workflow["update_t"] = current_time()
+        workflow.pop("chat_history", None)
+        workflow.pop("last_run_t", None)
+        if workflow.get("tag") != "delete":
+            workflow.pop("tag", None)
         self.save_workflow(workflow)
         return True
+
+    @class_try_catch_async
+    async def get_workflow_chat_history(self, workflow_id, user_id=None):
+        return self.load_workflow_chat_history(workflow_id, user_id)
+
+    @class_try_catch_async
+    async def save_workflow_chat_history(self, workflow_id, messages, user_id=None):
+        return self._save_workflow_chat_history_impl(workflow_id, messages, user_id)
 
     @class_try_catch_async
     async def delete_workflow(self, workflow_id, user_id=None):
@@ -552,12 +692,13 @@ class LocalTaskManager(BaseTaskManager):
             return False
         # Actually delete the workflow file instead of just marking it
         workflow_filename = os.path.join(self.local_dir, f"workflow_{workflow_id}.json")
+        chat_filename = self.get_workflow_chat_history_filename(workflow_id)
         try:
             if os.path.exists(workflow_filename):
                 os.remove(workflow_filename)
-                return True
-            else:
-                return False
+            if os.path.exists(chat_filename):
+                os.remove(chat_filename)
+            return True
         except Exception as e:
             logger.error(f"Failed to delete workflow file {workflow_filename}: {e}")
             return False

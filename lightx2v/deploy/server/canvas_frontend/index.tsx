@@ -34,12 +34,20 @@ export async function mount(props: any) {
   // 将共享的状态和方法挂载到 window，供 App 组件使用
   if (props?.sharedStore) {
     (window as any).__SHARED_STORE__ = props.sharedStore;
-    // 首次进入画布时同步主应用 token 到 localStorage，避免子应用读不到登录态
-    const token = props.sharedStore.getState?.('token');
+    const store = props.sharedStore;
+    // 优先用主应用传下来的 token，否则从 localStorage 取（主应用登录后可能只写了 localStorage 未同步到 sharedStore）
+    const token = store.getState?.('token');
     const initialState = typeof props.getInitialState === 'function' ? props.getInitialState() : null;
-    const tokenToSync = token ?? initialState?.token;
-    if (tokenToSync && typeof localStorage !== 'undefined') {
-      localStorage.setItem('accessToken', tokenToSync);
+    let tokenToSync = token ?? initialState?.token;
+    if (typeof localStorage !== 'undefined') {
+      const localToken = localStorage.getItem('accessToken');
+      if (tokenToSync) {
+        localStorage.setItem('accessToken', tokenToSync);
+      } else if (localToken) {
+        // 主应用未同步到 sharedStore 时，从 localStorage 回填，保证首屏请求带 token
+        store.setState?.('token', localToken);
+        tokenToSync = localToken;
+      }
     }
   }
   if (props?.apiClient) {
