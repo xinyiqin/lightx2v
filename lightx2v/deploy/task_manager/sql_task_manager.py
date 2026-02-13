@@ -80,7 +80,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
             (3, "Add podcasts table", self.upgrade_v3),
             (4, "Add voice clones table", self.upgrade_v4),
             (5, "Add workflows table, workflow thumsup", self.upgrade_v5),
-            (6, "Add workflow tags/history fields and drop legacy stores", self.upgrade_v6),
         ]
         logger.info(f"upgrade_db: {self.db_url}")
         cur_ver = await self.query_version()
@@ -294,6 +293,10 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         chat_history JSONB,
                         visibility VARCHAR(16),
                         tag VARCHAR(16),
+                        tags JSONB,
+                        node_output_history JSONB,
+                        author_id VARCHAR(256),
+                        author_name VARCHAR(256),
                         FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
                     )
                 """
@@ -316,59 +319,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 return True
         except:  # noqa
             logger.error(f"upgrade_v5 error: {traceback.format_exc()}")
-            return False
-        finally:
-            await self.release_conn(conn)
-
-    async def upgrade_v6(self, version, description):
-        conn = await self.get_conn()
-        try:
-            async with conn.transaction(isolation="read_uncommitted"):
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb
-                    """
-                )
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    ADD COLUMN IF NOT EXISTS node_output_history JSONB DEFAULT '{{}}'::jsonb
-                    """
-                )
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    ADD COLUMN IF NOT EXISTS author_id VARCHAR(256)
-                    """
-                )
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    ADD COLUMN IF NOT EXISTS author_name VARCHAR(256)
-                    """
-                )
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    DROP COLUMN IF EXISTS history_metadata
-                    """
-                )
-                await conn.execute(
-                    f"""
-                    ALTER TABLE {self.table_workflows}
-                    DROP COLUMN IF EXISTS data_store
-                    """
-                )
-                await conn.execute(
-                    f"INSERT INTO {self.table_versions} (version, description, create_t) VALUES ($1, $2, $3)",
-                    version,
-                    description,
-                    datetime.now(),
-                )
-                return True
-        except:  # noqa
-            logger.error(f"upgrade_v6 error: {traceback.format_exc()}")
             return False
         finally:
             await self.release_conn(conn)

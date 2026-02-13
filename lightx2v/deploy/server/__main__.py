@@ -29,7 +29,7 @@ from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
 from lightx2v.deploy.common.sensetime_voice_clone import SenseTimeTTSClient
-from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_audio_data, format_image_data, load_inputs, media_to_audio
+from lightx2v.deploy.common.utils import check_params, data_name, fetch_resource, format_audio_data, format_image_data, load_inputs, media_to_audio, transfer_workflow_output
 from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
 from lightx2v.deploy.data_manager import BaseDataManager, LocalDataManager, S3DataManager
@@ -378,14 +378,8 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
             return error_response(f"Queue busy, please try again later", 500)
 
         # process multimodal inputs data
-        # Get token from request for API calls
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]  # Remove "Bearer " prefix
-
-        # Pass data_manager, task_manager, user_id, and token to load_inputs
-        inputs_data = await load_inputs(params, inputs, types, data_manager=data_manager, task_manager=task_manager, user_id=user["user_id"], token=token)
+        await transfer_workflow_output(params, inputs, user["user_id"], task_manager, data_manager)
+        inputs_data = await load_inputs(params, inputs, types)
 
         # init task (we need task_id before preprocessing to save processed files)
         task_id = await task_manager.create_task(keys, workers, params, inputs, outputs, user["user_id"])
