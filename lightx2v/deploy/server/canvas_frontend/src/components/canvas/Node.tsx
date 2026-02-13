@@ -1311,6 +1311,10 @@ export const Node: React.FC<NodeProps> = ({
               <div
                 className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
                 onMouseDown={(e) => e.stopPropagation()}
+                onWheel={(e) => {
+                  e.stopPropagation();
+                  if (e.ctrlKey) e.preventDefault();
+                }}
               >
                 {nodeHistoryEntries.length > 0 ? (
                   nodeHistoryEntries.map((entry) => (

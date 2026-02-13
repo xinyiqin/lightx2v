@@ -471,8 +471,7 @@ async def api_v1_task_submit(request: Request, user=Depends(verify_user_access))
         if wait_time is None:
             return error_response(f"Queue busy, please try again later", 500)
 
-        # process multimodal inputs data
-        await transfer_workflow_output(params, inputs, user["user_id"], task_manager, data_manager)
+        # workflow_output 已在上面一次 transfer_workflow_output 中解析完毕，勿重复调用（否则会把已解析的 bytes 当引用解包导致 TypeError）
         inputs_data = await load_inputs(params, inputs, types)
 
         # init task (we need task_id before preprocessing to save processed files)
@@ -2657,8 +2656,13 @@ async def api_v1_workflow_node_output_url(request: Request, user=Depends(verify_
         node = next((n for n in nodes if isinstance(n, dict) and n.get("id") == node_id), None)
         assert node is not None, f"Node {node_id} not found in workflow {workflow_id}"
         assert "output_value" in node, f"Output value not found in node {node_id}"
-        assert port_id in node["output_value"], f"Port {port_id} not found in node {node_id} output_value: {node['output_value']}"
-        val = node["output_value"][port_id]
+        ov = node["output_value"]
+        if port_id in ov:
+            val = ov[port_id]
+        elif isinstance(ov, dict) and ("task_id" in ov or "file_id" in ov) and ov.get("kind") in ("task", "file"):
+            val = ov
+        else:
+            raise AssertionError(f"Port {port_id} not found in node {node_id} output_value: {ov}")
 
         run_id_fallback = q_run_id or request.query_params.get("run_id", "")
         user_id = user["user_id"]

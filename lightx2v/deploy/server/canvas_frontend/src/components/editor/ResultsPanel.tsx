@@ -95,7 +95,7 @@ function ResolvedImage({ content, resolveLightX2VResultRef, className }: { conte
       return () => { cancelled = true; };
     }
     if (content && typeof content === 'object' && content.kind === 'url' && typeof content.url === 'string') {
-      setUrl(content.url);
+      setUrl(getAssetPath(content.url) || content.url);
       return;
     }
     const direct = typeof content === 'string' ? (content.startsWith('http') || content.startsWith('data:') ? content : getAssetPath(content)) : getAssetPath(content);

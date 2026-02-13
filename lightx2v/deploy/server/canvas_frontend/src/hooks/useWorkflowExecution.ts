@@ -1691,8 +1691,8 @@ function useWorkflowExecutionImpl({
                 if (portId) valueToStore = { [portId]: { kind: 'file', file_id: fileId, mime_type: mime, ...(ext && { ext: ext.startsWith('.') ? ext : `.${ext}` }) } };
               }
             }
-            // 单输出节点（如 gemini-watermark-remover、图生图）：统一为端口字典 { "out-image": value }，与多端口节点一致
-            if (tool?.outputs?.length === 1 && !isPortKeyedOutputValue(valueToStore)) {
+            // 单结果值（task/file ref 等）统一为 port_keyed { "out-xxx": value }，与后端 /output/{port_id}/url 等约定一致
+            if (tool?.outputs?.length && !isPortKeyedOutputValue(valueToStore)) {
               const portId = tool.outputs[0].id;
               valueToStore = { [portId]: valueToStore };
             }

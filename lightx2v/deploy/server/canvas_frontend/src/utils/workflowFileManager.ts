@@ -175,6 +175,18 @@ export type SaveNodeOutputResult = {
  * - URL 字符串 (http/https/./assets) => { type: "url", data: "..." }
  * - 数组（多图）=> 每项各自 wrap 后返回数组
  */
+/** 本地 task 结果 URL（./assets/task/result?task_id=xxx&name=yyy）解析为 task ref；仅云端（模型名 -cloud）用 type: 'url' */
+function parseLocalTaskResultUrl(url: string): { kind: 'task'; task_id: string; output_name: string; is_cloud: false } | null {
+  if (typeof url !== 'string' || !url.includes('task/result') || !url.includes('task_id=') || !url.includes('name=')) return null;
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  const params = new URLSearchParams(url.slice(q));
+  const task_id = params.get('task_id');
+  const name = params.get('name');
+  if (!task_id || !name) return null;
+  return { kind: 'task', task_id, output_name: name, is_cloud: false };
+}
+
 function wrapOutputData(value: any): { type: string; data: any } | Array<{ type: string; data: any }> {
   if (Array.isArray(value)) {
     return value.map((item: any) => wrapOutputData(item) as { type: string; data: any });
@@ -235,7 +247,7 @@ export async function saveNodeOutputs(
           reader.readAsDataURL(value);
         });
       }
-      // 非仅前端且为 is_cloud 的 x2v 任务：用云端 result_url 得到 URL，以 { type: "url", data: url } 发给后端
+      // 非仅前端且为 is_cloud 的 x2v 任务：用云端 result_url 得到 URL，以 { type: "url", data: url } 发给后端（云端以模型名 -cloud 判断）
       if (!isStandalone() && isLightX2VResultRef(resolved) && (resolved as { is_cloud?: boolean }).is_cloud) {
         resolved = await resolveLightX2VResultRef(resolved);
       } else if (!isStandalone() && Array.isArray(resolved)) {
@@ -245,6 +257,26 @@ export async function saveNodeOutputs(
           }
           return item;
         }));
+      }
+      // 本地 task 结果 URL（./assets/task/result?task_id=...&name=...）统一转为 task ref(is_cloud: false)，避免误用 type: 'url'
+      if (typeof resolved === 'string') {
+        const taskRef = parseLocalTaskResultUrl(resolved);
+        if (taskRef) resolved = taskRef;
+      } else if (resolved && typeof resolved === 'object' && (resolved as { kind?: string }).kind === 'url' && typeof (resolved as { url?: string }).url === 'string') {
+        const taskRef = parseLocalTaskResultUrl((resolved as { url: string }).url);
+        if (taskRef) resolved = taskRef;
+      } else if (Array.isArray(resolved)) {
+        resolved = resolved.map((item: any) => {
+          if (typeof item === 'string') {
+            const tr = parseLocalTaskResultUrl(item);
+            return tr ?? item;
+          }
+          if (item && typeof item === 'object' && item.kind === 'url' && typeof item.url === 'string') {
+            const tr = parseLocalTaskResultUrl(item.url);
+            return tr ?? item;
+          }
+          return item;
+        });
       }
       const wrapped = wrapOutputData(resolved);
       toSend.push({ portId, wrappedOutput: wrapped });

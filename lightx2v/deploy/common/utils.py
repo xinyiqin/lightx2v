@@ -410,15 +410,30 @@ async def transfer_workflow_output(params, raw_inputs, user_id, task_manager, da
     # load output bytes data
     async def load_output_bytes(meta, workflow_id, node_id, port_id):
         logger.info(f"Load workflow output: {workflow_id}, {node_id}, {port_id}: {meta}...")
-        # 预设路径 /assets/xxx：与 template 一致，用 data_manager.load_bytes(None, abs_path=...) 从传入的 assets 目录读
+        # meta 为字符串时：可能是 task result URL 或静态资源路径
         if isinstance(meta, str):
             path = meta.strip()
+            # ./assets/task/result?task_id=xxx&name=yyy 是 API URL，不是静态文件，按 task 结果加载
+            if "task/result" in path and "task_id=" in path and "name=" in path:
+                import urllib.parse
+                if "?" in path:
+                    _, query = path.split("?", 1)
+                    params = urllib.parse.parse_qs(query)
+                    task_id = (params.get("task_id") or [None])[0]
+                    name = (params.get("name") or [None])[0]
+                    if task_id and name:
+                        task = await task_manager.query_task(task_id)
+                        return await data_manager.load_bytes(task["outputs"][name])
+                raise FileNotFoundError(f"Invalid task result URL format: {path!r}")
+            # 静态资源路径：/assets/xxx 或 ./assets/xxx（不含 query），从 assets_dirs 读文件
             if path.startswith("/assets/"):
                 suffix = path[8:]
             elif path.startswith("./assets/"):
                 suffix = path[10:]
             else:
                 raise ValueError(f"Unsupported workflow output path: {path!r}")
+            if "?" in suffix:
+                suffix = suffix.split("?")[0]
             for base in assets_dirs:
                 if not base:
                     continue

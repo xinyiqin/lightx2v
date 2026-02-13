@@ -237,13 +237,19 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
           ) : expandedResultData.type === DataType.IMAGE ? (
             (() => {
               const { effectiveContent: raw } = unwrapPortFileRef(expandedResultData.content, DataType.IMAGE);
-              const isRef = getLightX2VRefFromContent(raw) != null;
-              const isUrlRef = raw && typeof raw === 'object' && (raw as any).kind === 'url' && typeof (raw as any).url === 'string';
+              const singleRaw = Array.isArray(raw) ? (raw.find((x: any) => isFileRef(x)) ?? raw[0]) : raw;
+              const isRef = getLightX2VRefFromContent(singleRaw ?? raw) != null;
+              const isUrlRef = singleRaw && typeof singleRaw === 'object' && (singleRaw as any).kind === 'url' && typeof (singleRaw as any).url === 'string';
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
-              const imgSrc = fromApi
-                || (isRef ? (resolvedMediaUrl ?? '') : (isUrlRef ? (raw as any).url : (raw != null && raw !== '' ? (typeof raw === 'string' && (raw.startsWith('http') || raw.startsWith('data:')) ? raw : getAssetPath(raw)) : '')));
+              const fallbackFromRaw = (r: any) => {
+                if (r == null || r === '') return '';
+                if (typeof r === 'string') return (r.startsWith('http') || r.startsWith('data:')) ? r : getAssetPath(r);
+                if (typeof r === 'object' && (r.url || r.file_url)) return getAssetPath((r as any).url || (r as any).file_url) || (r as any).url || (r as any).file_url;
+                return '';
+              };
+              const imgSrc = fromApi || (isRef ? (resolvedMediaUrl ?? '') : (isUrlRef ? (singleRaw as any).url : fallbackFromRaw(singleRaw)));
               if (!imgSrc || imgSrc === '') {
-                return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(raw) && !resolvedFileUrl) ? 'Loading...' : 'No image data'}</div>;
+                return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(singleRaw) && !resolvedFileUrl) ? 'Loading...' : 'No image data'}</div>;
               }
               return <img src={imgSrc} className="max-h-full rounded-2xl shadow-2xl border border-slate-800" alt="" />;
             })()
@@ -313,8 +319,8 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
                 return '';
               };
               const v = getMediaValue(raw);
-              const fallback = isRef ? (resolvedMediaUrl ?? '') : (v !== '' ? (v.startsWith('http') || v.startsWith('data:') ? v : getAssetPath(v)) : '');
-              const videoSrc = fromApi || fallback;
+              const fallback = v !== '' ? (v.startsWith('http') || v.startsWith('data:') || v.startsWith('blob:') ? v : getAssetPath(v)) : '';
+              const videoSrc = (resolvedMediaUrl || fromApi || fallback) || '';
               if (!videoSrc || videoSrc === '') {
                 return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(raw) && !resolvedFileUrl) ? 'Loading...' : 'No video data'}</div>;
               }

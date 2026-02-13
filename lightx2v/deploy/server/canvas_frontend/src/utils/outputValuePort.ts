@@ -17,11 +17,11 @@ export const INPUT_PORT_IDS: Record<string, string> = {
   'text-input': 'out-text'
 };
 
-/** 判断是否为 port-keyed 结构（键为 out-*） */
+/** 判断是否为 port-keyed 结构（至少有一个键为 out-*，避免 task ref { kind, task_id, output_name } 被误判） */
 export function isPortKeyedOutputValue(ov: any): ov is Record<string, any> {
   if (ov == null || typeof ov !== 'object' || Array.isArray(ov)) return false;
   const keys = Object.keys(ov);
-  return keys.length > 0 && keys.every(k => typeof k === 'string' && (k.startsWith('out-') || k.includes('-')));
+  return keys.some(k => typeof k === 'string' && k.startsWith('out-'));
 }
 
 /** 将旧版 output_value（单值/数组）规范为 port-keyed。不修改原对象。 */
