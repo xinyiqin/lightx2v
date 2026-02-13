@@ -22,10 +22,12 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.table_voice_clones = "voice_clones"
         self.table_workflows = "workflows"
         self.table_workflow_thumsup = "workflow_thumsup"
+        self.table_workflow_chat_history = "workflow_chat_history"
         self.pool = None
         self.metrics_monitor = metrics_monitor
         self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t"]
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "chat_history", "tags", "node_output_history"]
+        # chat_history 与 workflow 分开放置，不放在 workflow 行内
+        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "tags", "node_output_history", "global_inputs"]
 
     async def init(self):
         await self.upgrade_db()
@@ -286,18 +288,28 @@ class PostgresSQLTaskManager(BaseTaskManager):
                         description TEXT,
                         create_t TIMESTAMPTZ NOT NULL,
                         update_t TIMESTAMPTZ NOT NULL,
-                        last_run_t TIMESTAMPTZ,
                         nodes JSONB NOT NULL,
                         connections JSONB NOT NULL,
                         extra_info JSONB,
-                        chat_history JSONB,
                         visibility VARCHAR(16),
-                        tag VARCHAR(16),
                         tags JSONB,
                         node_output_history JSONB,
+                        files_tasks JSONB,
                         author_id VARCHAR(256),
                         author_name VARCHAR(256),
+                        global_inputs JSONB,
                         FOREIGN KEY (user_id) REFERENCES {self.table_users}(user_id) ON DELETE CASCADE
+                    )
+                """
+                )
+                # chat_history 单独表，与本地 workflow_chat_history_{id}.json 对应
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.table_workflow_chat_history} (
+                        workflow_id VARCHAR(128) PRIMARY KEY,
+                        messages JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL,
+                        FOREIGN KEY (workflow_id) REFERENCES {self.table_workflows}(workflow_id) ON DELETE CASCADE
                     )
                 """
                 )
@@ -1247,9 +1259,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
                 await conn.execute(
                     f"""
                     INSERT INTO {self.table_workflows}
-                    (workflow_id, user_id, name, description, create_t, update_t, last_run_t,
-                     nodes, connections, extra_info, chat_history, visibility, tag, tags, node_output_history, author_id, author_name)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                    (workflow_id, user_id, name, description, create_t, update_t,
+                     nodes, connections, extra_info, visibility, tags, node_output_history, files_tasks, author_id, author_name, global_inputs)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     """,
                     workflow_data["workflow_id"],
                     workflow_data["user_id"],
@@ -1257,17 +1269,16 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     workflow_data.get("description", ""),
                     workflow_data["create_t"],
                     workflow_data["update_t"],
-                    workflow_data.get("last_run_t"),
                     workflow_data.get("nodes", []),
                     workflow_data.get("connections", []),
                     workflow_data.get("extra_info", {}),
-                    workflow_data.get("chat_history", []),
                     workflow_data.get("visibility", "private"),
-                    workflow_data.get("tag", ""),
                     workflow_data.get("tags", []),
                     workflow_data.get("node_output_history", {}),
+                    workflow_data.get("files_tasks", {}),
                     workflow_data.get("author_id"),
                     workflow_data.get("author_name"),
+                    workflow_data.get("global_inputs", {}),
                 )
                 return True
         except:  # noqa
@@ -1280,7 +1291,7 @@ class PostgresSQLTaskManager(BaseTaskManager):
     async def query_workflow(self, workflow_id, user_id=None, allow_public=True):
         conn = await self.get_conn()
         try:
-            query = f"SELECT * FROM {self.table_workflows} WHERE workflow_id = $1 AND tag != 'delete'"
+            query = f"SELECT * FROM {self.table_workflows} WHERE workflow_id = $1"
             params = [workflow_id]
             if user_id is not None:
                 if allow_public:
@@ -1353,16 +1364,72 @@ class PostgresSQLTaskManager(BaseTaskManager):
         conn = await self.get_conn()
         try:
             async with conn.transaction(isolation="read_uncommitted"):
-                query = f"UPDATE {self.table_workflows} SET tag = 'delete' WHERE workflow_id = $1"
+                query = f"DELETE FROM {self.table_workflows} WHERE workflow_id = $1"
                 params = [workflow_id]
                 if user_id is not None:
                     query += " AND user_id = $2"
                     params.append(user_id)
                 ret = await conn.execute(query, *params)
-                return ret > 0
+                return ret != "DELETE 0"
         except:  # noqa
             logger.error(f"delete_workflow error: {traceback.format_exc()}")
             return False
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def get_workflow_chat_history(self, workflow_id, user_id=None):
+        """与本地一致：chat_history 单独存储，返回 {workflow_id, messages, updated_at}，updated_at 为毫秒时间戳。"""
+        if user_id is not None:
+            wf = await self.query_workflow(workflow_id, user_id=user_id)
+            if not wf:
+                return None
+        conn = await self.get_conn()
+        try:
+            row = await conn.fetchrow(
+                f"SELECT messages, updated_at FROM {self.table_workflow_chat_history} WHERE workflow_id = $1",
+                workflow_id,
+            )
+            if not row:
+                return {"workflow_id": workflow_id, "messages": [], "updated_at": int(datetime.now().timestamp() * 1000)}
+            messages = row["messages"] if isinstance(row["messages"], list) else (json.loads(row["messages"]) if isinstance(row["messages"], str) else [])
+            updated_at = row["updated_at"]
+            if hasattr(updated_at, "timestamp"):
+                updated_at = int(updated_at.timestamp() * 1000)
+            return {"workflow_id": workflow_id, "messages": messages, "updated_at": updated_at}
+        except:  # noqa
+            logger.error(f"get_workflow_chat_history error: {traceback.format_exc()}")
+            return None
+        finally:
+            await self.release_conn(conn)
+
+    @class_try_catch_async
+    async def save_workflow_chat_history(self, workflow_id, messages, user_id=None):
+        """与本地一致：写入单独表，返回 updated_at（毫秒时间戳）。"""
+        if user_id is not None:
+            wf = await self.query_workflow(workflow_id, user_id=user_id)
+            if not wf:
+                raise Exception(f"Workflow {workflow_id} not found or not owned by user")
+        if not isinstance(messages, list):
+            messages = []
+        conn = await self.get_conn()
+        try:
+            now = datetime.now()
+            updated_at_ms = int(now.timestamp() * 1000)
+            await conn.execute(
+                f"""
+                INSERT INTO {self.table_workflow_chat_history} (workflow_id, messages, updated_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (workflow_id) DO UPDATE SET messages = $2, updated_at = $3
+                """,
+                workflow_id,
+                json.dumps(messages, ensure_ascii=False),
+                now,
+            )
+            return updated_at_ms
+        except:  # noqa
+            logger.error(f"save_workflow_chat_history error: {traceback.format_exc()}")
+            raise
         finally:
             await self.release_conn(conn)
 
@@ -1396,11 +1463,6 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     conds.append(f"(LOWER(name) LIKE ${param_idx} OR LOWER(description) LIKE ${param_idx + 1})")
                     params.extend([f"%{search_term.lower()}%", f"%{search_term.lower()}%"])
                     param_idx += 2
-
-                if not kwargs.get("include_delete", False):
-                    conds.append(f"tag != ${param_idx}")
-                    params.append("delete")
-                    param_idx += 1
 
                 query += self.table_workflows + " WHERE " + (" AND ".join(conds) if conds else "1=1")
 
@@ -1559,3 +1621,4 @@ async def test():
 
 if __name__ == "__main__":
     asyncio.run(test())
+st())

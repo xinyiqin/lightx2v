@@ -20,7 +20,9 @@ import {
   Globe,
   Bot,
   Clock,
-  History
+  History,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
 import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition, NodeHistoryEntry, NodeRunState } from '../../../types';
 import { TOOLS } from '../../../constants';
@@ -29,7 +31,7 @@ import { getIcon } from '../../utils/icons';
 import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
-import { historyEntryToDisplayValue, normalizeHistoryEntries } from '../../utils/historyEntry';
+import { historyEntryToDisplayValue, normalizeHistoryEntries, getEntryPortKeyedValue } from '../../utils/historyEntry';
 import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
@@ -45,11 +47,15 @@ const HistoryEntryItem: React.FC<{
   onSelect: () => void;
   resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
   outputDataType?: string;
+  outputPortId?: string;
   resolveAudioUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
   resolveVideoUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
+  resolveImageUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
   resolveTextFileContent?: (entry: NodeHistoryEntry) => Promise<string | null>;
-}> = ({ entry, lang, onSelect, resolveLightX2VResultRef, outputDataType, resolveAudioUrl, resolveVideoUrl, resolveTextFileContent }) => {
-  const ov = entry.output_value ?? {};
+}> = ({ entry, lang, onSelect, resolveLightX2VResultRef, outputDataType, outputPortId, resolveAudioUrl, resolveVideoUrl, resolveImageUrl, resolveTextFileContent }) => {
+  const portKeyed = getEntryPortKeyedValue(entry);
+  const effectiveOv = (outputPortId ? portKeyed[outputPortId] : null) ?? (Object.keys(portKeyed).length === 1 ? Object.values(portKeyed)[0] : null) ?? entry.output_value ?? {};
+  const ov = (effectiveOv != null && typeof effectiveOv === 'object' && !Array.isArray(effectiveOv) ? effectiveOv : (entry.output_value ?? {})) as Record<string, any>;
   const kind = ov.kind ?? (entry as any).kind;
   let preview = '';
   let isLightX2VResult = false;
@@ -81,19 +87,23 @@ const HistoryEntryItem: React.FC<{
       };
     }
   }
+  const ovFileId = (ov as { file_id?: string })?.file_id;
+  const ovRunId = (ov as { run_id?: string })?.run_id;
   const [resolvedUrl, setResolvedUrl] = React.useState<string | null>(null);
   const [textFilePreview, setTextFilePreview] = React.useState<string | null>(null);
-  const isTextFileRef = kind === 'file' && (outputDataType === DataType.TEXT || (ov as { mime_type?: string }).mime_type === 'text/plain') && !!(ov as { file_id?: string }).file_id;
+  const isTextFileRef = kind === 'file' && (outputDataType === DataType.TEXT || (ov as { mime_type?: string }).mime_type === 'text/plain') && !!ovFileId;
+  const resolveTextFileContentRef = React.useRef(resolveTextFileContent);
+  resolveTextFileContentRef.current = resolveTextFileContent;
   React.useEffect(() => {
-    if (!isTextFileRef || !resolveTextFileContent) return;
+    if (!isTextFileRef || !resolveTextFileContentRef.current) return;
     let cancelled = false;
-    resolveTextFileContent(entry).then((text) => {
+    resolveTextFileContentRef.current(entry).then((text) => {
       if (!cancelled && text != null) setTextFilePreview(text.length > 40 ? text.slice(0, 40) + '…' : text);
     }).catch(() => {
       if (!cancelled) setTextFilePreview(null);
     });
     return () => { cancelled = true; setTextFilePreview(null); };
-  }, [isTextFileRef, resolveTextFileContent, entry.id, (ov as { file_id?: string }).file_id]);
+  }, [isTextFileRef, entry.id, ovFileId]);
   const [audioUrl, setAudioUrl] = React.useState<string | null>(null);
   const audioElRef = React.useRef<HTMLAudioElement | null>(null);
   React.useEffect(() => {
@@ -106,17 +116,19 @@ const HistoryEntryItem: React.FC<{
     });
     return () => { cancelled = true; setResolvedUrl(null); };
   }, [lightX2VRef?.task_id, lightX2VRef?.output_name, lightX2VRef?.is_cloud, resolveLightX2VResultRef]);
-  const isAudio = outputDataType === DataType.AUDIO && !!resolveAudioUrl;
+  const isAudio = outputDataType === DataType.AUDIO && (kind === 'file' || kind === 'task' || kind === 'lightx2v_result') && !!resolveAudioUrl;
+  const resolveAudioUrlRef = React.useRef(resolveAudioUrl);
+  resolveAudioUrlRef.current = resolveAudioUrl;
   React.useEffect(() => {
-    if (!isAudio || !resolveAudioUrl) return;
+    if (!isAudio || !resolveAudioUrlRef.current) return;
     let cancelled = false;
-    resolveAudioUrl(entry).then((url) => {
+    resolveAudioUrlRef.current(entry).then((url) => {
       if (!cancelled && url) setAudioUrl(url);
     }).catch(() => {
       if (!cancelled) setAudioUrl(null);
     });
     return () => { cancelled = true; setAudioUrl(null); };
-  }, [isAudio, resolveAudioUrl, entry.id]);
+  }, [isAudio, entry.id, ovFileId, ovRunId]);
   const handlePlayAudio = React.useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (!audioUrl) return;
@@ -133,19 +145,36 @@ const HistoryEntryItem: React.FC<{
   const output_name = (ov as { output_name?: string })?.output_name || '';
   const isLightX2VAudio = isLightX2VResult && output_name === 'output_audio';
   const hasThumbnail = isLightX2VResult && !isLightX2VAudio && resolveLightX2VResultRef && lightX2VRef;
-  const isVideo = outputDataType === DataType.VIDEO && !!resolveVideoUrl;
+  const isVideo = outputDataType === DataType.VIDEO && (kind === 'file' || kind === 'task' || kind === 'lightx2v_result') && !!resolveVideoUrl;
   const [videoUrl, setVideoUrl] = React.useState<string | null>(null);
+  const resolveVideoUrlRef = React.useRef(resolveVideoUrl);
+  resolveVideoUrlRef.current = resolveVideoUrl;
   React.useEffect(() => {
-    if (!isVideo || !resolveVideoUrl || (kind === 'task' || kind === 'lightx2v_result')) return;
+    if (!isVideo || !resolveVideoUrlRef.current || (kind === 'task' || kind === 'lightx2v_result')) return;
     let cancelled = false;
-    resolveVideoUrl(entry).then((url) => {
+    resolveVideoUrlRef.current(entry).then((url) => {
       if (!cancelled && url) setVideoUrl(url);
     }).catch(() => {
       if (!cancelled) setVideoUrl(null);
     });
     return () => { cancelled = true; setVideoUrl(null); };
-  }, [isVideo, resolveVideoUrl, entry.id, kind]);
+  }, [isVideo, entry.id, kind, ovFileId, ovRunId]);
   const hasVideoFileThumbnail = isVideo && kind === 'file' && videoUrl;
+  const isImageFile = outputDataType === DataType.IMAGE && kind === 'file' && !!resolveImageUrl;
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
+  const resolveImageUrlRef = React.useRef(resolveImageUrl);
+  resolveImageUrlRef.current = resolveImageUrl;
+  React.useEffect(() => {
+    if (!isImageFile || !resolveImageUrlRef.current) return;
+    let cancelled = false;
+    resolveImageUrlRef.current(entry).then((url) => {
+      if (!cancelled && url) setImageUrl(url);
+    }).catch(() => {
+      if (!cancelled) setImageUrl(null);
+    });
+    return () => { cancelled = true; setImageUrl(null); };
+  }, [isImageFile, entry.id, ovFileId, ovRunId]);
+  const hasImageFileThumbnail = isImageFile && imageUrl;
   return (
     <button
       type="button"
@@ -155,9 +184,11 @@ const HistoryEntryItem: React.FC<{
       }}
       className="w-full px-3 py-2 text-left text-[10px] text-slate-300 hover:bg-[#90dce1]/20 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50 last:border-b-0"
     >
-      {(hasThumbnail || hasVideoFileThumbnail) ? (
+      {(hasThumbnail || hasVideoFileThumbnail || hasImageFileThumbnail) ? (
         <span className="flex-shrink-0 w-1/2 min-w-[72px] aspect-square rounded overflow-hidden bg-slate-700 flex items-center justify-center">
-          {hasVideoFileThumbnail ? (
+          {hasImageFileThumbnail ? (
+            <img src={imageUrl!} alt="" className="w-full h-full object-cover" />
+          ) : hasVideoFileThumbnail ? (
             <video
               src={videoUrl!}
               className="w-full h-full object-cover"
@@ -197,9 +228,30 @@ const HistoryEntryItem: React.FC<{
             <span className="text-[8px] text-slate-500">…</span>
           )}
         </span>
+      ) : isAudio ? (
+        <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-700/80 flex items-center justify-center text-slate-400" title={kind === 'file' ? (lang === 'zh' ? '音频' : 'Audio') : ''}>
+          <Volume2 size={14} />
+        </span>
+      ) : isImageFile ? (
+        <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-700/80 flex items-center justify-center text-slate-400 relative" title={lang === 'zh' ? '图片' : 'Image'}>
+          <ImageIcon size={14} />
+          {!imageUrl && <RefreshCw size={10} className="animate-spin absolute" />}
+        </span>
+      ) : isTextFileRef ? (
+        <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-700/80 flex items-center justify-center text-slate-400 relative" title={lang === 'zh' ? '文本' : 'Text'}>
+          {textFilePreview != null ? <FileText size={14} /> : <RefreshCw size={12} className="animate-spin" />}
+        </span>
       ) : null}
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-        {!hasThumbnail && !hasVideoFileThumbnail && <span className="truncate">{(isTextFileRef && textFilePreview != null ? textFilePreview : preview) || (lang === 'zh' ? '—' : '—')}</span>}
+        <span className="truncate">
+          {isAudio && ovFileId
+            ? (lang === 'zh' ? '已存音频' : 'Stored audio')
+            : isImageFile && ovFileId
+              ? (imageUrl ? (lang === 'zh' ? '已存图片' : 'Stored image') : (lang === 'zh' ? '加载中…' : 'Loading…'))
+              : isTextFileRef
+                ? (textFilePreview != null ? textFilePreview : (lang === 'zh' ? '加载中…' : 'Loading…'))
+                : (preview || (lang === 'zh' ? '—' : '—'))}
+        </span>
         {entry.timestamp ? (
           <span className="text-[9px] text-slate-500">{new Date(entry.timestamp).toLocaleTimeString()}</span>
         ) : null}
@@ -216,7 +268,9 @@ const HistoryEntryItem: React.FC<{
               <PlayIcon size={14} />
             </button>
           ) : (
-            <span className="inline-block p-1.5 text-slate-600" title={lang === 'zh' ? '加载中…' : 'Loading…'}>…</span>
+            <span className="inline-block p-1.5 text-slate-500" title={lang === 'zh' ? '加载中…' : 'Loading…'}>
+              <RefreshCw size={12} className="animate-spin" />
+            </span>
           )}
         </span>
       )}
@@ -452,7 +506,7 @@ export const Node: React.FC<NodeProps> = ({
   React.useEffect(() => {
     if (node.tool_id !== 'image-input' || !workflow?.id) return;
     const values = effectiveImageValues;
-    const fileRefs = values.filter((v: unknown) => v && typeof v === 'object' && (v as { file_id?: string }).file_id) as { file_id: string; file_url?: string; mime_type?: string; ext?: string; run_id?: string }[];
+    const fileRefs = values.filter((v: unknown) => v && typeof v === 'object' && (v as { file_id?: string }).file_id) as { file_id: string; mime_type?: string; ext?: string; run_id?: string }[];
     if (fileRefs.length === 0) return;
     let cancelled = false;
     Promise.all(fileRefs.map((ref) => getNodeOutputUrl(workflow.id!, node.id, 'out-image', ref.file_id, ref.run_id))).then((urls) => {
@@ -718,7 +772,10 @@ export const Node: React.FC<NodeProps> = ({
   );
 
   const resolveAudioUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
-    const ov = entry.output_value || (entry as any).value;
+    const portKeyed = getEntryPortKeyedValue(entry);
+    const keys = Object.keys(portKeyed);
+    const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
+    const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
     if (kind === 'task' || kind === 'lightx2v_result') {
       const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
@@ -734,24 +791,25 @@ export const Node: React.FC<NodeProps> = ({
       return resolveLightX2VResultRef(ref).catch(() => null);
     }
     if (kind === 'file') {
-      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string };
+      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
       if (fileVal?.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
       const fid = fileVal?.file_id;
       if (fid && workflow.id) {
-        const pid = portId ?? (entry as { port_id?: string }).port_id;
-        if (pid) {
-          const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, (fileVal as { run_id?: string }).run_id);
-          if (url) return url;
-        }
+        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-audio';
+        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        if (url) return getAssetPath(url) ?? url;
       }
       return null;
     }
     return null;
-  }, [workflow.id, node.id, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
 
-  const resolveVideoUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry): Promise<string | null> => {
-    const ov = entry.output_value || (entry as any).value;
+  const resolveVideoUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
+    const portKeyed = getEntryPortKeyedValue(entry);
+    const keys = Object.keys(portKeyed);
+    const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
+    const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
     if (kind === 'task' || kind === 'lightx2v_result') {
       const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
@@ -767,19 +825,53 @@ export const Node: React.FC<NodeProps> = ({
       return resolveLightX2VResultRef(ref).catch(() => null);
     }
     if (kind === 'file') {
-      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; ext?: string };
+      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; ext?: string; run_id?: string };
       if (fileVal?.dataUrl?.startsWith('data:video/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
       const fid = fileVal?.file_id;
       if (fid && workflow.id) {
-        const pid = (entry as { port_id?: string }).port_id ?? 'out-video';
-        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, (fileVal as any).run_id);
-        return url ?? null;
+        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-video';
+        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        return url ? (getAssetPath(url) ?? url) : null;
       }
       return null;
     }
     return null;
-  }, [workflow.id, node.id, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
+
+  const resolveImageUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
+    const portKeyed = getEntryPortKeyedValue(entry);
+    const keys = Object.keys(portKeyed);
+    const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
+    const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
+    const kind = ov?.kind ?? (entry as any).kind;
+    if (kind === 'task' || kind === 'lightx2v_result') {
+      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const output_name = val.output_name || 'output';
+      if (output_name !== 'output_image' && output_name !== 'output') return null;
+      if (!resolveLightX2VResultRef || !val.task_id) return null;
+      const ref: LightX2VResultRef = {
+        kind: 'task',
+        task_id: val.task_id,
+        output_name: output_name,
+        is_cloud: !!val.is_cloud
+      };
+      return resolveLightX2VResultRef(ref).catch(() => null);
+    }
+    if (kind === 'file') {
+      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
+      if (fileVal?.dataUrl?.startsWith('data:image/')) return fileVal.dataUrl;
+      if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      const fid = fileVal?.file_id;
+      if (fid && workflow.id) {
+        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-image';
+        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        return url ? (getAssetPath(url) ?? url) : null;
+      }
+      return null;
+    }
+    return null;
+  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
 
   // 当前输出为音频时（如 TTS），在节点卡片右侧显示小播放键，不进拓展框也可直接播放
   const currentAudioVal = firstOutputType === DataType.AUDIO && firstOutputPortId ? getOutputValueByPort(node, firstOutputPortId) : null;
@@ -1229,12 +1321,16 @@ export const Node: React.FC<NodeProps> = ({
                       onSelect={() => handleHistoryEntrySelect(entry)}
                       resolveLightX2VResultRef={resolveLightX2VResultRef}
                       outputDataType={firstOutputType}
-                      resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId)}
-                      resolveVideoUrl={resolveVideoUrlForEntry}
+                      outputPortId={firstOutputPortId ?? undefined}
+                      resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId ?? undefined)}
+                      resolveVideoUrl={(e) => resolveVideoUrlForEntry(e, firstOutputPortId ?? undefined)}
+                      resolveImageUrl={(e) => resolveImageUrlForEntry(e, firstOutputPortId ?? undefined)}
                       resolveTextFileContent={workflow?.id && firstOutputType === DataType.TEXT ? (e) => {
-                        const ov = e?.output_value as { file_id?: string; run_id?: string };
+                        const portKeyed = getEntryPortKeyedValue(e);
+                        const keys = Object.keys(portKeyed);
+                        const portId = (keys.length === 1 ? keys[0] : undefined) ?? firstOutputPortId ?? 'out-text';
+                        const ov = (portId ? portKeyed[portId] : null) ?? (e?.output_value as { file_id?: string; run_id?: string });
                         const fid = ov?.file_id;
-                        const portId = firstOutputPortId ?? 'out-text';
                         return fid ? getWorkflowFileText(workflow.id!, fid, node.id, portId, ov?.run_id) : Promise.resolve(null);
                       } : undefined}
                     />

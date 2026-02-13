@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import time
-import uuid
 
 from loguru import logger
 
@@ -56,8 +55,6 @@ class LocalTaskManager(BaseTaskManager):
         task, subtasks = info["task"], info["subtasks"]
         if user_id is not None and task["user_id"] != user_id:
             raise Exception(f"Task {task_id} is not belong to user {user_id}")
-        if task["tag"] == "delete":
-            raise Exception(f"Task {task_id} is deleted")
         self.parse_dict(task)
         if only_task:
             return task
@@ -77,8 +74,6 @@ class LocalTaskManager(BaseTaskManager):
         data = json.load(open(fpath))
         if user_id is not None and data.get("user_id") != user_id:
             raise Exception(f"Podcast {session_id} is not belong to user {user_id}")
-        if data["tag"] == "delete":
-            raise Exception(f"Podcast {session_id} is deleted")
         self.parse_dict(data)
         return data
 
@@ -121,8 +116,6 @@ class LocalTaskManager(BaseTaskManager):
                 if "start_ping_t" in kwargs and kwargs["start_ping_t"] > task["ping_t"]:
                     continue
                 if "end_ping_t" in kwargs and kwargs["end_ping_t"] < task["ping_t"]:
-                    continue
-                if not kwargs.get("include_delete", False) and task.get("tag", "") == "delete":
                     continue
 
                 # 如果不是查询子任务，则添加子任务信息到任务中
@@ -328,8 +321,6 @@ class LocalTaskManager(BaseTaskManager):
         # only allow to delete finished tasks
         if task["status"] not in FinishedStatus:
             return False
-        # delete task file
-        task["tag"] = "delete"
         task["update_t"] = current_time()
         self.save(task, subtasks)
         return True
@@ -352,8 +343,6 @@ class LocalTaskManager(BaseTaskManager):
             return None
         data = json.load(open(fpath))
         self.parse_dict(data)
-        if data["tag"] == "delete":
-            raise Exception(f"Share {share_id} is deleted")
         if data["valid_t"] < current_time():
             raise Exception(f"Share {share_id} has expired")
         return data
@@ -404,8 +393,7 @@ class LocalTaskManager(BaseTaskManager):
                 continue
             if "has_audio" in kwargs and session["has_audio"] != kwargs["has_audio"]:
                 continue
-            if not kwargs.get("include_delete", False) and session.get("tag", "") == "delete":
-                continue
+
             sessions.append(session)
         if "count" in kwargs:
             return len(sessions)
@@ -544,95 +532,6 @@ class LocalTaskManager(BaseTaskManager):
         with open(out_name, "w") as fout:
             fout.write(json.dumps(workflow, indent=4, ensure_ascii=False))
 
-    def _convert_legacy_history(self, workflow: dict):
-        data_store = workflow.get("data_store", {})
-        outputs = data_store.get("outputs", {})
-        if not isinstance(outputs, dict):
-            return
-
-        history_map: dict[str, list] = {}
-
-        for node_id, port_map in outputs.items():
-            if not isinstance(port_map, dict):
-                continue
-            node_entries: list[dict] = []
-            for port_id, port_data in port_map.items():
-                if not isinstance(port_data, dict):
-                    continue
-                history_list = port_data.get("history", [])
-                if not isinstance(history_list, list):
-                    continue
-                for raw in history_list:
-                    if not isinstance(raw, dict):
-                        continue
-                    metadata = raw.get("metadata", {}) or {}
-                    timestamp = metadata.get("created_at")
-                    if isinstance(timestamp, (int, float)):
-                        if timestamp < 1e12:
-                            timestamp = int(timestamp * 1000)
-                        else:
-                            timestamp = int(timestamp)
-                    else:
-                        timestamp = int(time.time() * 1000)
-                    entry_id = raw.get("data_id") or f"legacy-{uuid.uuid4()}"
-                    base_entry = {
-                        "id": entry_id,
-                        "timestamp": timestamp,
-                        "metadata": {
-                            **({k: v for k, v in metadata.items() if k != "created_at"}),
-                            "port_id": port_id,
-                        },
-                    }
-                    data_type = raw.get("data_type")
-                    if data_type == "text" or "text_value" in raw:
-                        entry = {
-                            **base_entry,
-                            "kind": "text",
-                            "text": raw.get("text_value", ""),
-                        }
-                    elif data_type == "json" or "json_value" in raw:
-                        entry = {
-                            **base_entry,
-                            "kind": "json",
-                            "value": raw.get("json_value"),
-                        }
-                    elif data_type == "url":
-                        entry = {
-                            **base_entry,
-                            "kind": "file",
-                            "value": {
-                                "fileId": raw.get("file_id") or raw.get("data_id"),
-                                "url": raw.get("url_value"),
-                            },
-                        }
-                    elif data_type == "file":
-                        file_paths = raw.get("file_path")
-                        storage_path = None
-                        if isinstance(file_paths, list) and file_paths:
-                            storage_path = file_paths[-1]
-                        elif isinstance(file_paths, str):
-                            storage_path = file_paths
-                        file_value: dict = {"fileId": raw.get("file_id") or raw.get("data_id")}
-                        if raw.get("url_value"):
-                            file_value["url"] = raw.get("url_value")
-                        entry = {**base_entry, "kind": "file", "value": file_value}
-                        if storage_path:
-                            entry.setdefault("metadata", {})["storage_path"] = storage_path
-                    else:
-                        entry = {
-                            **base_entry,
-                            "kind": "json",
-                            "value": raw,
-                        }
-                    node_entries.append(entry)
-            if node_entries:
-                history_map[node_id] = node_entries
-
-        if history_map:
-            workflow["node_output_history"] = history_map
-        if "data_store" in workflow:
-            del workflow["data_store"]
-
     def load_workflow(self, workflow_id, user_id=None, allow_public=True):
         fpath = self.get_workflow_filename(workflow_id)
         if not os.path.exists(fpath):
@@ -641,10 +540,6 @@ class LocalTaskManager(BaseTaskManager):
         if user_id is not None and data.get("user_id") != user_id:
             if not (allow_public and data.get("visibility", "private") == "public"):
                 raise Exception(f"Workflow {workflow_id} is not belong to user {user_id}")
-        if data.get("tag") == "delete":
-            raise Exception(f"Workflow {workflow_id} is deleted")
-        if "node_output_history" not in data and "data_store" in data:
-            self._convert_legacy_history(data)
         self.parse_dict(data)
         return data
 
@@ -664,16 +559,11 @@ class LocalTaskManager(BaseTaskManager):
             return False
 
         for key, value in updates.items():
-            if key in ["nodes", "connections", "extra_info", "tags", "node_output_history", "author_id", "author_name"]:
+            if key in ["nodes", "connections", "extra_info", "global_inputs", "tags", "node_output_history", "files_tasks", "author_id", "author_name", "name", "description", "visibility"]:
                 workflow[key] = value
-            elif key in ["name", "description", "visibility"]:
-                workflow[key] = value
+        logger.info(f"update_workflow_nodes: {workflow['nodes']}")
 
         workflow["update_t"] = current_time()
-        workflow.pop("chat_history", None)
-        workflow.pop("last_run_t", None)
-        if workflow.get("tag") != "delete":
-            workflow.pop("tag", None)
         self.save_workflow(workflow)
         return True
 
@@ -707,27 +597,33 @@ class LocalTaskManager(BaseTaskManager):
     async def list_workflows(self, **kwargs):
         workflows = []
         for f in os.listdir(self.local_dir):
-            if not f.startswith("workflow_"):
+            if not f.startswith("workflow_") or f.startswith("workflow_chat_history_"):
+                continue
+            if not f.endswith(".json") or f != f"workflow_{f[9:-5]}.json":
                 continue
             fpath = os.path.join(self.local_dir, f)
-            workflow = json.load(open(fpath))
+            try:
+                workflow = json.load(open(fpath))
+            except Exception as e:
+                logger.warning(f"Skip invalid workflow file {f}: {e}")
+                continue
+            if not isinstance(workflow.get("nodes"), list):
+                continue
             self.parse_dict(workflow)
             if "visibility" not in workflow:
                 workflow["visibility"] = "private"
 
-            # Filter by user_id
-            if "user_id" in kwargs and workflow["user_id"] != kwargs["user_id"]:
-                continue
+            # Filter by user_id (workflow may lack user_id in legacy files)
+            if "user_id" in kwargs:
+                wf_user_id = workflow.get("user_id")
+                if wf_user_id is not None and wf_user_id != kwargs["user_id"]:
+                    continue
 
             # Filter by search (name or description)
             if "search" in kwargs:
                 search_term = kwargs["search"].lower()
                 if search_term not in workflow.get("name", "").lower() and search_term not in workflow.get("description", "").lower():
                     continue
-
-            # Filter deleted
-            if not kwargs.get("include_delete", False) and workflow.get("tag", "") == "delete":
-                continue
 
             # Filter by visibility
             if "visibility" in kwargs and workflow.get("visibility", "private") != kwargs["visibility"]:

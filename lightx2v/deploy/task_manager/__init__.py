@@ -261,7 +261,9 @@ class BaseTaskManager:
         assert await self.insert_voice_clone_if_not_exists(voice_clone), f"create voice clone {voice_clone} failed"
         return True
 
-    async def create_workflow(self, user_id, name, description="", nodes=None, connections=None, workflow_id=None, visibility="private", tags=None, node_output_history=None, author_id=None, author_name=None):
+    async def create_workflow(
+        self, user_id, name, description="", nodes=None, connections=None, workflow_id=None, visibility="private", tags=None, node_output_history=None, author_id=None, author_name=None
+    ):
         if workflow_id is None:
             workflow_id = str(uuid.uuid4())
         else:
@@ -292,6 +294,7 @@ class BaseTaskManager:
             "visibility": visibility,
             "tags": tags or [],
             "node_output_history": node_output_history or {},
+            "files_tasks": {},
             "author_id": author_id,
             "author_name": author_name,
         }

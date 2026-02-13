@@ -148,7 +148,6 @@ export type NodeHistoryEntryKind = 'text' | 'file' | 'task'; // 兼容旧数据 
 export interface FileReference {
   kind: 'file';
   file_id: string;
-  file_url: string;
   mime_type?: string;
   /** @deprecated 使用 mime_type 代替 */
   ext?: string;

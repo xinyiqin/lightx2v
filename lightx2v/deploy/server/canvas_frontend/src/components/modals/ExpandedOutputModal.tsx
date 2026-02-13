@@ -35,6 +35,21 @@ function isFileRef(c: any): boolean {
   return c != null && typeof c === 'object' && (c.kind === 'file' || c._type === 'file') && !!c.file_id;
 }
 
+/** 当 content 为单端口包裹的 file ref（如 { "out-audio": { kind: "file", file_id, ... } }）时，返回内层 ref 与 portId，否则返回 content 与 undefined */
+function unwrapPortFileRef(content: any, type: DataType): { effectiveContent: any; effectivePortId: string | undefined } {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return { effectiveContent: content, effectivePortId: undefined };
+  const keys = Object.keys(content);
+  if (keys.length === 1) {
+    const val = content[keys[0]];
+    if (isFileRef(val)) return { effectiveContent: val, effectivePortId: keys[0] };
+  }
+  if (isFileRef(content)) {
+    const defaultPort = type === DataType.AUDIO ? 'out-audio' : type === DataType.VIDEO ? 'out-video' : type === DataType.IMAGE ? 'out-image' : 'output';
+    return { effectiveContent: content, effectivePortId: defaultPort };
+  }
+  return { effectiveContent: content, effectivePortId: undefined };
+}
+
 /** content 为 ref 或 port-keyed 包裹的 ref 时返回该 ref，否则返回 null */
 function getLightX2VRefFromContent(content: any): LightX2VResultRef | null {
   if (!content || typeof content !== 'object') return null;
@@ -86,20 +101,19 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
       setResolvedFileUrl(null);
       return;
     }
-    if (!isFileRef(content)) {
-      setResolvedFileUrl(null);
-      return;
-    }
     const type = expandedResultData.type;
     if (type !== DataType.AUDIO && type !== DataType.IMAGE && type !== DataType.VIDEO) {
       setResolvedFileUrl(null);
       return;
     }
-    const fileId = (content as { file_id?: string }).file_id;
-    const runId = (content as { run_id?: string }).run_id;
-    const portId = expandedOutput.fieldId
-      || (content && typeof content === 'object' && !Array.isArray(content) && Object.keys(content).length === 1 ? Object.keys(content)[0] : null)
-      || 'output';
+    const { effectiveContent, effectivePortId } = unwrapPortFileRef(content, type);
+    if (!isFileRef(effectiveContent)) {
+      setResolvedFileUrl(null);
+      return;
+    }
+    const fileId = (effectiveContent as { file_id?: string }).file_id;
+    const runId = (effectiveContent as { run_id?: string }).run_id;
+    const portId = expandedOutput.fieldId || effectivePortId || 'output';
     if (!workflowId || !fileId || !getNodeOutputUrl) {
       setResolvedFileUrl(null);
       return;
@@ -222,7 +236,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
             )
           ) : expandedResultData.type === DataType.IMAGE ? (
             (() => {
-              const raw = expandedResultData.content;
+              const { effectiveContent: raw } = unwrapPortFileRef(expandedResultData.content, DataType.IMAGE);
               const isRef = getLightX2VRefFromContent(raw) != null;
               const isUrlRef = raw && typeof raw === 'object' && (raw as any).kind === 'url' && typeof (raw as any).url === 'string';
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
@@ -235,6 +249,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
             })()
           ) : expandedResultData.type === DataType.AUDIO ? (
             (() => {
+              const { effectiveContent: audioContent } = unwrapPortFileRef(expandedResultData.content, DataType.AUDIO);
               const getMediaValue = (value: any) => {
                 if (!value) return '';
                 if (typeof value === 'string') return value;
@@ -255,11 +270,11 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               };
 
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
-              const audioValue = getMediaValue(expandedResultData.content);
+              const audioValue = getMediaValue(audioContent);
               const fallback = !audioValue ? '' : (audioValue.startsWith('data:') ? audioValue : (audioValue.startsWith('http') || audioValue.startsWith('/') || audioValue.startsWith('./assets') || audioValue.startsWith('blob:') ? getAssetPath(audioValue) : pcmToWavUrl(audioValue)));
               const audioSrc = (resolvedMediaUrl || fromApi || fallback) || '';
               if (!audioSrc) {
-                return <div className="text-sm text-slate-500">{isFileRef(expandedResultData.content) && !resolvedFileUrl ? 'Loading...' : 'No audio data'}</div>;
+                return <div className="text-sm text-slate-500">{isFileRef(audioContent) && !resolvedFileUrl ? 'Loading...' : 'No audio data'}</div>;
               }
               return (
                 <div className="w-full max-w-2xl">
@@ -276,7 +291,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
             })()
           ) : (
             (() => {
-              const raw = expandedResultData.content;
+              const { effectiveContent: raw } = unwrapPortFileRef(expandedResultData.content, DataType.VIDEO);
               const isRef = getLightX2VRefFromContent(raw) != null;
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
               const getMediaValue = (val: any): string => {
