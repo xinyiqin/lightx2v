@@ -89,10 +89,9 @@ export const useWorkflowAutoSave = ({
           }
           try {
             const idToUse = ensureWorkflowOwned ? await ensureWorkflowOwned(workflow) : workflow.id;
-            const response = await apiRequest(`/api/v1/workflow/${idToUse}/autosave`, {
+            const response = await apiRequest(`/api/v1/workflow/${idToUse}/update`, {
               method: 'POST',
               body: JSON.stringify({
-                workflow_id: idToUse,
                 name: workflow.name,
                 description: workflow.description ?? '',
                 nodes: workflow.nodes,

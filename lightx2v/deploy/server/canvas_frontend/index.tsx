@@ -70,7 +70,7 @@ export async function mount(props: any) {
     PPCHAT_API_KEY: process.env.PPCHAT_API_KEY ? `${process.env.PPCHAT_API_KEY.substring(0, 10)}...` : '未设置',
     LIGHTX2V_URL: process.env.LIGHTX2V_URL || '未设置',
     LIGHTX2V_CLOUD_URL: process.env.LIGHTX2V_CLOUD_URL || '未设置',
-    LIGHTX2V_CLOUD_TOKEN: process.env.LIGHTX2V_CLOUD_TOKEN ? `${process.env.LIGHTX2V_CLOUD_TOKEN.substring(0, 10)}...` : '未设置',
+    LIGHTX2V_CLOUD_TOKEN: process.env.LIGHTX2V_CLOUD_TOKEN ? `${process.env.LIGHTX2V_CLOUD_TOKEN}` : '未设置',
   });
 
   const rootElement = props?.container

@@ -1,4 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Trash2 } from 'lucide-react';
 import { WorkflowState, WorkflowNode, Connection, NodeStatus, DataType } from '../../../types';
 import { ViewState } from '../../utils/canvas';
 import { Connection as ConnectionComponent } from './Connection';
@@ -20,12 +22,15 @@ interface CanvasProps {
     startY: number;
   } | null;
   mousePos: { x: number; y: number };
+  clientMousePos?: { clientX: number; clientY: number };
   nodeHeights: Map<string, number>;
   sourceNodes: WorkflowNode[];
   sourceOutputs: Record<string, any>;
   isOverNode: boolean;
   isPanning: boolean;
+  draggingNode: { id: string; offsetX: number; offsetY: number } | null;
   canvasRef: React.RefObject<HTMLDivElement>;
+  screenToWorldCoords: (x: number, y: number) => { x: number; y: number };
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
@@ -69,10 +74,10 @@ interface CanvasProps {
   } | null) => void;
   onAddConnection?: (connection: {
     id: string;
-    sourceNodeId: string;
-    sourcePortId: string;
-    targetNodeId: string;
-    targetPortId: string;
+    source_node_id: string;
+    source_port_id: string;
+    target_node_id: string;
+    target_port_id: string;
   }) => void;
   getReplaceableTools?: (nodeId: string) => ToolDefinition[];
   getCompatibleToolsForOutput?: (outputType: DataType) => ToolDefinition[];
@@ -81,6 +86,7 @@ interface CanvasProps {
   onNodeHeightChange?: (nodeId: string, height: number) => void;
   onAddNodeToChat?: (nodeId: string, name: string) => void;
   resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -90,12 +96,15 @@ export const Canvas: React.FC<CanvasProps> = ({
   selectedConnectionId,
   connecting,
   mousePos,
+  clientMousePos,
   nodeHeights,
   sourceNodes,
   sourceOutputs,
   isOverNode,
   isPanning,
+  draggingNode = null,
   canvasRef,
+  screenToWorldCoords,
   onMouseMove,
   onMouseDown,
   onMouseUp,
@@ -136,14 +145,82 @@ export const Canvas: React.FC<CanvasProps> = ({
   quickAddOutput = () => {},
   onNodeHeightChange,
   onAddNodeToChat,
-  resolveLightX2VResultRef
+  resolveLightX2VResultRef,
+  getNodeOutputUrl
 }) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // 连接线终点：用逻辑像素 mousePos 转世界坐标（mousePos 在 useCanvas 中已按父级 scale 修正，兼容主应用 #app scale(0.8)）
+  const connectingEndWorld = useMemo(() => {
+    if (!connecting) return null;
+    return {
+      x: (mousePos.x - view.x) / view.zoom,
+      y: (mousePos.y - view.y) / view.zoom
+    };
+  }, [connecting, mousePos.x, mousePos.y, view.x, view.y, view.zoom]);
+
+  // 选中连线时用 Portal 在画布上渲染删除按钮（不依赖 SVG foreignObject，保证可点击）
+  const selectedConnectionDeleteButton = useMemo(() => {
+    if (!selectedConnectionId || !canvasRef.current) return null;
+    const c = workflow.connections.find((conn) => conn.id === selectedConnectionId);
+    if (!c) return null;
+    const sNode = sourceNodes.find((n) => n.id === c.source_node_id);
+    const tNode = sourceNodes.find((n) => n.id === c.target_node_id);
+    if (!sNode || !tNode) return null;
+    const sOutputs = getNodeOutputs(sNode);
+    const tTool = TOOLS.find((t) => t.id === tNode.tool_id);
+    const tInputs = tTool?.inputs || [];
+    const outputPortIndex = sOutputs.findIndex((p) => p.id === c.source_port_id);
+    const inputPortIndex = tInputs.findIndex((p) => p.id === c.target_port_id);
+    const sourceTool = TOOLS.find((t) => t.id === sNode.tool_id);
+    const isSourceInput = sourceTool?.category === 'Input';
+    const sourceNodeWidth = isSourceInput ? 320 : 224;
+    const sourceNodeHeight = nodeHeights.get(sNode.id) || Math.max(140, 48 + 16 + Math.max(0, (sOutputs.length - 1) * 30) + 30 + 16);
+    const nodeBottomY = sNode.y + sourceNodeHeight;
+    const x1 = sNode.x + sourceNodeWidth;
+    const y1 = nodeBottomY - ((sOutputs.length - 1 - outputPortIndex) * 30) - 24;
+    const x2 = tNode.x;
+    const y2 = tNode.y + 71 + (inputPortIndex * 30);
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const left = view.x + midX * view.zoom - 15;
+    const top = view.y + midY * view.zoom - 15;
+    const btn = (
+      <div
+        className="connection-delete-portal"
+        style={{
+          position: 'absolute',
+          left,
+          top,
+          width: 30,
+          height: 30,
+          zIndex: 20,
+          pointerEvents: 'auto'
+        }}
+      >
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteConnection(selectedConnectionId);
+          }}
+          className="p-1.5 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-all active:scale-90 pointer-events-auto"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+    );
+    return createPortal(btn, canvasRef.current);
+  }, [selectedConnectionId, workflow.connections, sourceNodes, nodeHeights, view, getNodeOutputs, onDeleteConnection]);
+
   return (
     <main
       ref={canvasRef}
       className="flex-1 h-full relative overflow-hidden canvas-grid bg-[#0a0f1e]"
       style={{
-        cursor: isOverNode ? 'default' : isPanning ? 'grabbing' : 'grab'
+        cursor: isOverNode ? 'default' : isPanning ? 'grabbing' : 'grab',
+        userSelect: connecting || draggingNode ? 'none' : undefined
       }}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
@@ -151,6 +228,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseLeave={onMouseLeave}
       onWheel={onWheel}
     >
+      {selectedConnectionDeleteButton}
       <div
         style={{
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
@@ -160,14 +238,14 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
       >
         {/* SVG for connections - no pointer-events-none so connection hit areas and delete button receive clicks; nodes wrapper has pointer-events-none so empty area clicks reach here */}
-        <svg className="absolute inset-0 w-full h-full z-0 overflow-visible">
+        <svg ref={svgRef} className="absolute inset-0 w-full h-full z-0 overflow-visible">
           {workflow.connections.map((c) => {
-            const sNode = sourceNodes.find((n) => n.id === c.sourceNodeId);
-            const tNode = sourceNodes.find((n) => n.id === c.targetNodeId);
+            const sNode = sourceNodes.find((n) => n.id === c.source_node_id);
+            const tNode = sourceNodes.find((n) => n.id === c.target_node_id);
             if (!sNode || !tNode) return null;
 
             const sOutputs = getNodeOutputs(sNode);
-            const tTool = TOOLS.find((t) => t.id === tNode.toolId);
+            const tTool = TOOLS.find((t) => t.id === tNode.tool_id);
             const tInputs = tTool?.inputs || [];
 
             // Calculate node height based on output count if not available from nodeHeights
@@ -192,6 +270,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onDelete={() => {
                   onDeleteConnection(c.id);
                 }}
+                isConnecting={!!connecting}
               />
             );
           })}
@@ -258,6 +337,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             onNodeHeightChange={onNodeHeightChange}
             onAddNodeToChat={onAddNodeToChat}
             resolveLightX2VResultRef={resolveLightX2VResultRef}
+            getNodeOutputUrl={getNodeOutputUrl}
+            screenToWorldCoords={screenToWorldCoords}
           />
         ))}
         </div>

@@ -126,7 +126,7 @@ export const updateLightX2VModels = (
   lastUpdateTime = now;
 
   // Group models by task and deduplicate by model_cls
-  const modelsByTask: Record<string, Map<string, { model_cls: string; stage: string; isCloud?: boolean }>> = {};
+  const modelsByTask: Record<string, Map<string, { model_cls: string; stage: string; is_cloud?: boolean }>> = {};
 
   // Add local models
   models.forEach(model => {
@@ -136,7 +136,7 @@ export const updateLightX2VModels = (
     // Use model_cls as key to deduplicate (case-insensitive)
     const key = model.model_cls.toLowerCase();
     if (!modelsByTask[model.task].has(key)) {
-      modelsByTask[model.task].set(key, { model_cls: model.model_cls, stage: model.stage, isCloud: false });
+      modelsByTask[model.task].set(key, { model_cls: model.model_cls, stage: model.stage, is_cloud: false });
     }
   });
 
@@ -150,7 +150,7 @@ export const updateLightX2VModels = (
       const cloudModelCls = `${model.model_cls}-cloud`;
       const key = cloudModelCls.toLowerCase();
       if (!modelsByTask[model.task].has(key)) {
-        modelsByTask[model.task].set(key, { model_cls: cloudModelCls, stage: model.stage, isCloud: true });
+        modelsByTask[model.task].set(key, { model_cls: cloudModelCls, stage: model.stage, is_cloud: true });
       }
     });
   }
@@ -197,7 +197,7 @@ export const updateLightX2VModels = (
       const key = modelId.toLowerCase();
       // Only add if not already in map
       if (!modelMap.has(key)) {
-        const displayName = model.isCloud
+        const displayName = model.is_cloud
           ? `LightX2V Cloud (${model.model_cls.replace(/-cloud$/, '')})`
           : `LightX2V (${modelId})`;
         modelMap.set(key, {
@@ -329,7 +329,7 @@ export const TOOLS: ToolDefinition[] = [
     icon: 'Cpu',
     defaultParams: {
       mode: 'basic',
-      customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+      custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
     },
     models: getFilteredModels([
       {
@@ -337,7 +337,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'DeepSeek V3.2',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       },
       {
@@ -345,7 +345,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'Doubao Seed 1.6',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       },
       {
@@ -353,7 +353,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'Gemini 2.5 Flash',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       },
       {
@@ -361,7 +361,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'Gemini 3 Pro',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       },
       {
@@ -369,7 +369,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'Gemini 3 Pro',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       },
       {
@@ -377,7 +377,7 @@ export const TOOLS: ToolDefinition[] = [
         name: 'Gemini 3 Flash',
         defaultParams: {
           mode: 'basic',
-          customOutputs: [{ id: 'out-text', label: '执行结果', description: 'Main text response.' }]
+          custom_outputs: [{ id: 'out-text1', label: '执行结果', description: 'Main text response.' }]
         }
       }
     ])
@@ -389,7 +389,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Generate images from text descriptions using Gemini or LightX2V',
-    description_zh: '根据文本描述生成图像 (可选 Gemini 或 LightX2V)',
+    description_zh: '根据文本描述生成图像',
     inputs: [{ id: 'in-text', type: DataType.TEXT, label: 'Prompt' }],
     outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image' }],
     icon: 'Sparkles',
@@ -442,7 +442,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Text-to-speech conversion',
-    description_zh: '使用 Gemini 或 LightX2V 进行语音合成',
+    description_zh: '文本转语音（多音色支持）',
     inputs: [
       { id: 'in-text', type: DataType.TEXT, label: 'TTS Text', label_zh: 'TTS 文本' },
       { id: 'in-context-tone', type: DataType.TEXT, label: 'Context & Tone (Opt)', label_zh: '语境与语调（可选）' }
@@ -481,7 +481,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Clone voice from audio and generate TTS with cloned voice',
-    description_zh: '从音频克隆音色，并使用克隆的音色生成语音',
+    description_zh: '生成你的专属角色音色',
     inputs: [
       { id: 'in-tts-text', type: DataType.TEXT, label: 'TTS Text', label_zh: 'TTS 文本' }
     ],
@@ -503,7 +503,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Generate video from text',
-    description_zh: '根据文本生成视频短片',
+    description_zh: '根据文本生成视频',
     inputs: [{ id: 'in-text', type: DataType.TEXT, label: 'Prompt', label_zh: '提示词' }],
     outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Video', label_zh: '视频' }],
     icon: 'Video',
@@ -521,7 +521,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Generate video from a starting image',
-    description_zh: '以起始图像生成动感视频',
+    description_zh: '从首帧图像生成视频',
     inputs: [
       { id: 'in-image', type: DataType.IMAGE, label: 'Start Frame', label_zh: '起始帧' },
       { id: 'in-text', type: DataType.TEXT, label: 'Motion Prompt', label_zh: '动作提示词' }
@@ -542,7 +542,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Generate video with start and end frame constraints (Wan 2.2)',
-    description_zh: '通过首尾两张图像及其描述生成过渡视频',
+    description_zh: '通过首尾两张图像生成过渡视频',
     inputs: [
       { id: 'in-image-start', type: DataType.IMAGE, label: 'Start Frame', label_zh: '起始帧' },
       { id: 'in-image-end', type: DataType.IMAGE, label: 'End Frame', label_zh: '结束帧' },
@@ -564,7 +564,7 @@ export const TOOLS: ToolDefinition[] = [
     category: 'AI Model',
     category_zh: 'AI 模型',
     description: 'Speech-to-Video talking avatar powered by LightX2V SekoTalk',
-    description_zh: '基于音频驱动的数字人播报视频',
+    description_zh: '根据音频生成数字人对口型视频',
     inputs: [
       { id: 'in-image', type: DataType.IMAGE, label: 'Portrait Image', label_zh: '人像图' },
       { id: 'in-audio', type: DataType.AUDIO, label: 'Voice Audio', label_zh: '语音' },
@@ -572,6 +572,9 @@ export const TOOLS: ToolDefinition[] = [
     ],
     outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Avatar Video', label_zh: '数字人视频' }],
     icon: 'UserCircle',
+    defaultParams: {
+      prompt: '角色根据音频说话'
+    },
     models: [
       // LightX2V models will be added dynamically via updateLightX2VModels
     ]
@@ -591,8 +594,11 @@ export const TOOLS: ToolDefinition[] = [
     ],
     outputs: [{ id: 'out-video', type: DataType.VIDEO, label: 'Swapped Video' }],
     icon: 'UserCog',
+    defaultParams: {
+      prompt: '将视频中的角色替换为参考图中的形象'
+    },
     models: [
-      { id: 'veo-3.1-fast-generate-preview', name: 'Veo 3.1 Fast' }
+
       // LightX2V models will be added dynamically via updateLightX2VModels
     ]
   },

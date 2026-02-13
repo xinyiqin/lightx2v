@@ -105,61 +105,94 @@ export interface ToolDefinition {
   defaultParams?: ModelDefaultParams;
 }
 
+/** 从 /api/v1/task/query 同步的任务状态，用于节点显示排队位置、进度、运行时间（与主应用 TaskDetails 一致） */
+export interface NodeRunState {
+  status: string; // CREATED | PENDING | RUNNING | SUCCEED | FAILED | CANCEL
+  subtasks?: Array<{
+    status: string;
+    estimated_pending_order?: number;
+    estimated_pending_secs?: number;
+    estimated_running_secs?: number;
+    elapses?: Record<string, number>;
+  }>;
+}
+
 export interface WorkflowNode {
   id: string;
   name?: string;
-  toolId: string;
+  tool_id: string;
   x: number;
   y: number;
   status: NodeStatus;
-  data: Record<string, any>; // For internal settings
-  outputValue?: any; // For multi-output nodes, this is a Record<portId, value>
+  data: Record<string, any>; // For internal settings (e.g. image_edits)
+  output_value?: any; // For multi-output nodes, this is a Record<portId, value>
   error?: string;
-  executionTime?: number;
-  startTime?: number;
-  completedAt?: number;
+  execution_time?: number;
+  start_time?: number;
+  completed_at?: number;
+  /** 与主应用一致的任务状态（排队/进度/运行时间），由 task/query 轮询更新 */
+  run_state?: NodeRunState;
 }
 
 export interface Connection {
   id: string;
-  sourceNodeId: string;
-  sourcePortId: string;
-  targetNodeId: string;
-  targetPortId: string;
+  source_node_id: string;
+  source_port_id: string;
+  target_node_id: string;
+  target_port_id: string;
 }
 
-export type NodeHistoryEntryKind = 'text' | 'json' | 'file' | 'lightx2v_result';
+export type NodeHistoryEntryKind = 'text' | 'file' | 'task'; // 兼容旧数据 kind: 'lightx2v_result' 视为 task；不再使用 kind: 'json'，多端口为 port_id 键字典
 
-/** 节点输出中“已存文件”的引用，与 NodeHistoryEntryKind 的 file 一致，用于 outputValue / 连线值 */
+/** 节点输出中“已存文件”的引用，使用 kind（兼容旧 type） */
 export interface FileReference {
-  type: 'file';
+  kind: 'file';
   file_id: string;
   file_url: string;
+  mime_type?: string;
+  /** @deprecated 使用 mime_type 代替 */
   ext?: string;
+}
+
+/** 任务结果引用，使用 kind（兼容旧 type / __type） */
+export interface TaskReference {
+  kind: 'task';
+  task_id: string;
+  output_name: string;
+  is_cloud?: boolean;
 }
 
 export type NodeHistoryValue =
   | { text: string }
   | { json: any }
   | {
-      fileId?: string;
+      file_id?: string;
       url?: string;
       dataUrl?: string;
+      mime_type?: string;
+      /** @deprecated 使用 mime_type 代替 */
       ext?: string;
     }
   | {
-      taskId: string;
-      outputName: string;
-      isCloud: boolean;
+      task_id: string;
+      output_name: string;
+      is_cloud: boolean;
     };
 
+/**
+ * 节点历史条目。
+ * - output_value 统一为以 port_id 为键的字典（out-text/out-audio/out-video/out-text1…）；每端口值为文本(string)、file ref 或 task ref，不再使用 kind: 'json'。
+ */
 export interface NodeHistoryEntry {
   id: string;
   timestamp: number;
-  executionTime?: number;
-  metadata?: Record<string, any>;
-  kind: NodeHistoryEntryKind;
-  value: NodeHistoryValue;
+  execution_time?: number;
+  /** 以 port_id 为键的字典，值为 string | { kind: 'file', ... } | { kind: 'task', ... }（或兼容旧版 kind: 'text' 等） */
+  output_value: Record<string, any>;
+  params?: Record<string, any>;
+  /** @deprecated 仅兼容旧数据读取，新数据统一存 output_value */
+  output_value_port_keyed?: Record<string, any>;
+  metadata?: { port_id?: string; [k: string]: any };
 }
 
 export interface WorkflowState {

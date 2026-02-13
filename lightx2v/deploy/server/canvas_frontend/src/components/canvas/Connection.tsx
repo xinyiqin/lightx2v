@@ -1,5 +1,4 @@
 import React from 'react';
-import { Trash2 } from 'lucide-react';
 import { Connection as ConnectionType, WorkflowNode, NodeStatus } from '../../../types';
 import { ToolDefinition } from '../../../types';
 import { TOOLS } from '../../../constants';
@@ -15,6 +14,8 @@ interface ConnectionProps {
   view: { zoom: number };
   onSelect: () => void;
   onDelete: () => void;
+  /** 正在拖拽连线时为 true，此时不响应点击选中，避免误选 */
+  isConnecting?: boolean;
 }
 
 export const Connection: React.FC<ConnectionProps> = ({
@@ -27,13 +28,15 @@ export const Connection: React.FC<ConnectionProps> = ({
   isSelected,
   view,
   onSelect,
-  onDelete
+  onDelete,
+  isConnecting = false,
+  getConnectionClickWorldCoords
 }) => {
   // Calculate port positions
-  const outputPortIndex = sourceOutputs.findIndex((p) => p.id === connection.sourcePortId);
-  const inputPortIndex = targetInputs.findIndex((p) => p.id === connection.targetPortId);
+  const outputPortIndex = sourceOutputs.findIndex((p) => p.id === connection.source_port_id);
+  const inputPortIndex = targetInputs.findIndex((p) => p.id === connection.target_port_id);
 
-  const sourceTool = TOOLS.find((t) => t.id === sourceNode.toolId);
+  const sourceTool = TOOLS.find((t) => t.id === sourceNode.tool_id);
   const isSourceInput = sourceTool?.category === 'Input';
   const sourceNodeWidth = isSourceInput ? 320 : 224;
   const portOffset = 18;
@@ -47,14 +50,15 @@ export const Connection: React.FC<ConnectionProps> = ({
   const isTargetRunning = targetNode.status === NodeStatus.RUNNING || targetNode.status === NodeStatus.PENDING;
 
   return (
-    <g style={{ pointerEvents: 'auto' }}>
+    <g style={{ pointerEvents: isConnecting ? 'none' : 'auto' }}>
       <path
         d={path}
         stroke="transparent"
         strokeWidth="15"
         fill="none"
-        className="pointer-events-auto cursor-pointer"
+        className={isConnecting ? 'pointer-events-none' : 'pointer-events-auto cursor-pointer'}
         onClick={(e) => {
+          if (isConnecting) return;
           e.stopPropagation();
           onSelect();
         }}
@@ -70,26 +74,6 @@ export const Connection: React.FC<ConnectionProps> = ({
         <circle r="4" fill="#90dce1" className="shadow-lg shadow-[#90dce1]/50">
           <animateMotion path={path} dur="1.5s" repeatCount="indefinite" />
         </circle>
-      )}
-      {isSelected && (
-        <foreignObject
-          x={(x1 + x2) / 2 - 15}
-          y={(y1 + y2) / 2 - 30}
-          width="30"
-          height="30"
-          className="overflow-visible"
-        >
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="p-1.5 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-all active:scale-90 pointer-events-auto"
-          >
-            <Trash2 size={12} />
-          </button>
-        </foreignObject>
       )}
     </g>
   );

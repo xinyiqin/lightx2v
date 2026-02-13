@@ -147,6 +147,7 @@ interface EditorProps {
   onExpandOutput?: (nodeId: string, fieldId?: string, runId?: string) => void;
   onPinOutputToCanvas?: (content: any, type: DataType) => void;
   resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
   // AI Chat props
   isAIChatOpen?: boolean;
@@ -191,6 +192,7 @@ export const Editor: React.FC<EditorProps> = ({
   selectedConnectionId,
   connecting,
   mousePos,
+  clientMousePos,
   nodeHeights,
   sourceNodes,
   sourceOutputs,
@@ -236,6 +238,8 @@ export const Editor: React.FC<EditorProps> = ({
   getNodeOutputs,
   isOverNode,
   isPanning,
+  draggingNode = null,
+  screenToWorldCoords,
   onCloseValidation,
   onCloseError,
   // Node component props
@@ -291,6 +295,7 @@ export const Editor: React.FC<EditorProps> = ({
   onExpandOutput = () => {},
   onPinOutputToCanvas = () => {},
   resolveLightX2VResultRef,
+  getNodeOutputUrl,
   // AI Chat props
   isAIChatOpen = false,
   isAIChatCollapsed = false,
@@ -390,6 +395,7 @@ export const Editor: React.FC<EditorProps> = ({
           selectedConnectionId={selectedConnectionId}
           connecting={connecting}
           mousePos={mousePos}
+          clientMousePos={clientMousePos}
           nodeHeights={nodeHeights}
           sourceNodes={sourceNodes}
           sourceOutputs={sourceOutputs}
@@ -408,6 +414,8 @@ export const Editor: React.FC<EditorProps> = ({
           onNodeDrag={onNodeDrag}
           onNodeDragEnd={onNodeDragEnd}
           getNodeOutputs={getNodeOutputs}
+          draggingNode={draggingNode}
+          screenToWorldCoords={screenToWorldCoords}
           lang={lang}
           showReplaceMenu={showReplaceMenu}
           showOutputQuickAdd={showOutputQuickAdd}
@@ -437,6 +445,7 @@ export const Editor: React.FC<EditorProps> = ({
           onNodeHeightChange={onNodeHeightChange}
           onAddNodeToChat={onAddNodeToChatContext}
           resolveLightX2VResultRef={resolveLightX2VResultRef}
+          getNodeOutputUrl={getNodeOutputUrl}
         />
 
         {/* 右侧面板容器：NodeConfigPanel */}
@@ -467,6 +476,8 @@ export const Editor: React.FC<EditorProps> = ({
             onTagsChange={onTagsChange}
             onShowCloneVoiceModal={onShowCloneVoiceModal}
             collapsed={nodeConfigPanelCollapsed}
+            resolveLightX2VResultRef={resolveLightX2VResultRef}
+            getNodeOutputUrl={getNodeOutputUrl}
           />
         </div>
 

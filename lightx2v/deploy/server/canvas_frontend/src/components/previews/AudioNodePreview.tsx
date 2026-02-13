@@ -9,11 +9,13 @@ interface AudioDataEntry {
 
 interface AudioNodePreviewProps {
   audioData: AudioDataEntry;
-  onUpdate: (trimmedBase64: string, range: { start: number; end: number }) => void;
+  onUpdate?: (trimmedBase64: string, range: { start: number; end: number }) => void;
   onRangeChange?: (range: { start: number; end: number }) => void;
+  /** 只读播放（波形 + 进度），不显示裁剪等编辑入口 */
+  readOnly?: boolean;
 }
 
-export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, onUpdate, onRangeChange }) => {
+export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, onUpdate, onRangeChange, readOnly = false }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -37,12 +39,23 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
 
   useEffect(() => {
     const analyzeAudio = async () => {
-      if (!audioData?.original) return;
+      const src = audioData?.original;
+      if (!src || typeof src !== 'string') {
+        setDuration(0);
+        setWaveform([]);
+        return;
+      }
       try {
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const response = await fetch(audioData.original);
+        const response = await fetch(src, { credentials: 'same-origin' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        if (arrayBuffer.byteLength === 0) {
+          throw new Error('Empty response');
+        }
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
         setDuration(audioBuffer.duration);
 
         const rawData = audioBuffer.getChannelData(0);
@@ -63,10 +76,12 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
         const multiplier = maxVal > 0 ? (1 / maxVal) : 1;
         setWaveform(filteredData.map(n => n * multiplier));
 
-        // Cleanup context to avoid memory leak and browser limit
         audioCtx.close();
       } catch (e) {
-        console.error("Audio analysis failed", e);
+        // 载入工作流时文件可能尚未解析、格式不被 decodeAudioData 支持（如 video/mp4）或需鉴权，降级为不显示波形
+        console.warn("Audio analysis skipped or failed", e);
+        setDuration(0);
+        setWaveform([]);
       }
     };
     analyzeAudio();
@@ -77,6 +92,7 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
     return ((range.end - range.start) / 100) * duration;
   }, [range, duration]);
 
+  const [currentTime, setCurrentTime] = useState(0);
   const togglePlay = () => {
     if (!audioRef.current || !duration) return;
     if (isPlaying) {
@@ -125,13 +141,15 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
   };
 
   const handleApplyTrim = async () => {
-    if (!audioData?.original || !duration) return;
+    const src = audioData?.original;
+    if (!src || typeof src !== 'string' || !duration) return;
     setIsProcessing(true);
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const response = await fetch(audioData.original);
+      const response = await fetch(src, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
       const startOffset = Math.floor((range.start / 100) * audioBuffer.length);
       const endOffset = Math.floor((range.end / 100) * audioBuffer.length);
       const frameCount = endOffset - startOffset;
@@ -142,14 +160,14 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
       const wavBlob = bufferToWav(trimmedBuffer);
       const reader = new FileReader();
       reader.onloadend = () => {
-        onUpdate(reader.result as string, range);
+        onUpdate?.(reader.result as string, range);
         setIsProcessing(false);
         setIsTrimMode(false);
       };
       reader.readAsDataURL(wavBlob);
       audioCtx.close();
     } catch (e) {
-      console.error("Trimming failed", e);
+      console.warn("Trimming failed", e);
       setIsProcessing(false);
     }
   };
@@ -190,17 +208,21 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
                 <Timer size={14} />
               </div>
               <div className="flex flex-col">
-                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Active Duration</span>
-                <span className="text-[11px] font-bold text-slate-200">{trimmedDuration.toFixed(2)}s</span>
+                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{readOnly ? 'Progress' : 'Active Duration'}</span>
+                <span className="text-[11px] font-bold text-slate-200">
+                  {readOnly ? `${currentTime.toFixed(1)}s / ${duration.toFixed(1)}s` : `${trimmedDuration.toFixed(2)}s`}
+                </span>
               </div>
             </div>
-            <button
-              onClick={() => setIsTrimMode(true)}
-              className="p-2 text-slate-500 hover:text-[#90dce1] transition-colors"
-              title="Edit Trim"
-            >
-              <Scissors size={18} />
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => setIsTrimMode(true)}
+                className="p-2 text-slate-500 hover:text-[#90dce1] transition-colors"
+                title="Edit Trim"
+              >
+                <Scissors size={18} />
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -302,9 +324,12 @@ export const AudioNodePreview: React.FC<AudioNodePreviewProps> = ({ audioData, o
         src={audioData?.original}
         onEnded={() => setIsPlaying(false)}
         onTimeUpdate={() => {
-          if (audioRef.current && audioRef.current.currentTime > (range.end / 100) * duration) {
-            audioRef.current.pause();
-            setIsPlaying(false);
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+            if (!readOnly && audioRef.current.currentTime > (range.end / 100) * duration) {
+              audioRef.current.pause();
+              setIsPlaying(false);
+            }
           }
         }}
         className="hidden"

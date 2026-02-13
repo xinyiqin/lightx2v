@@ -106,10 +106,10 @@ Please generate a workflow in JSON format with the following structure:
   ],
   "connections": [
     {
-      "sourceNodeId": "node-1",
-      "sourcePortId": "out-text",
-      "targetNodeId": "node-2",
-      "targetPortId": "in-text"
+      "source_node_id": "node-1",
+      "source_port_id": "out-text",
+      "target_node_id": "node-2",
+      "target_port_id": "in-text"
     },
     ...
   ],
@@ -194,7 +194,7 @@ Output ONLY the JSON, no additional text or markdown.`;
         id: `flow-${Date.now()}`,
         name: workflowData.name || t('untitled'),
         nodes: workflowData.nodes.map((n: any, idx: number) => {
-          const tool = TOOLS.find(t => t.id === n.toolId);
+          const tool = TOOLS.find(t => t.id === n.tool_id);
           const defaultData: Record<string, any> = { ...(n.data || {}) };
 
           // Set default model if tool has models
@@ -214,7 +214,7 @@ Output ONLY the JSON, no additional text or markdown.`;
 
           return {
             id: n.id || `node-${Date.now()}-${idx}`,
-            toolId: n.toolId,
+            tool_id: n.tool_id,
             x: n.x || (idx * 400),
             y: n.y || (idx % 3 * 200),
             status: NodeStatus.IDLE,
@@ -223,10 +223,10 @@ Output ONLY the JSON, no additional text or markdown.`;
         }),
         connections: (workflowData.connections || []).map((c: any, idx: number) => ({
           id: c.id || `conn-${Date.now()}-${idx}`,
-          sourceNodeId: c.sourceNodeId,
-          sourcePortId: c.sourcePortId,
-          targetNodeId: c.targetNodeId,
-          targetPortId: c.targetPortId
+          source_node_id: c.source_node_id ?? c.sourceNodeId,
+          source_port_id: c.source_port_id ?? c.sourcePortId,
+          target_node_id: c.target_node_id ?? c.targetNodeId,
+          target_port_id: c.target_port_id ?? c.targetPortId
         })),
         isDirty: true,
         isRunning: false,

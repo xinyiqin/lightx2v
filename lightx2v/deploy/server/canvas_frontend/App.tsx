@@ -43,6 +43,8 @@ import { getAccessToken, initLightX2VToken, apiRequest } from './src/utils/apiCl
 import { checkWorkflowOwnership, getCurrentUserId } from './src/utils/workflowUtils';
 import { isStandalone } from './src/config/runtimeMode';
 import { collectLightX2VResultRefs } from './src/utils/resultRef';
+import { getNodeOutputUrl } from './src/utils/workflowFileManager';
+import { getOutputValueByPort, setOutputValueByPort } from './src/utils/outputValuePort';
 
 // --- Main App ---
 
@@ -94,6 +96,7 @@ const App: React.FC = () => {
     connecting,
     setConnecting,
     mousePos,
+    clientMousePos,
     zoomIn,
     zoomOut,
     resetView,
@@ -118,6 +121,8 @@ const App: React.FC = () => {
   });
 
   const [ticker, setTicker] = useState(0);
+  /** 模型列表更新后递增，用于触发重渲染使节点/配置面板重新读取 TOOLS（含 cloud 模型） */
+  const [lightX2VModelsVersion, setLightX2VModelsVersion] = useState(0);
   const [validationErrors, setValidationErrors] = useState<{ message: string; type: 'ENV' | 'INPUT' }[]>([]);
   const [globalError, setGlobalError] = useState<{ message: string; details?: string } | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -253,6 +258,7 @@ const App: React.FC = () => {
         // 更新模型列表（本地模型 + 云端模型带 -cloud 后缀）
         if (localModels.length > 0 || cloudModels.length > 0) {
           updateLightX2VModels(localModels, cloudModels);
+          setLightX2VModelsVersion((v) => v + 1); // 触发重渲染，让节点/配置面板重新读取 TOOLS
           console.log('[LightX2V] 模型列表已更新:', {
             local: localModels.length,
             cloud: cloudModels.length
@@ -290,8 +296,15 @@ const App: React.FC = () => {
 
   // Helper function to get node outputs (needed by hooks)
   const getNodeOutputs = (node: WorkflowNode): Port[] => {
-    const tool = TOOLS.find(t => t.id === node.toolId);
-    if (node.toolId === 'text-generation' && node.data.customOutputs) return node.data.customOutputs.map((o: any) => ({ ...o, type: DataType.TEXT }));
+    const tool = TOOLS.find(t => t.id === node.tool_id);
+    if (node.tool_id === 'text-generation' && node.data.custom_outputs) {
+      return node.data.custom_outputs.map((o: any, i: number) => ({
+        id: o.id ?? `out-text${i + 1}`,
+        label: o.label ?? `Output ${i + 1}`,
+        description: o.description,
+        type: DataType.TEXT
+      }));
+    }
     return tool?.outputs || [];
   };
 
@@ -367,7 +380,10 @@ const App: React.FC = () => {
     updateNodeData: nodeManagement.updateNodeData,
     voiceList,
     lang,
-    onSaveExecutionToLocal: isStandalone() ? async (w) => { await saveWorkflowToLocalOnly(w); } : undefined
+    onSaveExecutionToLocal: isStandalone() ? async (w) => { await saveWorkflowToLocalOnly(w); } : undefined,
+    saveWorkflowBeforeRun: !isStandalone() && saveWorkflowToDatabase
+      ? async (w) => await saveWorkflowToDatabase(w, { name: w.name })
+      : undefined
   });
 
   // Destructure updateNodeData from nodeManagement (for use in other places)
@@ -385,7 +401,7 @@ const App: React.FC = () => {
   // Pre-resolve lightx2v result refs when entering workflow editor (warm cache for node previews)
   useEffect(() => {
     if (currentView !== 'EDITOR' || !workflow || !resolveLightX2VResultRef) return;
-    const refs = workflow.nodes.flatMap((n) => collectLightX2VResultRefs(n.outputValue));
+    const refs = workflow.nodes.flatMap((n) => collectLightX2VResultRefs(n.output_value));
     refs.forEach((ref) => resolveLightX2VResultRef(ref).catch(() => {}));
   }, [currentView, workflow?.id, workflow?.nodes, resolveLightX2VResultRef]);
 
@@ -508,6 +524,12 @@ const App: React.FC = () => {
       if (workflowMatch) {
         const workflowId = workflowMatch[1];
 
+        // 同一工作流且当前已有状态（含后台运行/执行结果）：仅切回编辑页，保留状态
+        if (workflow?.id === workflowId) {
+          setCurrentView('EDITOR');
+          return;
+        }
+
         // Only load if it's a different workflow
         if (!workflow || workflow.id !== workflowId) {
           console.log('[App] Hash changed, loading workflow:', workflowId);
@@ -572,7 +594,7 @@ const App: React.FC = () => {
     if (voiceData.voices && voiceData.voices.length > 0) {
           workflow.nodes.forEach(node => {
             const isLightX2V = node.data.model === 'lightx2v' || node.data.model?.startsWith('lightx2v');
-            if (node.toolId === 'tts' && isLightX2V && node.data.voiceType) {
+            if (node.tool_id === 'tts' && isLightX2V && node.data.voiceType) {
               const matchingVoice = voiceData.voices.find((v: any) => v.voice_type === node.data.voiceType);
               if (matchingVoice?.resource_id) {
                 // Only update if resourceId is empty, wrong, or missing
@@ -592,7 +614,7 @@ const App: React.FC = () => {
       return;
     }
     try {
-      const response = await apiRequest('/api/v1/workflow/public?page=1&page_size=100');
+      const response = await apiRequest('/api/v1/workflow/list?public=true&page=1&page_size=100');
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText);
@@ -747,6 +769,18 @@ const App: React.FC = () => {
   }, [saveWorkflowToDatabase, saveWorkflowToLocal, setWorkflow, autoSaveHook, setGlobalError, t]);
 
   const openWorkflow = useCallback(async (w: WorkflowState) => {
+    // 若正在重新进入的是当前已在后台运行（或刚跑完）的同一工作流，保留当前状态，仅切回编辑页，便于“退出后继续跟踪、再进入仍是之前样子”
+    if (workflow?.id === w.id && (
+      workflow.isRunning ||
+      workflow.nodes?.some((n) => n.status === NodeStatus.RUNNING || n.status === NodeStatus.SUCCESS || n.status === NodeStatus.ERROR)
+    )) {
+      setCurrentView('EDITOR');
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        window.history.replaceState(null, '', `#workflow/${w.id}`);
+      }
+      return;
+    }
+
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
     setValidationErrors([]);
@@ -818,7 +852,7 @@ const App: React.FC = () => {
     }
 
     // History will be automatically initialized by useUndoRedo when workflow changes
-  }, [loadWorkflow, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors]);
+  }, [workflow, loadWorkflow, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors]);
 
   const createNewWorkflow = useCallback(async () => {
     setSelectedNodeId(null);
@@ -891,6 +925,14 @@ const App: React.FC = () => {
     void openWorkflow(workflowToOpen);
   }, [openWorkflow]);
 
+  const handleBackToDashboard = useCallback(() => {
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      window.history.replaceState(null, '', '#');
+    }
+    setCurrentView('DASHBOARD');
+    void loadWorkflows();
+  }, [loadWorkflows, setCurrentView]);
+
   const handleAIGenerateClick = useCallback(() => {
     setSidebarDefaultTab('chat');
     setFocusAIChatInput(true);
@@ -903,6 +945,34 @@ const App: React.FC = () => {
   const expandedResultData = resultManagement.expandedResultData;
   const resultEntries = resultManagement.resultEntries;
   const handleManualResultEdit = resultManagement.handleManualResultEdit;
+
+  // 放大 modal 打开时默认进入编辑模式并初始化 tempEditValue（仅 TEXT 类型）；content 为 string 时才写入，避免 file ref 未解析时写入 JSON
+  const expandedOutputOpenKeyRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!modalState.expandedOutput) {
+      expandedOutputOpenKeyRef.current = null;
+      return;
+    }
+    if (!expandedResultData) return;
+    const key = `${modalState.expandedOutput.nodeId}:${modalState.expandedOutput.fieldId ?? ''}`;
+    const keyChanged = expandedOutputOpenKeyRef.current !== key;
+    if (keyChanged) {
+      expandedOutputOpenKeyRef.current = key;
+      modalState.setIsEditingResult(true);
+    }
+    if (expandedResultData.type === DataType.TEXT) {
+      const content = expandedResultData.content;
+      const isStableText = typeof content === 'string';
+      const initial = isStableText ? content : (typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content ?? ''));
+      if (keyChanged) {
+        modalState.setTempEditValue(initial);
+      } else if (isStableText && (modalState.tempEditValue === '' || modalState.tempEditValue === (lang === 'zh' ? '加载中…' : 'Loading…'))) {
+        modalState.setTempEditValue(content);
+      } else if (isStableText && typeof modalState.tempEditValue === 'string' && modalState.tempEditValue.trim().startsWith('{') && modalState.tempEditValue.includes('file_id')) {
+        modalState.setTempEditValue(content);
+      }
+    }
+  }, [modalState.expandedOutput, expandedResultData, modalState.tempEditValue, lang]);
 
 
   const handleGlobalInputChange = useCallback((nodeId: string, portId: string, value: any) => {
@@ -996,19 +1066,23 @@ const App: React.FC = () => {
     let newToolOutputs: Port[] = [];
     let newCustomOutputs: any[] | undefined = undefined;
     if (newToolId === 'text-generation') {
-      // If replacing with text-generation, preserve customOutputs if they exist
-      if (node.toolId === 'text-generation' && node.data.customOutputs) {
-        newToolOutputs = node.data.customOutputs.map((o: any) => ({ ...o, type: DataType.TEXT }));
-        newCustomOutputs = node.data.customOutputs;
+      // If replacing with text-generation, preserve customOutputs if they exist (including custom port ids)
+      if (node.tool_id === 'text-generation' && node.data.custom_outputs) {
+        newCustomOutputs = node.data.custom_outputs;
+        newToolOutputs = node.data.custom_outputs.map((o: any) => ({
+          id: o.id ?? `out-text1`,
+          label: o.label ?? 'Output',
+          description: o.description,
+          type: DataType.TEXT
+        }));
       } else {
-        // When replacing another node with text-generation, create customOutputs based on current node outputs
-        // This allows replacement of nodes with outputs
+        // When replacing another node with text-generation, create customOutputs (default ids out-text1, out-text2...)
         newCustomOutputs = currentNodeOutputs.map((out, idx) => ({
-          id: `out-${idx + 1}`,
+          id: out.id ?? `out-text${idx + 1}`,
           label: out.label || `Output ${idx + 1}`,
           description: out.label || `Output ${idx + 1}`
         }));
-        newToolOutputs = newCustomOutputs.map((o: any) => ({ ...o, type: DataType.TEXT }));
+        newToolOutputs = newCustomOutputs.map((o: any) => ({ id: o.id, label: o.label, description: o.description, type: DataType.TEXT }));
       }
     } else {
       newToolOutputs = newTool.outputs;
@@ -1037,67 +1111,67 @@ const App: React.FC = () => {
       // Create new node with new tool
       const newNode: WorkflowNode = {
         ...node,
-        toolId: newToolId,
+        tool_id: newToolId,
         data: {
           ...node.data,
           // Reset model if the new tool doesn't have models
           model: newTool.models && newTool.models.length > 0 ? (newTool.models[0].id || node.data.model) : undefined,
-          // Preserve customOutputs if replacing with text-generation and current node has them
-          customOutputs: newToolId === 'text-generation' ? (newCustomOutputs || node.data.customOutputs) : (newToolId !== 'text-generation' ? node.data.customOutputs : undefined)
+          // Preserve custom_outputs if replacing with text-generation and current node has them
+          custom_outputs: newToolId === 'text-generation' ? (newCustomOutputs || node.data.custom_outputs) : (newToolId !== 'text-generation' ? node.data.custom_outputs : undefined)
         },
         status: NodeStatus.IDLE,
         error: undefined,
-        executionTime: undefined,
-        startTime: undefined
+        execution_time: undefined,
+        start_time: undefined
       };
 
       // Update connections: map old output port IDs to new ones
       // Special handling for TTS -> Voice Clone replacement
-      const isTTSToVoiceClone = node.toolId === 'tts' && newToolId === 'lightx2v-voice-clone';
+      const isTTSToVoiceClone = node.tool_id === 'tts' && newToolId === 'lightx2v-voice-clone';
 
       const updatedConnections = prev.connections.map(conn => {
         // Handle output connections (source is the replaced node)
-        if (conn.sourceNodeId === nodeId) {
-          const newSourcePortId = outputPortMap[conn.sourcePortId];
+        if (conn.source_node_id === nodeId) {
+          const newSourcePortId = outputPortMap[conn.source_port_id];
           if (newSourcePortId) {
-            return { ...conn, sourcePortId: newSourcePortId };
+            return { ...conn, source_port_id: newSourcePortId };
           }
           // If no mapping found, remove the connection
           return null;
         }
 
         // Handle input connections (target is the replaced node)
-        if (conn.targetNodeId === nodeId) {
+        if (conn.target_node_id === nodeId) {
           // Special case: TTS -> Voice Clone
           if (isTTSToVoiceClone) {
             // Map in-text to in-tts-text
-            if (conn.targetPortId === 'in-text') {
-              return { ...conn, targetPortId: 'in-tts-text' };
+            if (conn.target_port_id === 'in-text') {
+              return { ...conn, target_port_id: 'in-tts-text' };
             }
             // Remove in-context-tone connection
-            if (conn.targetPortId === 'in-context-tone') {
+            if (conn.target_port_id === 'in-context-tone') {
               return null;
             }
           }
 
           // For other replacements, try to map input ports
-          const oldTool = TOOLS.find(t => t.id === node.toolId);
+          const oldTool = TOOLS.find(t => t.id === node.tool_id);
           const oldInputs = oldTool?.inputs || [];
           const newInputs = newTool.inputs || [];
 
           // Try to find matching input port by type and position
-          const oldInputIndex = oldInputs.findIndex(inp => inp.id === conn.targetPortId);
+          const oldInputIndex = oldInputs.findIndex(inp => inp.id === conn.target_port_id);
           if (oldInputIndex >= 0 && oldInputIndex < newInputs.length) {
             const oldInput = oldInputs[oldInputIndex];
             const newInput = newInputs[oldInputIndex];
             // Only map if types match
             if (oldInput.type === newInput.type) {
-              return { ...conn, targetPortId: newInput.id };
+              return { ...conn, target_port_id: newInput.id };
             }
           }
 
           // If no mapping found, check if port ID exists in new tool
-          const portExists = newInputs.some(inp => inp.id === conn.targetPortId);
+          const portExists = newInputs.some(inp => inp.id === conn.target_port_id);
           if (portExists) {
             return conn; // Keep connection if port exists
           }
@@ -1149,10 +1223,10 @@ const App: React.FC = () => {
     const list: { nodeId: string; port: Port; toolName: string; isSourceNode?: boolean; dataType: DataType }[] = [];
 
     workflow.nodes.forEach(node => {
-      const tool = TOOLS.find(t => t.id === node.toolId);
+      const tool = TOOLS.find(t => t.id === node.tool_id);
       if (!tool || tool.category === 'Input') return;
       tool.inputs.forEach(port => {
-        const isConnected = workflow.connections.some(c => c.targetNodeId === node.id && c.targetPortId === port.id);
+        const isConnected = workflow.connections.some(c => c.target_node_id === node.id && c.target_port_id === port.id);
         if (!isConnected) {
            list.push({ nodeId: node.id, port, toolName: (lang === 'zh' ? tool.name_zh : tool.name), dataType: port.type });
         }
@@ -1160,7 +1234,7 @@ const App: React.FC = () => {
     });
 
     workflow.nodes.forEach(node => {
-      const tool = TOOLS.find(t => t.id === node.toolId);
+      const tool = TOOLS.find(t => t.id === node.tool_id);
       if (!tool || tool.category !== 'Input') return;
 
       const val = node.data.value;
@@ -1183,34 +1257,62 @@ const App: React.FC = () => {
 
   // activeResultsList is now provided by useResultManagement Hook
 
-  // Enhanced mouse handlers that combine canvas Hook with workflow updates
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-
-    // Check if mouse is over a node or port
-    const target = e.target as HTMLElement;
-    const isOverNodeElement = target.closest('.node-element') || target.closest('.port') || target.closest('.connection-path');
-    setIsOverNode(!!isOverNodeElement);
-
-    // Call canvas Hook's handleMouseMove for panning
-    canvasHandleMouseMove(e);
-
-    // Handle node dragging with workflow update
-    if (draggingNode) {
+  // 节点拖拽时用 window 监听 mousemove/mouseup，保证鼠标移出画布或经过其他节点时位置仍跟随（与连接线拖拽一致）；并禁止拖拽期间文本选中
+  useEffect(() => {
+    if (!draggingNode) return;
+    document.body.style.userSelect = 'none';
+    const onMove = (e: MouseEvent) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
       const world = screenToWorldCoords(x, y);
-      setWorkflow(prev => prev ? ({
-        ...prev,
-        nodes: prev.nodes.map(n => n.id === draggingNode.id ? {
-          ...n,
-          x: world.x - draggingNode.offsetX,
-          y: world.y - draggingNode.offsetY
-        } : n),
-        isDirty: true
-      }) : null);
-    }
-  }, [draggingNode, canvasHandleMouseMove, screenToWorldCoords]);
+      setWorkflow(prev =>
+        prev
+          ? {
+              ...prev,
+              nodes: prev.nodes.map(n =>
+                n.id === draggingNode.id
+                  ? { ...n, x: world.x - draggingNode.offsetX, y: world.y - draggingNode.offsetY }
+                  : n
+              ),
+              isDirty: true
+            }
+          : null
+      );
+    };
+    const onUp = () => {
+      document.body.style.userSelect = '';
+      canvasHandleNodeDragEnd();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [draggingNode, canvasHandleNodeDragEnd, screenToWorldCoords]);
+
+  // Enhanced mouse handlers that combine canvas Hook with workflow updates（节点拖拽位置更新已移到上面 window 监听）
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      // Check if mouse is over a node or port
+      const target = e.target as HTMLElement;
+      const isOverNodeElement =
+        target.closest('.node-element') || target.closest('.port') || target.closest('.connection-path');
+      setIsOverNode(!!isOverNodeElement);
+
+      // Call canvas Hook's handleMouseMove for panning and connecting line
+      canvasHandleMouseMove(e);
+    },
+    [canvasHandleMouseMove]
+  );
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -1251,14 +1353,19 @@ const App: React.FC = () => {
 
   const clearSnapshot = useCallback(() => {}, []);
 
+  const getNodeOutputUrlForWorkflow = useCallback(
+    (nodeId: string, portId: string, fileId?: string, runId?: string) => (workflow?.id ? getNodeOutputUrl(workflow.id, nodeId, portId, fileId, runId) : Promise.resolve(null)),
+    [workflow?.id]
+  );
+
   const sourceNodes = React.useMemo(() => (workflow?.nodes ?? []), [workflow]);
 
   const sourceOutputs = React.useMemo(() => {
     if (!workflow) return {};
     return Object.fromEntries(
       workflow.nodes
-        .filter((n) => n.outputValue !== undefined && n.outputValue !== null)
-        .map((n) => [n.id, n.outputValue])
+        .filter((n) => n.output_value !== undefined && n.output_value !== null)
+        .map((n) => [n.id, n.output_value])
     );
   }, [workflow]);
 
@@ -1293,6 +1400,8 @@ const App: React.FC = () => {
         expandedOutput={modalState.expandedOutput}
         expandedResultData={expandedResultData}
         resolveLightX2VResultRef={resolveLightX2VResultRef}
+        workflowId={workflow?.id}
+        getNodeOutputUrl={workflow?.id ? getNodeOutputUrlForWorkflow : undefined}
         isEditingResult={modalState.isEditingResult}
         tempEditValue={modalState.tempEditValue}
           onClose={() => {
@@ -1321,6 +1430,7 @@ const App: React.FC = () => {
         selectedConnectionId={selectedConnectionId}
         connecting={connecting}
         mousePos={mousePos}
+        clientMousePos={clientMousePos}
         nodeHeights={nodeHeightsRef.current}
         sourceNodes={sourceNodes}
         sourceOutputs={sourceOutputs}
@@ -1334,7 +1444,7 @@ const App: React.FC = () => {
         validationErrors={validationErrors}
         globalError={globalError}
         canvasRef={canvasRef}
-        onBack={() => setCurrentView('DASHBOARD')}
+        onBack={handleBackToDashboard}
         onWorkflowNameChange={(name) => {
           setWorkflow(p => {
             if (!p) return null;
@@ -1397,6 +1507,8 @@ const App: React.FC = () => {
         getNodeOutputs={getNodeOutputs}
         isOverNode={isOverNode}
         isPanning={isPanning}
+        draggingNode={draggingNode}
+        screenToWorldCoords={screenToWorldCoords}
         onCloseValidation={() => setValidationErrors([])}
         onCloseError={() => setGlobalError(null)}
         showReplaceMenu={modalState.showReplaceMenu}
@@ -1413,6 +1525,7 @@ const App: React.FC = () => {
         onCancelNodeRun={cancelNodeRun}
         pendingRunNodeIds={pendingRunNodeIds}
         resolveLightX2VResultRef={resolveLightX2VResultRef}
+        getNodeOutputUrl={workflow?.id ? getNodeOutputUrlForWorkflow : undefined}
           onSetReplaceMenu={modalState.setShowReplaceMenu}
           onSetOutputQuickAdd={modalState.setShowOutputQuickAdd}
           onSetModelSelect={modalState.setShowModelSelect}
@@ -1608,7 +1721,7 @@ const App: React.FC = () => {
                       // Auto-select the newly created voice in the current node if applicable
                       if (newSpeakerId && selectedNodeId && workflow) {
                         const node = workflow.nodes.find(n => n.id === selectedNodeId);
-                        if (node && node.toolId === 'lightx2v-voice-clone') {
+                        if (node && node.tool_id === 'lightx2v-voice-clone') {
                           updateNodeData(selectedNodeId, 'speakerId', newSpeakerId);
                         }
                       }
@@ -1620,19 +1733,22 @@ const App: React.FC = () => {
 
       {modalState.showAudioEditor && workflow && (() => {
         const node = workflow.nodes.find(n => n.id === modalState.showAudioEditor);
-        if (!node || node.toolId !== 'audio-input' || !node.data.value) return null;
+        if (!node || node.tool_id !== 'audio-input') return null;
+        const audioSrc = node.data.value ?? (node.output_value && getOutputValueByPort(node, 'out-audio'));
+        if (!audioSrc) return null;
         return (
           <AudioEditorModal
             nodeId={modalState.showAudioEditor}
-            audioData={node.data.audioOriginal || node.data.value}
-            audioRange={node.data.audioRange}
+            audioData={audioSrc}
+            audioRange={node.data.audio_range}
             onRangeChange={(range) => {
-              updateNodeData(modalState.showAudioEditor!, 'audioRange', range);
+              updateNodeData(modalState.showAudioEditor!, 'audio_range', range);
             }}
             onClose={() => modalState.setShowAudioEditor(null)}
             onSave={(trimmedAudio) => {
-              updateNodeData(modalState.showAudioEditor!, 'value', trimmedAudio);
-              updateNodeData(modalState.showAudioEditor!, 'audioRange', node.data.audioRange || { start: 0, end: 100 });
+              const nextOutput = setOutputValueByPort(node.output_value, node.tool_id, 'out-audio', trimmedAudio);
+              updateNodeData(modalState.showAudioEditor!, 'output_value', nextOutput);
+              updateNodeData(modalState.showAudioEditor!, 'audio_range', node.data.audio_range || { start: 0, end: 100 });
               modalState.setShowAudioEditor(null);
             }}
             lang={lang}
@@ -1642,7 +1758,7 @@ const App: React.FC = () => {
 
       {modalState.showVideoEditor && workflow && (() => {
         const node = workflow.nodes.find(n => n.id === modalState.showVideoEditor);
-        if (!node || node.toolId !== 'video-input' || !node.data.value) return null;
+        if (!node || node.tool_id !== 'video-input' || !node.data.value) return null;
         const videoSource = node.data.videoOriginal || node.data.value;
         return (
           <VideoEditorModal

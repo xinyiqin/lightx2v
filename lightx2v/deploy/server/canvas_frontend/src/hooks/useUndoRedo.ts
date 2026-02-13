@@ -46,7 +46,7 @@ export const useUndoRedo = ({
         name: w.name,
         nodes: w.nodes.map(n => ({
           id: n.id,
-          toolId: n.toolId,
+          tool_id: n.tool_id,
           x: n.x,
           y: n.y,
           data: n.data

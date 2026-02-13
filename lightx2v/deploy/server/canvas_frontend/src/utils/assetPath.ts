@@ -18,10 +18,15 @@ export function getAssetPath(path: string | null | undefined): string {
   }
 
   if (path.startsWith('/api/v1/workflow/')) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    if (token) {
+      const separator = path.includes('?') ? '&' : '?';
+      return `${path}${separator}token=${encodeURIComponent(token)}`;
+    }
     return path;
   }
 
-  if (path.includes('/assets/task/result') || path.includes('/assets/workflow/input')) {
+  if (path.includes('/assets/task/result') || path.includes('/assets/workflow/file')) {
     // 获取主应用的 JWT token
     const sharedStore = (window as any).__SHARED_STORE__;
     const token = sharedStore ? sharedStore.getState('token') : localStorage.getItem('accessToken');

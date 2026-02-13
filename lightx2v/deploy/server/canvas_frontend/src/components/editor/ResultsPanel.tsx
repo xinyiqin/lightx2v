@@ -19,6 +19,7 @@ import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
 import { formatTime } from '../../utils/format';
 import { getAssetPath } from '../../utils/assetPath';
+import { getWorkflowFileText } from '../../utils/workflowFileManager';
 import type { ResultEntry } from '../../hooks/useResultManagement';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
@@ -35,6 +36,55 @@ interface ResultsPanelProps {
   resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
 }
 
+/** 运行结果里「文本」为 file 引用（file_id + text/plain）时按输出预览方式解析为可显示文本 */
+function isTextFileRef(x: any): boolean {
+  if (x == null || typeof x !== 'object') return false;
+  const t = (x as any)._type === 'file' || (x as any).kind === 'file';
+  const fileId = !!(x as any).file_id;
+  const mime = (x as any).mime_type === 'text/plain';
+  return (t && fileId) || (fileId && mime);
+}
+
+/** 文本文件引用：拉取正文并显示。传入 nodeId/portId/run_id 时通过 /output/url 解析，避免 404。 */
+function ResolvedTextContent({
+  workflowId,
+  fileRef,
+  nodeId,
+  portId,
+  className
+}: {
+  workflowId: string;
+  fileRef: { file_id: string; run_id?: string };
+  nodeId?: string;
+  portId?: string;
+  className?: string;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getWorkflowFileText(workflowId, fileRef.file_id, nodeId, portId, fileRef.run_id).then((content) => {
+      if (!cancelled) setText(content ?? '');
+    }).catch(() => { if (!cancelled) setText(''); });
+    return () => { cancelled = true; };
+  }, [workflowId, fileRef.file_id, fileRef.run_id, nodeId, portId]);
+  if (text === null) {
+    return <span className={className}>Loading…</span>;
+  }
+  return <span className={className}>{text || '—'}</span>;
+}
+
+function textResultDisplay(val: any, t: (key: string) => string): string {
+  if (val == null) return '—';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    if ((val as any).kind === 'text' && typeof (val as any).text === 'string') return (val as any).text;
+    if ((val as any).type === 'text' && typeof (val as any).data === 'string') return (val as any).data;
+    if (isTextFileRef(val)) return t('result_text_file_placeholder'); // fallback when no workflowId
+    return t('result_text_file_placeholder');
+  }
+  return String(val);
+}
+
 function ResolvedImage({ content, resolveLightX2VResultRef, className }: { content: any; resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -43,6 +93,10 @@ function ResolvedImage({ content, resolveLightX2VResultRef, className }: { conte
       let cancelled = false;
       resolveLightX2VResultRef(content).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
       return () => { cancelled = true; };
+    }
+    if (content && typeof content === 'object' && content.kind === 'url' && typeof content.url === 'string') {
+      setUrl(content.url);
+      return;
     }
     const direct = typeof content === 'string' ? (content.startsWith('http') || content.startsWith('data:') ? content : getAssetPath(content)) : getAssetPath(content);
     setUrl(direct || null);
@@ -110,17 +164,17 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
           ) : (
             resultEntries.map(entry => {
               const { node, output: res, runId } = entry;
-              const tool = TOOLS.find(t => t.id === node.toolId);
+              const tool = TOOLS.find(t => t.id === node.tool_id);
               if (!tool) return null;
               const type = tool?.outputs[0]?.type || DataType.TEXT;
-              const isTerminal = !workflow.connections.some(c => c.sourceNodeId === node.id);
+              const isTerminal = !workflow.connections.some(c => c.source_node_id === node.id);
 
               const elapsed =
                 node.status === NodeStatus.RUNNING
-                  ? ((performance.now() - (node.startTime || performance.now())) / 1000).toFixed(1) + 's'
+                  ? ((performance.now() - (node.start_time || performance.now())) / 1000).toFixed(1) + 's'
                   : node.status === NodeStatus.PENDING
                     ? (lang === 'zh' ? '排队中' : 'Pending')
-                    : formatTime(node.executionTime);
+                    : formatTime(node.execution_time);
 
               const expand = (fieldId?: string) => onExpandOutput(node.id, fieldId, runId);
 
@@ -144,9 +198,9 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         {node.name ?? (lang === 'zh' ? tool.name_zh : tool.name)}
                       </span>
                       <span className="text-[8px] font-bold text-slate-600">
-                        {runId === 'current' && (node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.executionTime !== undefined)
+                        {runId === 'current' && (node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.execution_time !== undefined)
                           ? `${t('run_time')}: ${elapsed}`
-                          : new Date(entry.runTimestamp).toLocaleTimeString()}
+                          : new Date(entry.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
                     <div className="flex gap-2">
@@ -191,7 +245,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         <p className="text-[10px] text-amber-400 font-bold uppercase">{lang === 'zh' ? '排队中' : 'Pending'}</p>
                       </div>
                     ) : type === DataType.TEXT ? (
-                      typeof res === 'object' && res !== null && !Array.isArray(res) && (res as any)._type !== 'file' ? (
+                      typeof res === 'object' && res !== null && !Array.isArray(res) && !isTextFileRef(res) ? (
                         <div className="space-y-2">
                           {Object.entries(res).map(([k, v]) => (
                             <div
@@ -205,7 +259,13 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                                 </span>
                                 <Maximize2 size={8} className="text-slate-600 group-hover/field:text-#90dce1" />
                               </div>
-                              <p className="text-[9px] text-slate-400 line-clamp-1">{String(v)}</p>
+                              <p className="text-[9px] text-slate-400 line-clamp-1">
+                                {workflow?.id && isTextFileRef(v) ? (
+                                  <ResolvedTextContent workflowId={workflow.id} fileRef={v} nodeId={node.id} portId={k} className="block" />
+                                ) : (
+                                  textResultDisplay(v, t)
+                                )}
+                              </p>
                             </div>
                           ))}
                         </div>
@@ -214,7 +274,11 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                           onClick={() => expand()}
                           className="text-[10px] text-slate-400 line-clamp-4 leading-relaxed cursor-pointer hover:text-slate-200 transition-colors"
                         >
-                          {res != null ? String(res) : '—'}
+                          {workflow?.id && isTextFileRef(res) ? (
+                            <ResolvedTextContent workflowId={workflow.id} fileRef={res} nodeId={node.id} portId={tool?.outputs?.[0]?.id ?? 'out-text'} className="block" />
+                          ) : (
+                            textResultDisplay(res, t)
+                          )}
                         </p>
                       )
                     ) : type === DataType.IMAGE ? (

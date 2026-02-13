@@ -17,11 +17,24 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     startY: number;
   } | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [clientMousePos, setClientMousePos] = useState({ clientX: 0, clientY: 0 });
 
-  // Convert screen coordinates to world coordinates
+  // 当画布在父级 scale(0.8) 等缩放容器内时，getBoundingClientRect() 是渲染尺寸，需转为逻辑像素
+  const getContainerScale = useCallback((): number => {
+    const el = canvasRef.current;
+    const rect = el?.getBoundingClientRect();
+    if (!el || !rect || rect.width === 0) return 1;
+    const scale = rect.width / (el.offsetWidth || rect.width);
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+  }, [canvasRef]);
+
+  // Convert screen coordinates to world coordinates (x,y 为相对画布的像素，会先按 containerScale 转为逻辑像素)
   const screenToWorldCoords = useCallback((x: number, y: number) => {
-    return screenToWorld(x, y, view, canvasRef.current?.getBoundingClientRect());
-  }, [view, canvasRef]);
+    const scale = getContainerScale();
+    const logicalX = x / scale;
+    const logicalY = y / scale;
+    return screenToWorld(logicalX, logicalY, view, canvasRef.current?.getBoundingClientRect());
+  }, [view, canvasRef, getContainerScale]);
 
   // Zoom in
   const zoomIn = useCallback(() => {
@@ -72,9 +85,11 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    const viewX = e.clientX - rect.left;
-    const viewY = e.clientY - rect.top;
+    const scale = getContainerScale();
+    const viewX = (e.clientX - rect.left) / scale;
+    const viewY = (e.clientY - rect.top) / scale;
     setMousePos({ x: viewX, y: viewY });
+    setClientMousePos({ clientX: e.clientX, clientY: e.clientY });
 
     if (isPanning) {
       const deltaX = viewX - panStart.x;
@@ -91,7 +106,7 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
       const world = screenToWorldCoords(viewX, viewY);
       // Node dragging is handled by parent component
     }
-  }, [isPanning, panStart, draggingNode, canvasRef, screenToWorldCoords]);
+  }, [isPanning, panStart, draggingNode, canvasRef, screenToWorldCoords, getContainerScale]);
 
   // Handle mouse down
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -103,12 +118,13 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
 
-      const viewX = e.clientX - rect.left;
-      const viewY = e.clientY - rect.top;
+      const scale = getContainerScale();
+      const viewX = (e.clientX - rect.left) / scale;
+      const viewY = (e.clientY - rect.top) / scale;
       setIsPanning(true);
       setPanStart({ x: viewX, y: viewY });
     }
-  }, [canvasRef]);
+  }, [canvasRef, getContainerScale]);
 
   // Handle mouse up
   const handleMouseUp = useCallback(() => {
@@ -135,12 +151,12 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     if (isZoom) {
       e.preventDefault();
 
-      // Get mouse position relative to canvas
+      // Get mouse position relative to canvas (逻辑像素，与 view 一致)
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
-
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      const scale = getContainerScale();
+      const mouseX = (e.clientX - rect.left) / scale;
+      const mouseY = (e.clientY - rect.top) / scale;
 
       // Calculate zoom factor - adjust sensitivity for trackpad vs mouse
       let zoomFactor: number;
@@ -163,11 +179,12 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
         y: mouseY - (mouseY - v.y) * zoomRatio
       }));
     } else {
-      // Pan with trackpad/wheel (when not zooming)
+      // Pan with trackpad/wheel (when not zooming)，delta 按容器缩放修正
       e.preventDefault();
-      setView(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      const scale = getContainerScale();
+      setView(v => ({ ...v, x: v.x - e.deltaX / scale, y: v.y - e.deltaY / scale }));
     }
-  }, [view, canvasRef]);
+  }, [view, canvasRef, getContainerScale]);
 
   // Node drag handlers
   const handleNodeDragStart = useCallback((nodeId: string, offsetX: number, offsetY: number) => {
@@ -193,6 +210,7 @@ export const useCanvas = (workflow: WorkflowState | null, canvasRef: React.RefOb
     connecting,
     setConnecting,
     mousePos,
+    clientMousePos,
     zoomIn,
     zoomOut,
     resetView,

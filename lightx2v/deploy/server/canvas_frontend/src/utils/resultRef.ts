@@ -3,18 +3,18 @@ import { getAssetPath } from './assetPath';
 import { lightX2VResultUrl } from '../../services/geminiService';
 import { isStandalone } from '../config/runtimeMode';
 
-/** LightX2V 结果引用：用 task_id + output_name 代替过期 CDN URL，需要时通过 result_url 解析 */
-export type LightX2VResultRef = { __type: 'lightx2v_result'; task_id: string; output_name: string; is_cloud: boolean };
+/** 任务结果引用：用 kind（统一，兼容旧 type / __type） */
+export type LightX2VResultRef = { kind: 'task'; task_id: string; output_name: string; is_cloud: boolean };
 
 export function isLightX2VResultRef(val: any): val is LightX2VResultRef {
   return val != null && typeof val === 'object' && !Array.isArray(val) &&
-    (val as any).__type === 'lightx2v_result' &&
+    ((val as any).kind === 'task' || (val as any).type === 'task' || (val as any).__type === 'lightx2v_result') &&
     typeof (val as any).task_id === 'string' &&
     typeof (val as any).output_name === 'string';
 }
 
 export function toLightX2VResultRef(task_id: string, output_name: string, is_cloud: boolean): LightX2VResultRef {
-  return { __type: 'lightx2v_result', task_id, output_name, is_cloud };
+  return { kind: 'task', task_id, output_name, is_cloud };
 }
 
 /** Collect all LightX2V result refs from a value (handles nested objects/arrays) */
@@ -66,6 +66,7 @@ export async function fetchLightX2VResultUrl(
 
 /**
  * Resolve LightX2V result ref to a displayable URL via result_url (backend or cloud).
+ * When is_cloud is true: 不走本地后端，直接走云端 x2v 的 task/result_url 接口获取 url。
  * Uses cache to avoid repeated calls. For backend asset paths, normalizes to absolute URL with token for <img>.
  */
 export async function resolveLightX2VResultRef(ref: LightX2VResultRef): Promise<string> {
@@ -74,23 +75,26 @@ export async function resolveLightX2VResultRef(ref: LightX2VResultRef): Promise<
   if (cached != null) return cached;
 
   let url: string;
-  if (isStandalone()) {
-    // Use canvas proxy API (same-origin), which forwards to LightX2V cloud or local
-    url = await fetchLightX2VResultUrl(ref.task_id, ref.output_name, ref.is_cloud);
-  } else if (ref.is_cloud) {
-    const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
-    const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
-    url = await lightX2VResultUrl(cloudUrl, cloudToken, ref.task_id, ref.output_name);
+  if (ref.is_cloud) {
+    // 云端任务：不调用本地后端，直接走云端 x2v 的 task/result_url
+    if (isStandalone()) {
+      url = await fetchLightX2VResultUrl(ref.task_id, ref.output_name, true);
+    } else {
+      const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
+      const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
+      url = await lightX2VResultUrl(cloudUrl, cloudToken, ref.task_id, ref.output_name);
+    }
+  } else if (isStandalone()) {
+    url = await fetchLightX2VResultUrl(ref.task_id, ref.output_name, false);
   } else {
     const res = await apiRequest(`/api/v1/task/result_url?task_id=${encodeURIComponent(ref.task_id)}&name=${encodeURIComponent(ref.output_name)}`, { method: 'GET' });
     if (!res.ok) throw new Error(`result_url failed: ${res.status}`);
     const data = await res.json().catch(() => ({})) as { url?: string };
     if (!data.url) throw new Error('result_url missing url');
     url = data.url;
-    // Backend may return relative path — under /canvas that would 404; normalize to root path and add token for <img>
     if (url.startsWith('./')) url = url.slice(1);
     if (!url.startsWith('/') && !url.startsWith('http')) url = '/' + url;
-    if (url.includes('/assets/task/result') || url.includes('/assets/workflow/input')) {
+    if (url.includes('/assets/task/result') || url.includes('/assets/workflow/file')) {
       url = getAssetPath(url);
       if (typeof window !== 'undefined' && url.startsWith('/')) url = window.location.origin + url;
     }

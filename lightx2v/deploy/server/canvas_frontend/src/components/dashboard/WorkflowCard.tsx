@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Layers, Trash2, Calendar, Sparkle, Lock, Globe, Heart, Users, Boxes } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
-import { getAssetPath } from '../../utils/assetPath';
-import { getLocalFileDataUrl } from '../../utils/workflowFileManager';
+import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
+import { getLocalFileDataUrl, getNodeOutputUrl } from '../../utils/workflowFileManager';
 
 interface WorkflowCardProps {
   workflow: WorkflowState;
@@ -31,28 +31,78 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   const { t } = useTranslation(lang);
 
   // Extract preview content from workflow (image first, then text)
-  const textInputNode = workflow.nodes.find(n => n.toolId === 'text-input' && n.data?.value);
-  const imageInputNode = workflow.nodes.find(n => n.toolId === 'image-input' && (n.data?.value || (Array.isArray(n.data?.imageEdits) && n.data.imageEdits.length > 0)));
+  const textInputNode = workflow.nodes.find(n => n.tool_id === 'text-input' && n.data?.value);
+  const imageInputNode = workflow.nodes.find(n => n.tool_id === 'image-input' && (n.data?.value || (Array.isArray(n.data?.image_edits) && n.data.image_edits.length > 0)));
   const imageValue = imageInputNode?.data?.value;
-  const imageEdits = Array.isArray(imageInputNode?.data?.imageEdits) ? imageInputNode.data.imageEdits : [];
+  const imageEdits = Array.isArray(imageInputNode?.data?.image_edits) ? imageInputNode.data.image_edits : [];
 
   const previewText = typeof textInputNode?.data?.value === 'string' ? textInputNode?.data?.value : null;
-  // 优先从 value 取第一张图；若无则从 imageEdits 取第一张的 cropped 或 original
+  // 优先从 value 取第一张图：可为字符串(data:/local:/path)、file_ref(file_id) 或 task_ref(task_id+output_name)
   let previewImage: string | null = null;
+  let previewFileRef: { file_id: string; mime_type?: string; ext?: string; run_id?: string; nodeId?: string; portId?: string } | null = null;
+  let previewTaskRef: { task_id: string; output_name: string } | null = null;
   if (Array.isArray(imageValue) && imageValue.length > 0) {
-    previewImage = typeof imageValue[0] === 'string' ? imageValue[0] : null;
+    const first = imageValue[0];
+    if (typeof first === 'string') previewImage = first;
+    else if (first && typeof first === 'object' && typeof (first as any).file_id === 'string') {
+      previewFileRef = {
+        file_id: (first as any).file_id,
+        mime_type: (first as any).mime_type,
+        ext: (first as any).ext,
+        run_id: (first as any).run_id,
+        nodeId: imageInputNode?.id,
+        portId: 'out-image',
+      };
+    } else if (first && typeof first === 'object' && typeof (first as any).task_id === 'string' && typeof (first as any).output_name === 'string') {
+      previewTaskRef = { task_id: (first as any).task_id, output_name: (first as any).output_name };
+    }
   } else if (typeof imageValue === 'string') {
     previewImage = imageValue;
+  } else if (imageValue && typeof imageValue === 'object' && typeof (imageValue as any).file_id === 'string') {
+    previewFileRef = {
+      file_id: (imageValue as any).file_id,
+      mime_type: (imageValue as any).mime_type,
+      ext: (imageValue as any).ext,
+      run_id: (imageValue as any).run_id,
+      nodeId: imageInputNode?.id,
+      portId: 'out-image',
+    };
+  } else if (imageValue && typeof imageValue === 'object' && typeof (imageValue as any).task_id === 'string' && typeof (imageValue as any).output_name === 'string') {
+    previewTaskRef = { task_id: (imageValue as any).task_id, output_name: (imageValue as any).output_name };
   }
-  if (!previewImage && imageEdits.length > 0) {
+  if (!previewImage && !previewFileRef && !previewTaskRef && imageEdits.length > 0) {
     const first = imageEdits[0] as { cropped?: string; original?: string; source?: string };
-    previewImage = (first.cropped || first.original || first.source) ?? null;
+    const s = first.cropped || first.original || first.source;
+    previewImage = (typeof s === 'string' && !s.startsWith('data:')) ? s : null;
+  }
+  // 若 image-input 无图，则用第一个带图片输出的节点的 output_value（file_ref/task_ref）作为缩略图
+  if (!previewImage && !previewFileRef && !previewTaskRef && workflow.id) {
+    for (const node of workflow.nodes || []) {
+      const ov = node.output_value;
+      if (!ov || typeof ov !== 'object') continue;
+      const imgVal = (ov as Record<string, unknown>)['out-image'];
+      const ref = Array.isArray(imgVal) ? imgVal[0] : imgVal;
+      if (ref && typeof ref === 'object') {
+        if ((ref as any).kind === 'url' && typeof (ref as any).url === 'string') {
+          previewImage = (ref as any).url;
+          break;
+        }
+        if (typeof (ref as any).file_id === 'string') {
+          previewFileRef = { file_id: (ref as any).file_id, mime_type: (ref as any).mime_type, ext: (ref as any).ext, run_id: (ref as any).run_id, nodeId: node.id, portId: 'out-image' };
+          break;
+        }
+        if (typeof (ref as any).task_id === 'string' && typeof (ref as any).output_name === 'string') {
+          previewTaskRef = { task_id: (ref as any).task_id, output_name: (ref as any).output_name };
+          break;
+        }
+      }
+    }
   }
 
   // Resolve local:// (IndexedDB) to data URL for thumbnail
   const [resolvedLocalUrl, setResolvedLocalUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!previewImage || !previewImage.startsWith('local://')) {
+    if (!previewImage || typeof previewImage !== 'string' || !previewImage.startsWith('local://')) {
       setResolvedLocalUrl(null);
       return;
     }
@@ -64,10 +114,26 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
     return () => { cancelled = true; };
   }, [previewImage]);
 
-  // 仅前端时 image-input 常存为 data:image；local:// 需异步解析为 data URL
+  // file_ref 预览：统一通过 /output/{port_id}/url 获取展示 URL
+  const [resolvedFileRefUrl, setResolvedFileRefUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!previewFileRef?.nodeId || !previewFileRef?.portId || !workflow.id) {
+      setResolvedFileRefUrl(null);
+      return;
+    }
+    let cancelled = false;
+    getNodeOutputUrl(workflow.id, previewFileRef.nodeId, previewFileRef.portId, previewFileRef.file_id, previewFileRef.run_id).then((url) => {
+      if (!cancelled && url) setResolvedFileRefUrl(url);
+      else if (!cancelled) setResolvedFileRefUrl(null);
+    });
+    return () => { cancelled = true; };
+  }, [workflow.id, previewFileRef?.file_id, previewFileRef?.nodeId, previewFileRef?.portId, previewFileRef?.run_id]);
+
+  // 显示用 URL：字符串(data:/local:// 解析后)、file_ref 用 getNodeOutputUrl 结果，task_ref 用 getResultRefPreviewUrl
   const displayImageUrl =
-    previewImage &&
-    (previewImage.startsWith('local://') ? resolvedLocalUrl : previewImage);
+    (previewImage && typeof previewImage === 'string' && (previewImage.startsWith('local://') ? resolvedLocalUrl : previewImage))
+    || (previewFileRef && resolvedFileRefUrl)
+    || (previewTaskRef ? getResultRefPreviewUrl(previewTaskRef) : null);
 
   const cardMode = isPreset ? 'PRESET' : mode;
   const visibility = workflow.visibility || (cardMode !== 'MY' ? 'public' : 'private');
@@ -100,8 +166,11 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
       <div className="relative flex-1 bg-slate-950/50 flex items-center justify-center overflow-hidden">
         {displayImageUrl ? (
           (() => {
-            // data:image（仅前端）、local:// 解析结果、http(s)/blob 原样；路径用 getAssetPath；裸 base64 加 data: 前缀
-            const raw = previewImage!.startsWith('local://') ? displayImageUrl : previewImage!;
+            // data:image、local:// 解析结果、http(s)/blob 原样；file_ref/task_ref 为 /api/... 或 /assets/... 用 getAssetPath 加 token；路径用 getAssetPath；裸 base64 加 data: 前缀
+            const raw =
+              (typeof previewImage === 'string' && previewImage.startsWith('local://') ? displayImageUrl : null)
+              ?? (typeof previewImage === 'string' ? previewImage : null)
+              ?? (displayImageUrl || '');
             const src =
               typeof raw === 'string' && (raw.startsWith('data:') || raw.startsWith('http') || raw.startsWith('blob:'))
                 ? raw

@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Settings,
   Trash2,
   Boxes,
   MessageSquare,
-  AlertCircle,
   RefreshCw,
   Target,
   Upload,
@@ -19,6 +18,11 @@ import {
 import { WorkflowState, WorkflowNode, Port, DataType } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
+import { getOutputValueByPort, setOutputValueByPort } from '../../utils/outputValuePort';
+import { getWorkflowFileText, saveNodeOutputs } from '../../utils/workflowFileManager';
+import { isStandalone } from '../../config/runtimeMode';
+import { getAssetPath } from '../../utils/assetPath';
+import { isLightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
 interface NodeConfigPanelProps {
   lang: Language;
@@ -53,6 +57,8 @@ interface NodeConfigPanelProps {
   onShowCloneVoiceModal: () => void;
   collapsed?: boolean;
   style?: React.CSSProperties;
+  resolveLightX2VResultRef?: (ref: any) => Promise<string>;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
 }
 
 export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
@@ -81,13 +87,143 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onTagsChange,
   onShowCloneVoiceModal,
   collapsed = false,
-  style
+  style,
+  resolveLightX2VResultRef,
+  getNodeOutputUrl
 }) => {
   const { t } = useTranslation(lang);
   const [uploadingNodes, setUploadingNodes] = useState<Set<string>>(new Set());
   const [newTagInput, setNewTagInput] = useState('');
   const selectedNode = selectedNodeId ? workflow.nodes.find(n => n.id === selectedNodeId) : null;
   const tags = workflow.tags ?? [];
+
+  const connectedInputsList = useMemo(() => {
+    if (!selectedNode) return [];
+    const tool = TOOLS.find(t => t.id === selectedNode.tool_id);
+    if (!tool) return [];
+    return tool.inputs
+      .map(port => {
+        const conn = workflow.connections.find(c => c.target_node_id === selectedNode.id && c.target_port_id === port.id);
+        if (!conn) return null;
+        const sourceNode = workflow.nodes.find(n => n.id === conn.source_node_id);
+        if (!sourceNode) return null;
+        const sourceTool = TOOLS.find(t => t.id === sourceNode.tool_id);
+        let sourceDataType: DataType = DataType.TEXT;
+        let fieldLabel: string = conn.source_port_id;
+        if (sourceNode.tool_id === 'text-generation' && sourceNode.data.custom_outputs) {
+          const custom = sourceNode.data.custom_outputs.find((o: any) => o.id === conn.source_port_id);
+          if (custom) {
+            sourceDataType = DataType.TEXT;
+            fieldLabel = custom.label ?? conn.source_port_id;
+          } else {
+            sourceDataType = DataType.TEXT;
+            fieldLabel = conn.source_port_id;
+          }
+        } else {
+          const outPort = sourceTool?.outputs?.find((o: any) => o.id === conn.source_port_id);
+          sourceDataType = (outPort as any)?.type ?? DataType.TEXT;
+          fieldLabel = (outPort as any)?.label ?? conn.source_port_id;
+        }
+        return { port, conn, sourceNode, fieldLabel, sourceDataType };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }, [selectedNode, workflow?.nodes, workflow?.connections]);
+
+  const [resolvedFieldText, setResolvedFieldText] = useState<Record<string, string>>({});
+  const [localEdits, setLocalEdits] = useState<Record<string, string>>({});
+  const [applyingFieldKey, setApplyingFieldKey] = useState<string | null>(null);
+  const [resolvedMediaUrls, setResolvedMediaUrls] = useState<Record<string, string | string[]>>({});
+
+  const textOnlyList = useMemo(() => connectedInputsList.filter(i => i.sourceDataType === DataType.TEXT), [connectedInputsList]);
+  const mediaList = useMemo(() => connectedInputsList.filter(i => i.sourceDataType === DataType.IMAGE || i.sourceDataType === DataType.AUDIO || i.sourceDataType === DataType.VIDEO), [connectedInputsList]);
+
+  useEffect(() => {
+    if (textOnlyList.length === 0) {
+      setResolvedFieldText({});
+      return;
+    }
+    const key = (nodeId: string, portId: string) => `${nodeId}:${portId}`;
+    const next: Record<string, string> = {};
+    const refs: { k: string; fileId: string; sourceNodeId: string; sourcePortId: string; runId?: string }[] = [];
+    textOnlyList.forEach(({ conn, sourceNode }) => {
+      const raw = getOutputValueByPort(sourceNode, conn.source_port_id) ?? sourceOutputs[conn.source_node_id]?.[conn.source_port_id];
+      const k = key(conn.source_node_id, conn.source_port_id);
+      if (typeof raw === 'string') next[k] = raw;
+      else if (raw && typeof raw === 'object' && (raw as any).file_id && (raw as any).mime_type === 'text/plain')
+        refs.push({ k, fileId: (raw as any).file_id, sourceNodeId: conn.source_node_id, sourcePortId: conn.source_port_id, runId: (raw as any).run_id });
+    });
+    if (refs.length === 0) {
+      setResolvedFieldText(prev => (Object.keys(next).length ? { ...prev, ...next } : prev));
+      return;
+    }
+    setResolvedFieldText(prev => ({ ...prev, ...next }));
+    if (!workflow?.id) return;
+    let cancelled = false;
+    Promise.all(refs.map(async ({ k, fileId, sourceNodeId, sourcePortId, runId }) => {
+      const text = await getWorkflowFileText(workflow.id!, fileId, sourceNodeId, sourcePortId, runId);
+      return [k, text ?? ''] as const;
+    })).then(pairs => {
+      if (cancelled) return;
+      setResolvedFieldText(prev => { const n = { ...prev }; pairs.forEach(([k, v]) => { n[k] = v; }); return n; });
+    });
+    return () => { cancelled = true; };
+  }, [workflow?.id, workflow?.nodes, textOnlyList, sourceOutputs]);
+
+  useEffect(() => {
+    if (mediaList.length === 0 || !workflow?.id) {
+      setResolvedMediaUrls({});
+      return;
+    }
+    const key = (nodeId: string, portId: string) => `${nodeId}:${portId}`;
+    const resolveOne = (raw: any): string | null => {
+      if (!raw || typeof raw === 'string') return raw && typeof raw === 'string' ? raw : null;
+      return null;
+    };
+    let cancelled = false;
+    Promise.all(mediaList.map(async ({ conn, sourceNode, sourceDataType }) => {
+      const raw = getOutputValueByPort(sourceNode, conn.source_port_id) ?? sourceOutputs[conn.source_node_id]?.[conn.source_port_id];
+      const k = key(conn.source_node_id, conn.source_port_id);
+      const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
+      const urls = await Promise.all(arr.map(async (v: any) => {
+        if (isLightX2VResultRef(v) && resolveLightX2VResultRef) return resolveLightX2VResultRef(v);
+        if (v && typeof v === 'object' && (v as any).kind === 'url' && typeof (v as any).url === 'string') return (v as any).url;
+        if (v && typeof v === 'object' && (v as any).file_id && getNodeOutputUrl) {
+          const url = await getNodeOutputUrl(conn.source_node_id, conn.source_port_id, (v as any).file_id, (v as any).run_id);
+          if (url) return getAssetPath(url) || url;
+        }
+        return resolveOne(v);
+      }));
+      const resolved = urls.filter((u): u is string => u != null);
+      return [k, sourceDataType, resolved] as const;
+    })).then(pairs => {
+      if (cancelled) return;
+      setResolvedMediaUrls(prev => {
+        const n = { ...prev };
+        pairs.forEach(([k, sourceDataType, resolved]) => {
+          if (resolved.length) n[k] = sourceDataType === DataType.IMAGE && resolved.length > 1 ? resolved : resolved[0];
+        });
+        return n;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [workflow?.id, workflow?.nodes, mediaList, sourceOutputs, resolveLightX2VResultRef, getNodeOutputUrl]);
+
+  const handleApplyConnectedField = useCallback(async (sourceNode: WorkflowNode, conn: { source_node_id: string; source_port_id: string }, newText: string) => {
+    const fieldKey = `${conn.source_node_id}:${conn.source_port_id}`;
+    setApplyingFieldKey(fieldKey);
+    try {
+      let valueToSet: any = newText;
+      if (workflow?.id && !isStandalone()) {
+        const result = await saveNodeOutputs(workflow.id, sourceNode.id, { [conn.source_port_id]: newText }, crypto.randomUUID());
+        if (result?.[conn.source_port_id]) valueToSet = result[conn.source_port_id];
+      }
+      const nextOutput = setOutputValueByPort(sourceNode.output_value, sourceNode.tool_id, conn.source_port_id, valueToSet);
+      onUpdateNodeData(sourceNode.id, 'output_value', nextOutput);
+      setLocalEdits(prev => { const n = { ...prev }; delete n[fieldKey]; return n; });
+    } finally {
+      setApplyingFieldKey(null);
+    }
+  }, [workflow?.id, onUpdateNodeData]);
 
   if (selectedNodeId && selectedNode) {
       return (
@@ -124,7 +260,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               </div>
             )}
             {/* Model Selection */}
-            {TOOLS.find(t => t.id === selectedNode.toolId)?.models && (
+            {TOOLS.find(t => t.id === selectedNode.tool_id)?.models && (
               <div className="space-y-2">
                 <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
                   <Boxes size={12} /> {t('select_model')}
@@ -134,7 +270,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   onChange={e => onUpdateNodeData(selectedNode.id, 'model', e.target.value)}
                   className="w-full bg-slate-800/80 hover:bg-slate-800 rounded-xl p-3 text-xs border border-slate-700/60 hover:border-slate-600 text-slate-200 focus:outline-none focus:ring-2 focus:ring-#90dce1/50 focus:border-[#90dce1] transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%23cbd5e1%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27M6 8l4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:20px_20px] bg-[right_12px_center] bg-no-repeat pr-10 shadow-sm"
                 >
-                  {TOOLS.find(t => t.id === selectedNode.toolId)?.models?.map(m => (
+                  {TOOLS.find(t => t.id === selectedNode.tool_id)?.models?.map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </select>
@@ -142,7 +278,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             )}
 
             {/* Web Search Toggle for DeepSeek and Doubao */}
-            {selectedNode.toolId === 'text-generation' &&
+            {selectedNode.tool_id === 'text-generation' &&
               (selectedNode.data.model?.startsWith('deepseek-') || selectedNode.data.model?.startsWith('doubao-')) && (
               <div className="space-y-2">
                 <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
@@ -163,7 +299,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             )}
 
             {/* Gemini Text Mode */}
-            {selectedNode.toolId === 'text-generation' && (
+            {selectedNode.tool_id === 'text-generation' && (
               <div className="space-y-6">
                 <div className="space-y-2">
                   <span className="text-[10px] text-slate-500 font-black uppercase">{t('mode')}</span>
@@ -193,23 +329,24 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 {/* Structured Outputs */}
                 <div className="space-y-4">
                   <span className="text-[10px] text-slate-500 font-black uppercase">{t('structured_outputs')}</span>
-                  {selectedNode.data.customOutputs?.map((o: any, i: number) => (
-                    <div key={i} className="p-4 bg-slate-950/40 border border-slate-800 rounded-[24px] space-y-3">
+                  {selectedNode.data.custom_outputs?.map((o: any, i: number) => (
+                    <div key={o.id ?? i} className="p-4 bg-slate-950/40 border border-slate-800 rounded-[24px] space-y-3">
                       <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500 shrink-0">{`ID: ${o.id ?? `out-text${i + 1}`}`}</span>
                         <input
-                          value={o.id}
+                          value={o.label ?? ''}
                           placeholder={t('field_id_placeholder')}
                           onChange={e => {
-                            const n = [...selectedNode.data.customOutputs];
-                            n[i].id = e.target.value;
-                            onUpdateNodeData(selectedNode.id, 'customOutputs', n);
+                            const n = [...selectedNode.data.custom_outputs];
+                            n[i] = { ...n[i], label: e.target.value };
+                            onUpdateNodeData(selectedNode.id, 'custom_outputs', n);
                           }}
                           className="bg-transparent border-none text-[10px] font-black text-[#90dce1] flex-1 p-0 focus:ring-0"
                         />
                         <button
                           onClick={() => {
-                            const n = selectedNode.data.customOutputs.filter((_: any, idx: number) => idx !== i);
-                            onUpdateNodeData(selectedNode.id, 'customOutputs', n);
+                            const n = selectedNode.data.custom_outputs.filter((_: any, idx: number) => idx !== i);
+                            onUpdateNodeData(selectedNode.id, 'custom_outputs', n);
                           }}
                           className="text-slate-600 hover:text-red-400 transition-colors"
                         >
@@ -220,9 +357,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                         value={o.description || ''}
                         placeholder={t('custom_instruction_placeholder')}
                         onChange={e => {
-                          const n = [...selectedNode.data.customOutputs];
+                          const n = [...selectedNode.data.custom_outputs];
                           n[i].description = e.target.value;
-                          onUpdateNodeData(selectedNode.id, 'customOutputs', n);
+                          onUpdateNodeData(selectedNode.id, 'custom_outputs', n);
                         }}
                         className="w-full h-16 bg-slate-900/50 border border-slate-800 rounded-xl p-2 text-[10px] text-slate-400 resize-none focus:border-[#90dce1] focus:ring-0 transition-all"
                       />
@@ -230,8 +367,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   ))}
                   <button
                     onClick={() => {
-                      const n = [...(selectedNode.data.customOutputs || []), { id: `out_${Date.now().toString().slice(-4)}`, label: 'Output', description: '' }];
-                      onUpdateNodeData(selectedNode.id, 'customOutputs', n);
+                      const len = selectedNode.data.custom_outputs?.length ?? 0;
+                      const n = [...(selectedNode.data.custom_outputs || []), { id: `out-text${len + 1}`, label: 'Output', description: '' }];
+                      onUpdateNodeData(selectedNode.id, 'custom_outputs', n);
                     }}
                     className="w-full py-2 border border-dashed border-slate-700 rounded-xl text-[10px] text-slate-500 uppercase hover:text-[#90dce1] transition-all"
                   >
@@ -242,7 +380,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             )}
 
             {/* Aspect Ratio */}
-            {(selectedNode.toolId === 'text-to-image' || selectedNode.toolId === 'image-to-image' || selectedNode.toolId.includes('video-gen')) && (
+            {(selectedNode.tool_id === 'text-to-image' || selectedNode.tool_id === 'image-to-image' || selectedNode.tool_id.includes('video-gen')) && (
               <div className="space-y-2">
                 <span className="text-[10px] text-slate-500 font-black uppercase">{t('aspect_ratio')}</span>
                 <select
@@ -250,7 +388,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   onChange={e => onUpdateNodeData(selectedNode.id, 'aspectRatio', e.target.value)}
                   className="w-full bg-slate-800/80 hover:bg-slate-800 rounded-xl p-3 text-xs border border-slate-700/60 hover:border-slate-600 text-slate-200 focus:outline-none focus:ring-2 focus:ring-#90dce1/50 focus:border-[#90dce1] transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%23cbd5e1%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27M6 8l4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:20px_20px] bg-[right_12px_center] bg-no-repeat pr-10 shadow-sm"
                 >
-                  {selectedNode.toolId.includes('video-gen')
+                  {selectedNode.tool_id.includes('video-gen')
                     ? ['16:9', '9:16'].map(r => <option key={r} value={r}>{r}</option>)
                     : ['1:1', '4:3', '3:4', '16:9', '9:16'].map(r => <option key={r} value={r}>{r}</option>)
                   }
@@ -259,7 +397,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             )}
 
             {/* TTS Settings */}
-            {selectedNode.toolId === 'tts' && (() => {
+            {selectedNode.tool_id === 'tts' && (() => {
               const isLightX2V = selectedNode.data.model === 'lightx2v' || selectedNode.data.model?.startsWith('lightx2v');
 
               if (!isLightX2V) {
@@ -468,7 +606,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             })()}
 
             {/* Voice Clone Settings */}
-            {selectedNode.toolId === 'lightx2v-voice-clone' && (
+            {selectedNode.tool_id === 'lightx2v-voice-clone' && (
               <div className="space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -569,89 +707,81 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               </div>
             )}
 
-            {/* Connected AI Output Fields */}
-            {selectedNode && (() => {
-              const tool = TOOLS.find(t => t.id === selectedNode.toolId);
-              if (!tool) return null;
+            {/* 连接的节点输出：显示上游节点端口预览文本/媒体，可编辑写回上游节点 */}
+            {connectedInputsList.length > 0 && (
+              <div className="space-y-4">
+                <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
+                  <MessageSquare size={12} />
+                  {lang === 'zh' ? '连接的节点输出' : 'Connected Node Outputs'}
+                </span>
+                {connectedInputsList.map(({ port, conn, sourceNode, fieldLabel, sourceDataType }) => {
+                  const fieldKey = `${conn.source_node_id}:${conn.source_port_id}`;
+                  const raw = getOutputValueByPort(sourceNode, conn.source_port_id) ?? sourceOutputs[conn.source_node_id]?.[conn.source_port_id];
+                  const isMedia = sourceDataType === DataType.IMAGE || sourceDataType === DataType.AUDIO || sourceDataType === DataType.VIDEO;
+                  const mediaUrl = resolvedMediaUrls[fieldKey];
+                  const mediaUrls = typeof mediaUrl === 'string' ? [mediaUrl] : (Array.isArray(mediaUrl) ? mediaUrl : []);
 
-              const connectedInputs = tool.inputs
-                .map(port => {
-                  const conn = workflow.connections.find(c => c.targetNodeId === selectedNode.id && c.targetPortId === port.id);
-                  if (!conn) return null;
-
-                  const sourceNode = workflow.nodes.find(n => n.id === conn.sourceNodeId);
-                  if (!sourceNode || sourceNode.toolId !== 'text-generation' || !sourceNode.data.customOutputs) return null;
-
-                  const isCustomOutput = sourceNode.data.customOutputs.some((o: any) => o.id === conn.sourcePortId);
-                  if (!isCustomOutput) return null;
-
-                  const sourceOutput = sourceOutputs[conn.sourceNodeId];
-                  let fieldValue = '';
-                  if (sourceOutput && typeof sourceOutput === 'object' && conn.sourcePortId in sourceOutput) {
-                    fieldValue = typeof sourceOutput[conn.sourcePortId] === 'string' ? sourceOutput[conn.sourcePortId] : JSON.stringify(sourceOutput[conn.sourcePortId], null, 2);
-                  }
-
-                  const overrideValue = selectedNode.data.inputOverrides?.[port.id];
-                  const displayValue = overrideValue !== undefined ? (typeof overrideValue === 'string' ? overrideValue : JSON.stringify(overrideValue, null, 2)) : fieldValue;
-
-                  const fieldLabel = sourceNode.data.customOutputs.find((o: any) => o.id === conn.sourcePortId)?.label || conn.sourcePortId;
-
-                  return { port, conn, sourceNode, fieldLabel, displayValue, fieldValue, overrideValue };
-                })
-                .filter((item): item is NonNullable<typeof item> => item !== null);
-
-              if (connectedInputs.length === 0) return null;
-
-              return (
-                <div className="space-y-4">
-                  <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-2">
-                    <MessageSquare size={12} />
-                    {lang === 'zh' ? '连接的AI输出字段' : 'Connected AI Output Fields'}
-                  </span>
-                  {connectedInputs.map(({ port, conn, sourceNode, fieldLabel, displayValue, fieldValue, overrideValue }) => (
-                    <div key={port.id} className="p-4 bg-slate-950/40 border border-slate-800 rounded-[24px] space-y-3">
-                      <div className="flex items-center justify-between">
+                  if (isMedia) {
+                    return (
+                      <div key={port.id} className="p-4 bg-slate-950/40 border border-slate-800 rounded-[24px] space-y-3">
                         <div className="flex flex-col gap-1">
                           <span className="text-[9px] font-black text-[#90dce1] uppercase">{fieldLabel}</span>
                           <span className="text-[8px] text-slate-500">
-                            {lang === 'zh' ? '来自' : 'From'}: {lang === 'zh' ? TOOLS.find(t => t.id === sourceNode.toolId)?.name_zh : TOOLS.find(t => t.id === sourceNode.toolId)?.name} → {port.label}
+                            {lang === 'zh' ? '来自' : 'From'}: {lang === 'zh' ? TOOLS.find(t => t.id === sourceNode.tool_id)?.name_zh : TOOLS.find(t => t.id === sourceNode.tool_id)?.name} → {port.label}
                           </span>
                         </div>
-                        {overrideValue !== undefined && (
-                          <button
-                            onClick={() => {
-                              const newOverrides = { ...(selectedNode.data.inputOverrides || {}) };
-                              delete newOverrides[port.id];
-                              onUpdateNodeData(selectedNode.id, 'inputOverrides', Object.keys(newOverrides).length > 0 ? newOverrides : undefined);
-                            }}
-                            className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
-                            title={lang === 'zh' ? '恢复原始值' : 'Restore original value'}
-                          >
-                            <RefreshCw size={12} />
-                          </button>
+                        {mediaUrls.length === 0 ? (
+                          <div className="text-[10px] text-slate-500 py-4">{lang === 'zh' ? '加载中…' : 'Loading…'}</div>
+                        ) : sourceDataType === DataType.IMAGE ? (
+                          <div className="flex flex-wrap gap-2">
+                            {mediaUrls.map((url, i) => (
+                              <img key={i} src={url} alt="" className="max-w-full max-h-48 rounded-xl object-contain bg-slate-900/50 border border-slate-800" />
+                            ))}
+                          </div>
+                        ) : sourceDataType === DataType.AUDIO ? (
+                          <audio controls src={mediaUrls[0]} className="w-full max-w-full rounded-xl" />
+                        ) : (
+                          <video controls src={mediaUrls[0]} className="w-full max-w-full rounded-xl" />
                         )}
                       </div>
+                    );
+                  }
+
+                  const isFileRef = raw && typeof raw === 'object' && (raw as any).file_id && (raw as any).mime_type === 'text/plain';
+                  const displayValue = isFileRef
+                    ? (resolvedFieldText[fieldKey] ?? (lang === 'zh' ? '加载中…' : 'Loading…'))
+                    : (typeof raw === 'string' ? raw : (raw != null ? JSON.stringify(raw, null, 2) : ''));
+                  const editedValue = localEdits[fieldKey] !== undefined ? localEdits[fieldKey] : displayValue;
+                  const hasChanges = editedValue !== displayValue && displayValue !== (lang === 'zh' ? '加载中…' : 'Loading…');
+                  const applying = applyingFieldKey === fieldKey;
+                  return (
+                    <div key={port.id} className="p-4 bg-slate-950/40 border border-slate-800 rounded-[24px] space-y-3">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] font-black text-[#90dce1] uppercase">{fieldLabel}</span>
+                        <span className="text-[8px] text-slate-500">
+                          {lang === 'zh' ? '来自' : 'From'}: {lang === 'zh' ? TOOLS.find(t => t.id === sourceNode.tool_id)?.name_zh : TOOLS.find(t => t.id === sourceNode.tool_id)?.name} → {port.label}
+                        </span>
+                      </div>
                       <textarea
-                        value={displayValue}
-                        onChange={e => {
-                          const newOverrides = { ...(selectedNode.data.inputOverrides || {}) };
-                          newOverrides[port.id] = e.target.value;
-                          onUpdateNodeData(selectedNode.id, 'inputOverrides', newOverrides);
-                        }}
+                        value={editedValue}
+                        onChange={e => setLocalEdits(prev => ({ ...prev, [fieldKey]: e.target.value }))}
                         className="w-full h-32 bg-slate-900/50 border border-slate-800 rounded-xl p-3 text-[10px] text-slate-300 resize-none focus:border-[#90dce1] focus:ring-0 transition-all font-mono"
                         placeholder={t('edit_field_placeholder')}
                       />
-                      {overrideValue !== undefined && (
-                        <div className="flex items-center gap-2 text-[8px] text-amber-400">
-                          <AlertCircle size={10} />
-                          <span>{lang === 'zh' ? '已修改，将使用此值覆盖连接的值' : 'Modified: This value will override the connected value'}</span>
-                        </div>
+                      {hasChanges && (
+                        <button
+                          onClick={() => handleApplyConnectedField(sourceNode, conn, editedValue)}
+                          disabled={applying}
+                          className="w-full py-2 rounded-xl text-[10px] font-bold uppercase transition-all bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {applying ? (lang === 'zh' ? '保存中…' : 'Saving…') : (lang === 'zh' ? '应用修改' : 'Apply changes')}
+                        </button>
                       )}
                     </div>
-                  ))}
-                </div>
-              );
-            })()}
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -776,7 +906,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                                 const node = workflow.nodes.find(n => n.id === item.nodeId);
                                 if (!node) return;
 
-                                const tool = TOOLS.find(t => t.id === node.toolId);
+                                const tool = TOOLS.find(t => t.id === node.tool_id);
                                 if (!tool || tool.category !== 'Input') {
                                   console.error('[NodeConfigPanel] Cannot upload file: node is not an input node');
                                   return;
@@ -794,13 +924,15 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                                   reader.onerror = reject;
                                   reader.readAsDataURL(file);
                                 });
-                                const currentValue = node.data.value || [];
-                                const existing = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
+                                // 与 Node 一致：以 output_value ?? data.value 为已有值，只更新 output_value，由 useNodeManagement 同步到 data.value
+                                const currentValue = node.output_value ?? node.data?.value;
+                                const existing = item.dataType === DataType.IMAGE
+                                  ? (Array.isArray(currentValue) ? currentValue : currentValue != null ? [currentValue] : [])
+                                  : null;
                                 const newValue = item.dataType === DataType.IMAGE
-                                  ? [...existing, dataUrl]
+                                  ? [...(existing ?? []), dataUrl]
                                   : dataUrl;
-                                onUpdateNodeData(item.nodeId, 'outputValue', newValue);
-                                onUpdateNodeData(item.nodeId, 'value', newValue);
+                                onUpdateNodeData(item.nodeId, 'output_value', newValue);
                               } else {
                                 // 对于非源节点的全局输入，暂时保持原逻辑（base64）
                                 const base64 = await new Promise<string>((resolve) => {

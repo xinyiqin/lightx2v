@@ -5,7 +5,7 @@ interface ImageEntry {
   source: string;
   original: string;
   cropped: string;
-  cropBox: { x: number; y: number; w: number; h: number };
+  crop_box: { x: number; y: number; w: number; h: number };
 }
 
 interface ImageNodePreviewProps {
@@ -19,18 +19,18 @@ type DragMode = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | nul
 export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUpdate, onAddMore }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isCropMode, setIsCropMode] = useState(false);
-  const [cropBox, setCropBox] = useState({ x: 10, y: 10, w: 80, h: 80 });
+  const [crop_box, setCropBox] = useState({ x: 10, y: 10, w: 80, h: 80 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
-  const [startPos, setStartPos] = useState({ x: 0, y: 0, box: { x: 0, y: 0, w: 0, h: 0 } });
 
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const startPosRef = useRef({ x: 0, y: 0, box: { x: 0, y: 0, w: 0, h: 0 } });
 
-  // Sync internal cropBox state when images prop changes
+  // Sync internal crop_box state when images prop changes
   useEffect(() => {
     const current = images[selectedIndex];
-    if (current && current.cropBox) {
-      setCropBox(current.cropBox);
+    if (current && current.crop_box) {
+      setCropBox(current.crop_box);
     }
   }, [selectedIndex, images]);
 
@@ -43,10 +43,10 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
     if (!ctx) return;
 
     const img = imgRef.current;
-    const realX = (cropBox.x / 100) * img.naturalWidth;
-    const realY = (cropBox.y / 100) * img.naturalHeight;
-    const realW = (cropBox.w / 100) * img.naturalWidth;
-    const realH = (cropBox.h / 100) * img.naturalHeight;
+    const realX = (crop_box.x / 100) * img.naturalWidth;
+    const realY = (crop_box.y / 100) * img.naturalHeight;
+    const realW = (crop_box.w / 100) * img.naturalWidth;
+    const realH = (crop_box.h / 100) * img.naturalHeight;
 
     canvas.width = realW;
     canvas.height = realH;
@@ -57,7 +57,7 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
     nextImages[selectedIndex] = {
       ...currentEntry,
       cropped: croppedData,
-      cropBox: { ...cropBox }
+      crop_box: { ...crop_box }
     };
     onUpdate(nextImages);
     setIsCropMode(false);
@@ -75,23 +75,24 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
   const onMouseDown = (e: React.MouseEvent, mode: DragMode) => {
     e.stopPropagation();
     e.preventDefault();
-    setDragMode(mode);
-    setStartPos({
+    startPosRef.current = {
       x: e.clientX,
       y: e.clientY,
-      box: { ...cropBox }
-    });
+      box: { ...crop_box }
+    };
+    setDragMode(mode);
   };
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (!dragMode || !containerRef.current) return;
 
+    const start = startPosRef.current;
     const rect = containerRef.current.getBoundingClientRect();
-    const dx = ((e.clientX - startPos.x) / rect.width) * 100;
-    const dy = ((e.clientY - startPos.y) / rect.height) * 100;
+    const dx = ((e.clientX - start.x) / rect.width) * 100;
+    const dy = ((e.clientY - start.y) / rect.height) * 100;
 
     setCropBox(prev => {
-      let { x, y, w, h } = startPos.box;
+      let { x, y, w, h } = start.box;
       const minSize = 5;
 
       switch (dragMode) {
@@ -102,7 +103,7 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
         case 'n':
           const nDiff = Math.min(dy, h - minSize);
           y = Math.max(0, y + nDiff);
-          h = h - (y - startPos.box.y);
+          h = h - (y - start.box.y);
           break;
         case 's':
           h = Math.max(minSize, Math.min(100 - y, h + dy));
@@ -110,7 +111,7 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
         case 'w':
           const wDiff = Math.min(dx, w - minSize);
           x = Math.max(0, x + wDiff);
-          w = w - (x - startPos.box.x);
+          w = w - (x - start.box.x);
           break;
         case 'e':
           w = Math.max(minSize, Math.min(100 - x, w + dx));
@@ -120,19 +121,19 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
           const nwXDiff = Math.min(dx, w - minSize);
           y = Math.max(0, y + nwYDiff);
           x = Math.max(0, x + nwXDiff);
-          h = h - (y - startPos.box.y);
-          w = w - (x - startPos.box.x);
+          h = h - (y - start.box.y);
+          w = w - (x - start.box.x);
           break;
         case 'ne':
           const neYDiff = Math.min(dy, h - minSize);
           y = Math.max(0, y + neYDiff);
-          h = h - (y - startPos.box.y);
+          h = h - (y - start.box.y);
           w = Math.max(minSize, Math.min(100 - x, w + dx));
           break;
         case 'sw':
           const swXDiff = Math.min(dx, w - minSize);
           x = Math.max(0, x + swXDiff);
-          w = w - (x - startPos.box.x);
+          w = w - (x - start.box.x);
           h = Math.max(minSize, Math.min(100 - y, h + dy));
           break;
         case 'se':
@@ -143,7 +144,7 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
 
       return { x, y, w, h };
     });
-  }, [dragMode, startPos]);
+  }, [dragMode]);
 
   const onMouseUp = useCallback(() => {
     setDragMode(null);
@@ -206,10 +207,10 @@ export const ImageNodePreview: React.FC<ImageNodePreviewProps> = ({ images, onUp
             <div
               className="absolute border border-[#90dce1] shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] cursor-move group/crop"
               style={{
-                left: `${cropBox.x}%`,
-                top: `${cropBox.y}%`,
-                width: `${cropBox.w}%`,
-                height: `${cropBox.h}%`
+                left: `${crop_box.x}%`,
+                top: `${crop_box.y}%`,
+                width: `${crop_box.w}%`,
+                height: `${crop_box.h}%`
               }}
               onMouseDown={(e) => onMouseDown(e, 'move')}
             >

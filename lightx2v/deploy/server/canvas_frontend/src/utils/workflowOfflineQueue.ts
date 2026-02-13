@@ -41,7 +41,7 @@ class WorkflowOfflineQueue {
     // 移除节点中的大字段（如base64数据）
     if (compressed.nodes) {
       compressed.nodes = compressed.nodes.map((node: any) => {
-        const { outputValue, ...rest } = node;
+        const { output_value, ...rest } = node;
         return rest;
       });
     }
@@ -260,8 +260,8 @@ class WorkflowOfflineQueue {
     for (const task of queue) {
       try {
         // 尝试更新工作流
-        const updateResponse = await apiRequest(`/api/v1/workflow/${task.workflowId}`, {
-          method: 'PUT',
+        const updateResponse = await apiRequest(`/api/v1/workflow/${task.workflowId}/update`, {
+          method: 'POST',
           body: JSON.stringify(task.workflowData)
         });
 

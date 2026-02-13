@@ -8,8 +8,21 @@
  * - 列表缩略图：WorkflowCard 里 previewImage 为 local:// 时用 getLocalFileDataUrl 异步解析后显示
  */
 
-import { apiRequest, getAccessToken } from './apiClient';
+import { apiRequest } from './apiClient';
 import { isStandalone } from '../config/runtimeMode';
+import { getEntryPortKeyedValue } from './historyEntry';
+import { getAssetPath } from './assetPath';
+import { isLightX2VResultRef, resolveLightX2VResultRef } from './resultRef';
+
+const EXT_TO_MIME: Record<string, string> = {
+  '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.json': 'application/json',
+};
+function extToMime(ext: string): string {
+  const norm = ext?.startsWith('.') ? ext : (ext ? `.${ext}` : '');
+  return EXT_TO_MIME[norm] ?? 'application/octet-stream';
+}
 
 const LOCAL_FILES_DB = 'canvas_local_files';
 const LOCAL_FILES_STORE = 'files';
@@ -140,83 +153,182 @@ export async function persistDataUrlToLocal(dataUrl: string, keyPrefix: string):
   }
 }
 
-export type SaveNodeOutputResult = { file_id?: string; file_url?: string; url?: string; ext?: string } | null;
-
-const JSON_PORT_ID = '__json__';
+export type SaveNodeOutputResult = {
+  kind?: string;
+  file_id?: string;
+  file_url?: string;
+  url?: string;
+  mime_type?: string;
+  ext?: string;
+  task_id?: string;
+  output_name?: string;
+  is_cloud?: boolean;
+  entries?: SaveNodeOutputResult[];
+} | null;
 
 /**
- * 以节点为单位保存多端口输出。对于对象型多端口（如文本生成 customOutputs），
- * 将整个 JSON 存为一条 kind:json 历史记录，读取时按字段提取。
+ * 将原始 value 包装为统一的 { type, data } 格式。
+ * - data URL (data:xxx;base64,...) => { type: "base64", data: "data:..." }
+ * - 纯文本字符串 => { type: "text", data: "..." }
+ * - task ref ({ kind: "task", ... }) => { type: "task", data: {...} }
+ * - file ref ({ kind: "file", ... }) => { type: "file", data: {...} }
+ * - URL 字符串 (http/https/./assets) => { type: "url", data: "..." }
+ * - 数组（多图）=> 每项各自 wrap 后返回数组
+ */
+function wrapOutputData(value: any): { type: string; data: any } | Array<{ type: string; data: any }> {
+  if (Array.isArray(value)) {
+    return value.map((item: any) => wrapOutputData(item) as { type: string; data: any });
+  }
+  if (value instanceof Blob) {
+    // Blob 不应出现在这里——调用前应已转为 data URL
+    throw new Error('Blob values must be converted to data URL before wrapOutputData');
+  }
+  if (typeof value === 'string') {
+    if (value.startsWith('data:')) {
+      return { type: 'base64', data: value };
+    }
+    if (
+      value.startsWith('http://') || value.startsWith('https://') ||
+      value.startsWith('./assets/') || value.startsWith('/assets/') ||
+      value.startsWith('/api/')
+    ) {
+      return { type: 'url', data: value };
+    }
+    // 纯文本
+    return { type: 'text', data: value };
+  }
+  if (typeof value === 'object' && value !== null) {
+    const kind = value.kind || value.type;
+    if (kind === 'task') return { type: 'task', data: value };
+    if (kind === 'file') return { type: 'file', data: value };
+    // 其他 object 当 JSON 文本存
+    return { type: 'text', data: JSON.stringify(value) };
+  }
+  return { type: 'text', data: String(value ?? '') };
+}
+
+/**
+ * 按端口保存节点输出。每个 port 调用一次 POST .../output/{port_id}/save。
+ * 请求体格式：{ run_id: string, output_data: { type, data } | Array<{ type, data }> }
+ * 多端口对象（如 text-generation customOutputs）按每个端口各调用一次 save，run_id 保持一致。
  */
 export async function saveNodeOutputs(
   workflowId: string,
   nodeId: string,
-  outputs: Record<string, string | object>,
+  outputs: Record<string, string | object | any[]>,
   runId?: string
 ): Promise<Record<string, SaveNodeOutputResult> | null> {
   if (isStandalone()) return null;
   if (!outputs || Object.keys(outputs).length === 0) return null;
   try {
-    // 对象型多端口（如文本生成 customOutputs）：整存整取，存成一条 kind:json 记录
-    // 排除 data URL、Blob、大对象，仅对纯文本/小 JSON 使用
-    const keys = Object.keys(outputs);
-    const isObjectOutput =
-      keys.length >= 1 &&
-      keys.every(k => {
-        const v = outputs[k];
-        if (v == null || v instanceof Blob) return false;
-        if (typeof v === 'string') return !v.startsWith('data:');
-        return typeof v === 'object' && !Array.isArray(v);
-      });
-    const payload: Record<string, string | object> = isObjectOutput
-      ? { [JSON_PORT_ID]: outputs }
-      : {};
-
-    if (!isObjectOutput) {
-      for (const [portId, value] of Object.entries(outputs)) {
-        if (value === undefined || value === null) continue;
-        if (typeof value === 'string' && value.length === 0) continue;
-        if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as object).length === 0) continue;
-        let outputData: string | object;
-        if (typeof value === 'string') {
-          outputData = value;
-        } else if (value instanceof Blob) {
-          outputData = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(value);
-          });
-        } else {
-          outputData = value as object;
-        }
-        payload[portId] = outputData;
+    // 准备每个端口要发送的数据
+    const toSend: Array<{ portId: string; wrappedOutput: any }> = [];
+    for (const [portId, value] of Object.entries(outputs)) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === 'string' && value.length === 0) continue;
+      let resolved: any = value;
+      if (value instanceof Blob) {
+        resolved = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(value);
+        });
       }
-    }
-    if (Object.keys(payload).length === 0) return null;
-
-    const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/outputs/save`, {
-      method: 'POST',
-      body: JSON.stringify({ outputs: payload, run_id: runId })
-    });
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') || '';
-      let errorMessage = `Failed to save node outputs: ${response.status} ${response.statusText}`;
-      if (contentType.includes('application/json')) {
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.message || errorMessage;
-        } catch (_e) { /* ignore */ }
+      // 非仅前端且为 is_cloud 的 x2v 任务：用云端 result_url 得到 URL，以 { type: "url", data: url } 发给后端
+      if (!isStandalone() && isLightX2VResultRef(resolved) && (resolved as { is_cloud?: boolean }).is_cloud) {
+        resolved = await resolveLightX2VResultRef(resolved);
+      } else if (!isStandalone() && Array.isArray(resolved)) {
+        resolved = await Promise.all(resolved.map(async (item: any) => {
+          if (isLightX2VResultRef(item) && (item as { is_cloud?: boolean }).is_cloud) {
+            return await resolveLightX2VResultRef(item);
+          }
+          return item;
+        }));
       }
-      throw new Error(errorMessage);
+      const wrapped = wrapOutputData(resolved);
+      toSend.push({ portId, wrappedOutput: wrapped });
     }
+    if (toSend.length === 0) return null;
 
-    const result = (await response.json()) as { results?: Record<string, { file_id?: string; file_url?: string; url?: string; ext?: string }> };
-    const results = result.results ?? {};
     const out: Record<string, SaveNodeOutputResult> = {};
-    for (const [portId, r] of Object.entries(results)) {
-      out[portId] = r ? { file_id: r.file_id, file_url: r.file_url ?? r.url, url: r.url ?? r.file_url, ext: r.ext } : null;
+    for (const { portId, wrappedOutput } of toSend) {
+      const body: any = { output_data: wrappedOutput };
+      if (runId) body.run_id = runId;
+      const response = await apiRequest(
+        `/api/v1/workflow/${workflowId}/node/${nodeId}/output/${encodeURIComponent(portId)}/save`,
+        { method: 'POST', body: JSON.stringify(body) }
+      );
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        let errorMessage = `Failed to save node output ${nodeId}/${portId}: ${response.status} ${response.statusText}`;
+        if (contentType.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            errorMessage = (errorData as { message?: string }).message || errorMessage;
+          } catch (_e) { /* ignore */ }
+        }
+        throw new Error(errorMessage);
+      }
+      const data = (await response.json()) as {
+        kind?: string;
+        file_id?: string;
+        file_url?: string;
+        url?: string;
+        mime_type?: string;
+        ext?: string;
+        run_id?: string;
+        task_id?: string;
+        output_name?: string;
+        is_cloud?: boolean;
+        entries?: Array<{
+          kind?: string; file_id?: string; file_url?: string; url?: string;
+          mime_type?: string; ext?: string; run_id?: string; task_id?: string; output_name?: string; is_cloud?: boolean;
+        }>;
+      };
+
+      /** 将后端返回的单条 entry 转换为 SaveNodeOutputResult */
+      const entryToResult = (e: typeof data): SaveNodeOutputResult => {
+        if (!e) return null;
+        const kind = e.kind ?? (e.file_id ? 'file' : e.task_id ? 'task' : e.url ? 'url' : undefined);
+        const entryRunId = (e as any)?.run_id ?? runId;
+        if (kind === 'file' && e.file_id != null) {
+          const mime = e.mime_type ?? (e.ext ? extToMime(e.ext) : undefined);
+          const extNorm = e.ext != null ? (e.ext.startsWith('.') ? e.ext : `.${e.ext}`) : undefined;
+          return { kind: 'file', file_id: e.file_id, mime_type: mime, ...(extNorm != null && { ext: extNorm }), ...(entryRunId && { run_id: entryRunId }) };
+        }
+        if (kind === 'task') {
+          return { kind: 'task', task_id: e.task_id, output_name: e.output_name, is_cloud: e.is_cloud };
+        }
+        if (kind === 'url') {
+          return { kind: 'url', url: e.url ?? e.file_url };
+        }
+        // fallback: 如果有 file_id 不论 kind 都返回 file ref
+        if (e.file_id != null) {
+          const mime = e.mime_type ?? (e.ext ? extToMime(e.ext) : undefined);
+          const extNorm = e.ext != null ? (e.ext.startsWith('.') ? e.ext : `.${e.ext}`) : undefined;
+          return { kind: 'file', file_id: e.file_id, mime_type: mime, ...(extNorm != null && { ext: extNorm }), ...(entryRunId && { run_id: entryRunId }) };
+        }
+        return null;
+      };
+
+      // 多图 list 响应：后端返回 { entries: [...] }
+      if (Array.isArray(data?.entries) && data.entries.length > 0) {
+        // 将所有 entries 转换为结果数组
+        const allResults = data.entries.map(e => entryToResult(e));
+        const validResults = allResults.filter((r): r is NonNullable<SaveNodeOutputResult> => r != null);
+        if (validResults.length === 1) {
+          // 单项数组平铺
+          out[portId] = validResults[0];
+        } else if (validResults.length > 1) {
+          // 多项数组：保留完整列表，供下游使用
+          out[portId] = { kind: 'file_list', entries: validResults } as SaveNodeOutputResult;
+        } else {
+          out[portId] = null;
+        }
+      } else {
+        out[portId] = entryToResult(data);
+      }
     }
     return out;
   } catch (error) {
@@ -226,8 +338,124 @@ export async function saveNodeOutputs(
   }
 }
 
+/** 按 (workflowId, nodeId, portId, fileId?) 或 (workflowId, nodeId, portId) 永久缓存 */
+const nodeOutputUrlCache = new Map<string, string>();
+/** 同一 node+port+run 只允许一个请求在进行 */
+const nodeOutputUrlInFlight = new Map<string, Promise<string | string[] | null>>();
+
+function parseFileIdFromUrl(url: string): string | null {
+  const m = url.match(/[?&]file_id=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 /**
- * 获取节点输出数据（当前输出）。后端按节点返回所有端口，此处取指定 portId。
+ * 获取节点某端口输出的展示 URL（统一入口）。调用后端 /output/{port_id}/url 接口获取最终 URL。
+ * 传入 fileId 时按 (workflowId, nodeId, portId, fileId) 缓存并返回匹配项；多项时后端返回 urls，按 file_id 匹配。
+ * runId 可选，作为 query 传给后端用于解析历史 run。
+ */
+export async function getNodeOutputUrl(
+  workflowId: string,
+  nodeId: string,
+  portId: string,
+  fileId?: string,
+  runId?: string
+): Promise<string | null> {
+  if (isStandalone()) return null;
+  const cacheKey = fileId ? `${workflowId}:${nodeId}:${portId}:${fileId}` : `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`;
+  const cached = nodeOutputUrlCache.get(cacheKey);
+  if (cached != null) return cached;
+  const inFlightKey = `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`;
+  let promise = nodeOutputUrlInFlight.get(inFlightKey);
+  if (promise) {
+    const result = await promise;
+    if (result == null) return null;
+    if (Array.isArray(result)) {
+      if (fileId) {
+        // 并发复用同一请求时，无法从已缓存的 final url 反推 file_id，需等本次请求结果再匹配
+        const single = nodeOutputUrlCache.get(`${workflowId}:${nodeId}:${portId}:${fileId}`);
+        return single ?? null;
+      }
+      return result[0];
+    }
+    return result;
+  }
+  promise = (async (): Promise<string | string[] | null> => {
+    try {
+      const params = new URLSearchParams();
+      if (runId) params.set('run_id', runId);
+      if (fileId) params.set('file_id', fileId);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiRequest(
+        `/api/v1/workflow/${workflowId}/node/${encodeURIComponent(nodeId)}/output/${encodeURIComponent(portId)}/url${qs}`
+      );
+      if (!response.ok) return null;
+      const data = await response.json();
+      const toFinal = (url: string) => getAssetPath(url.startsWith('./') ? url.slice(1) : url);
+      // 多项输出（如多图）
+      if (Array.isArray(data?.urls) && data.urls.length > 0) {
+        const finalUrls = data.urls.map((u: string) => toFinal(u));
+        data.urls.forEach((u: string) => {
+          const fid = parseFileIdFromUrl(u);
+          if (fid) nodeOutputUrlCache.set(`${workflowId}:${nodeId}:${portId}:${fid}`, toFinal(u));
+        });
+        if (fileId) {
+          const raw = data.urls.find((u: string) => parseFileIdFromUrl(u) === fileId);
+          const single = raw ? toFinal(raw) : null;
+          if (single) nodeOutputUrlCache.set(cacheKey, single);
+          return single;
+        }
+        nodeOutputUrlCache.set(inFlightKey, finalUrls[0]);
+        return finalUrls;
+      }
+      const url = data?.url;
+      if (typeof url !== 'string' || !url) return null;
+      const finalUrl = toFinal(url);
+      const fid = parseFileIdFromUrl(url);
+      if (fid) nodeOutputUrlCache.set(`${workflowId}:${nodeId}:${portId}:${fid}`, finalUrl);
+      nodeOutputUrlCache.set(inFlightKey, finalUrl);
+      return finalUrl;
+    } catch (error) {
+      console.error('[WorkflowFileManager] getNodeOutputUrl failed:', error);
+      return null;
+    } finally {
+      nodeOutputUrlInFlight.delete(inFlightKey);
+    }
+  })();
+  nodeOutputUrlInFlight.set(inFlightKey, promise);
+  const result = await promise;
+  if (result == null) return null;
+  if (Array.isArray(result)) {
+    if (fileId) return nodeOutputUrlCache.get(cacheKey) ?? null;
+    return result[0];
+  }
+  return result;
+}
+
+/**
+ * 将后端返回的单个输出 URL 解析为 task ref 或 data URL。
+ */
+async function resolveOutputUrl(url: string): Promise<any | null> {
+  // Task result: ./assets/task/result?task_id=...&name=...
+  const taskMatch = url.match(/[?&]task_id=([^&]+)/);
+  const nameMatch = url.match(/[?&]name=([^&]+)/);
+  if (taskMatch && nameMatch) {
+    return {
+      kind: 'task',
+      task_id: decodeURIComponent(taskMatch[1]),
+      output_name: decodeURIComponent(nameMatch[1]),
+      is_cloud: url.includes('is_cloud') ? true : undefined,
+    };
+  }
+  // Workflow file 或其他 URL：添加 token 后 fetch 转为 data URL
+  const resolvedUrl = getAssetPath(url.startsWith('./') ? url.slice(1) : url);
+  return await fetchUrlAsDataUrl(resolvedUrl);
+}
+
+/**
+ * 获取节点输出数据（当前输出）。调用 /output/{port_id}/url 接口，解析为下游可用的 data URL 或 task ref。
+ * - 文件输出：fetch URL 转为 data URL
+ * - 任务输出：返回 { kind: 'task', task_id, output_name } ref 供 resolveLightX2VResultRef
+ * - 多项输出（如多图）：返回数组
  */
 export async function getNodeOutputData(
   workflowId: string,
@@ -236,16 +464,19 @@ export async function getNodeOutputData(
 ): Promise<any | null> {
   if (isStandalone()) return null;
   try {
-    const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output`);
+    const response = await apiRequest(
+      `/api/v1/workflow/${workflowId}/node/${encodeURIComponent(nodeId)}/output/${encodeURIComponent(portId)}/url`
+    );
 
     if (!response.ok) {
+      if (response.status === 404) return null;
       const contentType = response.headers.get('content-type') || '';
       let errorMessage = `Failed to get node output: ${response.status} ${response.statusText}`;
       if (contentType.includes('application/json')) {
         try {
           const errorData = await response.json();
           errorMessage = errorData.message || errorMessage;
-        } catch (e) {
+        } catch {
           // ignore
         }
       } else {
@@ -256,12 +487,11 @@ export async function getNodeOutputData(
           } else {
             errorMessage = text.substring(0, 200);
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
       console.error(`[WorkflowFileManager] Error getting node output data for ${nodeId}/${portId}:`, errorMessage);
-      if (response.status === 404) return null;
       throw new Error(errorMessage);
     }
 
@@ -272,38 +502,45 @@ export async function getNodeOutputData(
     }
 
     const result = await response.json();
-    const portOutput = result.outputs?.[portId];
-    if (!portOutput?.data) return null;
 
-    const dataRef = portOutput.data;
-    const resultUrl = portOutput.url;
+    // 多项输出（如多图）：后端返回 { urls: [...] }
+    if (Array.isArray(result?.urls)) {
+      const resolved = await Promise.all(result.urls.map((u: string) => resolveOutputUrl(u)));
+      // 过滤掉解析失败的项
+      return resolved.filter((v: any) => v != null);
+    }
 
-    if (dataRef.data_type === 'url') {
-      return resultUrl || dataRef.url_value;
-    }
-    if (dataRef.data_type === 'file' && dataRef.file_path) {
-      const filePath = dataRef.file_path;
-      const filePaths = Array.isArray(filePath) ? filePath : [filePath];
-      const filePromises = filePaths.map(async (path: string) => {
-        const match = path.match(/workflows\/[^_]+_(.+)\.(.+)$/);
-        if (match) {
-          const fileId = match[1];
-          return await getWorkflowFileByFileId(workflowId, fileId);
-        }
-        return null;
-      });
-      const results = await Promise.all(filePromises);
-      const validResults = results.filter(r => r !== null);
-      return validResults.length === 1 ? validResults[0] : validResults;
-    }
-    if (dataRef.data_type === 'text') return dataRef.text_value;
-    if (dataRef.data_type === 'json') return dataRef.json_value;
-    return dataRef;
+    // 单项输出：后端返回 { url: "..." }
+    const url = result?.url;
+    if (typeof url !== 'string' || !url) return null;
+    return await resolveOutputUrl(url);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[WorkflowFileManager] Error getting node output data for ${nodeId}/${portId}:`, errorMessage);
     throw error;
   }
+}
+
+/** 通用：fetch URL 转为 data URL (base64) */
+async function fetchUrlAsDataUrl(url: string): Promise<string | null> {
+  const fetchUrl = url.startsWith('/') && !url.startsWith('//') ? `${typeof window !== 'undefined' ? window.location.origin : ''}${url}` : url;
+  const fetchRes = await fetch(fetchUrl, { credentials: url.includes('/api/') || url.includes('/assets/') ? 'include' : 'omit' });
+  if (!fetchRes.ok) return null;
+  const blob = await fetchRes.blob();
+  return await new Promise<string | null>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Failed to read blob'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** 通用：fetch URL 转为纯文本 */
+async function fetchUrlAsText(url: string): Promise<string | null> {
+  const fetchUrl = url.startsWith('/') && !url.startsWith('//') ? `${typeof window !== 'undefined' ? window.location.origin : ''}${url}` : url;
+  const fetchRes = await fetch(fetchUrl, { credentials: url.includes('/api/') || url.includes('/assets/') ? 'include' : 'omit' });
+  if (!fetchRes.ok) return null;
+  return await fetchRes.text();
 }
 
 /**
@@ -359,38 +596,83 @@ export async function getNodeOutputHistory(
 }
 
 /**
- * 重用历史记录
+ * 从本地 workflow 的 nodeOutputHistory 中按「第 historyIndex 次 run」取一条历史记录（port_keyed）。
+ * 每条 entry = 一次 run，output_value 为以 port_id 为键的字典；返回该 run 下指定 port 的展示值或整条 port_keyed。
  */
-export async function reuseNodeOutputHistory(
-  workflowId: string,
+export function getNodeOutputHistoryEntry(
+  nodeOutputHistory: Record<string, any[]> | undefined,
   nodeId: string,
   portId: string,
   historyIndex: number
+): { data?: any; entry?: any } | null {
+  if (!nodeOutputHistory || !nodeOutputHistory[nodeId] || !Array.isArray(nodeOutputHistory[nodeId])) return null;
+  const entries = nodeOutputHistory[nodeId];
+  if (historyIndex < 0 || historyIndex >= entries.length) return null;
+  const entry = entries[historyIndex];
+  if (!entry || typeof entry !== 'object') return null;
+  const portKeyed = getEntryPortKeyedValue(entry as import('../../types').NodeHistoryEntry);
+  const port = portId || 'output';
+  const data = port ? portKeyed[port] : portKeyed;
+  return { data, entry };
+}
+
+/** @deprecated Use getNodeOutputHistoryEntry for local workflow; persist changes via POST .../update. */
+export async function reuseNodeOutputHistory(
+  _workflowId: string,
+  nodeId: string,
+  portId: string,
+  historyIndex: number,
+  nodeOutputHistory?: Record<string, any[]>
 ): Promise<any | null> {
-  try {
-    const response = await apiRequest(`/api/v1/workflow/${workflowId}/node/${nodeId}/output/reuse`, {
-      method: 'POST',
-      body: JSON.stringify({ port_id: portId, history_index: historyIndex })
-    });
-    if (!response.ok) return null;
-    const result = await response.json();
-    return result?.data ?? null;
-  } catch (error) {
-    console.error('[WorkflowFileManager] Error reusing node output history:', error);
-    return null;
+  if (nodeOutputHistory) {
+    const r = getNodeOutputHistoryEntry(nodeOutputHistory, nodeId, portId, historyIndex);
+    return r?.data ?? null;
   }
+  return null;
+}
+
+/** saveInputFileViaOutputSave 的返回类型 */
+type SaveInputFileRef = { kind: 'file'; file_id: string; file_url: string; mime_type?: string; ext?: string; run_id?: string };
+
+/** 同一 (workflowId, nodeId, portId) 的 save 去重：后发请求等待先发结果，避免轮询/双跑时重复 POST 产生两个文件 */
+const pendingSaveByKey = new Map<string, Promise<SaveInputFileRef | null>>();
+
+/** 按内容短期缓存：auto-save 与 run 时可能对同一内容各调一次 save，短时间内容相同则复用同一 ref，避免重复文件 */
+const SAVE_INPUT_CACHE_TTL_MS = 4000;
+const saveInputResultCache = new Map<string, { ref: SaveInputFileRef; expiresAt: number }>();
+
+function pruneSaveInputCache(): void {
+  if (saveInputResultCache.size <= 80) return;
+  const now = Date.now();
+  for (const [k, v] of saveInputResultCache.entries()) {
+    if (v.expiresAt <= now) saveInputResultCache.delete(k);
+  }
+}
+
+function contentKeyForInput(dataUrl: string, fileOrDataUrl?: File | string): string {
+  if (typeof fileOrDataUrl === 'string') {
+    let h = 0;
+    const s = dataUrl;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return `${h.toString(36)}_${s.length}`;
+  }
+  if (fileOrDataUrl instanceof File) {
+    return `f:${fileOrDataUrl.name}:${fileOrDataUrl.size}:${fileOrDataUrl.lastModified}`;
+  }
+  return String(Date.now());
 }
 
 /**
  * 将输入节点的文件通过 node output/save 存到数据库，与节点生成文件时的保存逻辑一致。
- * 返回 file 类型引用 { type: 'file', file_id, file_url, ext }，用于写入 node.outputValue。
+ * 返回 file 引用 { kind: 'file', file_id, file_url, mime_type, ext, run_id }，用于写入 node.output_value（port-keyed）。
+ * 同一节点端口的并发调用会复用一次 save 结果，避免重复创建文件。
  */
 export async function saveInputFileViaOutputSave(
   workflowId: string,
   nodeId: string,
   portId: string,
   fileOrDataUrl: File | string
-): Promise<{ type: 'file'; file_id: string; file_url: string; ext?: string } | null> {
+): Promise<SaveInputFileRef | null> {
   try {
     let dataUrl: string;
     let ext = '.bin';
@@ -401,7 +683,8 @@ export async function saveInputFileViaOutputSave(
         const mime = header.split(':')[1]?.split(';')[0] || '';
         const extMap: Record<string, string> = {
           'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
-          'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg'
+          'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
+          'text/plain': '.txt'
         };
         ext = extMap[mime] || '.bin';
       }
@@ -427,14 +710,57 @@ export async function saveInputFileViaOutputSave(
         : fileOrDataUrl;
       await saveLocalFile(key, file);
       const localRef = `local://${key}`;
-      return { type: 'file', file_id: key, file_url: localRef, ext };
+      const mime = extToMime(ext);
+      return { kind: 'file', file_id: key, file_url: localRef, mime_type: mime, ext };
     }
 
-    const result = await saveNodeOutputs(workflowId, nodeId, { [portId]: dataUrl });
-    const r = result?.[portId];
-    if (!r?.file_id) return null;
-    const file_url = r.file_url ?? r.url ?? `/api/v1/workflow/${workflowId}/file/${r.file_id}`;
-    return { type: 'file', file_id: r.file_id, file_url, ext: r.ext };
+    pruneSaveInputCache();
+    const contentKey = contentKeyForInput(dataUrl, fileOrDataUrl);
+    const cacheKey = `${workflowId}:${nodeId}:${portId}:${contentKey}`;
+    const now = Date.now();
+    const cached = saveInputResultCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return { ...cached.ref };
+    }
+
+    const dedupeKey = `${workflowId}:${nodeId}:${portId}`;
+    const existing = pendingSaveByKey.get(dedupeKey);
+    if (existing) {
+      const ref = await existing;
+      if (ref) {
+        saveInputResultCache.set(cacheKey, { ref, expiresAt: now + SAVE_INPUT_CACHE_TTL_MS });
+        return { ...ref };
+      }
+      return null;
+    }
+
+    const promise = (async (): Promise<SaveInputFileRef | null> => {
+      try {
+        const result = await saveNodeOutputs(workflowId, nodeId, { [portId]: dataUrl }, crypto.randomUUID());
+        const r = result?.[portId];
+        const fileId = r?.file_id ?? (r && typeof r === 'object' && (r as any).file_id);
+        if (!fileId) return null;
+        const outMime = (r as any)?.mime_type ?? ((r as any)?.ext ? extToMime((r as any).ext) : (dataUrl.startsWith('data:text/') ? 'text/plain' : undefined));
+        const outExt: string | undefined = (r as any)?.ext != null
+          ? (String((r as any).ext).startsWith('.') ? String((r as any).ext) : `.${(r as any).ext}`)
+          : ext !== '.bin' ? ext : undefined;
+        const outRunId: string | undefined = (r as any)?.run_id || undefined;
+        const file_url = (r as any)?.file_url ?? (r as any)?.url ?? getWorkflowFileUrl(workflowId, fileId, outMime, outExt, nodeId, portId, outRunId);
+        const ref: SaveInputFileRef = {
+          kind: 'file', file_id: String(fileId), file_url,
+          ...(outMime != null && { mime_type: outMime }),
+          ...(outExt != null && { ext: outExt }),
+          ...(outRunId != null && { run_id: outRunId }),
+        };
+        saveInputResultCache.set(cacheKey, { ref, expiresAt: Date.now() + SAVE_INPUT_CACHE_TTL_MS });
+        return ref;
+      } finally {
+        pendingSaveByKey.delete(dedupeKey);
+      }
+    })();
+    pendingSaveByKey.set(dedupeKey, promise);
+    const ref = await promise;
+    return ref ? { ...ref } : null;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[WorkflowFileManager] saveInputFileViaOutputSave failed:`, msg);
@@ -445,7 +771,7 @@ export async function saveInputFileViaOutputSave(
 /**
  * 直接上传文件到工作流节点输出（用于输入节点）
  * 有后端时通过 output/save 保存；纯前端时保存到 IndexedDB。
- * @deprecated 新逻辑请用 saveInputFileViaOutputSave，并写入 node.outputValue。
+ * @deprecated 新逻辑请用 saveInputFileViaOutputSave，并写入 node.output_value。
  */
 export async function uploadNodeInputFile(
   workflowId: string,
@@ -453,10 +779,10 @@ export async function uploadNodeInputFile(
   portId: string,
   file: File,
   index: number = 0
-): Promise<{ file_id: string; file_path: string; file_url: string } | null> {
+): Promise<{ file_id: string; file_path: string; file_url: string; mime_type?: string } | null> {
   const ref = await saveInputFileViaOutputSave(workflowId, nodeId, portId, file);
   if (!ref) return null;
-  return { file_id: ref.file_id, file_path: ref.file_url, file_url: ref.file_url };
+  return { file_id: ref.file_id, file_path: ref.file_url, file_url: ref.file_url, mime_type: ref.mime_type };
 }
 
 /**
@@ -467,7 +793,7 @@ export function isLocalAssetUrlToUpload(url: string): boolean {
   if (typeof url !== 'string' || !url) return false;
   const u = url.replace(/^\.\//, '/');
   if (!u.startsWith('/assets/')) return false;
-  if (u.startsWith('/assets/workflow/input') || u.startsWith('/assets/task/')) return false;
+  if (u.startsWith('/assets/workflow/file') || u.startsWith('/assets/task/')) return false;
   if (u.startsWith('http://') || u.startsWith('https://')) return false;
   return true;
 }
@@ -483,7 +809,7 @@ export async function uploadLocalUrlAsNodeOutput(
   portId: string,
   localUrl: string,
   index: number = 0
-): Promise<{ type: 'file'; file_id: string; file_url: string; ext?: string } | null> {
+): Promise<SaveInputFileRef | null> {
   try {
     const path = localUrl.startsWith('./') ? localUrl.slice(1) : localUrl;
     const urlToFetch = path.startsWith('http') ? path : (typeof window !== 'undefined' ? window.location.origin : '') + path;
@@ -492,56 +818,57 @@ export async function uploadLocalUrlAsNodeOutput(
     const blob = await res.blob();
     const name = path.split('/').pop() || 'file';
     const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
-    const result = await uploadNodeInputFile(workflowId, nodeId, portId, file, index);
-    if (!result) return null;
-    const ext = name.includes('.') ? '.' + name.split('.').pop()!.toLowerCase() : undefined;
-    return {
-      type: 'file',
-      file_id: result.file_id,
-      file_url: result.file_url,
-      ext: ext || undefined
-    };
+    const ref = await saveInputFileViaOutputSave(workflowId, nodeId, portId, file);
+    if (!ref) return null;
+    return ref;
   } catch (e) {
     console.error('[WorkflowFileManager] uploadLocalUrlAsNodeOutput failed:', localUrl, e);
     return null;
   }
 }
 
+/** 构建 /assets/workflow/file?... 的完整 URL（含 token）。 nodeId/portId/runId 必须提供以匹配新存储路径。 */
+function buildWorkflowFileUrl(
+  workflowId: string,
+  fileId: string,
+  opts?: { nodeId?: string; portId?: string; runId?: string; mimeType?: string; ext?: string }
+): string {
+  const params = new URLSearchParams();
+  params.set('workflow_id', workflowId);
+  params.set('file_id', fileId);
+  if (opts?.nodeId) params.set('node_id', opts.nodeId);
+  if (opts?.portId) params.set('port_id', opts.portId);
+  if (opts?.runId) params.set('run_id', opts.runId);
+  if (opts?.mimeType) params.set('mime_type', opts.mimeType);
+  if (opts?.ext) params.set('ext', opts.ext.startsWith('.') ? opts.ext : `.${opts.ext}`);
+  return getAssetPath(`/assets/workflow/file?${params.toString()}`);
+}
+
 /**
- * 根据 file_id 获取工作流文件（新格式）
- * 纯前端模式：fileId 为 local://key 时从 IndexedDB 解析
+ * 根据 file ref 获取工作流文件的 data URL（二进制转 base64）。
+ * 纯前端模式：fileId 为 local://key 时从 IndexedDB 解析。
+ * 有后端且提供 nodeId+portId 时：先通过 /output/{port_id}/url 获取展示 URL，再 fetch 转 data URL；否则用 /assets/workflow/file 直链。
  */
 export async function getWorkflowFileByFileId(
   workflowId: string,
-  fileId: string
+  fileId: string,
+  mimeType?: string,
+  ext?: string,
+  nodeId?: string,
+  portId?: string,
+  runId?: string
 ): Promise<string | null> {
   try {
     if (fileId.startsWith('local://')) {
       return getLocalFileDataUrl(fileId);
     }
-    if (isStandalone()) {
-      return null;
+    if (isStandalone()) return null;
+    if (nodeId && portId) {
+      const displayUrl = await getNodeOutputUrl(workflowId, nodeId, portId, fileId, runId);
+      if (displayUrl) return await fetchUrlAsDataUrl(displayUrl);
     }
-    // 与上传接口一致：显式带 Authorization，保证与 POST /output/upload 相同的 token 方式
-    const token = getAccessToken();
-    const url = `/api/v1/workflow/${workflowId}/file/${fileId}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-
-    if (!response.ok) {
-      console.error(`[WorkflowFileManager] Failed to fetch file: ${response.status}`);
-      return null;
-    }
-
-    const blob = await response.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    const url = buildWorkflowFileUrl(workflowId, fileId, { nodeId, portId, runId, mimeType, ext });
+    return await fetchUrlAsDataUrl(url);
   } catch (error) {
     console.error('[WorkflowFileManager] Error getting workflow file by file_id:', error);
     return null;
@@ -549,15 +876,96 @@ export async function getWorkflowFileByFileId(
 }
 
 /**
- * 获取工作流文件 URL（用于直接访问，如 <img> 标签）
- * 新格式：使用 file_id
+ * 获取工作流文本文件内容（如 .txt 端口存为 file 后的预览）。
+ * 有 nodeId+portId 时先通过 /output/{port_id}/url 获取 URL 再 fetch 文本；否则用 /assets/workflow/file 直链（需 node_id/port_id/run_id 否则可能 404）。
+ */
+export async function getWorkflowFileText(
+  workflowId: string,
+  fileId: string,
+  nodeId?: string,
+  portId?: string,
+  runId?: string
+): Promise<string | null> {
+  try {
+    if (isStandalone()) return null;
+    if (nodeId && portId) {
+      const displayUrl = await getNodeOutputUrl(workflowId, nodeId, portId, fileId, runId);
+      if (displayUrl) return await fetchUrlAsText(displayUrl);
+    }
+    const url = buildWorkflowFileUrl(workflowId, fileId, { nodeId, portId, runId, mimeType: 'text/plain', ext: '.txt' });
+    return await fetchUrlAsText(url);
+  } catch {
+    return null;
+  }
+}
+
+/** 浏览器缓存 workflow 文件 URL，key: workflowId:fileId[:mimeType]，避免数据库存过期 file_url */
+const WORKFLOW_FILE_URL_CACHE_KEY = 'canvas_workflow_file_url_cache';
+const WORKFLOW_FILE_URL_TTL_MS = 50 * 60 * 1000; // 50 min，小于常见 presign 1h
+
+function getWorkflowFileUrlCacheKey(workflowId: string, fileId: string, mimeType?: string): string {
+  return mimeType ? `${workflowId}:${fileId}:${mimeType}` : `${workflowId}:${fileId}`;
+}
+
+function getWorkflowFileUrlFromStorage(workflowId: string, fileId: string, mimeType?: string): string | null {
+  try {
+    const raw = localStorage.getItem(WORKFLOW_FILE_URL_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw) as Record<string, { url: string; expiresAt: number }>;
+    const key = getWorkflowFileUrlCacheKey(workflowId, fileId, mimeType);
+    const keyFallback = getWorkflowFileUrlCacheKey(workflowId, fileId);
+    const entry = cache[key] ?? cache[keyFallback];
+    if (!entry || entry.expiresAt <= Date.now()) return null;
+    return entry.url;
+  } catch {
+    return null;
+  }
+}
+
+function setWorkflowFileUrlInStorage(workflowId: string, fileId: string, url: string, mimeType?: string): void {
+  try {
+    const raw = localStorage.getItem(WORKFLOW_FILE_URL_CACHE_KEY);
+    const cache: Record<string, { url: string; expiresAt: number }> = raw ? JSON.parse(raw) : {};
+    const key = getWorkflowFileUrlCacheKey(workflowId, fileId, mimeType);
+    cache[key] = { url, expiresAt: Date.now() + WORKFLOW_FILE_URL_TTL_MS };
+    localStorage.setItem(WORKFLOW_FILE_URL_CACHE_KEY, JSON.stringify(cache));
+  } catch (e) {
+    console.warn('[WorkflowFileManager] setWorkflowFileUrlInStorage failed:', e);
+  }
+}
+
+/**
+ * 获取工作流文件 URL（用于直接访问，如 <img> 标签）。
+ * 使用 /assets/workflow/file?... 格式，需要 nodeId/portId/runId 定位文件。
  */
 export function getWorkflowFileUrl(
   workflowId: string,
-  fileId: string
+  fileId: string,
+  mimeType?: string,
+  ext?: string,
+  nodeId?: string,
+  portId?: string,
+  runId?: string
 ): string {
-  const token = localStorage.getItem('accessToken');
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  return buildWorkflowFileUrl(workflowId, fileId, { nodeId, portId, runId, mimeType, ext });
+}
 
-  return `/api/v1/workflow/${workflowId}/file/${fileId}${tokenParam}`;
+/**
+ * 带缓存的 workflow 文件 URL：先查缓存，过期或缺失时用 getWorkflowFileUrl 生成并写入缓存。
+ * 用于展示（img src 等），避免数据库存 file_url 过期。
+ */
+export function getCachedWorkflowFileUrl(
+  workflowId: string,
+  fileId: string,
+  mimeType?: string,
+  ext?: string,
+  nodeId?: string,
+  portId?: string,
+  runId?: string
+): string {
+  const cached = getWorkflowFileUrlFromStorage(workflowId, fileId, mimeType);
+  if (cached) return cached;
+  const url = getWorkflowFileUrl(workflowId, fileId, mimeType, ext, nodeId, portId, runId);
+  setWorkflowFileUrlInStorage(workflowId, fileId, url, mimeType);
+  return url;
 }

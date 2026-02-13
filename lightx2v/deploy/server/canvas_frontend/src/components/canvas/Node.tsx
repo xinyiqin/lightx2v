@@ -22,17 +22,18 @@ import {
   Clock,
   History
 } from 'lucide-react';
-import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition, NodeHistoryEntry } from '../../../types';
+import { WorkflowNode, WorkflowState, NodeStatus, DataType, Port, ToolDefinition, NodeHistoryEntry, NodeRunState } from '../../../types';
 import { TOOLS } from '../../../constants';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
-import { formatTime } from '../../utils/format';
+import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries } from '../../utils/historyEntry';
-import { getLocalFileDataUrl, getWorkflowFileByFileId, persistDataUrlToLocal } from '../../utils/workflowFileManager';
+import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
+import { getOutputValueByPort, setOutputValueByPort, INPUT_PORT_IDS } from '../../utils/outputValuePort';
 import { TextNodePreview } from '../previews/TextNodePreview';
 import { ImageNodePreview } from '../previews/ImageNodePreview';
 import { AudioNodePreview } from '../previews/AudioNodePreview';
@@ -46,41 +47,53 @@ const HistoryEntryItem: React.FC<{
   outputDataType?: string;
   resolveAudioUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
   resolveVideoUrl?: (entry: NodeHistoryEntry) => Promise<string | null>;
-}> = ({ entry, lang, onSelect, resolveLightX2VResultRef, outputDataType, resolveAudioUrl, resolveVideoUrl }) => {
+  resolveTextFileContent?: (entry: NodeHistoryEntry) => Promise<string | null>;
+}> = ({ entry, lang, onSelect, resolveLightX2VResultRef, outputDataType, resolveAudioUrl, resolveVideoUrl, resolveTextFileContent }) => {
+  const ov = entry.output_value ?? {};
+  const kind = ov.kind ?? (entry as any).kind;
   let preview = '';
   let isLightX2VResult = false;
   let lightX2VRef: LightX2VResultRef | null = null;
-  if (entry.kind === 'text') {
-    const textVal = (entry.value as { text?: string })?.text ?? '';
+  if (kind === 'text') {
+    const textVal = (ov as { text?: string })?.text ?? '';
     preview = textVal.length > 40 ? textVal.slice(0, 40) + '…' : textVal;
-  } else if (entry.kind === 'json') {
-    const jsonVal = (entry.value as { json?: any })?.json ?? entry.value;
-    const s = JSON.stringify(jsonVal);
+  } else if (kind === 'json') {
+    const jsonVal = (ov as { json?: any })?.json ?? ov;
+    const s = typeof jsonVal === 'string' ? jsonVal : JSON.stringify(jsonVal);
     preview = s.length > 40 ? s.slice(0, 40) + '…' : s;
-  } else if (entry.kind === 'file') {
-    const fileVal = entry.value as {
-      dataUrl?: string;
-      url?: string;
-      fileId?: string;
-    };
+  } else if (kind === 'file') {
+    const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string };
     if (fileVal.dataUrl) preview = lang === 'zh' ? '[内联文件]' : '[Inline file]';
+    else if (fileVal.file_id && (fileVal.mime_type === 'text/plain' || outputDataType === DataType.TEXT)) preview = lang === 'zh' ? '[已存文本]' : '[Text file]';
+    else if (fileVal.file_id) preview = lang === 'zh' ? '[已存文件]' : '[Stored file]';
     else if (fileVal.url) preview = lang === 'zh' ? '[URL]' : '[URL]';
-    else if (fileVal.fileId) preview = lang === 'zh' ? '[已存文件]' : '[Stored file]';
     else preview = lang === 'zh' ? '[文件]' : '[File]';
-  } else if (entry.kind === 'lightx2v_result') {
-    const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
-    preview = `${val.taskId || ''} ${val.outputName || ''}`.trim() || (lang === 'zh' ? '[视频结果]' : '[Video]');
+  } else if (kind === 'task' || kind === 'lightx2v_result') {
+    const val = ov as { task_id?: string; output_name?: string; is_cloud?: boolean };
+    preview = `${val.task_id || ''} ${val.output_name || ''}`.trim() || (lang === 'zh' ? '[视频结果]' : '[Video]');
     isLightX2VResult = true;
-    if (val.taskId) {
+    if (val.task_id) {
       lightX2VRef = {
-        __type: 'lightx2v_result',
-        task_id: val.taskId,
-        output_name: val.outputName || 'output',
-        is_cloud: !!val.isCloud,
+        kind: 'task',
+        task_id: val.task_id,
+        output_name: val.output_name || 'output',
+        is_cloud: !!val.is_cloud,
       };
     }
   }
   const [resolvedUrl, setResolvedUrl] = React.useState<string | null>(null);
+  const [textFilePreview, setTextFilePreview] = React.useState<string | null>(null);
+  const isTextFileRef = kind === 'file' && (outputDataType === DataType.TEXT || (ov as { mime_type?: string }).mime_type === 'text/plain') && !!(ov as { file_id?: string }).file_id;
+  React.useEffect(() => {
+    if (!isTextFileRef || !resolveTextFileContent) return;
+    let cancelled = false;
+    resolveTextFileContent(entry).then((text) => {
+      if (!cancelled && text != null) setTextFilePreview(text.length > 40 ? text.slice(0, 40) + '…' : text);
+    }).catch(() => {
+      if (!cancelled) setTextFilePreview(null);
+    });
+    return () => { cancelled = true; setTextFilePreview(null); };
+  }, [isTextFileRef, resolveTextFileContent, entry.id, (ov as { file_id?: string }).file_id]);
   const [audioUrl, setAudioUrl] = React.useState<string | null>(null);
   const audioElRef = React.useRef<HTMLAudioElement | null>(null);
   React.useEffect(() => {
@@ -116,14 +129,14 @@ const HistoryEntryItem: React.FC<{
     audio.play().catch(() => {});
     audio.onended = () => { audioElRef.current = null; };
   }, [audioUrl]);
-  const isImage = isLightX2VResult && (entry.value as { outputName?: string })?.outputName === 'output_image';
-  const outputName = (entry.value as { outputName?: string })?.outputName || '';
-  const isLightX2VAudio = isLightX2VResult && outputName === 'output_audio';
+  const isImage = isLightX2VResult && (ov as { output_name?: string })?.output_name === 'output_image';
+  const output_name = (ov as { output_name?: string })?.output_name || '';
+  const isLightX2VAudio = isLightX2VResult && output_name === 'output_audio';
   const hasThumbnail = isLightX2VResult && !isLightX2VAudio && resolveLightX2VResultRef && lightX2VRef;
   const isVideo = outputDataType === DataType.VIDEO && !!resolveVideoUrl;
   const [videoUrl, setVideoUrl] = React.useState<string | null>(null);
   React.useEffect(() => {
-    if (!isVideo || !resolveVideoUrl || entry.kind === 'lightx2v_result') return;
+    if (!isVideo || !resolveVideoUrl || (kind === 'task' || kind === 'lightx2v_result')) return;
     let cancelled = false;
     resolveVideoUrl(entry).then((url) => {
       if (!cancelled && url) setVideoUrl(url);
@@ -131,8 +144,8 @@ const HistoryEntryItem: React.FC<{
       if (!cancelled) setVideoUrl(null);
     });
     return () => { cancelled = true; setVideoUrl(null); };
-  }, [isVideo, resolveVideoUrl, entry.id, entry.kind]);
-  const hasVideoFileThumbnail = isVideo && entry.kind === 'file' && videoUrl;
+  }, [isVideo, resolveVideoUrl, entry.id, kind]);
+  const hasVideoFileThumbnail = isVideo && kind === 'file' && videoUrl;
   return (
     <button
       type="button"
@@ -186,7 +199,7 @@ const HistoryEntryItem: React.FC<{
         </span>
       ) : null}
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-        {!hasThumbnail && !hasVideoFileThumbnail && <span className="truncate">{preview || (lang === 'zh' ? '—' : '—')}</span>}
+        {!hasThumbnail && !hasVideoFileThumbnail && <span className="truncate">{(isTextFileRef && textFilePreview != null ? textFilePreview : preview) || (lang === 'zh' ? '—' : '—')}</span>}
         {entry.timestamp ? (
           <span className="text-[9px] text-slate-500">{new Date(entry.timestamp).toLocaleTimeString()}</span>
         ) : null}
@@ -255,10 +268,10 @@ interface NodeProps {
   } | null) => void;
   onAddConnection: (connection: {
     id: string;
-    sourceNodeId: string;
-    sourcePortId: string;
-    targetNodeId: string;
-    targetPortId: string;
+    source_node_id: string;
+    source_port_id: string;
+    target_node_id: string;
+    target_port_id: string;
   }) => void;
   onClearSelectedRunId: () => void;
   getReplaceableTools: (nodeId: string) => ToolDefinition[];
@@ -276,6 +289,7 @@ interface NodeProps {
     startY: number;
   } | null;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
 }
 
 export const Node: React.FC<NodeProps> = ({
@@ -321,7 +335,9 @@ export const Node: React.FC<NodeProps> = ({
   quickAddOutput,
   onAddNodeToChat,
   connecting,
-  onNodeHeightChange
+  onNodeHeightChange,
+  getNodeOutputUrl,
+  screenToWorldCoords
 }) => {
   const { t } = useTranslation(lang);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -330,7 +346,7 @@ export const Node: React.FC<NodeProps> = ({
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
-  const tool = TOOLS.find((t) => t.id === node.toolId);
+  const tool = TOOLS.find((t) => t.id === node.tool_id);
   if (!tool) return null;
 
   const outputs = getNodeOutputs(node);
@@ -344,20 +360,31 @@ export const Node: React.FC<NodeProps> = ({
         onNodeHeightChange(node.id, currentHeight);
       }
     }
-  }, [node.id, onNodeHeightChange, node.data, outputs.length, node.outputValue, node.status]);
-  // sourceOutputs = node.outputValue per node; fallback to node.outputValue for saved refs after load
-  const nodeResultRaw = sourceOutputs[node.id] ?? node.outputValue ?? (tool.category === 'Input' ? node.data.value : null);
+  }, [node.id, onNodeHeightChange, node.data, outputs.length, node.output_value, node.status]);
+  // sourceOutputs 或 node.output_value 可能为 port-keyed；Input 按 port 取值，输出节点按首端口取值以便预览 task ref 等
+  const primaryPortId = tool.category === 'Input' ? INPUT_PORT_IDS[node.tool_id] ?? outputs[0]?.id : undefined;
+  const firstOutputPortId = outputs[0]?.id;
+  const nodeResultRaw = sourceOutputs[node.id] != null
+    ? (primaryPortId && typeof sourceOutputs[node.id] === 'object' && !Array.isArray(sourceOutputs[node.id]) && primaryPortId in sourceOutputs[node.id]
+        ? sourceOutputs[node.id][primaryPortId]
+        : firstOutputPortId && typeof sourceOutputs[node.id] === 'object' && !Array.isArray(sourceOutputs[node.id]) && firstOutputPortId in sourceOutputs[node.id]
+        ? sourceOutputs[node.id][firstOutputPortId]
+        : sourceOutputs[node.id])
+    : (firstOutputPortId ? getOutputValueByPort(node, firstOutputPortId) : null) ?? (primaryPortId ? getOutputValueByPort(node, primaryPortId) : null) ?? node.output_value ?? (tool.category === 'Input' ? node.data.value : null);
   // Extract actual value from reference/optimized objects (for history or 纯前端 run.outputs)
+  const r = (x: string) => (nodeResultRaw as any).kind === x || (nodeResultRaw as any).type === x;
   const nodeResult =
     nodeResultRaw && typeof nodeResultRaw === 'object' && !Array.isArray(nodeResultRaw)
-      ? nodeResultRaw.type === 'url' && typeof nodeResultRaw.data === 'string'
-        ? nodeResultRaw.data
-        : nodeResultRaw.type === 'text'
-        ? nodeResultRaw.data
-        : nodeResultRaw.type === 'data_url' && typeof nodeResultRaw._full_data === 'string'
-        ? nodeResultRaw._full_data
-        : nodeResultRaw.type === 'json' && nodeResultRaw.data != null
-        ? nodeResultRaw.data
+      ? r('url')
+        ? (typeof (nodeResultRaw as any).url === 'string' ? (nodeResultRaw as any).url : typeof (nodeResultRaw as any).data === 'string' ? (nodeResultRaw as any).data : undefined)
+        : r('text')
+        ? (nodeResultRaw as any).data
+        : r('file')
+        ? (nodeResultRaw as any).data ?? ((nodeResultRaw as any).file_id ? nodeResultRaw : undefined)
+        : r('data_url') && typeof (nodeResultRaw as any)._full_data === 'string'
+        ? (nodeResultRaw as any)._full_data
+        : r('json') && (nodeResultRaw as any).data != null
+        ? (nodeResultRaw as any).data
         : nodeResultRaw
       : nodeResultRaw;
   const firstOutputType = outputs[0]?.type || DataType.TEXT;
@@ -375,9 +402,23 @@ export const Node: React.FC<NodeProps> = ({
     });
     return () => { cancelled = true; setResolvedPreviewUrl(null); };
   }, [previewRefObj?.task_id, previewRefObj?.output_name, previewRefObj?.is_cloud, resolveLightX2VResultRef]);
+  // is_cloud 为 true 时只用 resolveLightX2VResultRef 得到的云端 URL，不走本地 getResultRefPreviewUrl
   const refPreviewUrl = isPreviewRef && previewRefObj
-    ? (resolveLightX2VResultRef ? resolvedPreviewUrl : getResultRefPreviewUrl(previewRefObj))
+    ? (previewRefObj.is_cloud ? resolvedPreviewUrl : (resolveLightX2VResultRef ? resolvedPreviewUrl : getResultRefPreviewUrl(previewRefObj)))
     : null;
+  // 文本端口为 file ref（.txt）时拉取内容用于预览
+  const isTextFileRef = firstOutputType === DataType.TEXT && previewValue != null && typeof previewValue === 'object' && (previewValue as any).kind === 'file' && (previewValue as any).file_id;
+  const [resolvedTextFromFile, setResolvedTextFromFile] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!isTextFileRef || !workflow?.id) return;
+    const ref = previewValue as { file_id: string; run_id?: string };
+    const portId = firstOutputPortId ?? 'out-text';
+    let cancelled = false;
+    getWorkflowFileText(workflow.id, ref.file_id, node.id, portId, ref.run_id).then((text) => {
+      if (!cancelled) setResolvedTextFromFile(text ?? null);
+    });
+    return () => { cancelled = true; setResolvedTextFromFile(null); };
+  }, [isTextFileRef, workflow?.id, node.id, firstOutputPortId, (previewValue as any)?.file_id, (previewValue as any)?.run_id]);
   const [resolvedLocalUrls, setResolvedLocalUrls] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
     const values = Array.isArray(node.data.value) ? node.data.value : (node.data.value ? [node.data.value] : []);
@@ -403,62 +444,168 @@ export const Node: React.FC<NodeProps> = ({
       cancelled = true;
     };
   }, [node.id, node.data.value]);
-  const resolveMediaSrc = (value?: string) => {
-    if (!value) return '';
+
+  // 载入工作流后：output_value["out-image"] 或 data.value 可能为 file_id 引用，通过 file_id 拉取并显示预览
+  const imagePortValue = node.tool_id === 'image-input' ? getOutputValueByPort(node, 'out-image') : undefined;
+  const effectiveImageValues = Array.isArray(imagePortValue) ? imagePortValue : (Array.isArray(node.data.value) ? node.data.value : (node.data.value ? [node.data.value] : []));
+  const [resolvedFileRefUrls, setResolvedFileRefUrls] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (node.tool_id !== 'image-input' || !workflow?.id) return;
+    const values = effectiveImageValues;
+    const fileRefs = values.filter((v: unknown) => v && typeof v === 'object' && (v as { file_id?: string }).file_id) as { file_id: string; file_url?: string; mime_type?: string; ext?: string; run_id?: string }[];
+    if (fileRefs.length === 0) return;
+    let cancelled = false;
+    Promise.all(fileRefs.map((ref) => getNodeOutputUrl(workflow.id!, node.id, 'out-image', ref.file_id, ref.run_id))).then((urls) => {
+      if (cancelled) return;
+      setResolvedFileRefUrls((prev) => {
+        const next = { ...prev };
+        fileRefs.forEach((ref, i) => {
+          if (urls[i]) next[ref.file_id] = urls[i];
+        });
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [node.id, node.tool_id, workflow?.id, node.output_value, node.data?.value]);
+
+  // 载入工作流后：audio-input / video-input 的 output_value 可能为 file 引用，需拉取为 data URL 再展示
+  const mediaValueForRef = node.tool_id === 'audio-input' || node.tool_id === 'video-input'
+    ? (Array.isArray(node.data.value) ? node.data.value[0] : node.data.value)
+    : undefined;
+  const mediaFileRef = mediaValueForRef && typeof mediaValueForRef === 'object' && (mediaValueForRef as { file_id?: string }).file_id
+    ? (mediaValueForRef as { file_id: string; mime_type?: string; ext?: string })
+    : null;
+  React.useEffect(() => {
+    if (!mediaFileRef?.file_id || !workflow?.id) return;
+    const mediaPortId = node.tool_id === 'audio-input' ? 'out-audio' : 'out-video';
+    let cancelled = false;
+    getNodeOutputUrl(workflow.id, node.id, mediaPortId, mediaFileRef.file_id, (mediaFileRef as any).run_id).then((url) => {
+      if (!cancelled && url) setResolvedFileRefUrls((prev) => ({ ...prev, [mediaFileRef.file_id]: url }));
+    });
+    return () => { cancelled = true; };
+  }, [node.id, workflow?.id, mediaFileRef?.file_id]);
+
+  const resolveMediaSrc = (value?: string | { file_id?: string }) => {
+    if (value == null) return '';
+    if (typeof value !== 'string') return value?.file_id ? resolvedFileRefUrls[value.file_id] ?? '' : '';
     if (value.startsWith('local://')) return resolvedLocalUrls[value] || '';
     if (value.startsWith('data:') || value.startsWith('http') || value.startsWith('/api/')) return value;
     return getAssetPath(value);
   };
 
-  const rawImageValues = Array.isArray(node.data.value) ? node.data.value : [];
-  const imageEdits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
-  const imageEntries = rawImageValues.map((value: string, index: number) => {
+  // output_value["out-image"] 或 data.value 为数据源；image_edits 仅存 crop_box，不存 base64；载入时用 crop_box + 值显示
+  const rawImageValues = effectiveImageValues;
+  const imageEdits = Array.isArray(node.data.image_edits) ? node.data.image_edits : [];
+  const imageEntries = rawImageValues.map((value: string | { type?: string; file_id?: string; file_url?: string }, index: number) => {
     const display = resolveMediaSrc(value);
-    const existing = imageEdits[index];
-    if (existing && existing.source === value) {
-      return {
-        ...existing,
-        original: display,
-        cropped: existing.cropped || display
-      };
-    }
+    const existing = imageEdits[index] as { crop_box?: { x: number; y: number; w: number; h: number }; cropped?: string } | undefined;
+    const crop_box = existing?.crop_box ?? { x: 10, y: 10, w: 80, h: 80 };
+    // 不使用存储的 base64；仅用 URL 或载入时用 display（output_value/data.value）作为显示
+    const cropped = (existing?.cropped && existing.cropped !== '' && !existing.cropped.startsWith('data:')) ? existing.cropped : display;
     return {
       source: value,
       original: display,
-      cropped: display,
-      cropBox: { x: 10, y: 10, w: 80, h: 80 }
+      cropped,
+      crop_box
     };
   });
 
+  // 与主应用 TaskDetails 一致：排队显示等待个数，运行中才计时，成功显示运行时间，取消显示已取消
+  const runState = node.run_state as NodeRunState | undefined;
+  const taskStatus = runState?.status;
+  const firstSubtask = runState?.subtasks?.[0];
+  const queueOrder = firstSubtask?.estimated_pending_order;
+  const isTaskPending = taskStatus === 'PENDING' || (firstSubtask?.status === 'PENDING');
+  const isTaskRunning = taskStatus === 'RUNNING' || (firstSubtask?.status === 'RUNNING');
+  const getSubtaskProgress = (subtask: { status: string; elapses?: Record<string, number>; estimated_running_secs?: number }): number => {
+    if (subtask.status === 'SUCCEED') return 100;
+    if (subtask.status === 'RUNNING') {
+      const elapses = subtask.elapses || {};
+      const runningTime = elapses['RUNNING-'] || 0;
+      const estimatedTotal = subtask.estimated_running_secs || 0;
+      if (estimatedTotal > 0) return Math.min(Math.round((runningTime / estimatedTotal) * 100), 95);
+      return 50;
+    }
+    return 0;
+  };
+  const progressPercent = firstSubtask ? getSubtaskProgress(firstSubtask) : 0;
+
   const durationText =
-    node.status === NodeStatus.RUNNING
-      ? ((performance.now() - (node.startTime || performance.now())) / 1000).toFixed(1) + 's'
-      : node.status === NodeStatus.PENDING
-        ? (lang === 'zh' ? '排队中' : 'Pending')
-        : formatTime(node.executionTime);
+    node.error === 'Cancelled'
+      ? (lang === 'zh' ? '已取消' : 'Cancelled')
+      : node.status === NodeStatus.PENDING || (node.status === NodeStatus.RUNNING && isTaskPending)
+        ? (lang === 'zh' ? '排队中' : 'Queued') + (queueOrder != null && queueOrder >= 0 ? ` (${lang === 'zh' ? '等待' : 'Wait'}: ${queueOrder})` : '')
+        : node.status === NodeStatus.RUNNING
+          ? ((performance.now() - (node.start_time || performance.now())) / 1000).toFixed(1) + 's'
+          : node.status === NodeStatus.SUCCESS && node.execution_time != null
+            ? formatRunTime(node.execution_time)
+            : node.execution_time != null
+              ? formatTime(node.execution_time)
+              : '';
 
   const isInputNode = tool.category === 'Input';
+  const hasOutputValue = !isInputNode && node.output_value != null && (
+    typeof node.output_value !== 'object' || Array.isArray(node.output_value) || Object.keys(node.output_value).length > 0
+  );
   const hasData =
     (isInputNode && node.data.value && (Array.isArray(node.data.value) ? node.data.value.length > 0 : true)) ||
-    (!isInputNode && sourceOutputs[node.id]);
-  const shouldShowPreview = hasData && !isInputNode && node.toolId !== 'text-input';
+    (!isInputNode && (sourceOutputs[node.id] || hasOutputValue));
+  const shouldShowPreview = hasData && !isInputNode && node.tool_id !== 'text-input';
+  const isMultiPortOutput = outputs.length > 1;
+
+  // 多端口小预览：每个端口的文本 file ref 拉取后直接显示
+  const [resolvedPortText, setResolvedPortText] = React.useState<Record<string, string | null>>({});
+  React.useEffect(() => {
+    if (!isMultiPortOutput || !workflow?.id || !outputs.length) {
+      setResolvedPortText({});
+      return;
+    }
+    const refs: { portId: string; fileId: string; runId?: string }[] = [];
+    outputs.forEach((p) => {
+      const portVal = typeof sourceOutputs[node.id] === 'object' && sourceOutputs[node.id] != null && p.id in sourceOutputs[node.id]
+        ? sourceOutputs[node.id][p.id]
+        : getOutputValueByPort(node, p.id);
+      const isFileRef = portVal && typeof portVal === 'object' && (portVal as any).file_id && (portVal as any).mime_type === 'text/plain';
+      if (isFileRef) refs.push({ portId: p.id, fileId: (portVal as any).file_id, runId: (portVal as any).run_id });
+    });
+    if (refs.length === 0) {
+      setResolvedPortText({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      refs.map(async ({ portId, fileId, runId }) => {
+        const text = await getWorkflowFileText(workflow.id!, fileId, node.id, portId, runId);
+        return [portId, text ?? null] as const;
+      })
+    ).then((pairs) => {
+      if (cancelled) return;
+      setResolvedPortText((prev) => {
+        const next = { ...prev };
+        pairs.forEach(([portId, text]) => { next[portId] = text; });
+        return next;
+      });
+    });
+    return () => { cancelled = true; setResolvedPortText({}); };
+  }, [isMultiPortOutput, workflow?.id, node.id, outputs.length, node.output_value, sourceOutputs[node.id]]);
 
   const handleNodeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (connecting) return; // 拖拽连线时不选中节点，避免误选
     onClearSelectedRunId?.();
     onSelect(node.id);
   };
 
   const handleNodeMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('input, textarea, button, label')) return;
+    e.preventDefault(); // 避免拖拽时触发其他节点文字选中（与连接线端口拖拽一致）
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const world = screenToWorld(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
-      view,
-      rect
-    );
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const world = screenToWorldCoords
+      ? screenToWorldCoords(x, y)
+      : screenToWorld(x, y, view, rect);
     onDragStart(node.id, world.x - node.x, world.y - node.y);
   };
 
@@ -467,6 +614,7 @@ export const Node: React.FC<NodeProps> = ({
 
   const handlePortMouseDown = (port: Port, direction: 'in' | 'out') => (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault(); // 避免从端口拖拽时触发文字选中
 
     if (direction === 'out') {
       const nodeWidth = isInputNode ? 320 : 224;
@@ -485,7 +633,7 @@ export const Node: React.FC<NodeProps> = ({
       });
     } else {
       // For input ports, calculate position from node top (same as Connection component)
-      const tool = TOOLS.find((t) => t.id === node.toolId);
+      const tool = TOOLS.find((t) => t.id === node.tool_id);
       const inputPortIndex = tool?.inputs.findIndex((p) => p.id === port.id) ?? -1;
       const startX = node.x; // Input port center X
       const startY = node.y + 71 + (inputPortIndex * 30); // Input port center Y
@@ -506,18 +654,18 @@ export const Node: React.FC<NodeProps> = ({
       if (direction === 'in') {
         onAddConnection({
           id: `conn-${Date.now()}`,
-          sourceNodeId: connecting.nodeId,
-          sourcePortId: connecting.portId,
-          targetNodeId: node.id,
-          targetPortId: port.id
+          source_node_id: connecting.nodeId,
+          source_port_id: connecting.portId,
+          target_node_id: node.id,
+          target_port_id: port.id
         });
       } else {
         onAddConnection({
           id: `conn-${Date.now()}`,
-          sourceNodeId: node.id,
-          sourcePortId: port.id,
-          targetNodeId: connecting.nodeId,
-          targetPortId: connecting.portId
+          source_node_id: node.id,
+          source_port_id: port.id,
+          target_node_id: connecting.nodeId,
+          target_port_id: connecting.portId
         });
       }
       onSetConnecting(null);
@@ -533,66 +681,150 @@ export const Node: React.FC<NodeProps> = ({
     return normalizeHistoryEntries(raw as any[]);
   }, [workflow.nodeOutputHistory, node.id]);
 
+  // 历史与 nodes 一致：port_keyed。输入节点用 INPUT_PORT_IDS 取对应 port（out-image/out-audio/out-video/out-text）；非输入节点取整条 port_keyed 或单端口值
   const handleHistoryEntrySelect = React.useCallback(
     (entry: NodeHistoryEntry) => {
-      const displayValue = historyEntryToDisplayValue(entry);
+      const portIdForInput = isInputNode ? INPUT_PORT_IDS[node.tool_id] : undefined;
+      const displayValue = historyEntryToDisplayValue(entry, portIdForInput);
       if (displayValue != null) {
-        onUpdateNodeData(node.id, 'outputValue', displayValue);
+        if (isInputNode) {
+          const portId = INPUT_PORT_IDS[node.tool_id];
+          if (portId) {
+            const nextOutput = setOutputValueByPort(node.output_value, node.tool_id, portId, displayValue);
+            onUpdateNodeData(node.id, 'output_value', nextOutput);
+            if (node.tool_id === 'text-input') {
+              if (typeof displayValue === 'string' && !displayValue.startsWith('data:')) {
+                onUpdateNodeData(node.id, 'value', displayValue);
+              } else if (typeof displayValue === 'object' && (displayValue as { file_id?: string }).file_id) {
+                onUpdateNodeData(node.id, 'value', displayValue);
+              }
+            } else {
+              const valueForData = node.tool_id === 'image-input' && !Array.isArray(displayValue) ? [displayValue] : displayValue;
+              onUpdateNodeData(node.id, 'value', valueForData);
+            }
+          } else {
+            onUpdateNodeData(node.id, 'output_value', displayValue);
+          }
+        } else {
+          onUpdateNodeData(node.id, 'output_value', displayValue);
+        }
+      }
+      if (entry.params && typeof entry.params === 'object' && Object.keys(entry.params).length > 0) {
+        onUpdateNodeData(node.id, '__mergeData', entry.params);
       }
       setShowHistoryDropdown(false);
     },
-    [node.id, onUpdateNodeData]
+    [node.id, node.tool_id, node.output_value, isInputNode, onUpdateNodeData]
   );
 
-  const resolveAudioUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry): Promise<string | null> => {
-    if (entry.kind === 'lightx2v_result') {
-      const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
-      const outputName = val.outputName || 'output';
-      if (outputName !== 'output_audio') return null;
-      if (!resolveLightX2VResultRef || !val.taskId) return null;
+  const resolveAudioUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
+    const ov = entry.output_value || (entry as any).value;
+    const kind = ov?.kind ?? (entry as any).kind;
+    if (kind === 'task' || kind === 'lightx2v_result') {
+      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const output_name = val.output_name || 'output';
+      if (output_name !== 'output_audio') return null;
+      if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
-        __type: 'lightx2v_result',
-        task_id: val.taskId,
-        output_name: outputName,
-        is_cloud: !!val.isCloud
+        kind: 'task',
+        task_id: val.task_id,
+        output_name: output_name,
+        is_cloud: !!val.is_cloud
       };
       return resolveLightX2VResultRef(ref).catch(() => null);
     }
-    if (entry.kind === 'file') {
-      const fileVal = entry.value as { dataUrl?: string; url?: string; fileId?: string };
-      if (fileVal.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
-      if (fileVal.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
-      const fid = fileVal.fileId;
-      if (fid && workflow.id) return getWorkflowFileByFileId(workflow.id, fid);
+    if (kind === 'file') {
+      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string };
+      if (fileVal?.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
+      if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      const fid = fileVal?.file_id;
+      if (fid && workflow.id) {
+        const pid = portId ?? (entry as { port_id?: string }).port_id;
+        if (pid) {
+          const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, (fileVal as { run_id?: string }).run_id);
+          if (url) return url;
+        }
+      }
       return null;
     }
     return null;
-  }, [workflow.id, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow.id, node.id, resolveLightX2VResultRef, resolveMediaSrc]);
 
   const resolveVideoUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry): Promise<string | null> => {
-    if (entry.kind === 'lightx2v_result') {
-      const val = entry.value as { taskId?: string; outputName?: string; isCloud?: boolean };
-      const outputName = val.outputName || 'output';
-      if (outputName !== 'output_video' && outputName !== 'output') return null;
-      if (!resolveLightX2VResultRef || !val.taskId) return null;
+    const ov = entry.output_value || (entry as any).value;
+    const kind = ov?.kind ?? (entry as any).kind;
+    if (kind === 'task' || kind === 'lightx2v_result') {
+      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const output_name = val.output_name || 'output';
+      if (output_name !== 'output_video' && output_name !== 'output') return null;
+      if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
-        __type: 'lightx2v_result',
-        task_id: val.taskId,
-        output_name: outputName,
-        is_cloud: !!val.isCloud
+        kind: 'task',
+        task_id: val.task_id,
+        output_name: output_name,
+        is_cloud: !!val.is_cloud
       };
       return resolveLightX2VResultRef(ref).catch(() => null);
     }
-    if (entry.kind === 'file') {
-      const fileVal = entry.value as { dataUrl?: string; url?: string; fileId?: string };
-      if (fileVal.dataUrl?.startsWith('data:video/')) return fileVal.dataUrl;
-      if (fileVal.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
-      const fid = fileVal.fileId;
-      if (fid && workflow.id) return getWorkflowFileByFileId(workflow.id, fid);
+    if (kind === 'file') {
+      const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; ext?: string };
+      if (fileVal?.dataUrl?.startsWith('data:video/')) return fileVal.dataUrl;
+      if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      const fid = fileVal?.file_id;
+      if (fid && workflow.id) {
+        const pid = (entry as { port_id?: string }).port_id ?? 'out-video';
+        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, (fileVal as any).run_id);
+        return url ?? null;
+      }
       return null;
     }
     return null;
-  }, [workflow.id, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow.id, node.id, resolveLightX2VResultRef, resolveMediaSrc]);
+
+  // 当前输出为音频时（如 TTS），在节点卡片右侧显示小播放键，不进拓展框也可直接播放
+  const currentAudioVal = firstOutputType === DataType.AUDIO && firstOutputPortId ? getOutputValueByPort(node, firstOutputPortId) : null;
+  const portValFileId = (currentAudioVal && typeof currentAudioVal === 'object' && (currentAudioVal as any).file_id) ? (currentAudioVal as any).file_id : '';
+  const portValTaskId = (currentAudioVal && typeof currentAudioVal === 'object' && (currentAudioVal as any).task_id) ? (currentAudioVal as any).task_id : '';
+  const [currentAudioUrl, setCurrentAudioUrl] = React.useState<string | null>(null);
+  const currentAudioElRef = React.useRef<HTMLAudioElement | null>(null);
+  const nodeForAudioRef = React.useRef(node);
+  nodeForAudioRef.current = node;
+  const resolveAudioUrlForEntryRef = React.useRef(resolveAudioUrlForEntry);
+  resolveAudioUrlForEntryRef.current = resolveAudioUrlForEntry;
+  // 仅当「要解析的音频身份」变化时重新请求 URL，避免 node.output_value 引用或回调引用导致重复请求
+  const currentAudioResolutionKey = React.useMemo(() => {
+    if (firstOutputType !== DataType.AUDIO || !firstOutputPortId) return null;
+    if (portValFileId) return `file:${node.id}:${firstOutputPortId}:${portValFileId}`;
+    if (portValTaskId) return `task:${portValTaskId}`;
+    return `${node.id}:${firstOutputPortId}`;
+  }, [node.id, firstOutputPortId, firstOutputType, portValFileId, portValTaskId]);
+  React.useEffect(() => {
+    const n = nodeForAudioRef.current;
+    const val = firstOutputType === DataType.AUDIO && firstOutputPortId ? getOutputValueByPort(n, firstOutputPortId) : null;
+    if (!val || !firstOutputPortId || !currentAudioResolutionKey) {
+      setCurrentAudioUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const entry: NodeHistoryEntry = { id: 'current', timestamp: 0, output_value: typeof val === 'object' && val !== null ? val : {} };
+    resolveAudioUrlForEntryRef.current(entry, firstOutputPortId).then((url) => {
+      if (!cancelled && url) setCurrentAudioUrl(url);
+      else if (!cancelled) setCurrentAudioUrl(null);
+    });
+    return () => { cancelled = true; setCurrentAudioUrl(null); };
+  }, [currentAudioResolutionKey]);
+  const handlePlayCurrentAudio = React.useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentAudioUrl) return;
+    if (currentAudioElRef.current) {
+      currentAudioElRef.current.pause();
+      currentAudioElRef.current.currentTime = 0;
+    }
+    const audio = new Audio(currentAudioUrl);
+    currentAudioElRef.current = audio;
+    audio.play().catch(() => {});
+    audio.onended = () => { currentAudioElRef.current = null; };
+  }, [currentAudioUrl]);
 
   React.useEffect(() => {
     if (!showHistoryDropdown) return;
@@ -651,76 +883,61 @@ export const Node: React.FC<NodeProps> = ({
     }
   };
 
+  // 同步 image_edits 与 data.value 长度；只持久化 { crop_box }，不存 cropped/base64，载入时用 output_value 显示
   React.useEffect(() => {
-    if (node.toolId !== 'image-input') return;
+    if (node.tool_id !== 'image-input') return;
     const values = Array.isArray(node.data.value) ? node.data.value : [];
-    const edits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
-    const needsSync = values.length !== edits.length || edits.some((entry: any, idx: number) => entry?.source !== values[idx]);
+    const edits = Array.isArray(node.data.image_edits) ? node.data.image_edits : [];
+    if (values.length === edits.length && values.length === 0) return;
+    const needsSync = values.length !== edits.length;
     if (!needsSync) return;
-    const nextEdits = values.map((value: string, index: number) => {
-      const display = resolveMediaSrc(value);
-      const existing = edits[index];
-      if (existing && existing.source === value) {
-        return {
-          ...existing,
-          original: display,
-          cropped: existing.cropped || display
-        };
-      }
-      return {
-        source: value,
-        original: display,
-        cropped: display,
-        cropBox: { x: 10, y: 10, w: 80, h: 80 }
-      };
+    const defaultCrop = { x: 10, y: 10, w: 80, h: 80 };
+    const nextEdits = values.map((_: unknown, index: number) => {
+      const existing = edits[index] as { crop_box?: { x: number; y: number; w: number; h: number } } | undefined;
+      return { crop_box: existing?.crop_box ?? defaultCrop };
     });
-    onUpdateNodeData(node.id, 'imageEdits', nextEdits);
-  }, [node.id, node.toolId, node.data.value, node.data.imageEdits]);
+    onUpdateNodeData(node.id, 'image_edits', nextEdits);
+  }, [node.id, node.tool_id, node.data.value, node.data.image_edits]);
 
   React.useEffect(() => {
     if (!isWorkflowReady(workflow.id)) return;
-    if (node.toolId === 'audio-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
+    if (node.tool_id === 'audio-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
       persistDataUrl(node.data.value, 'audio-input').then((url) => {
         if (url !== node.data.value) {
           onUpdateNodeData(node.id, 'value', url);
-          onUpdateNodeData(node.id, 'outputValue', url);
+          onUpdateNodeData(node.id, 'output_value', url);
         }
       });
     }
-    if (node.toolId === 'image-input' && Array.isArray(node.data.value) && node.data.value.some((v: string) => v.startsWith('data:'))) {
-      const values = node.data.value as string[];
-      const edits = Array.isArray(node.data.imageEdits) ? node.data.imageEdits : [];
+    if (node.tool_id === 'image-input' && Array.isArray(node.data.value) && node.data.value.some((v: unknown) => typeof v === 'string' && v.startsWith('data:'))) {
+      const values = node.data.value as (string | { file_id?: string })[];
+      const edits = Array.isArray(node.data.image_edits) ? node.data.image_edits : [];
       const persist = async () => {
         const updatedValues = await Promise.all(values.map((val, idx) =>
-          val.startsWith('data:') ? persistDataUrl(val, `image-input-${idx}`) : val
+          typeof val === 'string' && val.startsWith('data:') ? persistDataUrl(val, `image-input-${idx}`) : val
         ));
         if (updatedValues.some((val, idx) => val !== values[idx])) {
-          const updatedEdits = updatedValues.map((val, idx) => {
-            const display = resolveMediaSrc(val);
-            const existing = edits[idx];
-            return {
-              ...(existing || { cropBox: { x: 10, y: 10, w: 80, h: 80 } }),
-              source: val,
-              original: existing?.original || display,
-              cropped: val
-            };
+          const defaultCrop = { x: 10, y: 10, w: 80, h: 80 };
+          const updatedEdits = values.map((_: unknown, idx: number) => {
+            const existing = edits[idx] as { crop_box?: { x: number; y: number; w: number; h: number } } | undefined;
+            return { crop_box: existing?.crop_box ?? defaultCrop };
           });
-          onUpdateNodeData(node.id, 'imageEdits', updatedEdits);
+          onUpdateNodeData(node.id, 'image_edits', updatedEdits);
           onUpdateNodeData(node.id, 'value', updatedValues);
-          onUpdateNodeData(node.id, 'outputValue', updatedValues);
+          onUpdateNodeData(node.id, 'output_value', updatedValues);
         }
       };
       persist();
     }
-    if (node.toolId === 'video-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
+    if (node.tool_id === 'video-input' && typeof node.data.value === 'string' && node.data.value.startsWith('data:')) {
       persistDataUrl(node.data.value, 'video-input').then((url) => {
         if (url !== node.data.value) {
           onUpdateNodeData(node.id, 'value', url);
-          onUpdateNodeData(node.id, 'outputValue', url);
+          onUpdateNodeData(node.id, 'output_value', url);
         }
       });
     }
-  }, [workflow.id, node.id, node.toolId, node.data.value]);
+  }, [workflow.id, node.id, node.tool_id, node.data.value]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, isMultiple: boolean = false) => {
     const files = Array.from(e.target.files || []);
@@ -735,7 +952,7 @@ export const Node: React.FC<NodeProps> = ({
     setIsUploading(true);
 
     try {
-      const tool = TOOLS.find(t => t.id === node.toolId);
+      const tool = TOOLS.find(t => t.id === node.tool_id);
       if (!tool || tool.category !== 'Input') {
         console.error('[Node] Cannot upload file: node is not an input node');
         return;
@@ -759,20 +976,21 @@ export const Node: React.FC<NodeProps> = ({
       const dataUrls = await Promise.all(dataUrlPromises);
 
       if (dataUrls.length > 0) {
-        const currentValue = node.data.value || [];
-        const existing = Array.isArray(currentValue) ? currentValue : [currentValue].filter(Boolean);
-        const newValue = isMultiple ? [...existing, ...dataUrls] : dataUrls[0];
-        const newOutputValue = isMultiple
-          ? (Array.isArray(node.outputValue) ? [...node.outputValue, ...dataUrls] : dataUrls)
-          : dataUrls[0];
-
-        onUpdateNodeData(node.id, 'outputValue', newOutputValue);
-        onUpdateNodeData(node.id, 'value', newValue);
-        if (node.toolId === 'audio-input' && newValue) {
-          onUpdateNodeData(node.id, 'audioOriginal', newValue);
-          onUpdateNodeData(node.id, 'audioRange', { start: 0, end: 100 });
+        const portId = outputPort?.id ?? INPUT_PORT_IDS[node.tool_id] ?? outputs[0]?.id;
+        if (!portId) return;
+        // 使用 output_value ?? data.value 作为已有值；写入 port-keyed output_value
+        const currentValue = getOutputValueByPort(node, portId) ?? node.data.value;
+        const existing = isMultiple
+          ? (Array.isArray(currentValue) ? currentValue : currentValue != null ? [currentValue] : [])
+          : [];
+        const newVal = isMultiple ? [...existing, ...dataUrls] : dataUrls[0];
+        const nextPortKeyed = setOutputValueByPort(node.output_value, node.tool_id, portId, newVal);
+        onUpdateNodeData(node.id, 'output_value', nextPortKeyed);
+        if (node.tool_id === 'audio-input' && newVal) {
+          onUpdateNodeData(node.id, 'value', newVal);
+          onUpdateNodeData(node.id, 'audio_range', { start: 0, end: 100 });
         }
-        if (node.toolId === 'video-input') {
+        if (node.tool_id === 'video-input') {
           onUpdateNodeData(node.id, 'trimStart', 0);
           onUpdateNodeData(node.id, 'trimEnd', undefined);
         }
@@ -792,6 +1010,8 @@ export const Node: React.FC<NodeProps> = ({
     !tool.models.some((m) => m.id === node.data.model);
 
   const modelsListEmpty = Array.isArray(tool.models) && tool.models.length === 0;
+  // 仅对需要模型的节点（AI 模型类）显示该警告；工具类（如图像处理等）不显示
+  const showModelsListEmptyWarning = modelsListEmpty && tool.category === 'AI Model';
 
   // 当前模型不在支持列表中时，自动选为列表第一项
   React.useEffect(() => {
@@ -803,10 +1023,11 @@ export const Node: React.FC<NodeProps> = ({
   return (
     <div
       ref={nodeRef}
-      className={`node-element absolute bg-slate-900 border transition-all z-10 group pointer-events-auto ${
-        isInputNode
-          ? 'w-80 rounded-[2.5rem] shadow-2xl'
-          : 'w-56 rounded-3xl shadow-2xl'
+      className={`node-element absolute bg-slate-900 border transition-all group pointer-events-auto ${
+        isSelected ? 'z-[100]' : 'z-10'
+      } ${isInputNode
+        ? 'w-80 rounded-[2.5rem] shadow-2xl'
+        : 'w-56 rounded-3xl shadow-2xl'
       } ${isSelected
         ? 'border-[#90dce1] ring-8 ring-#90dce1/10 shadow-[0_0_40px_-10px_rgba(144,220,225,0.35)]'
         : 'border-slate-800/80 hover:border-[#90dce1]/60 hover:shadow-[0_0_30px_-10px_rgba(144,220,225,0.2)]'
@@ -815,8 +1036,8 @@ export const Node: React.FC<NodeProps> = ({
       onClick={handleNodeClick}
       onMouseDown={handleNodeMouseDown}
     >
-      {/* 模型列表为空时显示警告；模型不在列表中时已由 effect 自动切到第一项 */}
-      {modelsListEmpty && (
+      {/* 模型列表为空时显示警告（仅 AI 模型类）；模型不在列表中时已由 effect 自动切到第一项 */}
+      {showModelsListEmptyWarning && (
         <div
           className="absolute bottom-full left-0 right-0 mb-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-200 text-[9px] font-bold z-20"
           title={t('model_list_empty')}
@@ -896,14 +1117,15 @@ export const Node: React.FC<NodeProps> = ({
 
       {/* Node Header */}
       <div
-        className={`px-4 py-3 border-b flex items-center justify-between bg-slate-800/40 rounded-t-3xl ${
+        className={`px-4 py-3 border-b bg-slate-800/40 rounded-t-3xl ${
           node.status === NodeStatus.RUNNING
             ? 'animate-pulse bg-[#90dce1]/10 border-[#90dce1]/20'
             : node.status === NodeStatus.PENDING
               ? 'bg-amber-500/10 border-amber-500/20'
               : ''
-        }`}
+        } ${node.status === NodeStatus.RUNNING && isTaskRunning && progressPercent > 0 ? 'pb-2' : ''}`}
       >
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 truncate flex-1 min-w-0">
           <div
             className={`p-1.5 rounded-lg shrink-0 ${
@@ -921,12 +1143,12 @@ export const Node: React.FC<NodeProps> = ({
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {(node.toolId === 'audio-input' || node.toolId === 'video-input') && (
+          {(node.tool_id === 'audio-input' || node.tool_id === 'video-input') && (
             <button
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                if (node.toolId === 'audio-input') {
+                if (node.tool_id === 'audio-input') {
                   onSetShowAudioEditor(node.id);
                 } else {
                   onSetShowVideoEditor(node.id);
@@ -938,64 +1160,93 @@ export const Node: React.FC<NodeProps> = ({
               <Maximize2 size={12} />
             </button>
           )}
-          {(node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.executionTime !== undefined) && (
+          {(node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || node.execution_time !== undefined || node.error === 'Cancelled') && durationText && (
             <span
               className={`text-[8px] font-bold ${
-                node.status === NodeStatus.RUNNING
-                  ? 'text-[#90dce1]'
-                  : node.status === NodeStatus.PENDING
-                    ? 'text-amber-400'
-                    : 'text-slate-500'
+                node.error === 'Cancelled'
+                  ? 'text-slate-500'
+                  : node.status === NodeStatus.RUNNING
+                    ? 'text-[#90dce1]'
+                    : node.status === NodeStatus.PENDING
+                      ? 'text-amber-400'
+                      : 'text-slate-500'
               }`}
             >
               {durationText}
             </span>
           )}
 
-          {!isInputNode && (
-            <div className="relative" ref={historyDropdownRef}>
-              <button
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowHistoryDropdown((v) => !v);
-                }}
-                className={`p-1 rounded transition-colors ${
-                  nodeHistoryEntries.length > 0
-                    ? 'text-slate-400 hover:text-[#90dce1] opacity-0 group-hover:opacity-100'
-                    : 'text-slate-600 cursor-default opacity-0 group-hover:opacity-50'
-                }`}
-                title={lang === 'zh' ? '历史结果' : 'History'}
-              >
-                <History size={12} />
-              </button>
-              {showHistoryDropdown && (
-                <div
-                  className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  {nodeHistoryEntries.length > 0 ? (
-                    nodeHistoryEntries.map((entry) => (
-                      <HistoryEntryItem
-                        key={entry.id}
-                        entry={entry}
-                        lang={lang}
-                        onSelect={() => handleHistoryEntrySelect(entry)}
-                        resolveLightX2VResultRef={resolveLightX2VResultRef}
-                        outputDataType={firstOutputType}
-                        resolveAudioUrl={resolveAudioUrlForEntry}
-                        resolveVideoUrl={resolveVideoUrlForEntry}
-                      />
-                    ))
-                  ) : (
-                    <div className="px-3 py-4 text-[10px] text-slate-500 text-center">
-                      {lang === 'zh' ? '暂无历史记录' : 'No history'}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+          {node.status === NodeStatus.RUNNING && isTaskRunning && progressPercent > 0 && (
+            <span className="text-[8px] font-bold text-[#90dce1] tabular-nums">{progressPercent}%</span>
           )}
+
+          {firstOutputType === DataType.AUDIO && currentAudioVal != null && (
+            <span className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              {currentAudioUrl ? (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={handlePlayCurrentAudio}
+                  className="p-1.5 rounded-lg bg-[#90dce1]/20 hover:bg-[#90dce1]/40 text-[#90dce1] transition-colors"
+                  title={lang === 'zh' ? '播放' : 'Play'}
+                >
+                  <PlayIcon size={12} />
+                </button>
+              ) : (
+                <span className="inline-block p-1.5 text-slate-500" title={lang === 'zh' ? '加载中…' : 'Loading…'}>
+                  <RefreshCw size={12} className="animate-spin opacity-70" />
+                </span>
+              )}
+            </span>
+          )}
+          <div className="relative" ref={historyDropdownRef}>
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowHistoryDropdown((v) => !v);
+              }}
+              className={`p-1 rounded transition-colors ${
+                nodeHistoryEntries.length > 0
+                  ? 'text-slate-400 hover:text-[#90dce1] opacity-0 group-hover:opacity-100'
+                  : 'text-slate-600 cursor-default opacity-0 group-hover:opacity-50'
+              }`}
+              title={lang === 'zh' ? '历史结果' : 'History'}
+            >
+              <History size={12} />
+            </button>
+            {showHistoryDropdown && (
+              <div
+                className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {nodeHistoryEntries.length > 0 ? (
+                  nodeHistoryEntries.map((entry) => (
+                    <HistoryEntryItem
+                      key={entry.id}
+                      entry={entry}
+                      lang={lang}
+                      onSelect={() => handleHistoryEntrySelect(entry)}
+                      resolveLightX2VResultRef={resolveLightX2VResultRef}
+                      outputDataType={firstOutputType}
+                      resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId)}
+                      resolveVideoUrl={resolveVideoUrlForEntry}
+                      resolveTextFileContent={workflow?.id && firstOutputType === DataType.TEXT ? (e) => {
+                        const ov = e?.output_value as { file_id?: string; run_id?: string };
+                        const fid = ov?.file_id;
+                        const portId = firstOutputPortId ?? 'out-text';
+                        return fid ? getWorkflowFileText(workflow.id!, fid, node.id, portId, ov?.run_id) : Promise.resolve(null);
+                      } : undefined}
+                    />
+                  ))
+                ) : (
+                  <div className="px-3 py-4 text-[10px] text-slate-500 text-center">
+                    {lang === 'zh' ? '暂无历史记录' : 'No history'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {!isInputNode && (
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || (pendingRunNodeIds && pendingRunNodeIds.includes(node.id)) ? (
@@ -1040,6 +1291,12 @@ export const Node: React.FC<NodeProps> = ({
           {node.status === NodeStatus.SUCCESS && <CheckCircle2 size={12} className="text-emerald-500" />}
           {node.status === NodeStatus.ERROR && <AlertCircle size={12} className="text-red-500" />}
         </div>
+        {node.status === NodeStatus.RUNNING && isTaskRunning && progressPercent > 0 && (
+          <div className="mt-2 w-full h-1 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-[#90dce1] rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+          </div>
+        )}
+        </div>
       </div>
 
       {/* Node Content */}
@@ -1047,15 +1304,27 @@ export const Node: React.FC<NodeProps> = ({
         {/* Input Node Content */}
         {isInputNode && (
           <div onMouseDown={(e) => e.stopPropagation()} className="space-y-3">
-            {node.toolId === 'text-input' && (
+            {node.tool_id === 'text-input' && (
               <TextNodePreview
-                value={node.data.value || ''}
-                onChange={(value) => onUpdateNodeData(node.id, 'value', value)}
+                value={(() => {
+                  const plainFromData = typeof node.data?.value === 'string' && !node.data.value.startsWith('data:') ? node.data.value : null;
+                  if (plainFromData != null) return plainFromData;
+                  if (isTextFileRef) return resolvedTextFromFile ?? '';
+                  const pv = getOutputValueByPort(node, 'out-text');
+                  return typeof pv === 'string' ? pv : '';
+                })()}
+                onChange={(value) => {
+                  onUpdateNodeData(node.id, 'value', value);
+                  // 仅前端模式：无后端，文本始终为纯文本，需写入 output_value 以便持久化；有后端时仅更新 data.value，output_value 由执行/保存时上传为 file ref
+                  if (isStandalone()) {
+                    onUpdateNodeData(node.id, 'output_value', setOutputValueByPort(node.output_value ?? {}, 'text-input', 'out-text', value));
+                  }
+                }}
                 placeholder={lang === 'zh' ? '在此输入文本...' : 'Enter input text here...'}
                 charsLabel={lang === 'zh' ? '字符' : 'Characters'}
               />
             )}
-            {node.toolId === 'image-input' && (
+            {node.tool_id === 'image-input' && (
               <div className="space-y-2">
                 <input
                   ref={imageInputRef}
@@ -1082,7 +1351,8 @@ export const Node: React.FC<NodeProps> = ({
                     <button
                       onClick={() => {
                         onUpdateNodeData(node.id, 'value', []);
-                        onUpdateNodeData(node.id, 'imageEdits', []);
+                        onUpdateNodeData(node.id, 'output_value', []);
+                        onUpdateNodeData(node.id, 'image_edits', []);
                       }}
                       className="absolute -top-3 -right-3 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-2xl z-20 opacity-0 group-hover/content-container:opacity-100 transition-all scale-90 group-hover/content-container:scale-100 active:scale-90"
                     >
@@ -1092,27 +1362,22 @@ export const Node: React.FC<NodeProps> = ({
                       images={imageEntries}
                       onAddMore={() => imageInputRef.current?.click()}
                       onUpdate={(nextImages) => {
-                        onUpdateNodeData(node.id, 'imageEdits', nextImages);
                         const nextValues = nextImages.map((entry: any) =>
                           entry.cropped && entry.cropped !== entry.original ? entry.cropped : entry.source
                         );
                         onUpdateNodeData(node.id, 'value', nextValues);
+                        onUpdateNodeData(node.id, 'output_value', nextValues);
+                        onUpdateNodeData(node.id, 'image_edits', nextImages.map((entry: any) => ({ crop_box: entry.crop_box })));
                         if (isWorkflowReady(workflow.id) && outputPortId) {
                           const persist = async () => {
-                            const updatedImages = await Promise.all(nextImages.map(async (entry: any, idx: number) => {
+                            const newValues = await Promise.all(nextImages.map(async (entry: any, idx: number) => {
                               if (typeof entry.cropped === 'string' && entry.cropped.startsWith('data:')) {
-                                const url = await persistDataUrl(entry.cropped, `image-input-${idx}`);
-                                return {
-                                  ...entry,
-                                  source: url,
-                                  cropped: url
-                                };
+                                return await persistDataUrl(entry.cropped, `image-input-${idx}`) || entry.cropped;
                               }
-                              return entry;
+                              return entry.cropped || entry.source;
                             }));
-                            const updatedValues = updatedImages.map((entry: any) => entry.cropped || entry.source);
-                            onUpdateNodeData(node.id, 'imageEdits', updatedImages);
-                            onUpdateNodeData(node.id, 'value', updatedValues);
+                            onUpdateNodeData(node.id, 'value', newValues);
+                            onUpdateNodeData(node.id, 'output_value', newValues);
                           };
                           persist();
                         }
@@ -1122,7 +1387,7 @@ export const Node: React.FC<NodeProps> = ({
                 )}
               </div>
             )}
-            {(node.toolId === 'audio-input' || node.toolId === 'video-input') && (
+            {(node.tool_id === 'audio-input' || node.tool_id === 'video-input') && (
               <div className="space-y-2">
                 {(() => {
                   const mediaValue = Array.isArray(node.data.value) ? node.data.value[0] : node.data.value;
@@ -1131,15 +1396,15 @@ export const Node: React.FC<NodeProps> = ({
                     return (
                       <>
                         <input
-                          ref={node.toolId === 'audio-input' ? audioInputRef : videoInputRef}
+                          ref={node.tool_id === 'audio-input' ? audioInputRef : videoInputRef}
                           type="file"
-                          accept={node.toolId === 'audio-input' ? 'audio/*' : 'video/*'}
+                          accept={node.tool_id === 'audio-input' ? 'audio/*' : 'video/*'}
                           className="hidden"
                           disabled={isUploading}
                           onChange={(e) => handleFileUpload(e, false)}
                         />
                         <label
-                          onClick={() => (node.toolId === 'audio-input' ? audioInputRef.current : videoInputRef.current)?.click()}
+                          onClick={() => (node.tool_id === 'audio-input' ? audioInputRef.current : videoInputRef.current)?.click()}
                           className="flex flex-col items-center justify-center w-full py-10 border-2 border-dashed border-slate-800 rounded-[2rem] cursor-pointer hover:bg-slate-800/40 hover:border-[#90dce1]/40 transition-all group"
                         >
                           {isUploading ? (
@@ -1156,8 +1421,8 @@ export const Node: React.FC<NodeProps> = ({
                               </div>
                               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-200">
                                 {lang === 'zh'
-                                  ? `点击上传${node.toolId === 'audio-input' ? '音频' : '视频'}`
-                                  : `Upload ${node.toolId === 'audio-input' ? 'Audio' : 'Video'}`}
+                                  ? `点击上传${node.tool_id === 'audio-input' ? '音频' : '视频'}`
+                                  : `Upload ${node.tool_id === 'audio-input' ? 'Audio' : 'Video'}`}
                               </span>
                             </>
                           )}
@@ -1171,11 +1436,10 @@ export const Node: React.FC<NodeProps> = ({
                       <button
                         onClick={() => {
                           onUpdateNodeData(node.id, 'value', null);
-                          if (node.toolId === 'audio-input') {
-                            onUpdateNodeData(node.id, 'audioOriginal', null);
-                            onUpdateNodeData(node.id, 'audioRange', null);
+                          if (node.tool_id === 'audio-input') {
+                            onUpdateNodeData(node.id, 'audio_range', null);
                           }
-                          if (node.toolId === 'video-input') {
+                          if (node.tool_id === 'video-input') {
                             onUpdateNodeData(node.id, 'trimStart', null);
                             onUpdateNodeData(node.id, 'trimEnd', null);
                           }
@@ -1184,31 +1448,34 @@ export const Node: React.FC<NodeProps> = ({
                       >
                         <X size={12} />
                       </button>
-                      {node.toolId === 'audio-input' ? (
+                      {node.tool_id === 'audio-input' ? (
                         <>
                         <AudioNodePreview
                           audioData={{
-                            original: node.data.audioOriginal || resolveMediaSrc(mediaValue),
-                            trimmed: mediaValue,
-                            range: node.data.audioRange || { start: 0, end: 100 }
+                            original: (typeof node.data.value === 'string' ? node.data.value : '') || resolveMediaSrc(mediaValue),
+                            trimmed: typeof mediaValue === 'string' ? mediaValue : resolveMediaSrc(mediaValue),
+                            range: node.data.audio_range || { start: 0, end: 100 }
                           }}
                           onUpdate={(trimmed, range) => {
-                            if (!node.data.audioOriginal) {
-                              onUpdateNodeData(node.id, 'audioOriginal', mediaValue);
+                            if (!node.data.value) {
+                              onUpdateNodeData(node.id, 'value', mediaValue);
                             }
-                            onUpdateNodeData(node.id, 'audioRange', range);
-                            onUpdateNodeData(node.id, 'value', trimmed);
+                            onUpdateNodeData(node.id, 'audio_range', range);
+                            const portId = INPUT_PORT_IDS[node.tool_id] ?? 'out-audio';
+                            const nextOutput = setOutputValueByPort(node.output_value, node.tool_id, portId, trimmed);
+                            onUpdateNodeData(node.id, 'output_value', nextOutput);
                             if (typeof trimmed === 'string' && trimmed.startsWith('data:') && isWorkflowReady(workflow.id)) {
                               persistDataUrl(trimmed, 'audio-input-trim').then((url) => {
                                 if (url !== trimmed) {
-                                  onUpdateNodeData(node.id, 'value', url);
+                                  const next = setOutputValueByPort(node.output_value, node.tool_id, portId, url);
+                                  onUpdateNodeData(node.id, 'output_value', next);
                                 }
                               });
                             }
-                            if (typeof node.data.audioOriginal === 'string' && node.data.audioOriginal.startsWith('data:') && isWorkflowReady(workflow.id)) {
-                              persistDataUrl(node.data.audioOriginal, 'audio-input-original').then((url) => {
-                                if (url !== node.data.audioOriginal) {
-                                  onUpdateNodeData(node.id, 'audioOriginal', url);
+                            if (typeof node.data.value === 'string' && node.data.value.startsWith('data:') && isWorkflowReady(workflow.id)) {
+                              persistDataUrl(node.data.value, 'audio-input-original').then((url) => {
+                                if (url !== node.data.value) {
+                                  onUpdateNodeData(node.id, 'value', url);
                                 }
                               });
                             }
@@ -1269,7 +1536,7 @@ export const Node: React.FC<NodeProps> = ({
         {/* Input Ports */}
         {tool.inputs.map((p) => {
           const isConnected = workflow.connections.some(
-            (c) => c.targetNodeId === node.id && c.targetPortId === p.id
+            (c) => c.target_node_id === node.id && c.target_port_id === p.id
           );
           return (
             <div key={p.id} className="flex items-center gap-2 text-[9px] font-bold text-slate-500 relative group/port">
@@ -1299,7 +1566,7 @@ export const Node: React.FC<NodeProps> = ({
         {/* Output Ports */}
         {outputs.map((p) => {
           const isConnected = workflow.connections.some(
-            (c) => c.sourceNodeId === node.id && c.sourcePortId === p.id
+            (c) => c.source_node_id === node.id && c.source_port_id === p.id
           );
           const compatibleTools = getCompatibleToolsForOutput(p.type);
           const showMenu = showOutputQuickAdd?.nodeId === node.id && showOutputQuickAdd?.portId === p.id;
@@ -1351,8 +1618,47 @@ export const Node: React.FC<NodeProps> = ({
         })}
       </div>
 
-      {/* Preview */}
-      {shouldShowPreview && (
+      {/* Preview: multi-port = one box per port; single = one box */}
+      {shouldShowPreview && isMultiPortOutput && (
+        <div className="absolute -right-42 top-0 flex flex-col gap-2 z-30 max-w-50">
+          {outputs.map((p) => {
+            const portVal = typeof sourceOutputs[node.id] === 'object' && sourceOutputs[node.id] != null && p.id in sourceOutputs[node.id]
+              ? sourceOutputs[node.id][p.id]
+              : getOutputValueByPort(node, p.id);
+            const isFileRef = portVal && typeof portVal === 'object' && (portVal as any).file_id && (portVal as any).mime_type === 'text/plain';
+            const fetched = resolvedPortText[p.id];
+            const displayText = typeof portVal === 'string'
+              ? (portVal.length > 60 ? portVal.slice(0, 60) + '…' : portVal)
+              : isFileRef && typeof fetched === 'string'
+                ? (fetched.length > 60 ? fetched.slice(0, 60) + '…' : fetched)
+                : isFileRef
+                  ? (fetched === null ? (lang === 'zh' ? '[已存文本]' : '[Text file]') : (lang === 'zh' ? '加载中…' : 'Loading…'))
+                  : (lang === 'zh' ? '[结果]' : '[Result]');
+            return (
+              <div
+                key={p.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSetExpandedOutput({ nodeId: node.id, fieldId: p.id });
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="relative max-w-36 bg-slate-800/95 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden cursor-pointer hover:scale-105 hover:border-[#90dce1] transition-all group/thumb flex flex-col"
+              >
+                <div className="px-2.5 pt-2 pb-2 text-[8px] font-bold text-slate-500 uppercase tracking-wider truncate">
+                  {p.label}
+                </div>
+                <div className="p-2.5 pt-0 text-[8px] text-slate-300 overflow-hidden leading-snug font-medium selection:bg-transparent line-clamp-3 h-[1.5rem]">
+                  {displayText}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/thumb:opacity-100 transition-opacity duration-200 bg-slate-900/40 rounded-2xl">
+                  <Maximize2 size={20} className="text-white drop-shadow-lg scale-75 group-hover/thumb:scale-100 transition-transform duration-200" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {shouldShowPreview && !isMultiPortOutput && (
         <div
           onClick={(e) => {
             e.stopPropagation();
@@ -1394,9 +1700,11 @@ export const Node: React.FC<NodeProps> = ({
             )
           ) : firstOutputType === DataType.TEXT ? (
             <div className="p-3 text-[8px] text-slate-300 overflow-hidden leading-snug font-medium selection:bg-transparent w-full h-full">
-              {typeof nodeResult === 'object'
+              {(resolvedTextFromFile != null
+                ? resolvedTextFromFile
+                : typeof nodeResult === 'object'
                 ? JSON.stringify(nodeResult).slice(0, 100)
-                : nodeResult.toString().slice(0, 100)}
+                : nodeResult?.toString?.() ?? '').slice(0, 100)}
               ...
             </div>
           ) : firstOutputType === DataType.AUDIO ? (
@@ -1497,6 +1805,10 @@ export const Node: React.FC<NodeProps> = ({
               <div
                 className="absolute top-full left-0 mt-1 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 max-h-64 overflow-y-auto custom-scrollbar"
                 onClick={(e) => e.stopPropagation()}
+                onWheel={(e) => {
+                  e.stopPropagation();
+                  if (e.ctrlKey) e.preventDefault();
+                }}
               >
                 {tool.models.map((model) => (
                   <button
@@ -1522,7 +1834,7 @@ export const Node: React.FC<NodeProps> = ({
         )}
 
         {/* Web search toggle for DeepSeek and Doubao models */}
-        {node.toolId === 'text-generation' &&
+        {node.tool_id === 'text-generation' &&
           (node.data.model?.startsWith('deepseek-') || node.data.model?.startsWith('doubao-')) && (
           <button
             onMouseDown={(e) => e.stopPropagation()}
@@ -1542,7 +1854,7 @@ export const Node: React.FC<NodeProps> = ({
         )}
 
         {/* Voice selector for TTS nodes */}
-        {node.toolId === 'tts' &&
+        {node.tool_id === 'tts' &&
           (node.data.model === 'lightx2v' || node.data.model?.startsWith('lightx2v')) &&
           lightX2VVoiceList?.voices && (
             <div className="relative voice-select-container">
@@ -1567,6 +1879,10 @@ export const Node: React.FC<NodeProps> = ({
                 <div
                   className="absolute top-full left-0 mt-1 w-56 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 max-h-64 overflow-y-auto custom-scrollbar"
                   onClick={(e) => e.stopPropagation()}
+                  onWheel={(e) => {
+                    e.stopPropagation();
+                    if (e.ctrlKey) e.preventDefault();
+                  }}
                 >
                   {lightX2VVoiceList.voices.map((voice: any) => (
                     <button
@@ -1595,7 +1911,7 @@ export const Node: React.FC<NodeProps> = ({
           )}
 
         {/* Voice selector for voice clone nodes */}
-        {node.toolId === 'lightx2v-voice-clone' && cloneVoiceList.length > 0 && (
+        {node.tool_id === 'lightx2v-voice-clone' && cloneVoiceList.length > 0 && (
           <div className="relative voice-select-container">
             <button
               onMouseDown={(e) => e.stopPropagation()}

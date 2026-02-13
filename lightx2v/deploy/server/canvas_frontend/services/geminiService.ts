@@ -1,6 +1,36 @@
 
 import { GoogleGenAI, Modality, Type } from "@google/genai";
-import { apiRequest } from '../src/utils/apiClient';
+import { isStandalone } from '../src/config/runtimeMode';
+import { apiRequest, getApiBaseUrl } from '../src/utils/apiClient';
+import { getWorkflowFileByFileId } from '../src/utils/workflowFileManager';
+
+const VOLC_RESPONSES_URL = 'https://ark.cn-beijing.volces.com/api/v3/responses';
+
+/** Call Volc /responses: direct when standalone, backend proxy (with user auth) when not. */
+async function volcResponsesRequest(requestBody: any, signal?: AbortSignal): Promise<Response> {
+  if (isStandalone()) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey?.trim()) {
+      throw new Error("API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+    }
+    return fetch(VOLC_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(requestBody),
+      signal
+    });
+  }
+  const base = getApiBaseUrl();
+  return apiRequest(`${base}/api/v1/llm/volc/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+    signal
+  });
+}
 
 export interface OutputField {
   id: string;
@@ -325,6 +355,16 @@ async function handleLightX2VError(response: Response, context: string): Promise
  * ============================================================================
  */
 
+/** 本地 workflow_output 模式：提交 (workflow_id, node_id, port_id) 元组，后端解析 */
+export type WorkflowRefsPayload = {
+  workflowId: string;
+  prompt?: [string, string, string];
+  input_image?: [string, string, string] | [string, string, string][];
+  input_audio?: [string, string, string];
+  input_video?: [string, string, string];
+  input_last_frame?: [string, string, string];
+};
+
 /**
  * LightX2V Video/Image Service Integration
  * Generalized to handle T2V, I2V, S2V, T2I, and I2I
@@ -342,14 +382,16 @@ export const lightX2VTask = async (
   aspectRatio?: string,
   inputVideo?: string,
   onTaskId?: (taskId: string) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  workflowRefs?: WorkflowRefsPayload
 ): Promise<string> => {
   // Check if this is a cloud model (ends with -cloud)
   // If so, use cloud config instead of provided baseUrl/token
+  const isCloud = modelCls.endsWith('-cloud');
   let actualBaseUrl = baseUrl;
   let actualToken = token;
 
-  if (modelCls.endsWith('-cloud')) {
+  if (isCloud) {
     // Cloud model - use cloud config
     const cloudConfig = getLightX2VConfigForModel(modelCls);
     actualBaseUrl = cloudConfig.url;
@@ -360,9 +402,51 @@ export const lightX2VTask = async (
   }
 
   console.log('[LightX2V] baseUrl:', actualBaseUrl);
+  const useWorkflowRefs = !!workflowRefs && !isCloud;
+
+  // 云端且存在 workflowId 时，将 file ref 解析为 data URL 再提交（连接后端但选云端模型时图片/音视频为 file_id）
+  let resolvedInputImage = inputImage;
+  let resolvedInputAudio = inputAudio;
+  let resolvedLastFrame = lastFrame;
+  let resolvedInputVideo = inputVideo;
+  if (isCloud && workflowRefs?.workflowId) {
+    const wfId = workflowRefs.workflowId;
+    const isFileRef = (v: unknown): v is { file_id: string; mime_type?: string } =>
+      !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as { file_id?: string }).file_id === 'string';
+    if (resolvedInputImage != null) {
+      if (isFileRef(resolvedInputImage)) {
+        const r = await getWorkflowFileByFileId(wfId, resolvedInputImage.file_id, resolvedInputImage.mime_type, (resolvedInputImage as { ext?: string }).ext);
+        if (r) resolvedInputImage = r;
+      } else if (Array.isArray(resolvedInputImage)) {
+        const arr = await Promise.all(resolvedInputImage.map(async (item) => {
+          if (isFileRef(item)) {
+            const r = await getWorkflowFileByFileId(wfId, item.file_id, item.mime_type, (item as { ext?: string }).ext);
+            return r ?? item;
+          }
+          return item;
+        }));
+        const strings = arr.filter((x): x is string => typeof x === 'string');
+        resolvedInputImage = strings.length > 0 ? strings : undefined;
+      }
+    }
+    if (isFileRef(resolvedInputAudio)) {
+      const r = await getWorkflowFileByFileId(wfId, resolvedInputAudio.file_id, resolvedInputAudio.mime_type, (resolvedInputAudio as { ext?: string }).ext);
+      if (r) resolvedInputAudio = r;
+    }
+    if (isFileRef(resolvedLastFrame)) {
+      const r = await getWorkflowFileByFileId(wfId, resolvedLastFrame.file_id, resolvedLastFrame.mime_type, (resolvedLastFrame as { ext?: string }).ext);
+      if (r) resolvedLastFrame = r;
+    }
+    if (isFileRef(resolvedInputVideo)) {
+      const r = await getWorkflowFileByFileId(wfId, resolvedInputVideo.file_id, resolvedInputVideo.mime_type, (resolvedInputVideo as { ext?: string }).ext);
+      if (r) resolvedInputVideo = r;
+    }
+  }
 
   const formatMediaPayload = (val: string | string[] | undefined, isAudio = false) => {
     if (!val) return undefined;
+    // 未解析的 file ref（对象）不能当字符串用，否则后端会收到无效 base64
+    if (typeof val === 'object' && !Array.isArray(val)) return undefined;
 
     // Handle multiple images (array) - for i2i tasks with multiple input images
     // According to lightx2v server (utils.py:177-185), server expects:
@@ -386,24 +470,29 @@ export const lightX2VTask = async (
           return img.split(',')[1];
         }
         return img;
-      });
+      }).filter((x): x is string => typeof x === 'string' && x.length > 0);
+
+      if (processedImages.length === 0) return undefined;
 
       // 不能仅用 startsWith('/') 判 URL：JPEG base64 以 "/9j/4AAQ" 开头，会被误判为 url 导致 Submit error
-      const hasUrl = processedImages.some(img =>
+      // 必须全部为 URL 才用 type=url；任一 base64 时用 type=base64，否则后端会尝试 fetch base64 导致 "Failed to read input_image, type=url"
+      const allUrls = processedImages.every(img =>
         typeof img === 'string' && isPathOrHttpUrl(img)
       );
-      const type = hasUrl ? "url" : "base64";
+      const type = allUrls ? "url" : "base64";
 
       return { type: type, data: processedImages };
     }
 
     // Single value handling (original logic)
     const singleVal = val as string;
-    // Check if it's a URL (absolute http/https, or relative path starting with ./ or /)
+    // Check if it's a URL (absolute http/https, or relative path ./ or /assets or /api)
+    // 不能仅用 startsWith('/')：JPEG base64 以 "/9j/4AAQ" 开头，会被误判为 url
     const isUrl = singleVal.startsWith('http://') ||
                   singleVal.startsWith('https://') ||
                   singleVal.startsWith('./') ||
-                  singleVal.startsWith('/');
+                  singleVal.startsWith('/assets') ||
+                  singleVal.startsWith('/api');
     const type = isUrl ? "url" : "base64";
 
     // Process the data content
@@ -414,19 +503,25 @@ export const lightX2VTask = async (
       if (isAudio && !singleVal.startsWith('data:')) {
         dataContent = wrapPcmInWav(dataContent, 24000);
       }
+      // 空 base64 会导致云端 "cannot identify image file"；不提交
+      if (typeof dataContent !== 'string' || !dataContent.trim()) return undefined;
     }
 
     // Use 'data' as the field name for both types as the server error 'data'! suggests
     return { type: type, data: dataContent };
   };
 
-  // 参考主应用的做法构建 payload
+  // 参考主应用的做法构建 payload；本地走 workflow_output 元组时由后端解析
+  // 后端 assert len(params["prompt"]) > 0，云端提交时 prompt 不能为空字符串（否则 400 valid prompt is required）
+  const promptPayload = useWorkflowRefs && workflowRefs!.prompt
+    ? workflowRefs!.prompt
+    : (typeof prompt === "string" && prompt.trim().length > 0 ? prompt.trim() : " ");
   const payload: any = {
     task: task,
     model_cls: modelCls,
     stage: "single_stage",
     seed: Math.floor(Math.random() * 1000000), // 参考主应用：生成随机 seed
-    prompt: prompt || ""
+    prompt: promptPayload
   };
 
   // 添加尺寸参数（参考主应用）
@@ -437,13 +532,39 @@ export const lightX2VTask = async (
     payload.negative_prompt = "镜头晃动，色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走";
   }
 
-  // 添加媒体输入（参考主应用的格式）
-  if (inputImage) payload.input_image = formatMediaPayload(inputImage);
-  if (inputAudio) payload.input_audio = formatMediaPayload(inputAudio, true);
-  // Replaced 'last_frame' with 'input_last_frame' as required by the flf2v task
-  if (lastFrame) payload.input_last_frame = formatMediaPayload(lastFrame);
-  // Support for input video (used in character swap/animate task)
-  if (inputVideo) payload.input_video = formatMediaPayload(inputVideo);
+  if (useWorkflowRefs && workflowRefs!) {
+    // 本地 workflow_output：只传元组，后端按 (workflow_id, node_id, port_id) 解析
+    if (workflowRefs.input_image !== undefined) {
+      payload.input_image = { type: "workflow_output", data: workflowRefs.input_image };
+    }
+    if (workflowRefs.input_audio !== undefined) {
+      payload.input_audio = { type: "workflow_output", data: workflowRefs.input_audio };
+    }
+    if (workflowRefs.input_video !== undefined) {
+      payload.input_video = { type: "workflow_output", data: workflowRefs.input_video };
+    }
+    if (workflowRefs.input_last_frame !== undefined) {
+      payload.input_last_frame = { type: "workflow_output", data: workflowRefs.input_last_frame };
+    }
+  } else {
+    // 云端或未传 workflowRefs：沿用现有格式（prompt 字符串 + 媒体 type/data）；云端时已用 resolved*（file ref 已解析为 data URL）
+    if (resolvedInputImage) payload.input_image = formatMediaPayload(resolvedInputImage);
+    if (resolvedInputAudio) payload.input_audio = formatMediaPayload(resolvedInputAudio, true);
+    if (resolvedLastFrame) payload.input_last_frame = formatMediaPayload(resolvedLastFrame);
+    if (resolvedInputVideo) payload.input_video = formatMediaPayload(resolvedInputVideo);
+  }
+
+  // 云端任务若需要 input_image 但未解析出有效值，会在服务端报 'input_image'!；前端先校验并给出明确错误
+  const tasksRequiringInputImage = ['i2v', 'i2i', 'animate', 's2v'];
+  if (isCloud && tasksRequiringInputImage.includes(task) && (payload.input_image == null || payload.input_image === undefined)) {
+    throw new Error(
+      task === 'i2v' ? '请连接并确保图片输入节点已就绪（图片加载失败或未连接）' :
+      task === 'i2i' ? '请连接并确保图片输入已就绪' :
+      task === 'animate' ? '请连接图片与视频输入并确保已就绪' :
+      task === 's2v' ? '请连接图片与音频输入并确保已就绪' :
+      '缺少图片输入，请检查输入节点'
+    );
+  }
 
   // 对于 s2v 任务，如果使用多人模式，可能需要添加 negative_prompt
   // 主应用中 s2v 任务也会添加 negative_prompt（但内容略有不同）
@@ -452,6 +573,28 @@ export const lightX2VTask = async (
   }
 
   // 1. Submit Task (POST /api/v1/task/submit)
+  // 日志：打印提交 payload 摘要（媒体字段只打 type 和 data 前 80 字符，避免 base64 刷屏）
+  const summarizeMedia = (v: any) => {
+    if (!v || typeof v !== 'object') return v;
+    const d = v.data;
+    const preview = typeof d === 'string' ? d.slice(0, 80) + (d.length > 80 ? '...' : '')
+      : Array.isArray(d) ? d.map((x: any) => typeof x === 'string' ? x.slice(0, 80) + (x.length > 80 ? '...' : '') : x)
+      : d;
+    return { type: v.type, data: preview };
+  };
+  console.log('[LightX2V] Submit payload:', JSON.stringify({
+    task: payload.task,
+    model_cls: payload.model_cls,
+    stage: payload.stage,
+    seed: payload.seed,
+    prompt: typeof payload.prompt === 'string' ? payload.prompt.slice(0, 100) : payload.prompt,
+    aspect_ratio: payload.aspect_ratio,
+    input_image: summarizeMedia(payload.input_image),
+    input_audio: summarizeMedia(payload.input_audio),
+    input_video: summarizeMedia(payload.input_video),
+    input_last_frame: summarizeMedia(payload.input_last_frame),
+  }, null, 2));
+
   const submitRes = await lightX2VRequest({
     baseUrl: actualBaseUrl,
     token: actualToken,
@@ -475,11 +618,10 @@ export const lightX2VTask = async (
     onTaskId(taskId);
   }
 
-  // 2. Poll Task Status
+  // 2. Poll Task Status（与主应用一致：无 timeout，只要任务未失败/未取消就持续轮询）
   let status = "PENDING";
-  let maxAttempts = 120; // 10 minutes total
 
-  while (status !== "SUCCEED" && status !== "FAILED" && status !== "CANCELLED" && maxAttempts > 0) {
+  while (status !== "SUCCEED" && status !== "FAILED" && status !== "CANCELLED") {
     if (abortSignal?.aborted) {
       throw new DOMException('Task cancelled by user', 'AbortError');
     }
@@ -505,11 +647,11 @@ export const lightX2VTask = async (
     if (status === "FAILED") {
       throw new Error(`LightX2V Task Failed: ${taskInfo.error || 'Server processing error'}`);
     }
-    maxAttempts--;
   }
 
   if (status !== "SUCCEED") {
-    throw new Error(`LightX2V Task timed out or ended with status: ${status}`);
+    // 仅 CANCELLED 或其它非成功终态会走到这里（FAILED 已在上面 throw）
+    throw new Error(status === "CANCELLED" ? 'LightX2V Task was cancelled' : `LightX2V Task ended with status: ${status}`);
   }
 
   // 3. Get Result URL
@@ -777,6 +919,14 @@ export const lightX2VTTS = async (
     resource_id: resourceId
   };
 
+  console.log('[TTS] Generate payload:', JSON.stringify({
+    text: textStr.slice(0, 100) + (textStr.length > 100 ? '...' : ''),
+    voice_type: voiceTypeStr,
+    context_texts: contextTexts ? contextTexts.slice(0, 60) : '',
+    emotion, emotion_scale: emotionScale,
+    speech_rate: speechRate, pitch, loudness_rate: loudnessRate, resource_id: resourceId,
+  }));
+
   const response = await lightX2VRequest({
     baseUrl,
     token,
@@ -864,6 +1014,11 @@ export const lightX2VVoiceClone = async (
     formData.append('text', text);
   }
 
+  console.log('[VoiceClone] Clone payload:', JSON.stringify({
+    audio_size: byteArray.length,
+    text: text ? text.slice(0, 100) : '(none)',
+  }));
+
   const response = await lightX2VRequest({
     baseUrl,
     token,
@@ -921,6 +1076,12 @@ export const lightX2VVoiceCloneTTS = async (
     pitch: pitch,
     language: language
   };
+
+  console.log('[VoiceCloneTTS] Generate payload:', JSON.stringify({
+    text: textStr.slice(0, 100) + (textStr.length > 100 ? '...' : ''),
+    speaker_id: speakerIdStr,
+    style, speed, volume, pitch, language,
+  }));
 
   const response = await lightX2VRequest({
     baseUrl,
@@ -1029,9 +1190,11 @@ export const deepseekText = async (
   useSearch = false,
   returnRaw = false
 ): Promise<any> => {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  if (isStandalone()) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey?.trim()) {
+      throw new Error("API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+    }
   }
 
   // Ensure prompt is a string
@@ -1104,14 +1267,7 @@ export const deepseekText = async (
   //   requestBody.response_format = { type: 'json_object' };
   // }
 
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
+  const response = await volcResponsesRequest(requestBody);
 
   if (!response.ok) {
     let errorMessage = `DeepSeek API failed (${response.status})`;
@@ -1234,9 +1390,11 @@ export const doubaoText = async (
   useSearch = false,
   returnRaw = false
 ): Promise<any> => {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    throw new Error("API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  if (isStandalone()) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey?.trim()) {
+      throw new Error("API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+    }
   }
 
   // Ensure prompt is a string
@@ -1341,14 +1499,7 @@ export const doubaoText = async (
   //   requestBody.response_format = { type: 'json_object' };
   // }
 
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
+  const response = await volcResponsesRequest(requestBody);
 
   if (!response.ok) {
     let errorMessage = `Doubao API failed (${response.status})`;
@@ -1696,10 +1847,11 @@ export const deepseekChat = async (
   model = 'deepseek-v3-2-251201',
   responseFormat: 'json_object' | 'text' = 'json_object'
 ): Promise<string> => {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  if (isStandalone()) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey?.trim()) {
+      throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+    }
   }
 
   console.log('deepseekChat messages:', messages);
@@ -1808,14 +1960,7 @@ export const deepseekChat = async (
   // 调试日志
   console.log('[DeepSeek Chat] Request body:', JSON.stringify(requestBody, null, 2));
 
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
+  const response = await volcResponsesRequest(requestBody);
 
   if (!response.ok) {
     let errorMessage = `DeepSeek Responses API failed (${response.status})`;
@@ -1876,10 +2021,11 @@ export async function* deepseekChatStream(
   responseFormat: 'json_object' | 'text' = 'json_object',
   signal?: AbortSignal
 ): AsyncGenerator<{ type: 'thinking' | 'content'; text: string }, void, unknown> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+  if (isStandalone()) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey?.trim()) {
+      throw new Error("DeepSeek API key is required. Please set DEEPSEEK_API_KEY environment variable.");
+    }
   }
 
   // 转换为 Responses API 格式
@@ -1987,15 +2133,7 @@ export async function* deepseekChatStream(
   // 调试日志
   console.log('[DeepSeek Chat Stream] Request body:', JSON.stringify(requestBody, null, 2));
 
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(requestBody),
-    signal
-  });
+  const response = await volcResponsesRequest(requestBody, signal);
 
   if (!response.ok) {
     let errorMessage = `DeepSeek Responses API failed (${response.status})`;

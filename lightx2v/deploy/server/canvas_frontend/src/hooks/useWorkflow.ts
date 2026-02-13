@@ -1,13 +1,19 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { WorkflowState, WorkflowNode, NodeHistoryEntry } from '../../types';
+import { WorkflowState, WorkflowNode, NodeHistoryEntry, Connection } from '../../types';
 import { apiRequest } from '../utils/apiClient';
-import { getWorkflowFileByFileId, getLocalFileDataUrl, persistDataUrlToLocal, uploadLocalUrlAsNodeOutput, isLocalAssetUrlToUpload } from '../utils/workflowFileManager';
+import { getWorkflowFileByFileId, getWorkflowFileText, getLocalFileDataUrl, persistDataUrlToLocal, uploadLocalUrlAsNodeOutput, isLocalAssetUrlToUpload, saveInputFileViaOutputSave } from '../utils/workflowFileManager';
 import { TOOLS } from '../../constants';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
 import { isStandalone } from '../config/runtimeMode';
-import { createHistoryEntryFromValue, normalizeHistoryMap } from '../utils/historyEntry';
+import { getOutputValueByPort, setOutputValueByPort, INPUT_PORT_IDS } from '../utils/outputValuePort';
+import { createHistoryEntryFromValue, createHistoryEntryFromPortKeyedOutputValue, normalizeHistoryMap, normalizeAndAggregateHistoryMap } from '../utils/historyEntry';
+
+/** 不再强制规范 text-generation 端口 id：支持 default 的 out-text1/out-text2 与 AI 等指定的自定义 id，原样保留 nodes/connections */
+function migrateTextGenerationPortIds(nodes: WorkflowNode[], connections: Connection[]): { nodes: WorkflowNode[]; connections: Connection[] } {
+  return { nodes, connections };
+}
 
 export const useWorkflow = () => {
   const [myWorkflows, setMyWorkflows] = useState<WorkflowState[]>([]);
@@ -91,7 +97,7 @@ export const useWorkflow = () => {
     // 仅前端：先把 data: 存入 IndexedDB 得到 local://，再保存列表，这样 MY 列表缩略图能解析显示
     if (isStandalone()) {
       nodesToSave = await Promise.all(current.nodes.map(async (node) => {
-        const tool = TOOLS.find(t => t.id === node.toolId);
+        const tool = TOOLS.find(t => t.id === node.tool_id);
         if (!tool || tool.category !== 'Input' || !node.data?.value) return node;
         const nodeValue = node.data.value;
         const prefix = `wf_${current.id}_${node.id}`;
@@ -110,7 +116,7 @@ export const useWorkflow = () => {
     }
     // Clean input node values: remove base64 data URLs, keep only file paths (standalone 下已是 local://)
     const cleanedNodes = nodesToSave.map(node => {
-      const tool = TOOLS.find(t => t.id === node.toolId);
+      const tool = TOOLS.find(t => t.id === node.tool_id);
       if (!tool || tool.category !== 'Input') {
         // Not an input node, return as-is
         return node;
@@ -136,9 +142,9 @@ export const useWorkflow = () => {
       const isSavedPath = (val: any): boolean => {
         if (typeof val === 'string') {
           return val.startsWith('local://') ||
-                 val.startsWith('./assets/workflow/input') ||
+                 val.startsWith('./assets/workflow/file') ||
                  val.startsWith('./assets/task/') ||
-                 val.startsWith('/assets/workflow/input') ||
+                 val.startsWith('/assets/workflow/file') ||
                  val.startsWith('/assets/task/') ||
                  val.startsWith('/api/v1/workflow/') ||
                  (val.startsWith('http://') || val.startsWith('https://'));
@@ -146,9 +152,9 @@ export const useWorkflow = () => {
         if (Array.isArray(val)) {
           return val.every(item => typeof item === 'string' && (
             item.startsWith('local://') ||
-            item.startsWith('./assets/workflow/input') ||
+            item.startsWith('./assets/workflow/file') ||
             item.startsWith('./assets/task/') ||
-            item.startsWith('/assets/workflow/input') ||
+            item.startsWith('/assets/workflow/file') ||
             item.startsWith('/assets/task/') ||
             item.startsWith('/api/v1/workflow/') ||
             item.startsWith('http://') ||
@@ -278,10 +284,10 @@ export const useWorkflow = () => {
           }
           if (value && typeof value === 'object') {
             if (value.type === 'file' || value.file_id) {
-              return value;
+              return { kind: (value as any).kind || 'file', file_id: (value as any).file_id, ...((value as any).mime_type != null && { mime_type: (value as any).mime_type }) };
             }
             // Preserve LightX2VResultRef (task_id + output_name) so saved workflow can resolve result_url
-            if (value.__type === 'lightx2v_result' && typeof value.task_id === 'string' && typeof value.output_name === 'string') {
+            if (((value as any).type === 'task' || (value as any).__type === 'lightx2v_result') && typeof value.task_id === 'string' && typeof value.output_name === 'string') {
               return value;
             }
             const cleaned: Record<string, any> = {};
@@ -312,9 +318,9 @@ export const useWorkflow = () => {
               return true;
             }
             if (typeof val === 'string') {
-              return val.startsWith('./assets/workflow/input') ||
+              return val.startsWith('./assets/workflow/file') ||
                      val.startsWith('./assets/task/') ||
-                     val.startsWith('/assets/workflow/input') ||
+                     val.startsWith('/assets/workflow/file') ||
                      val.startsWith('/assets/task/') ||
                      val.startsWith('/api/v1/workflow/') ||
                      (val.startsWith('http://') || val.startsWith('https://'));
@@ -323,9 +329,9 @@ export const useWorkflow = () => {
               return val.every(item => {
                 if (item && typeof item === 'object' && (item.type === 'file' || item.file_id)) return true;
                 if (typeof item !== 'string') return false;
-                return item.startsWith('./assets/workflow/input') ||
+                return item.startsWith('./assets/workflow/file') ||
                        item.startsWith('./assets/task/') ||
-                       item.startsWith('/assets/workflow/input') ||
+                       item.startsWith('/assets/workflow/file') ||
                        item.startsWith('/assets/task/') ||
                        item.startsWith('/api/v1/workflow/') ||
                        item.startsWith('http://') ||
@@ -346,28 +352,28 @@ export const useWorkflow = () => {
           return nodeData;
         };
 
-        // Clean node outputValue to avoid persisting base64 in workflow nodes
+        // Clean node output_value to avoid persisting base64 in workflow nodes
         // 输入节点与文本输入一致：执行时才存库，保存工作流时保留 data URL 不 strip
         for (let i = 0; i < cleanedNodes.length; i++) {
           const node = cleanedNodes[i];
-          const nodeTool = TOOLS.find(t => t.id === node.toolId);
+          const nodeTool = TOOLS.find(t => t.id === node.tool_id);
           if (nodeTool?.category === 'Input') continue;
-          if (node.outputValue !== undefined) {
-            const cleanedOutputValue = stripBase64FromOutput(node.outputValue);
+          if (node.output_value !== undefined) {
+            const cleanedOutputValue = stripBase64FromOutput(node.output_value);
             if (Array.isArray(cleanedOutputValue)) {
               cleanedNodes[i] = {
                 ...cleanedNodes[i],
-                outputValue: cleanedOutputValue.length > 0 ? cleanedOutputValue : undefined
+                output_value: cleanedOutputValue.length > 0 ? cleanedOutputValue : undefined
               };
             } else if (cleanedOutputValue && typeof cleanedOutputValue === 'object') {
               cleanedNodes[i] = {
                 ...cleanedNodes[i],
-                outputValue: Object.keys(cleanedOutputValue).length > 0 ? cleanedOutputValue : undefined
+                output_value: Object.keys(cleanedOutputValue).length > 0 ? cleanedOutputValue : undefined
               };
             } else {
               cleanedNodes[i] = {
                 ...cleanedNodes[i],
-                outputValue: cleanedOutputValue !== '' && cleanedOutputValue !== null && cleanedOutputValue !== undefined
+                output_value: cleanedOutputValue !== '' && cleanedOutputValue !== null && cleanedOutputValue !== undefined
                   ? cleanedOutputValue
                   : undefined
               };
@@ -376,18 +382,13 @@ export const useWorkflow = () => {
         }
 
         // 使用后端时，将输入节点中的本地 URL（如 /assets/girl.png）通过 save/upload 存到后端，数据库以 file 类型存储
-        const INPUT_PORT_ID: Record<string, string> = {
-          'image-input': 'out-image',
-          'video-input': 'out-video',
-          'audio-input': 'out-audio'
-        };
         const resolveInputNodeLocalUrls = async (wfId: string, nodes: WorkflowNode[]): Promise<WorkflowNode[]> => {
           const next = [...nodes];
           for (let i = 0; i < next.length; i++) {
             const node = next[i];
-            const tool = TOOLS.find(t => t.id === node.toolId);
+            const tool = TOOLS.find(t => t.id === node.tool_id);
             if (!tool || tool.category !== 'Input') continue;
-            const portId = INPUT_PORT_ID[node.toolId];
+            const portId = INPUT_PORT_IDS[node.tool_id];
             if (!portId) continue;
             const nodeValue = node.data?.value;
             if (!nodeValue) continue;
@@ -396,7 +397,7 @@ export const useWorkflow = () => {
               const resolved: any[] = [];
               for (let idx = 0; idx < nodeValue.length; idx++) {
                 const item = nodeValue[idx];
-                if (item && typeof item === 'object' && (item.type === 'file' || item.file_id)) {
+                if (item && typeof item === 'object' && ((item as any).kind === 'file' || (item as any).type === 'file' || item.file_id)) {
                   resolved.push(item);
                   continue;
                 }
@@ -416,10 +417,100 @@ export const useWorkflow = () => {
           return next;
         };
 
+        /** 将节点中的 base64（data: URL）上传为 file_id，返回替换后的节点列表，保证写入 DB 的 payload 不含 base64 */
+        const uploadBase64InNodesToFileRefs = async (wfId: string, nodes: WorkflowNode[]): Promise<WorkflowNode[]> => {
+          const next = [...nodes];
+          for (let i = 0; i < next.length; i++) {
+            const node = next[i];
+            const tool = TOOLS.find(t => t.id === node.tool_id);
+            if (!tool || tool.category !== 'Input') continue;
+            const portId = INPUT_PORT_IDS[node.tool_id];
+            if (!portId) continue;
+            // text-input 优先用 data.value（当前编辑内容），保存时上传为 file ref 再写回 output_value；若已是 file ref 且展示文本与文件内容一致则不再上传
+            const existingPort = getOutputValueByPort(node, portId);
+            if (node.tool_id === 'text-input' && existingPort && typeof existingPort === 'object' && (existingPort as { file_id?: string }).file_id) {
+              const displayText = typeof node.data?.value === 'string' ? node.data.value : null;
+              if (displayText != null) {
+                try {
+                  const fileText = await getWorkflowFileText(wfId, (existingPort as { file_id: string }).file_id, node.id, portId, (existingPort as any).run_id);
+                  if (fileText === displayText) continue;
+                } catch (_e) { /* 比较失败则继续走上传 */ }
+              }
+            }
+            const nodeValue = node.tool_id === 'text-input'
+              ? (node.data?.value ?? getOutputValueByPort(node, portId))
+              : (getOutputValueByPort(node, portId) ?? node.data?.value);
+            if (nodeValue == null) continue;
+            const isDataUrl = (v: any) => typeof v === 'string' && v.startsWith('data:');
+            if (Array.isArray(nodeValue) && nodeValue.length > 0) {
+              const newValue: any[] = [];
+              for (const item of nodeValue) {
+                if (isDataUrl(item)) {
+                  try {
+                    const ref = await saveInputFileViaOutputSave(wfId, node.id, portId, item);
+                    newValue.push(ref ?? item);
+                  } catch (e) {
+                    console.warn('[Workflow] uploadBase64InNodesToFileRefs failed for item:', e);
+                    newValue.push(item);
+                  }
+                } else {
+                  newValue.push(item);
+                }
+              }
+              const finalVal = portId === 'out-image' ? newValue : newValue[0] ?? null;
+              const nextPortKeyed = setOutputValueByPort(node.output_value, node.tool_id, portId, finalVal);
+              next[i] = { ...next[i], data: { ...next[i].data, value: finalVal }, output_value: nextPortKeyed };
+            } else if (isDataUrl(nodeValue)) {
+              try {
+                const ref = await saveInputFileViaOutputSave(wfId, node.id, portId, nodeValue);
+                if (ref) {
+                  const nextPortKeyed = setOutputValueByPort(node.output_value, node.tool_id, portId, ref);
+                  next[i] = { ...next[i], data: { ...next[i].data, value: ref }, output_value: nextPortKeyed };
+                }
+              } catch (e) {
+                console.warn('[Workflow] uploadBase64InNodesToFileRefs failed:', e);
+              }
+            } else if (node.tool_id === 'text-input' && typeof nodeValue === 'string' && nodeValue.trim()) {
+              try {
+                const dataUrl = `data:text/plain;charset=utf-8;base64,${btoa(unescape(encodeURIComponent(nodeValue)))}`;
+                const ref = await saveInputFileViaOutputSave(wfId, node.id, portId, dataUrl);
+                if (ref) {
+                  const nextPortKeyed = setOutputValueByPort(node.output_value, node.tool_id, portId, ref);
+                  next[i] = { ...next[i], data: { ...next[i].data, value: ref }, output_value: nextPortKeyed };
+                }
+              } catch (e) {
+                console.warn('[Workflow] uploadBase64InNodesToFileRefs text-input failed:', e);
+              }
+            }
+          }
+          return next;
+        };
+
         let nodesToSave = cleanedNodes;
         const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
         if (!isStandalone() && effectiveId && isUuid(effectiveId)) {
           nodesToSave = await resolveInputNodeLocalUrls(effectiveId, cleanedNodes);
+        }
+
+        // 先上传再保存：有 UUID 时把 base64 上传为 file_id，再写入 DB；无 UUID（新建）时先剥离 base64，创建后再上传并 PUT
+        if (!isStandalone() && effectiveId && isUuid(effectiveId)) {
+          nodesToSave = await uploadBase64InNodesToFileRefs(effectiveId, nodesToSave);
+          setWorkflow(prev => (prev && prev.id === workflowId ? { ...prev, nodes: nodesToSave } : prev));
+          if (workflowRef.current && workflowRef.current.id === workflowId) {
+            workflowRef.current = { ...workflowRef.current, nodes: nodesToSave };
+          }
+        } else if (!isStandalone() && effectiveId) {
+          // 创建且尚无 UUID：剥离 base64，避免 POST body 带 base64
+          nodesToSave = nodesToSave.map(n => {
+            const nodeTool = TOOLS.find(t => t.id === n.tool_id);
+            if (nodeTool?.category === 'Input') {
+              const cleanedData = cleanNodeDataValue(n.data);
+              const cleanedOutput = stripBase64FromOutput(n.output_value);
+              const outVal = (cleanedOutput === '' || (Array.isArray(cleanedOutput) && cleanedOutput.length === 0)) ? undefined : cleanedOutput;
+              return { ...n, data: cleanedData, output_value: outVal };
+            }
+            return n;
+          });
         }
 
         // 使用最新的工作流状态构建保存数据（不再写入 history_metadata，执行历史按节点存 nodeOutputHistory / data_store）
@@ -435,10 +526,21 @@ export const useWorkflow = () => {
           return out;
         };
 
+        // 有后端时：输入节点只持久化 output_value（file ref），不存 data.value；仅前端时：不写后端，保留 data.value（base64/纯文本）以便本地持久化
+        const nodesForPayload = nodesToSave.map((n: WorkflowNode) => {
+          const tool = TOOLS.find(t => t.id === n.tool_id);
+          if (tool?.category === 'Input') {
+            if (isStandalone()) return n;
+            const { value: _dropped, ...restData } = n.data || {};
+            return { ...n, data: restData };
+          }
+          return n;
+        });
+
         workflowData = {
           name: options?.name || latestWorkflow.name,
           description: options?.description ?? latestWorkflow.description ?? '',
-          nodes: nodesToSave,
+          nodes: nodesForPayload,
           connections: latestWorkflow.connections,
           visibility: latestWorkflow.visibility || 'private',
           tags: latestWorkflow.tags ?? [],
@@ -466,8 +568,8 @@ export const useWorkflow = () => {
 
         // For saved workflows (UUID) that user owns, try to update first
         if (isSavedWorkflow && owned) {
-          const updateResponse = await apiRequest(`/api/v1/workflow/${effectiveId}`, {
-            method: 'PUT',
+          const updateResponse = await apiRequest(`/api/v1/workflow/${effectiveId}/update`, {
+            method: 'POST',
             body: JSON.stringify(workflowData)
           });
 
@@ -493,6 +595,7 @@ export const useWorkflow = () => {
           console.warn('[Workflow] Unknown workflow ID format, letting backend generate ID');
         }
 
+        const hadUuidWhenBuildingPayload = isUuid(effectiveId);
         console.log('[Workflow] Creating new workflow (backend will generate workflow_id)');
         const response = await apiRequest('/api/v1/workflow/create', {
           method: 'POST',
@@ -504,161 +607,22 @@ export const useWorkflow = () => {
           const newWorkflowId = data.workflow_id;
           console.log('[Workflow] Workflow created in database with ID:', newWorkflowId);
 
-          // For new workflows, now save any remaining input files that weren't saved before
-          // (because workflow_id didn't exist yet)
-          const remainingInputSavePromises: Promise<void>[] = [];
-          const finalCleanedNodes = [...cleanedNodes];
-
-          for (let i = 0; i < finalCleanedNodes.length; i++) {
-            const node = finalCleanedNodes[i];
-            const tool = TOOLS.find(t => t.id === node.toolId);
-            if (!tool || tool.category !== 'Input') continue;
-
-            const nodeValue = node.data.value;
-            if (!nodeValue) continue;
-
-            const isDataURL = (val: any): boolean => {
-              if (typeof val === 'string') return val.startsWith('data:');
-              if (Array.isArray(val)) return val.some(item => typeof item === 'string' && item.startsWith('data:'));
-              return false;
-            };
-
-            const isSavedPath = (val: any): boolean => {
-              if (typeof val === 'string') {
-                return val.startsWith('./assets/workflow/input') ||
-                       val.startsWith('./assets/task/') ||
-                       val.startsWith('/assets/workflow/input') ||
-                       val.startsWith('/assets/task/') ||
-                       (val.startsWith('http://') || val.startsWith('https://'));
-              }
-              if (Array.isArray(val)) {
-                return val.every(item => typeof item === 'string' && (
-                  item.startsWith('./assets/workflow/input') ||
-                  item.startsWith('./assets/task/') ||
-                  item.startsWith('/assets/workflow/input') ||
-                  item.startsWith('/assets/task/') ||
-                  item.startsWith('http://') ||
-                  item.startsWith('https://')
-                ));
-              }
-              return false;
-            };
-
-            if (isDataURL(nodeValue) && !isSavedPath(nodeValue)) {
-              // Save input file now that we have workflow_id
-              const inputNameMap: Record<string, string> = {
-                'image-input': 'input_image',
-                'video-input': 'input_video',
-                'audio-input': 'input_audio'
-              };
-              const inputName = inputNameMap[node.toolId];
-              if (!inputName) continue;
-
-              const params: Record<string, { type: string; data: any }> = {};
-
-              if (node.toolId === 'image-input' && Array.isArray(nodeValue)) {
-                for (let idx = 0; idx < nodeValue.length; idx++) {
-                  const dataUrl = nodeValue[idx];
-                  if (!dataUrl || !dataUrl.startsWith('data:')) continue;
-                  const inpKey = idx > 0 ? `${inputName}/${idx}` : inputName;
-                  params[inpKey] = { type: 'base64', data: dataUrl };
-                }
-              } else {
-                const dataUrl = Array.isArray(nodeValue) ? nodeValue[0] : nodeValue;
-                if (dataUrl && dataUrl.startsWith('data:')) {
-                  params[inputName] = { type: 'base64', data: dataUrl };
-                }
-              }
-
-              if (Object.keys(params).length === 0) continue;
-
-              remainingInputSavePromises.push(
-                (async () => {
-                  try {
-                    const response = await apiRequest('/api/v1/task/submit', {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        task: 't2i',
-                        model_cls: 'z-image-turbo',
-                        stage: 'single',
-                        prompt: 'dummy',
-                        ...params
-                      })
-                    });
-
-                    if (response.ok) {
-                      const taskData = await response.json();
-                      const taskId = taskData.task_id;
-
-                      try {
-                        await apiRequest(`/api/v1/task/cancel?task_id=${taskId}`, { method: 'GET' });
-                      } catch (e) {
-                        // Ignore cancel errors
-                      }
-
-                      const savedPaths: string[] = [];
-                      Object.keys(params).forEach(inp => {
-                        let baseName = inp;
-                        let ext = 'png';
-                        if (inp.includes('video')) ext = 'mp4';
-                        else if (inp.includes('audio')) ext = 'mp3';
-                        const filename = `${taskId}-${baseName}.${ext}`;
-                        const workflowPath = `./assets/workflow/input?workflow_id=${newWorkflowId}&filename=${filename}`;
-                        savedPaths.push(workflowPath);
-                      });
-
-                      if (node.toolId === 'image-input' && Array.isArray(nodeValue)) {
-                        finalCleanedNodes[i] = {
-                          ...finalCleanedNodes[i],
-                          data: {
-                            ...finalCleanedNodes[i].data,
-                            value: savedPaths.length > 0 ? savedPaths : nodeValue
-                          }
-                        };
-                      } else {
-                        finalCleanedNodes[i] = {
-                          ...finalCleanedNodes[i],
-                          data: {
-                            ...finalCleanedNodes[i].data,
-                            value: savedPaths[0] || nodeValue
-                          }
-                        };
-                      }
-
-                      // Update workflow in database with cleaned nodes
-                      await apiRequest(`/api/v1/workflow/${newWorkflowId}`, {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                          nodes: finalCleanedNodes
-                        })
-                      });
-                    }
-                  } catch (err) {
-                    console.error(`[Workflow] Error saving input file for node ${node.id} after workflow creation:`, err);
-                  }
-                })()
-              );
-            }
+          // 创建时若之前无 UUID（未先上传）：用 newWorkflowId 把 latestWorkflow 中的 base64 上传为 file_id，再 PUT
+          let nodesForPut = nodesToSave;
+          if (!hadUuidWhenBuildingPayload) {
+            nodesForPut = await uploadBase64InNodesToFileRefs(newWorkflowId, latestWorkflow.nodes);
           }
-
-          // Wait for remaining input files to be saved
-          if (remainingInputSavePromises.length > 0) {
-            await Promise.allSettled(remainingInputSavePromises);
-          }
-
-          // 新建后：将输入节点中的本地 URL（如 /assets/girl.png）通过 upload 存到后端，再 PUT 节点（数据库以 file 类型存储）
-          const nodesAfterLocalUrls = await resolveInputNodeLocalUrls(newWorkflowId, finalCleanedNodes);
-          await apiRequest(`/api/v1/workflow/${newWorkflowId}`, {
-            method: 'PUT',
+          // 将输入节点中的本地 URL（如 /assets/girl.png）通过 upload 存到后端
+          const nodesAfterLocalUrls = await resolveInputNodeLocalUrls(newWorkflowId, nodesForPut);
+          await apiRequest(`/api/v1/workflow/${newWorkflowId}/update`, {
+            method: 'POST',
             body: JSON.stringify({ nodes: nodesAfterLocalUrls })
           });
 
-          // Always update workflow with backend-generated ID and cleaned nodes
           const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: nodesAfterLocalUrls };
           setWorkflow(updatedWorkflow);
           workflowRef.current = updatedWorkflow;
           await saveWorkflowToLocal(updatedWorkflow);
-          // Update URL hash to reflect the new workflow ID
           if (typeof window !== 'undefined') {
             window.history.replaceState(null, '', `#workflow/${newWorkflowId}`);
           }
@@ -712,9 +676,11 @@ export const useWorkflow = () => {
           setWorkflow(null);
           return null;
         }
+        const { nodes: nodesMigrated, connections: connectionsMigrated } = migrateTextGenerationPortIds(found.nodes, found.connections || []);
+        const foundMigrated = { ...found, nodes: nodesMigrated, connections: connectionsMigrated };
         const loadedOutputs: Record<string, any> = {};
-        for (const node of found.nodes) {
-          const tool = TOOLS.find(t => t.id === node.toolId);
+        for (const node of foundMigrated.nodes) {
+          const tool = TOOLS.find(t => t.id === node.tool_id);
           if (!tool || tool.category !== 'Input') continue;
           const nodeValue = node.data?.value;
           if (!nodeValue) continue;
@@ -731,12 +697,16 @@ export const useWorkflow = () => {
             if (url) loadedOutputs[node.id] = url;
           }
         }
-        // Merge loadedOutputs into nodes (outputValue is the single source of truth)
-        const nodesWithOutputs = found.nodes.map((n: WorkflowNode) => ({
-          ...n,
-          outputValue: loadedOutputs[n.id] ?? n.outputValue
-        }));
-        const workflowWithOutputs = { ...found, nodes: nodesWithOutputs };
+        const nodesWithOutputs = foundMigrated.nodes.map((n: WorkflowNode) => {
+          const outVal = loadedOutputs[n.id] ?? n.output_value;
+          const isInput = TOOLS.find(t => t.id === n.tool_id)?.category === 'Input';
+          if (isInput) {
+            const canonical = outVal ?? n.data?.value;
+            return { ...n, output_value: canonical, data: { ...n.data, value: canonical } };
+          }
+          return { ...n, output_value: outVal };
+        });
+        const workflowWithOutputs = { ...foundMigrated, nodes: nodesWithOutputs };
         setWorkflow(workflowWithOutputs);
         return { workflow: workflowWithOutputs };
       }
@@ -745,17 +715,36 @@ export const useWorkflow = () => {
       if (response.ok) {
         const wf = await response.json();
 
-        const nodes = wf.nodes || [];
+        const nodesRaw = wf.nodes || [];
+        const { nodes, connections: connectionsMigrated } = migrateTextGenerationPortIds(nodesRaw, wf.connections || []);
         const loadPromises: Promise<unknown>[] = [];
         const loadedOutputs: Record<string, any> = {};
 
         for (const node of nodes) {
-          const tool = TOOLS.find(t => t.id === node.toolId);
+          const tool = TOOLS.find(t => t.id === node.tool_id);
           if (!tool) continue;
 
           if (tool.category === 'Input') {
-            const nodeValue = node.data?.value;
+            const portId = INPUT_PORT_IDS[node.tool_id];
+            const nodeValue = node.data?.value ?? (portId ? getOutputValueByPort(node, portId) : undefined) ?? node.output_value;
             if (!nodeValue) continue;
+
+            // text-input 的 file ref：拉取纯文本用于预览，不转为 data URL，且保留 output_value 为 file ref
+            const textFileRef = node.tool_id === 'text-input' && nodeValue && typeof nodeValue === 'object' && (nodeValue as { file_id?: string }).file_id;
+            if (textFileRef) {
+              const fileId = (nodeValue as { file_id: string }).file_id;
+              const runId = (nodeValue as { run_id?: string }).run_id;
+              loadPromises.push(
+                getWorkflowFileText(wf.workflow_id, fileId, node.id, portId, runId).then((text) => {
+                  if (text != null) loadedOutputs[node.id] = text;
+                  else loadedOutputs[node.id] = nodeValue;
+                }).catch((err) => {
+                  console.error(`[Workflow] Error loading text file for node ${node.id}:`, err);
+                  loadedOutputs[node.id] = nodeValue;
+                })
+              );
+              continue;
+            }
 
             const isFilePath = (val: any): boolean => {
               if (typeof val === 'string') {
@@ -775,7 +764,33 @@ export const useWorkflow = () => {
               return false;
             };
 
-            if (isFilePath(nodeValue)) {
+            const pathOrUrlFromVal = (val: any): string | null => {
+              if (typeof val === 'string') return val;
+              if (val && typeof val === 'object' && typeof val.file_url === 'string') return val.file_url;
+              return null;
+            };
+            const pathToFetch = pathOrUrlFromVal(nodeValue);
+            if (pathToFetch && (pathToFetch.startsWith('/api/v1/workflow/') || pathToFetch.startsWith('./assets/') || pathToFetch.startsWith('http://') || pathToFetch.startsWith('https://'))) {
+              if (pathToFetch.startsWith('/api/v1/workflow/')) {
+                const match = pathToFetch.match(/\/api\/v1\/workflow\/([^/]+)\/file\/(.+)$/);
+                if (match) {
+                  const [, workflowId, fileId] = match;
+                  loadPromises.push(
+                    getWorkflowFileByFileId(workflowId, fileId).then(dataUrl => {
+                      if (dataUrl) loadedOutputs[node.id] = dataUrl;
+                      else loadedOutputs[node.id] = nodeValue;
+                    }).catch(err => {
+                      console.error(`[Workflow] Error loading input file for node ${node.id}:`, err);
+                      loadedOutputs[node.id] = nodeValue;
+                    })
+                  );
+                } else {
+                  loadedOutputs[node.id] = nodeValue;
+                }
+              } else {
+                loadedOutputs[node.id] = nodeValue;
+              }
+            } else if (isFilePath(nodeValue)) {
               if (Array.isArray(nodeValue)) {
                 const fileLoadPromises = nodeValue.map((path: string) => {
                   if (path.startsWith('/api/v1/workflow/')) {
@@ -827,8 +842,8 @@ export const useWorkflow = () => {
             continue;
           }
 
-          if (node.outputValue != null) {
-            loadedOutputs[node.id] = node.outputValue;
+          if (node.output_value != null) {
+            loadedOutputs[node.id] = node.output_value;
           }
         }
 
@@ -848,7 +863,7 @@ export const useWorkflow = () => {
           });
         }
 
-        let normalizedHistory = normalizeHistoryMap(wf.node_output_history || {});
+        let normalizedHistory = normalizeAndAggregateHistoryMap(wf.node_output_history || {});
         if ((!wf.node_output_history || Object.keys(normalizedHistory).length === 0) && wf.data_store?.outputs) {
           const dataStoreOutputs = wf.data_store.outputs;
           const legacyHistory: Record<string, NodeHistoryEntry[]> = {};
@@ -878,29 +893,42 @@ export const useWorkflow = () => {
                   output[pid] = histories[idx][i];
                 });
               }
-              const entry = createHistoryEntryFromValue({ id, timestamp, value: output });
+              const entry = portIds.length === 1
+                ? createHistoryEntryFromValue({ id, timestamp, value: output, params: {}, portId: portIds[0] })
+                : createHistoryEntryFromPortKeyedOutputValue({ id, timestamp, output_value: output, params: {} });
               if (entry) entries.push(entry);
             }
             if (entries.length > 0) {
               legacyHistory[nodeId] = entries;
             }
           }
-          normalizedHistory = normalizeHistoryMap(legacyHistory);
+          normalizedHistory = normalizeAndAggregateHistoryMap(legacyHistory);
         }
 
         const createT = wf.create_t ?? wf.create_at;
         const createAtMs = createT != null ? (createT < 1e12 ? createT * 1000 : createT) : undefined;
 
-        const nodesWithOutputs = nodes.map((n: WorkflowNode) => ({
-          ...n,
-          outputValue: loadedOutputs[n.id] ?? n.outputValue
-        }));
+        const nodesWithOutputs = nodes.map((n: WorkflowNode) => {
+          const outVal = loadedOutputs[n.id] ?? n.output_value;
+          const tool = TOOLS.find(t => t.id === n.tool_id);
+          const isInput = tool?.category === 'Input';
+          if (isInput) {
+            const portVal = getOutputValueByPort(n, INPUT_PORT_IDS[n.tool_id]);
+            const isTextInputFileRef = n.tool_id === 'text-input' && portVal && typeof portVal === 'object' && (portVal as { file_id?: string }).file_id;
+            if (isTextInputFileRef) {
+              return { ...n, output_value: n.output_value, data: { ...n.data, value: loadedOutputs[n.id] ?? n.data?.value } };
+            }
+            const canonical = outVal ?? n.data?.value;
+            return { ...n, output_value: canonical, data: { ...n.data, value: canonical } };
+          }
+          return { ...n, output_value: outVal };
+        });
         const workflow: WorkflowState = {
           id: wf.workflow_id,
           name: wf.name,
           description: wf.description ?? '',
           nodes: nodesWithOutputs,
-          connections: wf.connections || [],
+          connections: connectionsMigrated,
           isDirty: false,
           isRunning: false,
           globalInputs: wf.global_inputs || {},
@@ -918,15 +946,18 @@ export const useWorkflow = () => {
         return { workflow };
       } else {
         console.warn('[Workflow] Failed to load workflow from API, trying localStorage');
-        // Fallback to localStorage：用节点的 outputValue 恢复执行结果预览（不依赖 nodeOutputHistory）
+        // Fallback to localStorage：用节点的 output_value 恢复执行结果预览（不依赖 nodeOutputHistory）
         const saved = localStorage.getItem('omniflow_user_data');
         if (saved) {
           const workflows = JSON.parse(saved);
           const found = workflows.find((w: WorkflowState) => w.id === workflowId);
           if (found) {
+            const { nodes: nodesMigrated, connections: connectionsMigrated } = migrateTextGenerationPortIds(found.nodes, found.connections || []);
             const normalizedFound: WorkflowState = {
               ...found,
-              nodeOutputHistory: normalizeHistoryMap(found.nodeOutputHistory)
+              nodes: nodesMigrated,
+              connections: connectionsMigrated,
+              nodeOutputHistory: normalizeAndAggregateHistoryMap(found.nodeOutputHistory ?? {})
             };
             setWorkflow(normalizedFound);
             return { workflow: normalizedFound };
@@ -990,8 +1021,8 @@ export const useWorkflow = () => {
     }
 
     try {
-      const response = await apiRequest(`/api/v1/workflow/${id}/visibility`, {
-        method: 'PUT',
+      const response = await apiRequest(`/api/v1/workflow/${id}/update`, {
+        method: 'POST',
         body: JSON.stringify({ visibility })
       });
 

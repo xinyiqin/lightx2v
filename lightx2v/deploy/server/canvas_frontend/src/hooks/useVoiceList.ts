@@ -56,7 +56,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
     const loadVoiceList = async () => {
       if (!selectedNodeId || !workflow) return;
       const node = workflow.nodes.find(n => n.id === selectedNodeId);
-      if (!node || node.toolId !== 'tts') return;
+      if (!node || node.tool_id !== 'tts') return;
 
       // Only load voice list if model is lightx2v
       const isLightX2V = node.data.model === 'lightx2v' || node.data.model?.startsWith('lightx2v');
@@ -120,7 +120,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
     const loadCloneVoiceList = async () => {
       if (!selectedNodeId || !workflow) return;
       const node = workflow.nodes.find(n => n.id === selectedNodeId);
-      if (!node || node.toolId !== 'lightx2v-voice-clone') {
+      if (!node || node.tool_id !== 'lightx2v-voice-clone') {
         // Reset clone voice list when switching away from voice clone node
         setCloneVoiceList([]);
         cloneVoiceListLoadedRef.current = '';
@@ -159,7 +159,7 @@ export const useVoiceList = (workflow: WorkflowState | null, selectedNodeId: str
     };
 
     loadCloneVoiceList();
-  }, [selectedNodeId, workflow?.nodes.find(n => n.id === selectedNodeId)?.toolId, loadingCloneVoiceList]);
+  }, [selectedNodeId, workflow?.nodes.find(n => n.id === selectedNodeId)?.tool_id, loadingCloneVoiceList]);
 
   return {
     lightX2VVoiceList,

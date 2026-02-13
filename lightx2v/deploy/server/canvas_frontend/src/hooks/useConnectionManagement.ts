@@ -18,10 +18,10 @@ export const useConnectionManagement = ({
 }: UseConnectionManagementProps) => {
   const addConnection = useCallback((connection: {
     id: string;
-    sourceNodeId: string;
-    sourcePortId: string;
-    targetNodeId: string;
-    targetPortId: string;
+    source_node_id: string;
+    source_port_id: string;
+    target_node_id: string;
+    target_port_id: string;
   }) => {
     setWorkflow(prev => prev ? ({ ...prev, connections: [...prev.connections, connection], isDirty: true }) : null);
     setConnecting(null);

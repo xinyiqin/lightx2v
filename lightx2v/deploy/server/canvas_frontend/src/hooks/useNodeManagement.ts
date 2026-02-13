@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import { WorkflowState, WorkflowNode, ToolDefinition, DataType, Port, NodeStatus } from '../../types';
 import { TOOLS } from '../../constants';
+import { getOutputValueByPort, INPUT_PORT_IDS, isPortKeyedOutputValue } from '../utils/outputValuePort';
 import { useTranslation, Language } from '../i18n/useTranslation';
 
 interface UseNodeManagementProps {
@@ -72,7 +73,7 @@ export const useNodeManagement = ({
         defaultData.model = 'deepseek-v3-2-251201';
       }
       if (!defaultData.mode) defaultData.mode = 'basic';
-      if (!defaultData.customOutputs) defaultData.customOutputs = [{ id: 'out-text', label: t('execution_results'), description: 'Main text response.' }];
+      if (!defaultData.custom_outputs) defaultData.custom_outputs = [{ id: 'out-text1', label: t('execution_results'), description: 'Main text response.' }];
     }
     const rect = canvasRef.current?.getBoundingClientRect();
     const worldPos = x !== undefined && y !== undefined ? { x, y } : screenToWorldCoords((rect?.width || 800) / 2, (rect?.height || 600) / 2);
@@ -88,7 +89,7 @@ export const useNodeManagement = ({
           setWorkflow(prev => prev ? ({
             ...prev,
             nodes: prev.nodes.filter(n => n.id !== nodeId),
-            connections: prev.connections.filter(c => c.sourceNodeId !== nodeId && c.targetNodeId !== nodeId),
+            connections: prev.connections.filter(c => c.source_node_id !== nodeId && c.target_node_id !== nodeId),
             isDirty: true
           }) : null);
           newNodeId = nodeId; // 使用指定的ID，不修改
@@ -103,7 +104,7 @@ export const useNodeManagement = ({
       newNodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     }
 
-    const newNode: WorkflowNode = { id: newNodeId, toolId: tool.id, x: worldPos.x, y: worldPos.y, status: NodeStatus.IDLE, data: defaultData };
+    const newNode: WorkflowNode = { id: newNodeId, tool_id: tool.id, x: worldPos.x, y: worldPos.y, status: NodeStatus.IDLE, data: defaultData };
     setWorkflow(prev => prev ? ({ ...prev, nodes: [...prev.nodes, newNode], isDirty: true }) : null);
     setSelectedNodeId(newNodeId);
     return newNode;
@@ -114,7 +115,7 @@ export const useNodeManagement = ({
     setWorkflow(prev => prev ? ({
       ...prev,
       nodes: prev.nodes.filter(n => n.id !== nodeId),
-      connections: prev.connections.filter(c => c.sourceNodeId !== nodeId && c.targetNodeId !== nodeId),
+      connections: prev.connections.filter(c => c.source_node_id !== nodeId && c.target_node_id !== nodeId),
       isDirty: true
     }) : null);
     if (selectedNodeId === nodeId) {
@@ -125,9 +126,9 @@ export const useNodeManagement = ({
   const updateNodeData = useCallback((nodeId: string, key: string, value: any) => {
     setValidationErrors([]);
 
-    // 以下更新无论是否在运行快照视图都应用，保证 AI 等调用能真正改到工作流（如 customOutputs）
+    // 以下更新无论是否在运行快照视图都应用，保证 AI 等调用能真正改到工作流（如 custom_outputs）
     // 支持一次性合并多个 data 字段（避免多次调用时后一次覆盖前一次），由 AI 工作流等调用
-    // 对数组（如 customOutputs）做深拷贝，确保引用变化以便 React 与 getNodeOutputs 等能正确更新
+    // 对数组（如 custom_outputs）做深拷贝，确保引用变化以便 React 与 getNodeOutputs 等能正确更新
     if (key === '__mergeData' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
       const cloneForMerge = (v: any): any => {
         if (Array.isArray(v)) return v.map(item => (item && typeof item === 'object' && !Array.isArray(item) ? { ...item } : item));
@@ -147,13 +148,25 @@ export const useNodeManagement = ({
     }
 
 
-    // 支持直接修改节点的输出值（如文本生成节点已生成的内容），outputValue 是唯一数据源
-    if (key === 'outputValue') {
+    // 支持直接修改节点的输出值；output_value 可为 port-keyed（以 port_id 为键）
+    // 对输入类节点：同步更新 data.value 为当前 port 的取值
+    if (key === 'output_value') {
       setWorkflow(prev => {
         if (!prev) return null;
+        const node = prev.nodes.find(n => n.id === nodeId);
+        const tool = node ? TOOLS.find(t => t.id === node.tool_id) : undefined;
+        const isInputWithValue = tool?.category === 'Input' && ['image-input', 'audio-input', 'video-input', 'text-input'].includes(node?.tool_id ?? '');
+        const portId = node ? INPUT_PORT_IDS[node.tool_id] : undefined;
+        const effectiveValue = isInputWithValue && portId && isPortKeyedOutputValue(value)
+          ? value[portId]
+          : value;
         return {
           ...prev,
-          nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, outputValue: value, status: NodeStatus.IDLE } : n),
+          nodes: prev.nodes.map(n => {
+            if (n.id !== nodeId) return n;
+            const nextData = isInputWithValue ? { ...n.data, value: effectiveValue } : n.data;
+            return { ...n, output_value: value, data: nextData, status: NodeStatus.IDLE };
+          }),
           isDirty: true
         };
       });
@@ -191,16 +204,16 @@ export const useNodeManagement = ({
     const outputCount = currentNodeOutputs.length;
 
     return TOOLS.filter(tool => {
-      if (tool.id === node.toolId) return false;
+      if (tool.id === node.tool_id) return false;
 
       if (tool.id === 'text-generation') {
-        if (node.toolId === 'text-generation') {
+        if (node.tool_id === 'text-generation') {
           return true;
         }
         return true;
       }
 
-      if (node.toolId === 'text-generation') {
+      if (node.tool_id === 'text-generation') {
         if (tool.outputs.length !== outputCount) return false;
         return tool.outputs.every((out, idx) => out.type === outputTypes[idx]);
       }
@@ -222,7 +235,7 @@ export const useNodeManagement = ({
     const newToolOutputs = newTool.outputs;
 
     // Validate compatibility
-    if (node.toolId !== 'text-generation' && newTool.id !== 'text-generation') {
+    if (node.tool_id !== 'text-generation' && newTool.id !== 'text-generation') {
       if (currentNodeOutputs.length !== newToolOutputs.length) {
         console.warn('Output count mismatch');
         return;
@@ -267,10 +280,10 @@ export const useNodeManagement = ({
     }
 
     // 3. 保留兼容的数据（覆盖默认值）
-    // Preserve customOutputs for text-generation
-    if (newTool.id === 'text-generation' && node.toolId === 'text-generation') {
-      if (node.data.customOutputs) {
-        newData.customOutputs = node.data.customOutputs;
+    // Preserve custom_outputs for text-generation
+    if (newTool.id === 'text-generation' && node.tool_id === 'text-generation') {
+      if (node.data.custom_outputs) {
+        newData.custom_outputs = node.data.custom_outputs;
       }
       if (node.data.mode) {
         newData.mode = node.data.mode;
@@ -279,7 +292,7 @@ export const useNodeManagement = ({
 
     // Preserve aspectRatio for image/video tools
     if ((newTool.id === 'text-to-image' || newTool.id === 'image-to-image' || newTool.id.includes('video-gen')) &&
-        (node.toolId === 'text-to-image' || node.toolId === 'image-to-image' || node.toolId.includes('video-gen'))) {
+        (node.tool_id === 'text-to-image' || node.tool_id === 'image-to-image' || node.tool_id.includes('video-gen'))) {
       if (node.data.aspectRatio) {
         newData.aspectRatio = node.data.aspectRatio;
       }
@@ -293,7 +306,7 @@ export const useNodeManagement = ({
 
     setWorkflow(prev => prev ? ({
       ...prev,
-      nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, toolId: newToolId, data: newData } : n),
+      nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, tool_id: newToolId, data: newData } : n),
       isDirty: true
     }) : null);
   }, [workflow, getNodeOutputs, setWorkflow]);
@@ -317,7 +330,7 @@ export const useNodeManagement = ({
 
     const newNode: WorkflowNode = {
       id: newNodeId,
-      toolId: tool.id,
+      tool_id: tool.id,
       x: worldPos.x,
       y: worldPos.y,
       status: NodeStatus.IDLE,
@@ -326,10 +339,10 @@ export const useNodeManagement = ({
 
     const newConn = {
       id: `conn-${Date.now()}`,
-      sourceNodeId: newNodeId,
-      sourcePortId: tool.outputs[0].id,
-      targetNodeId: node.id,
-      targetPortId: port.id
+      source_node_id: newNodeId,
+      source_port_id: tool.outputs[0].id,
+      target_node_id: node.id,
+      target_port_id: port.id
     };
 
     setWorkflow(prev => {
@@ -357,13 +370,13 @@ export const useNodeManagement = ({
     const defaultData: Record<string, any> = {};
     if (targetTool.models && targetTool.models.length > 0) defaultData.model = targetTool.models[0].id;
     if (targetTool.id === 'text-generation') {
-      defaultData.customOutputs = [{ id: 'out-text', label: t('execution_results'), description: 'Main text response.' }];
+      defaultData.custom_outputs = [{ id: 'out-text1', label: t('execution_results'), description: 'Main text response.' }];
       defaultData.mode = 'basic';
     }
 
     const newNode: WorkflowNode = {
       id: newNodeId,
-      toolId: targetTool.id,
+      tool_id: targetTool.id,
       x: worldPos.x,
       y: worldPos.y,
       status: NodeStatus.IDLE,
@@ -372,10 +385,10 @@ export const useNodeManagement = ({
 
     const newConn = {
       id: `conn-${Date.now()}`,
-      sourceNodeId: node.id,
-      sourcePortId: port.id,
-      targetNodeId: newNodeId,
-      targetPortId: matchingInput.id
+      source_node_id: node.id,
+      source_port_id: port.id,
+      target_node_id: newNodeId,
+      target_port_id: matchingInput.id
     };
 
     setWorkflow(prev => {
