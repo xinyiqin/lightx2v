@@ -85,25 +85,29 @@ function textResultDisplay(val: any, t: (key: string) => string): string {
   return String(val);
 }
 
-function ResolvedImage({ content, resolveLightX2VResultRef, className }: { content: any; resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>; className?: string }) {
+/** 与运行结果栏、弹窗共用：支持 port-keyed（单 key 解包为 value），与 historyEntryToDisplayValue 一致 */
+export function ResolvedImage({ content, resolveLightX2VResultRef, className }: { content: any; resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
+  const displayContent = content != null && typeof content === 'object' && !Array.isArray(content) && Object.keys(content).length === 1
+    ? (content as Record<string, unknown>)[Object.keys(content)[0]]
+    : content;
   useEffect(() => {
-    if (content == null) { setUrl(null); return; }
-    if (isLightX2VResultRef(content) && resolveLightX2VResultRef) {
+    if (displayContent == null) { setUrl(null); return; }
+    if (isLightX2VResultRef(displayContent) && resolveLightX2VResultRef) {
       let cancelled = false;
-      resolveLightX2VResultRef(content).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
+      resolveLightX2VResultRef(displayContent).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
       return () => { cancelled = true; };
     }
-    if (content && typeof content === 'object' && content.kind === 'url' && typeof content.url === 'string') {
-      setUrl(getAssetPath(content.url) || content.url);
+    if (displayContent && typeof displayContent === 'object' && (displayContent as any).kind === 'url' && typeof (displayContent as any).url === 'string') {
+      setUrl(getAssetPath((displayContent as any).url) || (displayContent as any).url);
       return;
     }
-    const direct = typeof content === 'string' ? (content.startsWith('http') || content.startsWith('data:') ? content : getAssetPath(content)) : getAssetPath(content);
+    const direct = typeof displayContent === 'string' ? (displayContent.startsWith('http') || displayContent.startsWith('data:') ? displayContent : getAssetPath(displayContent)) : getAssetPath(displayContent);
     setUrl(direct || null);
-  }, [content, resolveLightX2VResultRef]);
+  }, [displayContent, resolveLightX2VResultRef]);
   if (url) return <img src={url} className={className} alt="" />;
-  if (content != null && isLightX2VResultRef(content)) return <div className={className + ' flex items-center justify-center text-[9px] text-slate-500 uppercase'}>Loading...</div>;
-  return <img src={getAssetPath(content)} className={className} alt="" />;
+  if (displayContent != null && isLightX2VResultRef(displayContent)) return <div className={className + ' flex items-center justify-center text-[9px] text-slate-500 uppercase'}>Loading...</div>;
+  return <img src={getAssetPath(displayContent)} className={className} alt="" />;
 }
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({

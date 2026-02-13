@@ -82,8 +82,9 @@ export const useResultManagement = ({
     const tool = TOOLS.find(t => t.id === node.tool_id);
     let content: any;
     if (expandedOutput.historyEntryId) {
-      const list = workflow.nodeOutputHistory?.[expandedOutput.nodeId] || [];
-      const entry = list.find(e => e.id === expandedOutput.historyEntryId);
+      const raw = workflow.nodeOutputHistory?.[expandedOutput.nodeId];
+      const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+      const entry = list.find((e: any) => e.id === expandedOutput.historyEntryId);
       content = entry ? historyEntryToDisplayValue(entry) : undefined;
     } else {
       content = node.output_value;
@@ -100,7 +101,14 @@ export const useResultManagement = ({
     }
     if (!content && tool?.category === 'Input') content = node.data.value;
     let label = (lang === 'zh' ? tool?.name_zh : tool?.name) || 'Output';
-    const type = tool?.outputs?.[0]?.type || DataType.TEXT;
+    let type = tool?.outputs?.[0]?.type || DataType.TEXT;
+    if (content && typeof content === 'object' && !Array.isArray(content)) {
+      const outName = (content as any).output_name;
+      const firstVal = outName == null && Object.keys(content).length >= 1 ? (content as any)[Object.keys(content)[0]] : null;
+      const resolvedOutName = outName ?? (firstVal && typeof firstVal === 'object' ? (firstVal as any).output_name : null);
+      if (resolvedOutName === 'output_image') type = DataType.IMAGE;
+      else if (resolvedOutName === 'output_video') type = DataType.VIDEO;
+    }
     if (expandedOutput.fieldId && content && typeof content === 'object') {
       content = content[expandedOutput.fieldId];
       // Use port label from custom_outputs for text-generation multi-port
@@ -122,7 +130,8 @@ export const useResultManagement = ({
     for (const nodeId of Object.keys(nodeHistory)) {
       const node = workflow.nodes.find(n => n.id === nodeId);
       if (!node) continue;
-      const list = nodeHistory[nodeId] || [];
+      const raw = nodeHistory[nodeId];
+      const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
       for (const entry of list) {
         if (!showIntermediateResults && !isTerminal(node)) continue;
         const historyValue = historyEntryToDisplayValue(entry);

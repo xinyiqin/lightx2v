@@ -4,10 +4,11 @@ import { DataType } from '../../../types';
 import { downloadFile } from '../../utils/download';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { pcmToWavUrl } from '../../utils/audio';
-import { getAssetPath } from '../../utils/assetPath';
+import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { collectLightX2VResultRefs } from '../../utils/resultRef';
 import { AudioNodePreview } from '../previews/AudioNodePreview';
+import { ResolvedImage } from '../editor/ResultsPanel';
 
 interface ExpandedOutputModalProps {
   lang: Language;
@@ -16,6 +17,12 @@ interface ExpandedOutputModalProps {
   /** 仅用于本地 file 类输出（kind: 'file', file_id）；x2v 任务结果用 resolveLightX2VResultRef，不请求本地 node output url */
   getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
   workflowId?: string;
+  /** 传入时优先从 node.output_value 取 ref，与节点小图一致，刚生成即可显示 */
+  workflow?: { nodes: Array<{ id: string; output_value?: any }> } | null;
+  /** 与节点右侧预览、运行结果栏同一数据源，传入后优先从此取 IMAGE ref，避免首次打开无图 */
+  sourceOutputs?: Record<string, any>;
+  /** 与运行结果栏同源：当前展开节点在 resultEntries 中的 output（可能已由 history 解包为 ref），弹窗优先用此显示图片 */
+  resultEntryOutputForNode?: any;
   expandedResultData: {
     content: any;
     label: string;
@@ -58,6 +65,16 @@ function getLightX2VRefFromContent(content: any): LightX2VResultRef | null {
   return refs.length > 0 ? refs[0] : null;
 }
 
+/** 将可能为 camelCase 或 snake_case 的 ref 规范为 { kind, task_id, output_name, is_cloud }，无法识别则返回 null */
+function normalizeTaskRef(val: any): { kind: 'task'; task_id: string; output_name: string; is_cloud: boolean } | null {
+  if (val == null || typeof val !== 'object' || Array.isArray(val)) return null;
+  const taskId = (val as any).task_id ?? (val as any).taskId;
+  const outputName = (val as any).output_name ?? (val as any).outputName;
+  if (typeof taskId !== 'string' || typeof outputName !== 'string') return null;
+  const is_cloud = (val as any).is_cloud === true;
+  return { kind: 'task', task_id: taskId, output_name: outputName, is_cloud };
+}
+
 export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   lang,
   expandedOutput,
@@ -65,6 +82,9 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   resolveLightX2VResultRef,
   getNodeOutputUrl,
   workflowId,
+  workflow,
+  sourceOutputs,
+  resultEntryOutputForNode,
   isEditingResult,
   tempEditValue,
   onClose,
@@ -75,20 +95,97 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   const { t } = useTranslation(lang);
   const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string | null>(null);
   const [resolvedFileUrl, setResolvedFileUrl] = useState<string | null>(null);
+  /** 首次打开时 content 可能尚未就绪（workflow 未更新），从 workflow 再读一次 ref，触发重渲染以显示图片 */
+  const [lateWorkflowRef, setLateWorkflowRef] = useState<LightX2VResultRef | null>(null);
 
-  // x2v 任务结果（含云端）：只走 resolveLightX2VResultRef，不请求本地 node output url
-  const lightX2VRef = expandedResultData?.content ? getLightX2VRefFromContent(expandedResultData.content) : null;
+  // 与节点右侧预览、运行结果栏同源，优先从此取 ref（IMAGE/VIDEO/AUDIO 均避免 expandedResultData 未就绪时无媒体）
+  const portIdByType = React.useMemo(() => ({
+    [DataType.IMAGE]: 'out-image',
+    [DataType.VIDEO]: 'out-video',
+    [DataType.AUDIO]: 'out-audio'
+  }), []);
+  const refFromSourceOutputsTop = React.useMemo(() => {
+    if (!expandedOutput?.nodeId || !sourceOutputs) return null;
+    const type = expandedResultData?.type;
+    const portId = type != null && type in portIdByType ? portIdByType[type as DataType] : 'out-image';
+    const soRaw = sourceOutputs[expandedOutput.nodeId];
+    if (soRaw == null) return null;
+    const soPortVal =
+      typeof soRaw === 'object' && !Array.isArray(soRaw) && portId in soRaw
+        ? (soRaw as Record<string, unknown>)[portId]
+        : typeof soRaw === 'object' && !Array.isArray(soRaw) && Object.keys(soRaw).length === 1
+          ? (soRaw as Record<string, unknown>)[Object.keys(soRaw)[0]]
+          : soRaw;
+    return soPortVal != null ? (normalizeTaskRef(soPortVal) ?? getLightX2VRefFromContent(soPortVal)) : null;
+  }, [expandedOutput?.nodeId, sourceOutputs, expandedResultData?.type, portIdByType]);
+
+  /** 与运行结果栏同源：从 resultEntryOutputForNode 解包出 ref（与 ResolvedImage 收到的 content 一致），供 IMAGE 优先显示 */
+  const refFromResultEntryTop = React.useMemo(() => {
+    const out = resultEntryOutputForNode;
+    if (out == null) return null;
+    const unwrapped = typeof out === 'object' && !Array.isArray(out) && Object.keys(out).length === 1
+      ? (out as Record<string, unknown>)[Object.keys(out)[0]]
+      : out;
+    return unwrapped != null ? (normalizeTaskRef(unwrapped) ?? (isLightX2VResultRef(unwrapped) ? unwrapped : null) ?? getLightX2VRefFromContent(unwrapped)) : null;
+  }, [resultEntryOutputForNode]);
+
+  /** 从 sourceOutputs 取当前类型的端口内容（供 AUDIO/VIDEO 与 content 同源优先使用） */
+  const contentFromSourceOutputsTop = React.useMemo(() => {
+    if (!expandedOutput?.nodeId || !sourceOutputs) return null;
+    const type = expandedResultData?.type;
+    const portId = type != null && type in portIdByType ? portIdByType[type as DataType] : 'out-image';
+    const soRaw = sourceOutputs[expandedOutput.nodeId];
+    if (soRaw == null) return null;
+    if (typeof soRaw === 'object' && !Array.isArray(soRaw) && portId in soRaw) return (soRaw as Record<string, unknown>)[portId];
+    if (typeof soRaw === 'object' && !Array.isArray(soRaw) && Object.keys(soRaw).length === 1) return (soRaw as Record<string, unknown>)[Object.keys(soRaw)[0]];
+    return soRaw;
+  }, [expandedOutput?.nodeId, sourceOutputs, expandedResultData?.type, portIdByType]);
+
+  // 优先用 workflow 里节点最新 output_value 取 ref，与节点小图一致，刚生成即可显示
+  const contentForRef =
+    workflow && expandedOutput?.nodeId
+      ? (() => {
+          const node = workflow.nodes.find((n: { id: string }) => n.id === expandedOutput!.nodeId);
+          const ov = node?.output_value;
+          if (expandedOutput?.fieldId && ov && typeof ov === 'object') return ov[expandedOutput.fieldId] ?? ov;
+          return ov;
+        })()
+      : expandedResultData?.content;
+  const lightX2VRef = contentForRef != null ? getLightX2VRefFromContent(contentForRef) : null;
+
+  // 首次打开时 expandedResultData.content 可能尚未包含 output_value，从 workflow 直接再读一次（IMAGE/VIDEO），以便 workflow 更新后能立即显示
   useEffect(() => {
-    if (!lightX2VRef || !resolveLightX2VResultRef) {
+    const type = expandedResultData?.type;
+    if (!expandedOutput?.nodeId || !workflow || (type !== DataType.IMAGE && type !== DataType.VIDEO)) {
+      setLateWorkflowRef(null);
+      return;
+    }
+    const node = workflow.nodes.find((n: { id: string }) => n.id === expandedOutput.nodeId);
+    const ov = node?.output_value;
+    if (ov == null || typeof ov !== 'object') {
+      setLateWorkflowRef(null);
+      return;
+    }
+    const portId = type === DataType.VIDEO ? 'out-video' : 'out-image';
+    const portVal = typeof ov === 'object' && !Array.isArray(ov) && portId in ov
+      ? (ov as Record<string, unknown>)[portId]
+      : Object.keys(ov).length >= 1 ? (ov as Record<string, unknown>)[Object.keys(ov)[0]] : null;
+    const ref = portVal != null ? (normalizeTaskRef(portVal) ?? getLightX2VRefFromContent(portVal)) : getLightX2VRefFromContent(ov);
+    setLateWorkflowRef(ref);
+  }, [workflow, expandedOutput?.nodeId, expandedResultData?.type]);
+
+  const refToResolve = refFromResultEntryTop ?? refFromSourceOutputsTop ?? lightX2VRef ?? lateWorkflowRef;
+  useEffect(() => {
+    if (!refToResolve || !resolveLightX2VResultRef) {
       setResolvedMediaUrl(null);
       return;
     }
     let cancelled = false;
-    resolveLightX2VResultRef(lightX2VRef).then(url => {
+    resolveLightX2VResultRef(refToResolve).then(url => {
       if (!cancelled) setResolvedMediaUrl(url);
     }).catch(() => { if (!cancelled) setResolvedMediaUrl(null); });
     return () => { cancelled = true; };
-  }, [lightX2VRef?.task_id, lightX2VRef?.output_name, lightX2VRef?.is_cloud, resolveLightX2VResultRef]);
+  }, [refToResolve?.task_id, refToResolve?.output_name, refToResolve?.is_cloud, resolveLightX2VResultRef]);
 
   // 仅对本地 file 类输出（kind: 'file', file_id）请求本地后端；x2v ref 已在上方处理，此处不再请求
   useEffect(() => {
@@ -114,7 +211,9 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
     const fileId = (effectiveContent as { file_id?: string }).file_id;
     const runId = (effectiveContent as { run_id?: string }).run_id;
     const portId = expandedOutput.fieldId || effectivePortId || 'output';
-    if (!workflowId || !fileId || !getNodeOutputUrl) {
+    // Avoid requesting URL when file_id looks like a port id (e.g. "out-image") to prevent 404
+    const looksLikePortId = !fileId || fileId === portId || /^out-/.test(fileId);
+    if (!workflowId || !fileId || !getNodeOutputUrl || looksLikePortId) {
       setResolvedFileUrl(null);
       return;
     }
@@ -236,26 +335,28 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
             )
           ) : expandedResultData.type === DataType.IMAGE ? (
             (() => {
-              const { effectiveContent: raw } = unwrapPortFileRef(expandedResultData.content, DataType.IMAGE);
-              const singleRaw = Array.isArray(raw) ? (raw.find((x: any) => isFileRef(x)) ?? raw[0]) : raw;
-              const isRef = getLightX2VRefFromContent(singleRaw ?? raw) != null;
-              const isUrlRef = singleRaw && typeof singleRaw === 'object' && (singleRaw as any).kind === 'url' && typeof (singleRaw as any).url === 'string';
-              const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
-              const fallbackFromRaw = (r: any) => {
-                if (r == null || r === '') return '';
-                if (typeof r === 'string') return (r.startsWith('http') || r.startsWith('data:')) ? r : getAssetPath(r);
-                if (typeof r === 'object' && (r.url || r.file_url)) return getAssetPath((r as any).url || (r as any).file_url) || (r as any).url || (r as any).file_url;
-                return '';
-              };
-              const imgSrc = fromApi || (isRef ? (resolvedMediaUrl ?? '') : (isUrlRef ? (singleRaw as any).url : fallbackFromRaw(singleRaw)));
-              if (!imgSrc || imgSrc === '') {
-                return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(singleRaw) && !resolvedFileUrl) ? 'Loading...' : 'No image data'}</div>;
-              }
-              return <img src={imgSrc} className="max-h-full rounded-2xl shadow-2xl border border-slate-800" alt="" />;
+              // 与下方运行结果栏完全一致：用同一份 output，同一套 (Array.isArray ? res : [res])，同一组件 ResolvedImage
+              const res = resultEntryOutputForNode ?? expandedResultData.content;
+              const items = Array.isArray(res) ? res : res != null ? [res] : [];
+              if (items.length === 0) return <div className="text-sm text-slate-500">No image data</div>;
+              return (
+                <div className="flex gap-4 flex-wrap justify-center">
+                  {items.map((img, i) => (
+                    <div key={i} className="flex items-center justify-center">
+                      <ResolvedImage
+                        content={img}
+                        resolveLightX2VResultRef={resolveLightX2VResultRef}
+                        className="max-h-full max-w-full rounded-2xl shadow-2xl border border-slate-800 object-contain"
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
             })()
           ) : expandedResultData.type === DataType.AUDIO ? (
             (() => {
               const { effectiveContent: audioContent } = unwrapPortFileRef(expandedResultData.content, DataType.AUDIO);
+              const audioContentForDisplay = contentFromSourceOutputsTop ?? audioContent;
               const getMediaValue = (value: any) => {
                 if (!value) return '';
                 if (typeof value === 'string') return value;
@@ -276,11 +377,11 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               };
 
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
-              const audioValue = getMediaValue(audioContent);
+              const audioValue = getMediaValue(audioContentForDisplay);
               const fallback = !audioValue ? '' : (audioValue.startsWith('data:') ? audioValue : (audioValue.startsWith('http') || audioValue.startsWith('/') || audioValue.startsWith('./assets') || audioValue.startsWith('blob:') ? getAssetPath(audioValue) : pcmToWavUrl(audioValue)));
               const audioSrc = (resolvedMediaUrl || fromApi || fallback) || '';
               if (!audioSrc) {
-                return <div className="text-sm text-slate-500">{isFileRef(audioContent) && !resolvedFileUrl ? 'Loading...' : 'No audio data'}</div>;
+                return <div className="text-sm text-slate-500">{isFileRef(audioContentForDisplay) && !resolvedFileUrl ? 'Loading...' : 'No audio data'}</div>;
               }
               return (
                 <div className="w-full max-w-2xl">
@@ -298,7 +399,10 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
           ) : (
             (() => {
               const { effectiveContent: raw } = unwrapPortFileRef(expandedResultData.content, DataType.VIDEO);
-              const isRef = getLightX2VRefFromContent(raw) != null;
+              const rawForDisplay = contentFromSourceOutputsTop ?? raw;
+              const refFromContent = getLightX2VRefFromContent(rawForDisplay);
+              const refForDisplay = refFromSourceOutputsTop ?? refFromContent ?? lightX2VRef ?? lateWorkflowRef ?? null;
+              const isRef = refForDisplay != null || getLightX2VRefFromContent(raw) != null;
               const fromApi = resolvedFileUrl ? (getAssetPath(resolvedFileUrl) || resolvedFileUrl) : '';
               const getMediaValue = (val: any): string => {
                 if (val == null) return '';
@@ -318,11 +422,13 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
                 }
                 return '';
               };
-              const v = getMediaValue(raw);
+              const v = getMediaValue(rawForDisplay);
               const fallback = v !== '' ? (v.startsWith('http') || v.startsWith('data:') || v.startsWith('blob:') ? v : getAssetPath(v)) : '';
-              const videoSrc = (resolvedMediaUrl || fromApi || fallback) || '';
+              const isLocalRef = refForDisplay && (refForDisplay as any).is_cloud !== true && typeof (refForDisplay as any).task_id === 'string' && typeof (refForDisplay as any).output_name === 'string';
+              const localRefUrl = isLocalRef ? getResultRefPreviewUrl(refForDisplay as { task_id: string; output_name: string }) : '';
+              const videoSrc = (resolvedMediaUrl || localRefUrl || fromApi || fallback) || '';
               if (!videoSrc || videoSrc === '') {
-                return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(raw) && !resolvedFileUrl) ? 'Loading...' : 'No video data'}</div>;
+                return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(rawForDisplay) && !resolvedFileUrl) ? 'Loading...' : 'No video data'}</div>;
               }
               return (
                 <video

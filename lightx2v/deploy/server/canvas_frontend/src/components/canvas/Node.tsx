@@ -32,7 +32,7 @@ import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries, getEntryPortKeyedValue } from '../../utils/historyEntry';
-import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
+import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getWorkflowFileUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { getOutputValueByPort, setOutputValueByPort, INPUT_PORT_IDS } from '../../utils/outputValuePort';
@@ -500,16 +500,27 @@ export const Node: React.FC<NodeProps> = ({
   }, [node.id, node.data.value]);
 
   // 载入工作流后：output_value["out-image"] 或 data.value 可能为 file_id 引用，通过 file_id 拉取并显示预览
+  // 优先用 output_value（保存/加载后多为 port-keyed），避免上传为 file 后 data.value 未同步导致输入节点变空
   const imagePortValue = node.tool_id === 'image-input' ? getOutputValueByPort(node, 'out-image') : undefined;
-  const effectiveImageValues = Array.isArray(imagePortValue) ? imagePortValue : (Array.isArray(node.data.value) ? node.data.value : (node.data.value ? [node.data.value] : []));
+  const fromData = Array.isArray(node.data.value) ? node.data.value : (node.data.value != null ? [node.data.value] : []);
+  const fromOutputPort =
+    node.output_value && typeof node.output_value === 'object' && !Array.isArray(node.output_value) && 'out-image' in node.output_value
+      ? (Array.isArray((node.output_value as Record<string, unknown>)['out-image'])
+          ? (node.output_value as Record<string, unknown>)['out-image'] as unknown[]
+          : [(node.output_value as Record<string, unknown>)['out-image']].filter(Boolean))
+      : [];
+  const effectiveImageValues =
+    (Array.isArray(imagePortValue) && imagePortValue.length > 0 ? imagePortValue : null) ??
+    (fromData.length > 0 ? fromData : null) ??
+    (fromOutputPort.length > 0 ? fromOutputPort : []);
   const [resolvedFileRefUrls, setResolvedFileRefUrls] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
-    if (node.tool_id !== 'image-input' || !workflow?.id) return;
+    if (node.tool_id !== 'image-input' || !workflow?.id || !getNodeOutputUrl) return;
     const values = effectiveImageValues;
     const fileRefs = values.filter((v: unknown) => v && typeof v === 'object' && (v as { file_id?: string }).file_id) as { file_id: string; mime_type?: string; ext?: string; run_id?: string }[];
     if (fileRefs.length === 0) return;
     let cancelled = false;
-    Promise.all(fileRefs.map((ref) => getNodeOutputUrl(workflow.id!, node.id, 'out-image', ref.file_id, ref.run_id))).then((urls) => {
+    Promise.all(fileRefs.map((ref) => getNodeOutputUrl(node.id, 'out-image', ref.file_id, ref.run_id))).then((urls) => {
       if (cancelled) return;
       setResolvedFileRefUrls((prev) => {
         const next = { ...prev };
@@ -520,7 +531,7 @@ export const Node: React.FC<NodeProps> = ({
       });
     });
     return () => { cancelled = true; };
-  }, [node.id, node.tool_id, workflow?.id, node.output_value, node.data?.value]);
+  }, [node.id, node.tool_id, workflow?.id, node.output_value, node.data?.value, getNodeOutputUrl, effectiveImageValues]);
 
   // 载入工作流后：audio-input / video-input 的 output_value 可能为 file 引用，需拉取为 data URL 再展示
   const mediaValueForRef = node.tool_id === 'audio-input' || node.tool_id === 'video-input'
@@ -533,15 +544,21 @@ export const Node: React.FC<NodeProps> = ({
     if (!mediaFileRef?.file_id || !workflow?.id) return;
     const mediaPortId = node.tool_id === 'audio-input' ? 'out-audio' : 'out-video';
     let cancelled = false;
-    getNodeOutputUrl(workflow.id, node.id, mediaPortId, mediaFileRef.file_id, (mediaFileRef as any).run_id).then((url) => {
+    getNodeOutputUrl(node.id, mediaPortId, mediaFileRef.file_id, (mediaFileRef as any).run_id).then((url) => {
       if (!cancelled && url) setResolvedFileRefUrls((prev) => ({ ...prev, [mediaFileRef.file_id]: url }));
     });
     return () => { cancelled = true; };
   }, [node.id, workflow?.id, mediaFileRef?.file_id]);
 
-  const resolveMediaSrc = (value?: string | { file_id?: string }) => {
+  const resolveMediaSrc = (value?: string | { file_id?: string; file_url?: string }) => {
     if (value == null) return '';
-    if (typeof value !== 'string') return value?.file_id ? resolvedFileRefUrls[value.file_id] ?? '' : '';
+    if (typeof value !== 'string') {
+      if (value?.file_id && resolvedFileRefUrls[value.file_id]) return resolvedFileRefUrls[value.file_id];
+      // 后端返回的 file_url 可直接用于预览（与生图节点一致），避免等 getNodeOutputUrl 才显示
+      const url = (value as { file_url?: string }).file_url;
+      if (typeof url === 'string' && (url.startsWith('/') || url.startsWith('http'))) return getAssetPath(url);
+      return value?.file_id ? resolvedFileRefUrls[value.file_id] ?? '' : '';
+    }
     if (value.startsWith('local://')) return resolvedLocalUrls[value] || '';
     if (value.startsWith('data:') || value.startsWith('http') || value.startsWith('/api/')) return value;
     return getAssetPath(value);
@@ -550,8 +567,20 @@ export const Node: React.FC<NodeProps> = ({
   // output_value["out-image"] 或 data.value 为数据源；image_edits 仅存 crop_box，不存 base64；载入时用 crop_box + 值显示
   const rawImageValues = effectiveImageValues;
   const imageEdits = Array.isArray(node.data.image_edits) ? node.data.image_edits : [];
-  const imageEntries = rawImageValues.map((value: string | { type?: string; file_id?: string; file_url?: string }, index: number) => {
-    const display = resolveMediaSrc(value);
+  const imageEntries = rawImageValues.map((value: string | { type?: string; file_id?: string; file_url?: string; mime_type?: string; ext?: string; run_id?: string }, index: number) => {
+    let display = resolveMediaSrc(value);
+    // 无 file_url 且未解析到 URL 时，用 file_id + run_id 直接拼 /assets/workflow/file 展示（与生图节点一致）
+    if (!display && typeof value === 'object' && value?.file_id && workflow?.id) {
+      display = getWorkflowFileUrl(
+        workflow.id,
+        value.file_id,
+        value.mime_type,
+        value.ext,
+        node.id,
+        'out-image',
+        value.run_id
+      );
+    }
     const existing = imageEdits[index] as { crop_box?: { x: number; y: number; w: number; h: number }; cropped?: string } | undefined;
     const crop_box = existing?.crop_box ?? { x: 10, y: 10, w: 80, h: 80 };
     // 不使用存储的 base64；仅用 URL 或载入时用 display（output_value/data.value）作为显示
@@ -564,25 +593,20 @@ export const Node: React.FC<NodeProps> = ({
     };
   });
 
-  // 与主应用 TaskDetails 一致：排队显示等待个数，运行中才计时，成功显示运行时间，取消显示已取消
+  // 与主应用一致：排队显示等待个数，运行中才计时，成功显示运行时间；进度条用整体进度 (已完成数/总数)，与主应用 getOverallProgress 一致
   const runState = node.run_state as NodeRunState | undefined;
   const taskStatus = runState?.status;
-  const firstSubtask = runState?.subtasks?.[0];
+  const subtasks = runState?.subtasks ?? [];
+  const firstSubtask = subtasks[0];
   const queueOrder = firstSubtask?.estimated_pending_order;
   const isTaskPending = taskStatus === 'PENDING' || (firstSubtask?.status === 'PENDING');
   const isTaskRunning = taskStatus === 'RUNNING' || (firstSubtask?.status === 'RUNNING');
-  const getSubtaskProgress = (subtask: { status: string; elapses?: Record<string, number>; estimated_running_secs?: number }): number => {
-    if (subtask.status === 'SUCCEED') return 100;
-    if (subtask.status === 'RUNNING') {
-      const elapses = subtask.elapses || {};
-      const runningTime = elapses['RUNNING-'] || 0;
-      const estimatedTotal = subtask.estimated_running_secs || 0;
-      if (estimatedTotal > 0) return Math.min(Math.round((runningTime / estimatedTotal) * 100), 95);
-      return 50;
-    }
-    return 0;
+  const getOverallProgress = (): number => {
+    if (!subtasks.length) return 0;
+    const completedCount = subtasks.filter((s: { status: string }) => s.status === 'SUCCEED').length;
+    return Math.round((completedCount / subtasks.length) * 100);
   };
-  const progressPercent = firstSubtask ? getSubtaskProgress(firstSubtask) : 0;
+  const progressPercent = getOverallProgress();
 
   const durationText =
     node.error === 'Cancelled'
@@ -731,8 +755,9 @@ export const Node: React.FC<NodeProps> = ({
   const historyDropdownRef = React.useRef<HTMLDivElement>(null);
 
   const nodeHistoryEntries = React.useMemo(() => {
-    const raw = workflow.nodeOutputHistory?.[node.id] ?? [];
-    return normalizeHistoryEntries(raw as any[]);
+    const raw = workflow.nodeOutputHistory?.[node.id];
+    const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+    return normalizeHistoryEntries(list as any[]);
   }, [workflow.nodeOutputHistory, node.id]);
 
   // 历史与 nodes 一致：port_keyed。输入节点用 INPUT_PORT_IDS 取对应 port（out-image/out-audio/out-video/out-text）；非输入节点取整条 port_keyed 或单端口值
@@ -797,7 +822,7 @@ export const Node: React.FC<NodeProps> = ({
       const fid = fileVal?.file_id;
       if (fid && workflow.id) {
         const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-audio';
-        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         if (url) return getAssetPath(url) ?? url;
       }
       return null;
@@ -831,7 +856,7 @@ export const Node: React.FC<NodeProps> = ({
       const fid = fileVal?.file_id;
       if (fid && workflow.id) {
         const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-video';
-        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         return url ? (getAssetPath(url) ?? url) : null;
       }
       return null;
@@ -865,7 +890,7 @@ export const Node: React.FC<NodeProps> = ({
       const fid = fileVal?.file_id;
       if (fid && workflow.id) {
         const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-image';
-        const url = await getNodeOutputUrl(workflow.id, node.id, pid, fid, fileVal?.run_id);
+        const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         return url ? (getAssetPath(url) ?? url) : null;
       }
       return null;

@@ -1401,6 +1401,9 @@ const App: React.FC = () => {
         expandedResultData={expandedResultData}
         resolveLightX2VResultRef={resolveLightX2VResultRef}
         workflowId={workflow?.id}
+        workflow={workflow ?? undefined}
+        sourceOutputs={sourceOutputs}
+        resultEntryOutputForNode={modalState.expandedOutput ? (resultEntries.find(e => e.nodeId === modalState.expandedOutput?.nodeId)?.output) : undefined}
         getNodeOutputUrl={workflow?.id ? getNodeOutputUrlForWorkflow : undefined}
         isEditingResult={modalState.isEditingResult}
         tempEditValue={modalState.tempEditValue}
