@@ -25,9 +25,9 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.table_workflow_chat_history = "workflow_chat_history"
         self.pool = None
         self.metrics_monitor = metrics_monitor
-        self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t"]
+        self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t", "updated_at"]
         # chat_history 与 workflow 分开放置，不放在 workflow 行内
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "tags", "node_output_history", "global_inputs"]
+        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "tags", "node_output_history", "global_inputs", "files_tasks", "messages"]
 
     async def init(self):
         await self.upgrade_db()
@@ -1290,25 +1290,26 @@ class PostgresSQLTaskManager(BaseTaskManager):
                     f"""
                     INSERT INTO {self.table_workflows}
                     (workflow_id, user_id, name, description, create_t, update_t,
-                     nodes, connections, extra_info, visibility, tags, node_output_history, files_tasks, author_id, author_name, global_inputs)
+                     nodes, connections, extra_info, visibility, tags, node_output_history,
+                     files_tasks, author_id, author_name, global_inputs)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     """,
                     workflow_data["workflow_id"],
                     workflow_data["user_id"],
                     workflow_data["name"],
-                    workflow_data.get("description", ""),
+                    workflow_data["description"],
                     workflow_data["create_t"],
                     workflow_data["update_t"],
-                    workflow_data.get("nodes", []),
-                    workflow_data.get("connections", []),
-                    workflow_data.get("extra_info", {}),
-                    workflow_data.get("visibility", "private"),
-                    workflow_data.get("tags", []),
-                    workflow_data.get("node_output_history", {}),
-                    workflow_data.get("files_tasks", {}),
-                    workflow_data.get("author_id"),
-                    workflow_data.get("author_name"),
-                    workflow_data.get("global_inputs", {}),
+                    workflow_data["nodes"],
+                    workflow_data["connections"],
+                    workflow_data["extra_info"],
+                    workflow_data["visibility"],
+                    workflow_data["tags"],
+                    workflow_data["node_output_history"],
+                    workflow_data["files_tasks"],
+                    workflow_data["author_id"],
+                    workflow_data["author_name"],
+                    workflow_data["global_inputs"],
                 )
                 return True
         except:  # noqa
@@ -1410,23 +1411,18 @@ class PostgresSQLTaskManager(BaseTaskManager):
     @class_try_catch_async
     async def get_workflow_chat_history(self, workflow_id, user_id=None):
         """与本地一致：chat_history 单独存储，返回 {workflow_id, messages, updated_at}，updated_at 为毫秒时间戳。"""
-        if user_id is not None:
-            wf = await self.query_workflow(workflow_id, user_id=user_id)
-            if not wf:
-                return None
         conn = await self.get_conn()
         try:
             row = await conn.fetchrow(
-                f"SELECT messages, updated_at FROM {self.table_workflow_chat_history} WHERE workflow_id = $1",
+                f"SELECT * FROM {self.table_workflow_chat_history} WHERE workflow_id = $1",
                 workflow_id,
             )
             if not row:
-                return {"workflow_id": workflow_id, "messages": [], "updated_at": int(datetime.now().timestamp() * 1000)}
-            messages = row["messages"] if isinstance(row["messages"], list) else (json.loads(row["messages"]) if isinstance(row["messages"], str) else [])
-            updated_at = row["updated_at"]
-            if hasattr(updated_at, "timestamp"):
-                updated_at = int(updated_at.timestamp() * 1000)
-            return {"workflow_id": workflow_id, "messages": messages, "updated_at": updated_at}
+                logger.warning(f"Workflow {workflow_id} chat history not found")
+                return None
+            chat_history = dict(row)
+            self.parse_dict(chat_history)
+            return chat_history
         except:  # noqa
             logger.error(f"get_workflow_chat_history error: {traceback.format_exc()}")
             return None

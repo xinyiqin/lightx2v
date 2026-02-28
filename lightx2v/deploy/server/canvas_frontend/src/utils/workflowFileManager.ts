@@ -229,7 +229,7 @@ export async function saveNodeOutputs(
   nodeId: string,
   outputs: Record<string, string | object | any[]>,
   runId?: string
-): Promise<Record<string, SaveNodeOutputResult> | null> {
+): Promise<Record<string, any> | null> {
   if (isStandalone()) return null;
   if (!outputs || Object.keys(outputs).length === 0) return null;
   try {
@@ -283,7 +283,7 @@ export async function saveNodeOutputs(
     }
     if (toSend.length === 0) return null;
 
-    const out: Record<string, SaveNodeOutputResult> = {};
+    const out: Record<string, any> = {};
     for (const { portId, wrappedOutput } of toSend) {
       const body: any = { output_data: wrappedOutput };
       if (runId) body.run_id = runId;
@@ -303,63 +303,33 @@ export async function saveNodeOutputs(
         throw new Error(errorMessage);
       }
       const data = (await response.json()) as {
+        user_id?: string;
+        workflow_id?: string;
         kind?: string;
         file_id?: string;
-        file_url?: string;
-        url?: string;
+        task_id?: string;
+        run_id?: string;
+        ouptut_name?: string;
         mime_type?: string;
         ext?: string;
-        run_id?: string;
-        task_id?: string;
-        output_name?: string;
-        is_cloud?: boolean;
         entries?: Array<{
-          kind?: string; file_id?: string; file_url?: string; url?: string;
-          mime_type?: string; ext?: string; run_id?: string; task_id?: string; output_name?: string; is_cloud?: boolean;
+          user_id?: string;
+          workflow_id?: string;
+          kind?: string;
+          file_id?: string;
+          task_id?: string;
+          run_id?: string;
+          ouptut_name?: string;
+          mime_type?: string;
+          ext?: string;
         }>;
-      };
-
-      /** 将后端返回的单条 entry 转换为 SaveNodeOutputResult */
-      const entryToResult = (e: typeof data): SaveNodeOutputResult => {
-        if (!e) return null;
-        const kind = e.kind ?? (e.file_id ? 'file' : e.task_id ? 'task' : e.url ? 'url' : undefined);
-        const entryRunId = (e as any)?.run_id ?? runId;
-        if (kind === 'file' && e.file_id != null) {
-          const mime = e.mime_type ?? (e.ext ? extToMime(e.ext) : undefined);
-          const extNorm = e.ext != null ? (e.ext.startsWith('.') ? e.ext : `.${e.ext}`) : undefined;
-          return { kind: 'file', file_id: e.file_id, mime_type: mime, ...(extNorm != null && { ext: extNorm }), ...(entryRunId && { run_id: entryRunId }) };
-        }
-        if (kind === 'task') {
-          return { kind: 'task', task_id: e.task_id, output_name: e.output_name, is_cloud: e.is_cloud };
-        }
-        if (kind === 'url') {
-          return { kind: 'url', url: e.url ?? e.file_url };
-        }
-        // fallback: 如果有 file_id 不论 kind 都返回 file ref
-        if (e.file_id != null) {
-          const mime = e.mime_type ?? (e.ext ? extToMime(e.ext) : undefined);
-          const extNorm = e.ext != null ? (e.ext.startsWith('.') ? e.ext : `.${e.ext}`) : undefined;
-          return { kind: 'file', file_id: e.file_id, mime_type: mime, ...(extNorm != null && { ext: extNorm }), ...(entryRunId && { run_id: entryRunId }) };
-        }
-        return null;
       };
 
       // 多图 list 响应：后端返回 { entries: [...] }
       if (Array.isArray(data?.entries) && data.entries.length > 0) {
-        // 将所有 entries 转换为结果数组
-        const allResults = data.entries.map(e => entryToResult(e));
-        const validResults = allResults.filter((r): r is NonNullable<SaveNodeOutputResult> => r != null);
-        if (validResults.length === 1) {
-          // 单项数组平铺
-          out[portId] = validResults[0];
-        } else if (validResults.length > 1) {
-          // 多项数组：保留完整列表，供下游使用
-          out[portId] = { kind: 'file_list', entries: validResults } as SaveNodeOutputResult;
-        } else {
-          out[portId] = null;
-        }
+        out[portId] = data.entries;
       } else {
-        out[portId] = entryToResult(data);
+        out[portId] = data;
       }
     }
     return out;
@@ -664,7 +634,16 @@ export async function reuseNodeOutputHistory(
 }
 
 /** saveInputFileViaOutputSave 的返回类型 */
-type SaveInputFileRef = { kind: 'file'; file_id: string; file_url: string; mime_type?: string; ext?: string; run_id?: string };
+type SaveInputFileRef = {
+  kind: 'file';
+  user_id?: string;
+  workflow_id?: string;
+  file_id: string;
+  file_url: string;
+  mime_type?: string;
+  ext?: string;
+  run_id?: string;
+};
 
 /** 同一 (workflowId, nodeId, portId) 的 save 去重：后发请求等待先发结果，避免轮询/双跑时重复 POST 产生两个文件 */
 const pendingSaveByKey = new Map<string, Promise<SaveInputFileRef | null>>();
@@ -777,9 +756,11 @@ export async function saveInputFileViaOutputSave(
           ? (String((r as any).ext).startsWith('.') ? String((r as any).ext) : `.${(r as any).ext}`)
           : ext !== '.bin' ? ext : undefined;
         const outRunId: string | undefined = (r as any)?.run_id || undefined;
-        const file_url = (r as any)?.file_url ?? (r as any)?.url ?? getWorkflowFileUrl(workflowId, fileId, outMime, outExt, nodeId, portId, outRunId);
         const ref: SaveInputFileRef = {
-          kind: 'file', file_id: String(fileId), file_url,
+          kind: 'file', file_id: String(fileId),
+          file_url: "",
+          user_id: r?.user_id,
+          workflow_id: r?.workflow_id,
           ...(outMime != null && { mime_type: outMime }),
           ...(outExt != null && { ext: outExt }),
           ...(outRunId != null && { run_id: outRunId }),

@@ -918,6 +918,9 @@ export const useWorkflow = () => {
             if (isTextInputFileRef) {
               return { ...n, output_value: n.output_value, data: { ...n.data, value: loadedOutputs[n.id] ?? n.data?.value } };
             }
+            if (n.tool_id === 'image-input') {
+              return n;
+            }
             const canonical = outVal ?? n.data?.value;
             return { ...n, output_value: canonical, data: { ...n.data, value: canonical } };
           }
@@ -942,6 +945,7 @@ export const useWorkflow = () => {
           userId: wf.user_id,
           tags: wf.tags ?? []
         };
+        console.log('[Workflow] loaded workflow:', workflow);
         setWorkflow(workflow);
         return { workflow };
       } else {

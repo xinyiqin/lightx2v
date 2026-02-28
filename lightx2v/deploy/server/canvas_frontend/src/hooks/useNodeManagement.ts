@@ -151,12 +151,21 @@ export const useNodeManagement = ({
     // 支持直接修改节点的输出值；output_value 可为 port-keyed（以 port_id 为键）
     // 对输入类节点：同步更新 data.value 为当前 port 的取值
     if (key === 'output_value') {
+      console.log('try to updateNodeData output_value:', nodeId, value);
+
       setWorkflow(prev => {
         if (!prev) return null;
         const node = prev.nodes.find(n => n.id === nodeId);
         const tool = node ? TOOLS.find(t => t.id === node.tool_id) : undefined;
         const isInputWithValue = tool?.category === 'Input' && ['image-input', 'audio-input', 'video-input', 'text-input'].includes(node?.tool_id ?? '');
         const portId = node ? INPUT_PORT_IDS[node.tool_id] : undefined;
+        if (portId === "out-image") {
+          if (typeof value === 'string' || (Array.isArray(value) && value.some(item => typeof item === 'string'))){
+            console.warn("do not set output_value to url string, skip updateNodeData output_value:", nodeId, value);
+            return prev;
+          }
+        }
+
         const effectiveValue = isInputWithValue && portId && isPortKeyedOutputValue(value)
           ? value[portId]
           : value;

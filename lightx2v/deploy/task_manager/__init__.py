@@ -263,7 +263,19 @@ class BaseTaskManager:
         return True
 
     async def create_workflow(
-        self, user_id, name, description="", nodes=None, connections=None, workflow_id=None, visibility="private", tags=None, node_output_history=None, author_id=None, author_name=None
+        self,
+        user_id,
+        name,
+        description="",
+        nodes=[],
+        connections=[],
+        workflow_id=None,
+        visibility="private",
+        tags=[],
+        node_output_history={},
+        author_id=None,
+        author_name=None,
+        file_tasks={},
     ):
         if workflow_id is None:
             workflow_id = str(uuid.uuid4())
@@ -285,19 +297,20 @@ class BaseTaskManager:
             "workflow_id": workflow_id,
             "user_id": user_id,
             "name": name,
-            "description": description or "",
+            "description": description,
             "create_t": cur_t,
             "update_t": cur_t,
-            "nodes": nodes or [],
-            "connections": connections or [],
+            "nodes": nodes,
+            "connections": connections,
             "chat_history": [],
             "extra_info": {},
             "visibility": visibility,
-            "tags": tags or [],
-            "node_output_history": node_output_history or {},
-            "files_tasks": {},
+            "tags": tags,
+            "node_output_history": node_output_history,
+            "files_tasks": file_tasks,
             "author_id": author_id,
             "author_name": author_name,
+            "global_inputs": {},
         }
         assert await self.insert_workflow(workflow_data), f"create workflow {workflow_data} failed"
         return workflow_id
