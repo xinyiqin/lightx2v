@@ -1098,6 +1098,35 @@ export const useWorkflow = () => {
   /** 获取当前最新工作流（用于 AI 等需要“实时”状态的场景，避免闭包拿到旧状态） */
   const getWorkflow = useCallback(() => workflowRef.current, []);
 
+  /**
+   * 从后端拉取 workflow 并仅合并 nodes 的 output_value 与 node_output_history，不替换整棵 state（用于输入节点 save / 任务节点 save 后刷新展示）。
+   */
+  const refreshWorkflowFromBackend = useCallback(async (workflowId: string): Promise<void> => {
+    if (isStandalone()) return;
+    try {
+      const response = await apiRequest(`/api/v1/workflow/${workflowId}`);
+      if (!response.ok) return;
+      const wf = await response.json();
+      const serverNodes: WorkflowNode[] = Array.isArray(wf.nodes) ? wf.nodes : [];
+      const serverHistory: Record<string, NodeHistoryEntry[]> =
+        typeof wf.node_output_history === 'object' && wf.node_output_history != null ? wf.node_output_history : {};
+      setWorkflow((prev) => {
+        if (!prev || prev.id !== workflowId) return prev;
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n) => {
+            const sn = serverNodes.find((x: WorkflowNode) => x.id === n.id);
+            if (!sn || sn.output_value === undefined) return n;
+            return { ...n, output_value: sn.output_value };
+          }),
+          nodeOutputHistory: { ...(prev.nodeOutputHistory ?? {}), ...serverHistory },
+        };
+      });
+    } catch (e) {
+      console.warn('[Workflow] refreshWorkflowFromBackend failed:', workflowId, e);
+    }
+  }, []);
+
   return {
     myWorkflows,
     workflow,
@@ -1109,6 +1138,7 @@ export const useWorkflow = () => {
     saveWorkflowToDatabase,
     loadWorkflow,
     loadWorkflows,
+    refreshWorkflowFromBackend,
     deleteWorkflow,
     updateWorkflowVisibility,
     ensureWorkflowOwned,

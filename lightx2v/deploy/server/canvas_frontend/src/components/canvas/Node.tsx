@@ -32,7 +32,7 @@ import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries, getEntryPortKeyedValue } from '../../utils/historyEntry';
-import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getWorkflowFileUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
+import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getNodeOutputDisplayUrl, getWorkflowFileUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { getOutputValueByPort, setOutputValueByPort, INPUT_PORT_IDS } from '../../utils/outputValuePort';
@@ -810,10 +810,14 @@ export const Node: React.FC<NodeProps> = ({
     const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
+    const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-audio';
+    if (workflow?.id && (kind === 'task' || kind === 'file' || kind === 'lightx2v_result' || (ov as any)?.task_id || (ov as any)?.file_id)) {
+      const url = await getNodeOutputDisplayUrl(workflow.id, node.id, pid, ov as any);
+      if (url) return getAssetPath(url) ?? url;
+    }
     if (kind === 'task' || kind === 'lightx2v_result') {
       const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
-      const output_name = val.output_name || 'output';
-      if (output_name !== 'output_audio') return null;
+      if (val.output_name !== 'output_audio' && val.output_name !== 'output') return null;
       if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
         kind: 'task',
@@ -821,7 +825,7 @@ export const Node: React.FC<NodeProps> = ({
         node_id: val.node_id ?? node.id,
         port_id: val.port_id ?? portIdToUse,
         task_id: val.task_id,
-        output_name: output_name,
+        output_name: val.output_name || 'output',
         is_cloud: !!val.is_cloud
       };
       const ctx = workflow?.id && node.id && portIdToUse ? { workflow_id: workflow.id, node_id: node.id, port_id: portIdToUse } : undefined;
@@ -831,10 +835,8 @@ export const Node: React.FC<NodeProps> = ({
       const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
       if (fileVal?.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
-      // 持久化后的 file ref（如 TTS/音色克隆通过 /output/.../save 保存）：通过 /output/.../url?file_id= 取回 URL 用于预览
       const fid = fileVal?.file_id;
       if (fid && workflow?.id && getNodeOutputUrl) {
-        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-audio';
         const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         if (url) return getAssetPath(url) ?? url;
       }
@@ -849,6 +851,11 @@ export const Node: React.FC<NodeProps> = ({
     const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
+    const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-video';
+    if (workflow?.id && (kind === 'task' || kind === 'file' || kind === 'lightx2v_result' || (ov as any)?.task_id || (ov as any)?.file_id)) {
+      const url = await getNodeOutputDisplayUrl(workflow.id, node.id, pid, ov as any);
+      if (url) return getAssetPath(url) ?? url;
+    }
     if (kind === 'task' || kind === 'lightx2v_result') {
       const val = (ov || entry) as {task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
       const output_name = val.output_name || 'output';
@@ -871,15 +878,14 @@ export const Node: React.FC<NodeProps> = ({
       if (fileVal?.dataUrl?.startsWith('data:video/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
       const fid = fileVal?.file_id;
-      if (fid && workflow.id) {
-        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-video';
+      if (fid && workflow?.id) {
         const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         return url ? (getAssetPath(url) ?? url) : null;
       }
       return null;
     }
     return null;
-  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow?.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
 
   const resolveImageUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
     const portKeyed = getEntryPortKeyedValue(entry);
@@ -887,6 +893,11 @@ export const Node: React.FC<NodeProps> = ({
     const portIdToUse = (keys.length === 1 ? keys[0] : undefined) ?? portId ?? (entry as { port_id?: string }).port_id;
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
+    const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-image';
+    if (workflow?.id && (kind === 'task' || kind === 'file' || kind === 'lightx2v_result' || (ov as any)?.task_id || (ov as any)?.file_id)) {
+      const url = await getNodeOutputDisplayUrl(workflow.id, node.id, pid, ov as any);
+      if (url) return getAssetPath(url) ?? url;
+    }
     if (kind === 'task' || kind === 'lightx2v_result') {
       const val = (ov || entry) as {task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
       const output_name = val.output_name || 'output';
@@ -910,15 +921,14 @@ export const Node: React.FC<NodeProps> = ({
       if (fileVal?.dataUrl?.startsWith('data:image/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
       const fid = fileVal?.file_id;
-      if (fid && workflow.id) {
-        const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-image';
+      if (fid && workflow?.id) {
         const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         return url ? (getAssetPath(url) ?? url) : null;
       }
       return null;
     }
     return null;
-  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow?.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
 
   // 当前输出为音频时（如 TTS），在节点卡片右侧显示小播放键，不进拓展框也可直接播放
   const currentAudioVal = firstOutputType === DataType.AUDIO && firstOutputPortId ? getOutputValueByPort(node, firstOutputPortId) : null;

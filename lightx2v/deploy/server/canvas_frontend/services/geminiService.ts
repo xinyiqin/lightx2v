@@ -665,7 +665,7 @@ export const lightX2VTask = async (
     endpoint: `/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/save`,
     options: {
       method: 'POST',
-      body: JSON.stringify({ output_data: { type: 'task', data: { task_id: taskId, output_name: outputName } } })
+      body: JSON.stringify({ output_data: { type: 'task', data: { task_id: taskId, output_name: outputName, workflow_id: workflow_id, node_id: node_id, port_id: port_id } } })
     }
   });
   if (!saveEntry.ok) {

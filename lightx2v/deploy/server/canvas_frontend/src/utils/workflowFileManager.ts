@@ -353,28 +353,33 @@ function parseFileIdFromUrl(url: string): string | null {
 
 /**
  * 获取节点某端口输出的展示 URL（统一入口）。调用后端 /output/{port_id}/url 接口获取最终 URL。
+ * 支持 file_id/run_id（文件引用）或 task_id（任务结果），统一走 /api/v1/workflow/.../node/.../output/.../url?task_id=xxx&file_id=xxx。
  * 传入 fileId 时按 (workflowId, nodeId, portId, fileId) 缓存并返回匹配项；多项时后端返回 urls，按 file_id 匹配。
- * runId 可选，作为 query 传给后端用于解析历史 run。
  */
 export async function getNodeOutputUrl(
   workflowId: string,
   nodeId: string,
   portId: string,
   fileId?: string,
-  runId?: string
+  runId?: string,
+  taskId?: string,
+  fileIdForTask?: string
 ): Promise<string | null> {
   if (isStandalone()) return null;
-  const cacheKey = fileId ? `${workflowId}:${nodeId}:${portId}:${fileId}` : `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`;
+  const cacheKey = taskId
+    ? `${workflowId}:${nodeId}:${portId}:task:${taskId}:${fileIdForTask ?? ''}`
+    : (fileId ? `${workflowId}:${nodeId}:${portId}:${fileId}` : `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`);
   const cached = nodeOutputUrlCache.get(cacheKey);
   if (cached != null) return cached;
-  const inFlightKey = `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`;
+  const inFlightKey = taskId
+    ? `${workflowId}:${nodeId}:${portId}:task:${taskId}`
+    : `${workflowId}:${nodeId}:${portId}:${runId ?? ''}`;
   let promise = nodeOutputUrlInFlight.get(inFlightKey);
   if (promise) {
     const result = await promise;
     if (result == null) return null;
     if (Array.isArray(result)) {
       if (fileId) {
-        // 并发复用同一请求时，无法从已缓存的 final url 反推 file_id，需等本次请求结果再匹配
         const single = nodeOutputUrlCache.get(`${workflowId}:${nodeId}:${portId}:${fileId}`);
         return single ?? null;
       }
@@ -387,6 +392,8 @@ export async function getNodeOutputUrl(
       const params = new URLSearchParams();
       if (runId) params.set('run_id', runId);
       if (fileId) params.set('file_id', fileId);
+      if (taskId) params.set('task_id', taskId);
+      if (fileIdForTask) params.set('file_id', fileIdForTask);
       const qs = params.toString() ? `?${params.toString()}` : '';
       const response = await apiRequest(
         `/api/v1/workflow/${workflowId}/node/${encodeURIComponent(nodeId)}/output/${encodeURIComponent(portId)}/url${qs}`
@@ -415,6 +422,7 @@ export async function getNodeOutputUrl(
       const finalUrl = toFinal(url);
       const fid = parseFileIdFromUrl(url);
       if (fid) nodeOutputUrlCache.set(`${workflowId}:${nodeId}:${portId}:${fid}`, finalUrl);
+      if (taskId) nodeOutputUrlCache.set(cacheKey, finalUrl);
       nodeOutputUrlCache.set(inFlightKey, finalUrl);
       return finalUrl;
     } catch (error) {
@@ -432,6 +440,32 @@ export async function getNodeOutputUrl(
     return result[0];
   }
   return result;
+}
+
+/**
+ * 统一根据节点输出值（file ref 或 task ref）获取展示 URL，走 /api/v1/workflow/.../node/.../output/.../url?task_id=xxx&file_id=xxx。
+ * 用于任意节点的 image/video/audio 等展示，不再区分 resolveLightX2VResultRef 与 getNodeOutputUrl。
+ */
+export async function getNodeOutputDisplayUrl(
+  workflowId: string,
+  nodeId: string,
+  portId: string,
+  value: { kind?: string; file_id?: string; task_id?: string; output_name?: string; run_id?: string } | string | null
+): Promise<string | null> {
+  if (!value || !workflowId || !nodeId || !portId) return null;
+  if (typeof value === 'string') return value.startsWith('data:') ? value : null;
+  const kind = value.kind ?? (value as any).type;
+  if (kind === 'task' || (value as any).task_id) {
+    const taskId = (value as any).task_id;
+    if (!taskId) return null;
+    return getNodeOutputUrl(workflowId, nodeId, portId, undefined, undefined, taskId, (value as any).file_id);
+  }
+  if (kind === 'file' || (value as any).file_id) {
+    const fileId = (value as any).file_id;
+    if (!fileId) return null;
+    return getNodeOutputUrl(workflowId, nodeId, portId, fileId, (value as any).run_id);
+  }
+  return null;
 }
 
 /**

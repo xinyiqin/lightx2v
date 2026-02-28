@@ -70,6 +70,7 @@ const App: React.FC = () => {
     saveWorkflowToDatabase,
     loadWorkflow,
     loadWorkflows,
+    refreshWorkflowFromBackend,
     deleteWorkflow: deleteWorkflowFromHook,
     updateWorkflowVisibility,
     ensureWorkflowOwned,
@@ -383,7 +384,8 @@ const App: React.FC = () => {
     onSaveExecutionToLocal: isStandalone() ? async (w) => { await saveWorkflowToLocalOnly(w); } : undefined,
     saveWorkflowBeforeRun: !isStandalone() && saveWorkflowToDatabase
       ? async (w) => await saveWorkflowToDatabase(w, { name: w.name })
-      : undefined
+      : undefined,
+    refreshWorkflowFromBackend: !isStandalone() ? refreshWorkflowFromBackend : undefined
   });
 
   // Destructure updateNodeData from nodeManagement (for use in other places)
