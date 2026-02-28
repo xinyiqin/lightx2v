@@ -184,12 +184,11 @@ def update_workflow_node_output(
 
     # 如果 port_id 已存在，则将 new_entry 添加到 old_entry 列表中
     # 目前仅支持多图的输入，其它 port_id 不支持合并
-    if port_id in node["output_value"] and port_id == "out-image":
+    if port_id in node["output_value"] and port_id == "out-image" and "file_id" in new_entry:
         old_entry = node["output_value"][port_id]
         old_entries = [old_entry] if not isinstance(old_entry, list) else old_entry
-        old_ids = [old_entry["file_id"] or old_entry["task_id"] for old_entry in old_entries]
-        new_id = new_entry["file_id"] or new_entry["task_id"]
-        if new_id in old_ids:
+        old_ids = [old_entry["file_id"] for old_entry in old_entries]
+        if new_entry["file_id"] in old_ids:
             logger.warning(f"new_entry has already been uploaded, skip: {new_entry}")
             new_entry = old_entry
         else:

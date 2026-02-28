@@ -1367,6 +1367,9 @@ function useWorkflowExecutionImpl({
                     const t2iWorkflowRefs = !t2iModelConfig.isCloud && wfId ? buildWorkflowRefs(wfId, incomingConns, tool.inputs) : undefined;
                     console.log("[LightX2V] Calling lightX2VTask for text-to-image");
                     result = await lightX2VTask(
+                      wfId,
+                      node.id,
+                      'out-image',
                       t2iModelConfig.url,
                       t2iModelConfig.token,
                       't2i',
@@ -1381,7 +1384,7 @@ function useWorkflowExecutionImpl({
                       t2iWorkflowRefs
                     );
                     const t2iTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (t2iTid) result = toLightX2VResultRef(t2iTid, 'output_image', (model || '').endsWith('-cloud'));
+                    if (t2iTid) result = toLightX2VResultRef(wfId, node.id, 'out-image', t2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'image-to-image':
@@ -1426,6 +1429,9 @@ function useWorkflowExecutionImpl({
                     }
                     const i2iWorkflowRefs = !i2iModelConfig.isCloud && wfId ? buildWorkflowRefs(wfId, incomingConns, tool.inputs) : undefined;
                     result = await lightX2VTask(
+                      wfId,
+                      node.id,
+                      'out-image',
                       i2iModelConfig.url,
                       i2iModelConfig.token,
                       'i2i',
@@ -1442,7 +1448,7 @@ function useWorkflowExecutionImpl({
                       i2iWorkflowRefs
                     );
                     const i2iTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (i2iTid) result = toLightX2VResultRef(i2iTid, 'output_image', (model || '').endsWith('-cloud'));
+                    if (i2iTid) result = toLightX2VResultRef(wfId, node.id, 'out-image', i2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'gemini-watermark-remover':
@@ -1535,8 +1541,11 @@ function useWorkflowExecutionImpl({
                   const t2vModelConfig = getLightX2VConfigForModel(model || 'Wan2.2_T2V_A14B_distilled');
                   const t2vWorkflowRefs = !t2vModelConfig.isCloud && wfId ? buildWorkflowRefs(wfId, incomingConns, tool.inputs) : undefined;
                   result = await lightX2VTask(
-                      t2vModelConfig.url,
-                      t2vModelConfig.token,
+                    wfId,
+                    node.id,
+                    'out-video',
+                    t2vModelConfig.url,
+                    t2vModelConfig.token,
                     't2v',
                     model || 'Wan2.2_T2V_A14B_distilled',
                     nodeInputs['in-text'] || "",
@@ -1549,7 +1558,7 @@ function useWorkflowExecutionImpl({
                     t2vWorkflowRefs
                   );
                   const t2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (t2vTid) result = toLightX2VResultRef(t2vTid, 'output_video', (model || '').endsWith('-cloud'));
+                  if (t2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', t2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 case 'video-gen-image': {
                   const startImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
@@ -1560,6 +1569,9 @@ function useWorkflowExecutionImpl({
                     ? (typeof startImg === 'object' && (startImg as any)?.file_id ? await resolveMediaForCloud(startImg, wfId) : (await ensureLocalInputsAsDataUrls(flattenImageInput(startImg)))[0])
                     : startImg;
                   result = await lightX2VTask(
+                    wfId,
+                    node.id,
+                    'out-video',
                     i2vModelConfig.url,
                     i2vModelConfig.token,
                     'i2v',
@@ -1575,7 +1587,7 @@ function useWorkflowExecutionImpl({
                     i2vWorkflowRefs
                   );
                   const i2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (i2vTid) result = toLightX2VResultRef(i2vTid, 'output_video', (model || '').endsWith('-cloud'));
+                  if (i2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', i2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 }
                 case 'video-gen-dual-frame': {
@@ -1591,6 +1603,9 @@ function useWorkflowExecutionImpl({
                       ? (typeof dualEnd === 'object' && (dualEnd as any)?.file_id ? await resolveMediaForCloud(dualEnd, wfId) : (await ensureLocalInputsAsDataUrls(flattenImageInput(dualEnd)))[0])
                       : dualEnd;
                     result = await lightX2VTask(
+                        wfId,
+                        node.id,
+                        'out-video',
                         flf2vModelConfig.url,
                         flf2vModelConfig.token,
                         'flf2v',
@@ -1607,7 +1622,7 @@ function useWorkflowExecutionImpl({
                         flf2vWorkflowRefs
                     );
                     const flf2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (flf2vTid) result = toLightX2VResultRef(flf2vTid, 'output_video', (model || '').endsWith('-cloud'));
+                    if (flf2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', flf2vTid, 'output_video', (model || '').endsWith('-cloud'));
                     break;
                 }
                 case 'character-swap':
@@ -1622,6 +1637,9 @@ function useWorkflowExecutionImpl({
                     const swapImgForSubmit = animateModelConfig.isCloud && wfId ? await resolveMediaForCloud(swapImg, wfId) : swapImg;
                     const swapVidForSubmit = animateModelConfig.isCloud && wfId ? await resolveMediaForCloud(swapVid, wfId) : swapVid;
                     result = await lightX2VTask(
+                      wfId,
+                      node.id,
+                      'out-video',
                       animateModelConfig.url,
                       animateModelConfig.token,
                       'animate',
@@ -1637,7 +1655,7 @@ function useWorkflowExecutionImpl({
                       animateWorkflowRefs
                     );
                     const animateTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (animateTid) result = toLightX2VResultRef(animateTid, 'output_video', (model || '').endsWith('-cloud'));
+                    if (animateTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', animateTid, 'output_video', (model || '').endsWith('-cloud'));
                   } else {
                   result = await geminiVideo(nodeInputs['in-text'] || "Swap character", swapImg, "16:9", "720p", swapVid, model);
                   }
@@ -1651,6 +1669,9 @@ function useWorkflowExecutionImpl({
                   const avatarImgForSubmit = s2vModelConfig.isCloud && wfId ? await resolveMediaForCloud(avatarImg, wfId) : avatarImg;
                   const avatarAudioForSubmit = s2vModelConfig.isCloud && wfId ? await resolveMediaForCloud(avatarAudio, wfId) : avatarAudio;
                   result = await lightX2VTask(
+                    wfId,
+                    node.id,
+                    'out-video',
                     s2vModelConfig.url,
                     s2vModelConfig.token,
                     's2v',
@@ -1667,7 +1688,7 @@ function useWorkflowExecutionImpl({
                     s2vWorkflowRefs
                   );
                   const s2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (s2vTid) result = toLightX2VResultRef(s2vTid, 'output_video', (model || '').endsWith('-cloud'));
+                  if (s2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', s2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 default: result = "Processed";
               }

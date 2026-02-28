@@ -4,7 +4,16 @@ import { lightX2VResultUrl } from '../../services/geminiService';
 import { isStandalone } from '../config/runtimeMode';
 
 /** 任务结果引用：用 kind（统一，兼容旧 type / __type） */
-export type LightX2VResultRef = { kind: 'task'; task_id: string; output_name: string; is_cloud: boolean };
+export type LightX2VResultRef = {
+  user_id?: string;
+  workflow_id?: string;
+  node_id?: string;
+  port_id?: string;
+  kind: 'task';
+  task_id: string;
+  output_name: string;
+  is_cloud: boolean;
+};
 
 export function isLightX2VResultRef(val: any): val is LightX2VResultRef {
   return val != null && typeof val === 'object' && !Array.isArray(val) &&
@@ -13,8 +22,15 @@ export function isLightX2VResultRef(val: any): val is LightX2VResultRef {
     typeof (val as any).output_name === 'string';
 }
 
-export function toLightX2VResultRef(task_id: string, output_name: string, is_cloud: boolean): LightX2VResultRef {
-  return { kind: 'task', task_id, output_name, is_cloud };
+export function toLightX2VResultRef(
+  workflow_id: string,
+  node_id: string,
+  port_id: string,
+  task_id: string,
+  output_name: string,
+  is_cloud: boolean,
+): LightX2VResultRef {
+  return { workflow_id, node_id, port_id, kind: 'task', task_id, output_name, is_cloud };
 }
 
 /** Collect all LightX2V result refs from a value (handles nested objects/arrays) */
@@ -45,16 +61,11 @@ function setCachedResultUrl(cacheKey: string, url: string): void {
  * Used when canvas runs standalone; proxy forwards to LightX2V cloud or local backend.
  */
 export async function fetchLightX2VResultUrl(
-  taskId: string,
-  outputName: string,
-  isCloud: boolean
+  workflow_id: string,
+  node_id: string,
+  port_id: string,
 ): Promise<string> {
-  const params = new URLSearchParams({
-    task_id: taskId,
-    output_name: outputName,
-    is_cloud: String(isCloud)
-  });
-  const res = await fetch(`/api/lightx2v/result_url?${params.toString()}`, { method: 'GET' });
+  const res = await fetch(`/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`, { method: 'GET' });
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`result_url failed: ${res.status} ${err}`);
@@ -69,35 +80,26 @@ export async function fetchLightX2VResultUrl(
  * When is_cloud is true: 不走本地后端，直接走云端 x2v 的 task/result_url 接口获取 url。
  * Uses cache to avoid repeated calls. For backend asset paths, normalizes to absolute URL with token for <img>.
  */
-export async function resolveLightX2VResultRef(ref: LightX2VResultRef): Promise<string> {
+export async function resolveLightX2VResultRef(
+  ref: LightX2VResultRef
+): Promise<string> {
   const cacheKey = `${ref.is_cloud}:${ref.task_id}:${ref.output_name}`;
   const cached = getCachedResultUrl(cacheKey);
   if (cached != null) return cached;
 
+  throw new Error('resolveLightX2VResultRef ${JSON.stringify(ref)}');
   let url: string;
   if (ref.is_cloud) {
     // 云端任务：不调用本地后端，直接走云端 x2v 的 task/result_url
     if (isStandalone()) {
-      url = await fetchLightX2VResultUrl(ref.task_id, ref.output_name, true);
+      url = await fetchLightX2VResultUrl(ref.workflow_id, ref.node_id, ref.port_id);
     } else {
       const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
       const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
-      url = await lightX2VResultUrl(cloudUrl, cloudToken, ref.task_id, ref.output_name);
+      url = await lightX2VResultUrl(cloudUrl, cloudToken, ref.workflow_id, ref.node_id, ref.port_id);
     }
-  } else if (isStandalone()) {
-    url = await fetchLightX2VResultUrl(ref.task_id, ref.output_name, false);
   } else {
-    const res = await apiRequest(`/api/v1/task/result_url?task_id=${encodeURIComponent(ref.task_id)}&name=${encodeURIComponent(ref.output_name)}`, { method: 'GET' });
-    if (!res.ok) throw new Error(`result_url failed: ${res.status}`);
-    const data = await res.json().catch(() => ({})) as { url?: string };
-    if (!data.url) throw new Error('result_url missing url');
-    url = data.url;
-    if (url.startsWith('./')) url = url.slice(1);
-    if (!url.startsWith('/') && !url.startsWith('http')) url = '/' + url;
-    if (url.includes('/assets/task/result') || url.includes('/assets/workflow/file')) {
-      url = getAssetPath(url);
-      if (typeof window !== 'undefined' && url.startsWith('/')) url = window.location.origin + url;
-    }
+    url = await fetchLightX2VResultUrl(ref.workflow_id, ref.node_id, ref.port_id);
   }
   setCachedResultUrl(cacheKey, url);
   return url;

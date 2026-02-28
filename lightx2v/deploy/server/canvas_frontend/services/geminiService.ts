@@ -370,6 +370,9 @@ export type WorkflowRefsPayload = {
  * Generalized to handle T2V, I2V, S2V, T2I, and I2I
  */
 export const lightX2VTask = async (
+  workflow_id: string,
+  node_id: string,
+  port_id: string,
   baseUrl: string,
   token: string,
   task: string,
@@ -654,11 +657,27 @@ export const lightX2VTask = async (
     throw new Error(status === "CANCELLED" ? 'LightX2V Task was cancelled' : `LightX2V Task ended with status: ${status}`);
   }
 
+  // 2.5 save port output value
+  const saveEntry = await lightX2VRequest({
+    baseUrl: actualBaseUrl,
+    token: actualToken,
+    endpoint: `/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/save`,
+    options: {
+      method: 'POST',
+      body: JSON.stringify({ output_data: { type: 'task', data: { task_id: taskId, output_name: outputName } } })
+    }
+  });
+  if (!saveEntry.ok) {
+    await handleLightX2VError(saveEntry, `Save port output value (workflow_id: ${workflow_id} node_id: ${node_id} port_id: ${port_id})`);
+  }
+  const saveData = await saveEntry.json();
+  console.log('[LightX2V] Save port output value data:', saveData);
+
   // 3. Get Result URL
   const resultRes = await lightX2VRequest({
     baseUrl: actualBaseUrl,
     token: actualToken,
-    endpoint: `/api/v1/task/result_url?task_id=${taskId}&name=${outputName}`,
+    endpoint: `/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`,
     options: {
       method: 'GET'
     }
@@ -682,10 +701,11 @@ export const lightX2VTask = async (
 export const lightX2VResultUrl = async (
   baseUrl: string,
   token: string,
-  taskId: string,
-  outputName: string
+  workflow_id: string,
+  node_id: string,
+  port_id: string,
 ): Promise<string> => {
-  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/task/result_url?task_id=${encodeURIComponent(taskId)}&name=${encodeURIComponent(outputName)}`;
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -696,7 +716,7 @@ export const lightX2VResultUrl = async (
     throw new Error(`LightX2V result_url failed: ${res.status} ${err}`);
   }
   const data = await res.json().catch(() => ({}));
-  if (!data.url) throw new Error(`LightX2V result_url missing url for task_id=${taskId} name=${outputName}`);
+  if (!data.url) throw new Error(`LightX2V result_url missing url for workflow_id=${workflow_id} node_id=${node_id} port_id=${port_id}`);
   return data.url;
 };
 

@@ -233,6 +233,7 @@ export async function saveNodeOutputs(
   if (isStandalone()) return null;
   if (!outputs || Object.keys(outputs).length === 0) return null;
   try {
+    console.log('[WorkflowFileManager] saveNodeOutputs:', outputs);
     // 准备每个端口要发送的数据
     const toSend: Array<{ portId: string; wrappedOutput: any }> = [];
     for (const [portId, value] of Object.entries(outputs)) {
