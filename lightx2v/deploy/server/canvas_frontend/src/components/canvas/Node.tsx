@@ -831,8 +831,9 @@ export const Node: React.FC<NodeProps> = ({
       const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
       if (fileVal?.dataUrl?.startsWith('data:audio/')) return fileVal.dataUrl;
       if (fileVal?.url) return resolveMediaSrc(fileVal.url) || getAssetPath(fileVal.url);
+      // 持久化后的 file ref（如 TTS/音色克隆通过 /output/.../save 保存）：通过 /output/.../url?file_id= 取回 URL 用于预览
       const fid = fileVal?.file_id;
-      if (fid && workflow.id) {
+      if (fid && workflow?.id && getNodeOutputUrl) {
         const pid = portIdToUse ?? (entry as { port_id?: string }).port_id ?? 'out-audio';
         const url = await getNodeOutputUrl(node.id, pid, fid, fileVal?.run_id);
         if (url) return getAssetPath(url) ?? url;
@@ -840,7 +841,7 @@ export const Node: React.FC<NodeProps> = ({
       return null;
     }
     return null;
-  }, [workflow.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
+  }, [workflow?.id, node.id, getNodeOutputUrl, resolveLightX2VResultRef, resolveMediaSrc]);
 
   const resolveVideoUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
     const portKeyed = getEntryPortKeyedValue(entry);
@@ -1148,8 +1149,12 @@ export const Node: React.FC<NodeProps> = ({
     !tool.models.some((m) => m.id === node.data.model);
 
   const modelsListEmpty = Array.isArray(tool.models) && tool.models.length === 0;
-  // 仅对需要模型的节点（AI 模型类）显示该警告；工具类（如图像处理等）不显示
-  const showModelsListEmptyWarning = modelsListEmpty && tool.category === 'AI Model';
+  // 仅对需要模型的节点（AI 模型类）显示该警告；语音合成、音色克隆等节点不需要模型，不显示
+  const noModelNeededToolIds = ['tts', 'lightx2v-voice-clone'];
+  const showModelsListEmptyWarning =
+    modelsListEmpty &&
+    tool.category === 'AI Model' &&
+    !noModelNeededToolIds.includes(tool.id);
 
   // 当前模型不在支持列表中时，自动选为列表第一项
   React.useEffect(() => {

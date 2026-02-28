@@ -159,6 +159,9 @@ export interface TaskReference {
   task_id: string;
   output_name: string;
   is_cloud?: boolean;
+  workflow_id?: string;
+  node_id?: string;
+  port_id?: string;
 }
 
 export type NodeHistoryValue =
@@ -176,6 +179,9 @@ export type NodeHistoryValue =
       task_id: string;
       output_name: string;
       is_cloud: boolean;
+      workflow_id?: string;
+      node_id?: string;
+      port_id?: string;
     };
 
 /**

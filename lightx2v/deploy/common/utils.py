@@ -168,7 +168,7 @@ def format_audio_data(data, max_duration=None):
     return data
 
 
-async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=None, user_id=None, token=None):
+async def preload_data(inp, inp_type, typ, val):
     try:
         if typ == "url":
             timeout = int(os.getenv("REQUEST_TIMEOUT", "5"))
@@ -193,7 +193,7 @@ async def preload_data(inp, inp_type, typ, val, data_manager=None, task_manager=
             # no bytes data need to be saved by data_manager
             data = None
         elif typ == "workflow_output":
-            pass
+            data = val
         else:
             raise ValueError(f"cannot read {inp}[{inp_type}] which type is {typ}!")
 

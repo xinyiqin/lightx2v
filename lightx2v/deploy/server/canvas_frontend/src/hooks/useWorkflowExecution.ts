@@ -1687,9 +1687,11 @@ function useWorkflowExecutionImpl({
               const nodeDuration = performance.now() - nodeStart;
 
             // Normalize result to valueToStore (port-keyed file ref for workflow file URL, etc.)
+            // TTS / 音色克隆 返回 data URL (audio bytes)，保持为 port-keyed 以便后续通过 /output/.../save 持久化，加载时通过 /url 取回并预览
             let valueToStore: any = result;
-            const isOldUrl = typeof result === 'string' && result.includes('/api/v1/workflow/') && result.includes('/file/');
-            const isNewUrl = typeof result === 'string' && result.includes('/assets/workflow/file');
+            const isDataUrl = typeof result === 'string' && result.startsWith('data:');
+            const isOldUrl = !isDataUrl && typeof result === 'string' && result.includes('/api/v1/workflow/') && result.includes('/file/');
+            const isNewUrl = !isDataUrl && typeof result === 'string' && result.includes('/assets/workflow/file');
             if (isOldUrl || isNewUrl) {
               const fileIdMatch = isNewUrl ? result.match(/[?&]file_id=([^&]+)/) : result.match(/\/file\/([^/?]+)/);
               if (fileIdMatch) {
