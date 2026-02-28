@@ -3,6 +3,7 @@ import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { isStandalone } from '../src/config/runtimeMode';
 import { apiRequest, getApiBaseUrl } from '../src/utils/apiClient';
 import { getWorkflowFileByFileId } from '../src/utils/workflowFileManager';
+import { toLightX2VResultRef, type LightX2VResultRef } from '../src/utils/resultRef';
 
 const VOLC_RESPONSES_URL = 'https://ark.cn-beijing.volces.com/api/v3/responses';
 
@@ -387,7 +388,7 @@ export const lightX2VTask = async (
   onTaskId?: (taskId: string) => void,
   abortSignal?: AbortSignal,
   workflowRefs?: WorkflowRefsPayload
-): Promise<string> => {
+): Promise<LightX2VResultRef> => {
   // Check if this is a cloud model (ends with -cloud)
   // If so, use cloud config instead of provided baseUrl/token
   const isCloud = modelCls.endsWith('-cloud');
@@ -673,26 +674,15 @@ export const lightX2VTask = async (
   const saveData = await saveEntry.json();
   console.log('[LightX2V] Save port output value data:', saveData);
 
-  // 3. Get Result URL
-  const resultRes = await lightX2VRequest({
-    baseUrl: actualBaseUrl,
-    token: actualToken,
-    endpoint: `/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`,
-    options: {
-      method: 'GET'
-    }
-  });
-
-  if (!resultRes.ok) {
-    await handleLightX2VError(resultRes, `Result URL (task_id: ${taskId}, name: ${outputName})`);
-  }
-
-  const resultData = await resultRes.json();
-  if (!resultData.url) {
-    throw new Error(`LightX2V response missing ${outputName} result URL.`);
-  }
-
-  return resultData.url;
+  const ref = toLightX2VResultRef(
+    workflow_id,
+    node_id,
+    port_id,
+    taskId,
+    outputName,
+    (modelCls || '').endsWith('-cloud')
+  );
+  return ref;
 };
 
 /**
@@ -704,8 +694,9 @@ export const lightX2VResultUrl = async (
   workflow_id: string,
   node_id: string,
   port_id: string,
+  task_id: string,
 ): Promise<string> => {
-  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`;
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url?task_id=${task_id}`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {})

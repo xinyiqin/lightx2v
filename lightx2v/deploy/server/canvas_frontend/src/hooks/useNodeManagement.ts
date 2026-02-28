@@ -1,7 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import { WorkflowState, WorkflowNode, ToolDefinition, DataType, Port, NodeStatus } from '../../types';
 import { TOOLS } from '../../constants';
-import { getOutputValueByPort, INPUT_PORT_IDS, isPortKeyedOutputValue } from '../utils/outputValuePort';
+import { getOutputValueByPort, INPUT_PORT_IDS, isPortKeyedOutputValue, isValidOutputEntry } from '../utils/outputValuePort';
 import { useTranslation, Language } from '../i18n/useTranslation';
 
 interface UseNodeManagementProps {
@@ -148,10 +148,24 @@ export const useNodeManagement = ({
     }
 
 
-    // 支持直接修改节点的输出值；output_value 可为 port-keyed（以 port_id 为键）
-    // 对输入类节点：同步更新 data.value 为当前 port 的取值
+    // output_value 仅允许来自：服务器查询、/output/{port_id}/save 返回、或 node_output_history 的 entry；不得在前端擅自改为 url 或非法格式。
+    // 只接受 port-keyed 的 ref：entry 为 { kind: 'file' | 'task', ... }，禁止 url 字符串或 kind === 'url'。
     if (key === 'output_value') {
-      console.log('try to updateNodeData output_value:', nodeId, value);
+      const isRefOrPortKeyed = (v: any): boolean => {
+        if (v == null) return true;
+        if (typeof v === 'string') return false;
+        if (Array.isArray(v)) return v.every((item: any) => isValidOutputEntry(item));
+        if (typeof v === 'object' && isPortKeyedOutputValue(v)) {
+          return Object.values(v).every((val: any) =>
+            val == null || (Array.isArray(val) ? val.every((i: any) => isValidOutputEntry(i)) : isValidOutputEntry(val))
+          );
+        }
+        return isValidOutputEntry(v);
+      };
+      if (!isRefOrPortKeyed(value)) {
+        console.warn('updateNodeData output_value: only allow ref (kind file|task), reject url string or kind=url:', nodeId, value);
+        return;
+      }
 
       setWorkflow(prev => {
         if (!prev) return null;
@@ -159,13 +173,6 @@ export const useNodeManagement = ({
         const tool = node ? TOOLS.find(t => t.id === node.tool_id) : undefined;
         const isInputWithValue = tool?.category === 'Input' && ['image-input', 'audio-input', 'video-input', 'text-input'].includes(node?.tool_id ?? '');
         const portId = node ? INPUT_PORT_IDS[node.tool_id] : undefined;
-        if (portId === "out-image") {
-          if (typeof value === 'string' || (Array.isArray(value) && value.some(item => typeof item === 'string'))){
-            console.warn("do not set output_value to url string, skip updateNodeData output_value:", nodeId, value);
-            return prev;
-          }
-        }
-
         const effectiveValue = isInputWithValue && portId && isPortKeyedOutputValue(value)
           ? value[portId]
           : value;

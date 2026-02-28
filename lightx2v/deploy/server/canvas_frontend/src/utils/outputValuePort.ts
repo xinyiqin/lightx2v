@@ -1,9 +1,12 @@
 /**
- * output_value 统一为以 port_id 为键的字典：
- * - 图像: output_value["out-image"] = [{ kind: "file", file_id, ... }, ...]
- * - 音频: output_value["out-audio"] = { kind: "file", file_id, ... }
- * - 视频: output_value["out-video"] = { kind: "file", ... }
- * - 文本(文件): output_value["out-text"] = { kind: "file" | "task", ... }
+ * output_value 统一为以 port_id 为键的字典：{ [portID]: entry | list[entry] }
+ * - 输入类 image-input 的 out-image 可为多图：list[entry]
+ * - 其他端口统一为单条 entry
+ * entry 必须为 { kind: "file", ... } 或 { kind: "task", ... }，不得将 entry 存成 url 字符串。
+ * - 图像: output_value["out-image"] = entry | entry[]  (image-input 可为数组)
+ * - 音频: output_value["out-audio"] = entry
+ * - 视频: output_value["out-video"] = entry
+ * - 文本(文件): output_value["out-text"] = entry
  * - LightX2V 任务: output_value["out-image"] = { kind: "task", task_id, output_name, ... }
  * 兼容旧版：单值、数组或非 port-keyed 对象。
  */
@@ -56,7 +59,16 @@ export function getOutputValueByPort(node: { output_value?: any; data?: { value?
   return undefined;
 }
 
-/** 设置节点 output_value 中某 port 的值，返回新的 port-keyed output_value（不修改原节点） */
+/** 判断是否为合法的 entry（仅允许 kind === 'file' | 'task'，禁止 url 字符串或 kind === 'url'） */
+export function isValidOutputEntry(val: any): boolean {
+  if (val == null) return false;
+  if (typeof val === 'string') return false;
+  if (typeof val !== 'object' || Array.isArray(val)) return false;
+  const k = (val as { kind?: string }).kind;
+  return k === 'file' || k === 'task';
+}
+
+/** 设置节点 output_value 中某 port 的值，返回新的 port-keyed output_value（不修改原节点）。value 应为 entry(ref) 或 entry[]，不得为 url 字符串。 */
 export function setOutputValueByPort(
   currentOutputValue: any,
   toolId: string,
@@ -70,6 +82,18 @@ export function setOutputValueByPort(
   }
   base[portId] = value;
   return base;
+}
+
+/** 从 save API 返回的 ref 中提取仅用于写入 output_value 的 entry（不含 file_url，保证 kind 为 file）。 */
+export function toFileRefForOutputValue(saveRef: { kind?: string; file_id: string; mime_type?: string; ext?: string; run_id?: string; file_url?: string } | null): { kind: 'file'; file_id: string; mime_type?: string; ext?: string; run_id?: string } | null {
+  if (!saveRef || !saveRef.file_id) return null;
+  return {
+    kind: 'file',
+    file_id: saveRef.file_id,
+    ...(saveRef.mime_type != null && { mime_type: saveRef.mime_type }),
+    ...(saveRef.ext != null && { ext: saveRef.ext }),
+    ...(saveRef.run_id != null && { run_id: saveRef.run_id }),
+  };
 }
 
 /** 规范 ref 为 kind（写入用）。兼容读 type。 */

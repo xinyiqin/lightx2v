@@ -181,11 +181,12 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
       return;
     }
     let cancelled = false;
-    resolveLightX2VResultRef(refToResolve).then(url => {
+    const ctx = workflowId && expandedResultData?.nodeId ? { workflow_id: workflowId, node_id: expandedResultData.nodeId, port_id: expandedOutput?.fieldId ?? 'out-image' } : undefined;
+    resolveLightX2VResultRef(refToResolve, ctx).then(url => {
       if (!cancelled) setResolvedMediaUrl(url);
     }).catch(() => { if (!cancelled) setResolvedMediaUrl(null); });
     return () => { cancelled = true; };
-  }, [refToResolve?.task_id, refToResolve?.output_name, refToResolve?.is_cloud, resolveLightX2VResultRef]);
+  }, [refToResolve?.task_id, refToResolve?.output_name, refToResolve?.is_cloud, resolveLightX2VResultRef, workflowId, expandedResultData?.nodeId, expandedOutput?.fieldId]);
 
   // 仅对本地 file 类输出（kind: 'file', file_id）请求本地后端；x2v ref 已在上方处理，此处不再请求
   useEffect(() => {
@@ -346,6 +347,10 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
                       <ResolvedImage
                         content={img}
                         resolveLightX2VResultRef={resolveLightX2VResultRef}
+                        workflowId={workflowId}
+                        nodeId={expandedResultData.nodeId}
+                        portId={expandedOutput?.fieldId ?? 'out-image'}
+                        getNodeOutputUrl={getNodeOutputUrl}
                         className="max-h-full max-w-full rounded-2xl shadow-2xl border border-slate-800 object-contain"
                       />
                     </div>

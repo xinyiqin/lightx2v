@@ -2160,6 +2160,7 @@ async def api_v1_workflow_node_output_url(request: Request, user=Depends(verify_
         node_id = request.path_params["node_id"]
         port_id = request.path_params.get("port_id")
         file_id = request.query_params.get("file_id", "")
+        task_id = request.query_params.get("task_id", "")
         try:
             entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_manager)
         except Exception:
@@ -2181,7 +2182,7 @@ async def api_v1_workflow_node_output_url(request: Request, user=Depends(verify_
             assert storage_path, f"File entry {entry} path is not valid!"
             url = await data_manager.presign_url(storage_path)
             # if url is None:
-            url = f"./assets/workflow/file?workflow_id={workflow_id}&node_id={node_id}&port_id={port_id}&file_id={file_id}"
+            url = f"./assets/workflow/file?workflow_id={workflow_id}&node_id={node_id}&port_id={port_id}&file_id={file_id}&task_id={task_id}"
             urls.append(url)
         if len(urls) == 1:
             return {"url": urls[0]}
@@ -2199,6 +2200,8 @@ async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access
         node_id = request.query_params["node_id"]
         port_id = request.query_params["port_id"]
         file_id = request.query_params.get("file_id", "")
+        # only for task changed not cached
+        task_id = request.query_params.get("task_id", "")
         try:
             entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_manager)
             assert len(entries) == 1, f"should be one entry, but got {len(entries)}, {entries}"

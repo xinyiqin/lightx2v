@@ -185,7 +185,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
       const k = key(conn.source_node_id, conn.source_port_id);
       const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
       const urls = await Promise.all(arr.map(async (v: any) => {
-        if (isLightX2VResultRef(v) && resolveLightX2VResultRef) return resolveLightX2VResultRef(v);
+        if (isLightX2VResultRef(v) && resolveLightX2VResultRef) return resolveLightX2VResultRef(v, workflow?.id ? { workflow_id: workflow.id, node_id: conn.source_node_id, port_id: conn.source_port_id } : undefined);
         if (v && typeof v === 'object' && (v as any).kind === 'url' && typeof (v as any).url === 'string') return (v as any).url;
         if (v && typeof v === 'object' && (v as any).file_id && getNodeOutputUrl) {
           const url = await getNodeOutputUrl(conn.source_node_id, conn.source_port_id, (v as any).file_id, (v as any).run_id);

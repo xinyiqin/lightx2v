@@ -43,8 +43,8 @@ import { getAccessToken, initLightX2VToken, apiRequest } from './src/utils/apiCl
 import { checkWorkflowOwnership, getCurrentUserId } from './src/utils/workflowUtils';
 import { isStandalone } from './src/config/runtimeMode';
 import { collectLightX2VResultRefs } from './src/utils/resultRef';
-import { getNodeOutputUrl } from './src/utils/workflowFileManager';
-import { getOutputValueByPort, setOutputValueByPort } from './src/utils/outputValuePort';
+import { getNodeOutputUrl, saveInputFileViaOutputSave } from './src/utils/workflowFileManager';
+import { getOutputValueByPort, setOutputValueByPort, toFileRefForOutputValue } from './src/utils/outputValuePort';
 
 // --- Main App ---
 
@@ -1358,6 +1358,34 @@ const App: React.FC = () => {
     [workflow?.id]
   );
 
+  const [audioEditorDisplayUrl, setAudioEditorDisplayUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!modalState.showAudioEditor || !workflow?.id) {
+      setAudioEditorDisplayUrl(null);
+      return;
+    }
+    const node = workflow.nodes.find(n => n.id === modalState.showAudioEditor);
+    if (!node || node.tool_id !== 'audio-input') {
+      setAudioEditorDisplayUrl(null);
+      return;
+    }
+    const audioSrc = node.data.value ?? (node.output_value && getOutputValueByPort(node, 'out-audio'));
+    if (!audioSrc) {
+      setAudioEditorDisplayUrl(null);
+      return;
+    }
+    if (typeof audioSrc === 'string') {
+      setAudioEditorDisplayUrl(audioSrc);
+      return;
+    }
+    const ref = audioSrc as { file_id?: string; run_id?: string };
+    if (ref.file_id && getNodeOutputUrl) {
+      getNodeOutputUrl(workflow.id, modalState.showAudioEditor, 'out-audio', ref.file_id, ref.run_id).then((url) => setAudioEditorDisplayUrl(url ?? ''));
+    } else {
+      setAudioEditorDisplayUrl('');
+    }
+  }, [modalState.showAudioEditor, workflow?.id, workflow?.nodes, getNodeOutputUrl]);
+
   const sourceNodes = React.useMemo(() => (workflow?.nodes ?? []), [workflow]);
 
   const sourceOutputs = React.useMemo(() => {
@@ -1739,19 +1767,31 @@ const App: React.FC = () => {
         if (!node || node.tool_id !== 'audio-input') return null;
         const audioSrc = node.data.value ?? (node.output_value && getOutputValueByPort(node, 'out-audio'));
         if (!audioSrc) return null;
+        const isRef = typeof audioSrc === 'object' && audioSrc !== null && (audioSrc as any).file_id;
+        const displayUrl = audioEditorDisplayUrl ?? (typeof audioSrc === 'string' ? audioSrc : '');
+        if (!displayUrl && isRef) return null;
         return (
           <AudioEditorModal
             nodeId={modalState.showAudioEditor}
-            audioData={audioSrc}
+            audioData={displayUrl}
             audioRange={node.data.audio_range}
             onRangeChange={(range) => {
               updateNodeData(modalState.showAudioEditor!, 'audio_range', range);
             }}
             onClose={() => modalState.setShowAudioEditor(null)}
-            onSave={(trimmedAudio) => {
-              const nextOutput = setOutputValueByPort(node.output_value, node.tool_id, 'out-audio', trimmedAudio);
-              updateNodeData(modalState.showAudioEditor!, 'output_value', nextOutput);
-              updateNodeData(modalState.showAudioEditor!, 'audio_range', node.data.audio_range || { start: 0, end: 100 });
+            onSave={async (trimmedAudio) => {
+              if (!workflow?.id) return;
+              try {
+                const saveRef = await saveInputFileViaOutputSave(workflow.id, node.id, 'out-audio', trimmedAudio);
+                const ref = toFileRefForOutputValue(saveRef);
+                if (ref) {
+                  const nextOutput = setOutputValueByPort(node.output_value, node.tool_id, 'out-audio', ref);
+                  updateNodeData(modalState.showAudioEditor!, 'output_value', nextOutput);
+                  updateNodeData(modalState.showAudioEditor!, 'audio_range', node.data.audio_range || { start: 0, end: 100 });
+                }
+              } catch (e) {
+                console.warn('[App] saveInputFileViaOutputSave failed:', e);
+              }
               modalState.setShowAudioEditor(null);
             }}
             lang={lang}

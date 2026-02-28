@@ -33,7 +33,8 @@ interface ResultsPanelProps {
   onToggleShowIntermediate: () => void;
   onExpandOutput: (nodeId: string, fieldId?: string, runId?: string) => void;
   onPinOutputToCanvas?: (content: any, type: DataType) => void;
-  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef, context?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
 }
 
 /** 运行结果里「文本」为 file 引用（file_id + text/plain）时按输出预览方式解析为可显示文本 */
@@ -85,8 +86,24 @@ function textResultDisplay(val: any, t: (key: string) => string): string {
   return String(val);
 }
 
-/** 与运行结果栏、弹窗共用：支持 port-keyed（单 key 解包为 value），与 historyEntryToDisplayValue 一致 */
-export function ResolvedImage({ content, resolveLightX2VResultRef, className }: { content: any; resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>; className?: string }) {
+/** 渲染时通过 getNodeOutputUrl 将 file/task ref 转为 url 给 img，不修改 output_value。与运行结果栏、弹窗共用。 */
+export function ResolvedImage({
+  content,
+  resolveLightX2VResultRef,
+  workflowId,
+  nodeId,
+  portId = 'out-image',
+  getNodeOutputUrl,
+  className
+}: {
+  content: any;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef, context?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>;
+  workflowId?: string;
+  nodeId?: string;
+  portId?: string;
+  getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
+  className?: string;
+}) {
   const [url, setUrl] = useState<string | null>(null);
   const displayContent = content != null && typeof content === 'object' && !Array.isArray(content) && Object.keys(content).length === 1
     ? (content as Record<string, unknown>)[Object.keys(content)[0]]
@@ -95,19 +112,32 @@ export function ResolvedImage({ content, resolveLightX2VResultRef, className }: 
     if (displayContent == null) { setUrl(null); return; }
     if (isLightX2VResultRef(displayContent) && resolveLightX2VResultRef) {
       let cancelled = false;
-      resolveLightX2VResultRef(displayContent).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
+      const ctx = workflowId && nodeId && portId ? { workflow_id: workflowId, node_id: nodeId, port_id: portId } : undefined;
+      resolveLightX2VResultRef(displayContent, ctx).then(u => { if (!cancelled) setUrl(u); }).catch(() => { if (!cancelled) setUrl(null); });
       return () => { cancelled = true; };
     }
-    if (displayContent && typeof displayContent === 'object' && (displayContent as any).kind === 'url' && typeof (displayContent as any).url === 'string') {
-      setUrl(getAssetPath((displayContent as any).url) || (displayContent as any).url);
+    const fileRef = displayContent && typeof displayContent === 'object' && (displayContent as any).kind === 'file' && (displayContent as any).file_id;
+    if (fileRef && workflowId && nodeId && getNodeOutputUrl) {
+      const fileId = (displayContent as any).file_id;
+      const runId = (displayContent as any).run_id;
+      let cancelled = false;
+      getNodeOutputUrl(nodeId, portId, fileId, runId).then(u => { if (!cancelled && u) setUrl(getAssetPath(u) || u); }).catch(() => { if (!cancelled) setUrl(null); });
+      return () => { cancelled = true; };
+    }
+    if (typeof displayContent === 'string' && (displayContent.startsWith('http') || displayContent.startsWith('data:'))) {
+      setUrl(displayContent);
       return;
     }
-    const direct = typeof displayContent === 'string' ? (displayContent.startsWith('http') || displayContent.startsWith('data:') ? displayContent : getAssetPath(displayContent)) : getAssetPath(displayContent);
-    setUrl(direct || null);
-  }, [displayContent, resolveLightX2VResultRef]);
+    if (typeof displayContent === 'string') {
+      setUrl(getAssetPath(displayContent) || null);
+      return;
+    }
+    setUrl(null);
+  }, [displayContent, resolveLightX2VResultRef, workflowId, nodeId, portId, getNodeOutputUrl]);
   if (url) return <img src={url} className={className} alt="" />;
   if (displayContent != null && isLightX2VResultRef(displayContent)) return <div className={className + ' flex items-center justify-center text-[9px] text-slate-500 uppercase'}>Loading...</div>;
-  return <img src={getAssetPath(displayContent)} className={className} alt="" />;
+  if (displayContent != null && typeof displayContent === 'object' && (displayContent as any).kind === 'file' && workflowId && nodeId && getNodeOutputUrl) return <div className={className + ' flex items-center justify-center text-[9px] text-slate-500 uppercase'}>Loading...</div>;
+  return <img src={getAssetPath(displayContent) ?? ''} className={className} alt="" />;
 }
 
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({
@@ -120,7 +150,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
   onToggleShowIntermediate,
   onExpandOutput,
   onPinOutputToCanvas,
-  resolveLightX2VResultRef
+  resolveLightX2VResultRef,
+  getNodeOutputUrl
 }) => {
   const { t } = useTranslation(lang);
 
@@ -264,8 +295,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                                 <Maximize2 size={8} className="text-slate-600 group-hover/field:text-#90dce1" />
                               </div>
                               <p className="text-[9px] text-slate-400 line-clamp-1">
-                                {workflow?.id && isTextFileRef(v) ? (
-                                  <ResolvedTextContent workflowId={workflow.id} fileRef={v} nodeId={node.id} portId={k} className="block" />
+                                {workflow?.id && isTextFileRef(v) && (v as { file_id: string }).file_id ? (
+                                  <ResolvedTextContent workflowId={workflow.id} fileRef={v as { file_id: string; run_id?: string }} nodeId={node.id} portId={k} className="block" />
                                 ) : (
                                   textResultDisplay(v, t)
                                 )}
@@ -278,8 +309,8 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                           onClick={() => expand()}
                           className="text-[10px] text-slate-400 line-clamp-4 leading-relaxed cursor-pointer hover:text-slate-200 transition-colors"
                         >
-                          {workflow?.id && isTextFileRef(res) ? (
-                            <ResolvedTextContent workflowId={workflow.id} fileRef={res} nodeId={node.id} portId={tool?.outputs?.[0]?.id ?? 'out-text'} className="block" />
+                          {workflow?.id && isTextFileRef(res) && (res as { file_id?: string }).file_id ? (
+                            <ResolvedTextContent workflowId={workflow.id} fileRef={res as { file_id: string; run_id?: string }} nodeId={node.id} portId={tool?.outputs?.[0]?.id ?? 'out-text'} className="block" />
                           ) : (
                             textResultDisplay(res, t)
                           )}
@@ -291,12 +322,17 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                         className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar cursor-pointer"
                       >
                         {(Array.isArray(res) ? res : res != null ? [res] : []).map((img, i) => (
-                          <ResolvedImage
-                            key={i}
-                            content={img}
-                            resolveLightX2VResultRef={resolveLightX2VResultRef}
-                            className="h-full w-auto object-cover rounded-lg border border-slate-800"
-                          />
+                          <React.Fragment key={i}>
+                            <ResolvedImage
+                              content={img}
+                              resolveLightX2VResultRef={resolveLightX2VResultRef}
+                              workflowId={workflow?.id}
+                              nodeId={node.id}
+                              portId={tool?.outputs?.[0]?.id ?? 'out-image'}
+                              getNodeOutputUrl={getNodeOutputUrl}
+                              className="h-full w-auto object-cover rounded-lg border border-slate-800"
+                            />
+                          </React.Fragment>
                         ))}
                       </div>
                     ) : (

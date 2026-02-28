@@ -19,7 +19,7 @@ import { useTranslation, Language } from '../i18n/useTranslation';
 import { saveNodeOutputs, saveInputFileViaOutputSave, getNodeOutputData, getWorkflowFileByFileId, getWorkflowFileText, type SaveNodeOutputResult } from '../utils/workflowFileManager';
 import { apiRequest } from '../utils/apiClient';
 import { resolveLightX2VResultRef as resolveLightX2VResultRefUtil, isLightX2VResultRef as isLightX2VResultRefUtil, toLightX2VResultRef, type LightX2VResultRef } from '../utils/resultRef';
-import { getOutputValueByPort, setOutputValueByPort, normalizeOutputValueToPortKeyed, INPUT_PORT_IDS, isPortKeyedOutputValue } from '../utils/outputValuePort';
+import { getOutputValueByPort, setOutputValueByPort, normalizeOutputValueToPortKeyed, INPUT_PORT_IDS, isPortKeyedOutputValue, toFileRefForOutputValue } from '../utils/outputValuePort';
 import { workflowSaveQueue } from '../utils/workflowSaveQueue';
 import { workflowOfflineQueue } from '../utils/workflowOfflineQueue';
 import { checkWorkflowOwnership, getCurrentUserId } from '../utils/workflowUtils';
@@ -509,9 +509,12 @@ function useWorkflowExecutionImpl({
     setPendingRunNodeIds([...new Set([...fromQueue, ...fromRunning])]);
   }, []);
 
-  /** Resolve LightX2V result ref to a fresh URL via result_url (backend or cloud). Uses cache and proxy when standalone. */
-  const resolveLightX2VResultRef = useCallback((ref: LightX2VResultRef): Promise<string> => {
-    return resolveLightX2VResultRefUtil(ref);
+  /** Resolve LightX2V result ref to a fresh URL via result_url (backend or cloud). 加载的 ref 可能无 workflow_id/node_id/port_id，可传 context 补全。 */
+  const resolveLightX2VResultRef = useCallback((
+    ref: LightX2VResultRef,
+    context?: { workflow_id?: string; node_id?: string; port_id?: string }
+  ): Promise<string> => {
+    return resolveLightX2VResultRefUtil(ref, context);
   }, []);
 
   /** Runs one job (full or single node). Called by processQueue. Does not set isRunning false (processQueue does when queue empty). */
@@ -765,7 +768,8 @@ function useWorkflowExecutionImpl({
           if (str && typeof str === 'string') {
             const dataUrl = `data:text/plain;charset=utf-8;base64,${btoa(unescape(encodeURIComponent(str)))}`;
             try {
-              const ref = await saveInputFileViaOutputSave(wfId, node.id, 'out-text', dataUrl);
+              const saveRef = await saveInputFileViaOutputSave(wfId, node.id, 'out-text', dataUrl);
+              const ref = toFileRefForOutputValue(saveRef);
               if (ref) {
                 nextPortKeyed = setOutputValueByPort(node.output_value, node.tool_id, 'out-text', ref);
                 valueToStore = ref;
@@ -808,7 +812,8 @@ function useWorkflowExecutionImpl({
           for (const item of arr) {
             if (isDataUrl(item)) {
               try {
-                const ref = await saveInputFileViaOutputSave(wfId, node.id, portId, item);
+                const saveRef = await saveInputFileViaOutputSave(wfId, node.id, portId, item);
+                const ref = toFileRefForOutputValue(saveRef);
                 if (ref) {
                   newOutputValue.push(ref);
                   hasNewRefs = true;
@@ -855,7 +860,8 @@ function useWorkflowExecutionImpl({
           sessionOutputs[node.id] = nextPortKeyed;
         } else if (!Array.isArray(nodeValue) && isDataUrl(nodeValue)) {
           try {
-            const ref = await saveInputFileViaOutputSave(wfId, node.id, portId, nodeValue);
+            const saveRef = await saveInputFileViaOutputSave(wfId, node.id, portId, nodeValue);
+            const ref = toFileRefForOutputValue(saveRef);
             if (ref) {
               const runTs = Date.now();
               const entry = inputNodesWithNewValue.has(node.id)
@@ -1383,8 +1389,6 @@ function useWorkflowExecutionImpl({
                       jobAbortSignal,
                       t2iWorkflowRefs
                     );
-                    const t2iTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (t2iTid) result = toLightX2VResultRef(wfId, node.id, 'out-image', t2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'image-to-image':
@@ -1447,8 +1451,6 @@ function useWorkflowExecutionImpl({
                       jobAbortSignal,
                       i2iWorkflowRefs
                     );
-                    const i2iTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (i2iTid) result = toLightX2VResultRef(wfId, node.id, 'out-image', i2iTid, 'output_image', (model || '').endsWith('-cloud'));
                   }
                   break;
                 case 'gemini-watermark-remover':
@@ -1557,8 +1559,6 @@ function useWorkflowExecutionImpl({
                     jobAbortSignal,
                     t2vWorkflowRefs
                   );
-                  const t2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (t2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', t2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 case 'video-gen-image': {
                   const startImg = Array.isArray(nodeInputs['in-image']) ? nodeInputs['in-image'][0] : nodeInputs['in-image'];
@@ -1586,8 +1586,6 @@ function useWorkflowExecutionImpl({
                     jobAbortSignal,
                     i2vWorkflowRefs
                   );
-                  const i2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (i2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', i2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 }
                 case 'video-gen-dual-frame': {
@@ -1621,8 +1619,6 @@ function useWorkflowExecutionImpl({
                         jobAbortSignal,
                         flf2vWorkflowRefs
                     );
-                    const flf2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (flf2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', flf2vTid, 'output_video', (model || '').endsWith('-cloud'));
                     break;
                 }
                 case 'character-swap':
@@ -1654,8 +1650,6 @@ function useWorkflowExecutionImpl({
                       jobAbortSignal,
                       animateWorkflowRefs
                     );
-                    const animateTid = jobInfo.taskIdsByNodeId.get(node.id);
-                    if (animateTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', animateTid, 'output_video', (model || '').endsWith('-cloud'));
                   } else {
                   result = await geminiVideo(nodeInputs['in-text'] || "Swap character", swapImg, "16:9", "720p", swapVid, model);
                   }
@@ -1687,8 +1681,6 @@ function useWorkflowExecutionImpl({
                     jobAbortSignal,
                     s2vWorkflowRefs
                   );
-                  const s2vTid = jobInfo.taskIdsByNodeId.get(node.id);
-                  if (s2vTid) result = toLightX2VResultRef(wfId, node.id, 'out-video', s2vTid, 'output_video', (model || '').endsWith('-cloud'));
                   break;
                 default: result = "Processed";
               }
@@ -1724,7 +1716,8 @@ function useWorkflowExecutionImpl({
               const idx = prev.nodes.findIndex(n => n.id === node.id);
               if (idx < 0) return prev;
               const updated = [...prev.nodes];
-              updated[idx] = { ...updated[idx], status: NodeStatus.SUCCESS, execution_time: nodeDuration, output_value: valueToStore, completed_at: Date.now() };
+              const nextOutput = valueToStore !== undefined ? valueToStore : updated[idx].output_value;
+              updated[idx] = { ...updated[idx], status: NodeStatus.SUCCESS, execution_time: nodeDuration, output_value: nextOutput, completed_at: Date.now() };
               return { ...prev, nodes: updated };
             });
             return { nodeId: node.id, result: valueToStore, duration: nodeDuration };

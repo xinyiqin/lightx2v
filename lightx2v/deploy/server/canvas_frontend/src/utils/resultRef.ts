@@ -1,7 +1,18 @@
-import { apiRequest } from './apiClient';
-import { getAssetPath } from './assetPath';
-import { lightX2VResultUrl } from '../../services/geminiService';
-import { isStandalone } from '../config/runtimeMode';
+import { apiRequest, getSharedStore } from './apiClient';
+
+function getAccessToken(): string | null {
+  const sharedStore = getSharedStore();
+  return sharedStore ? sharedStore.getState('token') : (typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null);
+}
+
+/** 给 URL 追加 ?token=accessToken 或 &token=...，便于 <img> 等直接访问时带鉴权 */
+function appendTokenToUrl(url: string): string {
+  if (!url.startsWith('./assets/')) return url;
+  const token = getAccessToken();
+  if (!token) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
 
 /** 任务结果引用：用 kind（统一，兼容旧 type / __type） */
 export type LightX2VResultRef = {
@@ -58,49 +69,46 @@ function setCachedResultUrl(cacheKey: string, url: string): void {
 
 /**
  * Fetch LightX2V result URL via canvas proxy API (task_id + output_name).
- * Used when canvas runs standalone; proxy forwards to LightX2V cloud or local backend.
+ * 使用 apiRequest 自动携带 accessToken，否则接口无权限。
  */
 export async function fetchLightX2VResultUrl(
   workflow_id: string,
   node_id: string,
   port_id: string,
+  task_id: string,
 ): Promise<string> {
-  const res = await fetch(`/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/url`, { method: 'GET' });
+  const url = `/api/v1/workflow/${encodeURIComponent(workflow_id)}/node/${encodeURIComponent(node_id)}/output/${encodeURIComponent(port_id)}/url?task_id=${encodeURIComponent(task_id)}`;
+  const res = await apiRequest(url, { method: 'GET' });
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`result_url failed: ${res.status} ${err}`);
   }
   const data = (await res.json().catch(() => ({}))) as { url?: string };
   if (!data.url) throw new Error('result_url missing url');
-  return data.url;
+  return appendTokenToUrl(data.url);
 }
 
 /**
- * Resolve LightX2V result ref to a displayable URL via result_url (backend or cloud).
- * When is_cloud is true: 不走本地后端，直接走云端 x2v 的 task/result_url 接口获取 url。
- * Uses cache to avoid repeated calls. For backend asset paths, normalizes to absolute URL with token for <img>.
+ * Resolve LightX2V result ref to a displayable URL.
+ * 统一调用 /api/v1/workflow/{workflow_id}/node/{node_id}/output/{port_id}/url 获取 url（输入节点与 task 节点一致），不修改 output_value。
+ * 加载 workflow 时 ref 可能无 workflow_id/node_id/port_id，可传入 context 补全。
  */
 export async function resolveLightX2VResultRef(
-  ref: LightX2VResultRef
+  ref: LightX2VResultRef,
+  context?: { workflow_id?: string; node_id?: string; port_id?: string }
 ): Promise<string> {
-  const cacheKey = `${ref.is_cloud}:${ref.task_id}:${ref.output_name}`;
+  const wfId = ref.workflow_id ?? context?.workflow_id;
+  const nodeId = ref.node_id ?? context?.node_id;
+  const portId = ref.port_id ?? context?.port_id;
+  const cacheKey = `${wfId ?? ''}:${nodeId ?? ''}:${portId ?? ''}:${ref.task_id}:${ref.output_name}`;
+  const taskId = ref.task_id;
   const cached = getCachedResultUrl(cacheKey);
   if (cached != null) return cached;
 
-  throw new Error('resolveLightX2VResultRef ${JSON.stringify(ref)}');
-  let url: string;
-  if (ref.is_cloud) {
-    // 云端任务：不调用本地后端，直接走云端 x2v 的 task/result_url
-    if (isStandalone()) {
-      url = await fetchLightX2VResultUrl(ref.workflow_id, ref.node_id, ref.port_id);
-    } else {
-      const cloudUrl = (process.env.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').trim();
-      const cloudToken = (process.env.LIGHTX2V_CLOUD_TOKEN || '').trim();
-      url = await lightX2VResultUrl(cloudUrl, cloudToken, ref.workflow_id, ref.node_id, ref.port_id);
-    }
-  } else {
-    url = await fetchLightX2VResultUrl(ref.workflow_id, ref.node_id, ref.port_id);
+  if (wfId && nodeId && portId) {
+    const url = await fetchLightX2VResultUrl(wfId, nodeId, portId, taskId);
+    setCachedResultUrl(cacheKey, url);
+    return url;
   }
-  setCachedResultUrl(cacheKey, url);
-  return url;
+  throw new Error(`resolveLightX2VResultRef: missing workflow_id/node_id/port_id for ref ${JSON.stringify(ref)}`);
 }

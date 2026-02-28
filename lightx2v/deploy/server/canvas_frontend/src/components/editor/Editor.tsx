@@ -551,6 +551,7 @@ export const Editor: React.FC<EditorProps> = ({
         onExpandOutput={onExpandOutput}
         onPinOutputToCanvas={onPinOutputToCanvas}
         resolveLightX2VResultRef={resolveLightX2VResultRef}
+        getNodeOutputUrl={getNodeOutputUrl}
       />
     </div>
   );
