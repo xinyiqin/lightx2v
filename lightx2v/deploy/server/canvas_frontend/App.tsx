@@ -1414,6 +1414,7 @@ const App: React.FC = () => {
           onToggleThumbsup={handleToggleWorkflowThumsup}
           onToggleWorkflowVisibility={handleToggleWorkflowVisibility}
           onSetActiveTab={setActiveTab}
+          resolveLightX2VResultRef={resolveLightX2VResultRef}
         />
       </div>
     );

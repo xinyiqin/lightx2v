@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Layers, Trash2, Calendar, Sparkle, Lock, Globe, Heart, Users, Boxes } from 'lucide-react';
 import { WorkflowState } from '../../../types';
 import { useTranslation, Language } from '../../i18n/useTranslation';
-import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
+import { getAssetPath } from '../../utils/assetPath';
 import { getLocalFileDataUrl, getNodeOutputUrl } from '../../utils/workflowFileManager';
+import type { LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
 interface WorkflowCardProps {
   workflow: WorkflowState;
@@ -15,6 +16,7 @@ interface WorkflowCardProps {
   onToggleThumbsup?: (workflowId: string) => void;
   mode?: 'MY' | 'COMMUNITY' | 'PRESET';
   accentColor?: string;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef, context?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>;
 }
 
 export const WorkflowCard: React.FC<WorkflowCardProps> = ({
@@ -26,7 +28,8 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   onToggleVisibility,
   onToggleThumbsup,
   mode = 'MY',
-  accentColor = '#90dce1'
+  accentColor = '#90dce1',
+  resolveLightX2VResultRef
 }) => {
   const { t } = useTranslation(lang);
 
@@ -40,7 +43,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   // 优先从 value 取第一张图：可为字符串(data:/local:/path)、file_ref(file_id) 或 task_ref(task_id+output_name)
   let previewImage: string | null = null;
   let previewFileRef: { file_id: string; mime_type?: string; ext?: string; run_id?: string; nodeId?: string; portId?: string } | null = null;
-  let previewTaskRef: { task_id: string; output_name: string } | null = null;
+  let previewTaskRef: { task_id: string; output_name: string; nodeId?: string; portId?: string } | null = null;
   if (Array.isArray(imageValue) && imageValue.length > 0) {
     const first = imageValue[0];
     if (typeof first === 'string') previewImage = first;
@@ -54,7 +57,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
         portId: 'out-image',
       };
     } else if (first && typeof first === 'object' && typeof (first as any).task_id === 'string' && typeof (first as any).output_name === 'string') {
-      previewTaskRef = { task_id: (first as any).task_id, output_name: (first as any).output_name };
+      previewTaskRef = { task_id: (first as any).task_id, output_name: (first as any).output_name, nodeId: imageInputNode?.id ?? undefined, portId: 'out-image' };
     }
   } else if (typeof imageValue === 'string') {
     previewImage = imageValue;
@@ -68,7 +71,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
       portId: 'out-image',
     };
   } else if (imageValue && typeof imageValue === 'object' && typeof (imageValue as any).task_id === 'string' && typeof (imageValue as any).output_name === 'string') {
-    previewTaskRef = { task_id: (imageValue as any).task_id, output_name: (imageValue as any).output_name };
+    previewTaskRef = { task_id: (imageValue as any).task_id, output_name: (imageValue as any).output_name, nodeId: imageInputNode?.id ?? undefined, portId: 'out-image' };
   }
   if (!previewImage && !previewFileRef && !previewTaskRef && imageEdits.length > 0) {
     const first = imageEdits[0] as { cropped?: string; original?: string; source?: string };
@@ -92,7 +95,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           break;
         }
         if (typeof (ref as any).task_id === 'string' && typeof (ref as any).output_name === 'string') {
-          previewTaskRef = { task_id: (ref as any).task_id, output_name: (ref as any).output_name };
+          previewTaskRef = { task_id: (ref as any).task_id, output_name: (ref as any).output_name, nodeId: node.id, portId: 'out-image' };
           break;
         }
       }
@@ -129,11 +132,28 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
     return () => { cancelled = true; };
   }, [workflow.id, previewFileRef?.file_id, previewFileRef?.nodeId, previewFileRef?.portId, previewFileRef?.run_id]);
 
-  // 显示用 URL：字符串(data:/local:// 解析后)、file_ref 用 getNodeOutputUrl 结果，task_ref 用 getResultRefPreviewUrl
+  // task_ref 预览：通过 resolveLightX2VResultRef 获取 URL
+  const [resolvedTaskRefUrl, setResolvedTaskRefUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!previewTaskRef || !resolveLightX2VResultRef || !workflow.id || !previewTaskRef.nodeId || !previewTaskRef.portId) {
+      setResolvedTaskRefUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const ref: LightX2VResultRef = { kind: 'task', task_id: previewTaskRef.task_id, output_name: previewTaskRef.output_name, is_cloud: false };
+    const ctx = { workflow_id: workflow.id, node_id: previewTaskRef.nodeId, port_id: previewTaskRef.portId };
+    resolveLightX2VResultRef(ref, ctx).then((url) => {
+      if (!cancelled && url) setResolvedTaskRefUrl(url);
+      else if (!cancelled) setResolvedTaskRefUrl(null);
+    }).catch(() => { if (!cancelled) setResolvedTaskRefUrl(null); });
+    return () => { cancelled = true; setResolvedTaskRefUrl(null); };
+  }, [workflow.id, previewTaskRef?.task_id, previewTaskRef?.output_name, previewTaskRef?.nodeId, previewTaskRef?.portId, resolveLightX2VResultRef]);
+
+  // 显示用 URL：字符串(data:/local:// 解析后)、file_ref 用 getNodeOutputUrl 结果，task_ref 用 resolveLightX2VResultRef
   const displayImageUrl =
     (previewImage && typeof previewImage === 'string' && (previewImage.startsWith('local://') ? resolvedLocalUrl : previewImage))
     || (previewFileRef && resolvedFileRefUrl)
-    || (previewTaskRef ? getResultRefPreviewUrl(previewTaskRef) : null);
+    || (previewTaskRef && resolvedTaskRefUrl) || null;
 
   const cardMode = isPreset ? 'PRESET' : mode;
   const visibility = workflow.visibility || (cardMode !== 'MY' ? 'public' : 'private');

@@ -30,7 +30,7 @@ import { useTranslation, Language } from '../../i18n/useTranslation';
 import { getIcon } from '../../utils/icons';
 import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
-import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
+import { getAssetPath } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries, getEntryPortKeyedValue } from '../../utils/historyEntry';
 import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getWorkflowFileUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
@@ -75,12 +75,15 @@ const HistoryEntryItem: React.FC<{
     else if (fileVal.url) preview = lang === 'zh' ? '[URL]' : '[URL]';
     else preview = lang === 'zh' ? '[文件]' : '[File]';
   } else if (kind === 'task' || kind === 'lightx2v_result') {
-    const val = ov as { task_id?: string; output_name?: string; is_cloud?: boolean };
+    const val = ov as { task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
     preview = `${val.task_id || ''} ${val.output_name || ''}`.trim() || (lang === 'zh' ? '[视频结果]' : '[Video]');
     isLightX2VResult = true;
     if (val.task_id) {
       lightX2VRef = {
         kind: 'task',
+        workflow_id: val.workflow_id,
+        node_id: val.node_id,
+        port_id: val.port_id,
         task_id: val.task_id,
         output_name: val.output_name || 'output',
         is_cloud: !!val.is_cloud,
@@ -333,7 +336,7 @@ interface NodeProps {
   quickAddInput: (node: WorkflowNode, port: Port) => void;
   quickAddOutput: (node: WorkflowNode, port: Port, toolId: string) => void;
   onAddNodeToChat?: (nodeId: string, name: string) => void;
-  resolveLightX2VResultRef?: (ref: LightX2VResultRef) => Promise<string>;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef, context?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>;
   connecting: {
     nodeId: string;
     portId: string;
@@ -446,20 +449,25 @@ export const Node: React.FC<NodeProps> = ({
   const isPreviewRef = previewValue != null && isLightX2VResultRef(previewValue);
   const previewRefObj = isPreviewRef && typeof previewValue === 'object' ? (previewValue as LightX2VResultRef) : null;
   const [resolvedPreviewUrl, setResolvedPreviewUrl] = React.useState<string | null>(null);
+  const resolveTaskRefContext = React.useMemo(() => (workflow?.id && node.id && firstOutputPortId
+    ? { workflow_id: workflow.id, node_id: node.id, port_id: firstOutputPortId }
+    : undefined), [workflow?.id, node.id, firstOutputPortId]);
+  const resolveTaskRefForHistory = React.useCallback((ref: LightX2VResultRef) => {
+    if (!resolveLightX2VResultRef) return Promise.reject(new Error('no resolver'));
+    return resolveLightX2VResultRef(ref, resolveTaskRefContext);
+  }, [resolveLightX2VResultRef, resolveTaskRefContext]);
   React.useEffect(() => {
     if (!previewRefObj || !resolveLightX2VResultRef) return;
     let cancelled = false;
-    resolveLightX2VResultRef(previewRefObj).then((url) => {
+    resolveLightX2VResultRef(previewRefObj, resolveTaskRefContext).then((url) => {
       if (!cancelled) setResolvedPreviewUrl(url);
     }).catch(() => {
       if (!cancelled) setResolvedPreviewUrl(null);
     });
     return () => { cancelled = true; setResolvedPreviewUrl(null); };
-  }, [previewRefObj?.task_id, previewRefObj?.output_name, previewRefObj?.is_cloud, resolveLightX2VResultRef]);
-  // is_cloud 为 true 时只用 resolveLightX2VResultRef 得到的云端 URL，不走本地 getResultRefPreviewUrl
-  const refPreviewUrl = isPreviewRef && previewRefObj
-    ? (previewRefObj.is_cloud ? resolvedPreviewUrl : (resolveLightX2VResultRef ? resolvedPreviewUrl : getResultRefPreviewUrl(previewRefObj)))
-    : null;
+  }, [previewRefObj?.task_id, previewRefObj?.output_name, previewRefObj?.is_cloud, resolveLightX2VResultRef, resolveTaskRefContext]);
+  // 统一通过 resolveLightX2VResultRef 获取 URL（本地/云端均走接口）
+  const refPreviewUrl = isPreviewRef && previewRefObj ? resolvedPreviewUrl : null;
   // 文本端口为 file ref（.txt）时拉取内容用于预览
   const isTextFileRef = firstOutputType === DataType.TEXT && previewValue != null && typeof previewValue === 'object' && (previewValue as any).kind === 'file' && (previewValue as any).file_id;
   const [resolvedTextFromFile, setResolvedTextFromFile] = React.useState<string | null>(null);
@@ -803,17 +811,21 @@ export const Node: React.FC<NodeProps> = ({
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
     if (kind === 'task' || kind === 'lightx2v_result') {
-      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
       const output_name = val.output_name || 'output';
       if (output_name !== 'output_audio') return null;
       if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
         kind: 'task',
+        workflow_id: val.workflow_id ?? workflow?.id,
+        node_id: val.node_id ?? node.id,
+        port_id: val.port_id ?? portIdToUse,
         task_id: val.task_id,
         output_name: output_name,
         is_cloud: !!val.is_cloud
       };
-      return resolveLightX2VResultRef(ref).catch(() => null);
+      const ctx = workflow?.id && node.id && portIdToUse ? { workflow_id: workflow.id, node_id: node.id, port_id: portIdToUse } : undefined;
+      return resolveLightX2VResultRef(ref, ctx).catch(() => null);
     }
     if (kind === 'file') {
       const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
@@ -837,17 +849,21 @@ export const Node: React.FC<NodeProps> = ({
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
     if (kind === 'task' || kind === 'lightx2v_result') {
-      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const val = (ov || entry) as {task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
       const output_name = val.output_name || 'output';
       if (output_name !== 'output_video' && output_name !== 'output') return null;
       if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
         kind: 'task',
+        workflow_id: val.workflow_id ?? workflow?.id,
+        node_id: val.node_id ?? node.id,
+        port_id: val.port_id ?? portIdToUse,
         task_id: val.task_id,
         output_name: output_name,
         is_cloud: !!val.is_cloud
       };
-      return resolveLightX2VResultRef(ref).catch(() => null);
+      const ctx = workflow?.id && node.id && portIdToUse ? { workflow_id: workflow.id, node_id: node.id, port_id: portIdToUse } : undefined;
+      return resolveLightX2VResultRef(ref, ctx).catch(() => null);
     }
     if (kind === 'file') {
       const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; ext?: string; run_id?: string };
@@ -871,17 +887,22 @@ export const Node: React.FC<NodeProps> = ({
     const ov = (portIdToUse ? portKeyed[portIdToUse] : null) ?? entry.output_value ?? (entry as any).value;
     const kind = ov?.kind ?? (entry as any).kind;
     if (kind === 'task' || kind === 'lightx2v_result') {
-      const val = (ov || entry) as { task_id?: string; output_name?: string; is_cloud?: boolean };
+      const val = (ov || entry) as {task_id?: string; output_name?: string; is_cloud?: boolean; workflow_id?: string; node_id?: string; port_id?: string };
       const output_name = val.output_name || 'output';
       if (output_name !== 'output_image' && output_name !== 'output') return null;
       if (!resolveLightX2VResultRef || !val.task_id) return null;
       const ref: LightX2VResultRef = {
         kind: 'task',
+        workflow_id: val.workflow_id ?? workflow?.id,
+        node_id: val.node_id ?? node.id,
+        port_id: val.port_id ?? portIdToUse,
         task_id: val.task_id,
         output_name: output_name,
         is_cloud: !!val.is_cloud
       };
-      return resolveLightX2VResultRef(ref).catch(() => null);
+      const ctx = workflow?.id && node.id && portIdToUse ? { workflow_id: workflow.id, node_id: node.id, port_id: portIdToUse } : undefined;
+      const url = await resolveLightX2VResultRef(ref, ctx).catch(() => null);
+      return url;
     }
     if (kind === 'file') {
       const fileVal = ov as { dataUrl?: string; url?: string; file_id?: string; mime_type?: string; run_id?: string };
@@ -1348,7 +1369,7 @@ export const Node: React.FC<NodeProps> = ({
                       entry={entry}
                       lang={lang}
                       onSelect={() => handleHistoryEntrySelect(entry)}
-                      resolveLightX2VResultRef={resolveLightX2VResultRef}
+                      resolveLightX2VResultRef={resolveLightX2VResultRef ? resolveTaskRefForHistory : undefined}
                       outputDataType={firstOutputType}
                       outputPortId={firstOutputPortId ?? undefined}
                       resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId ?? undefined)}

@@ -5,6 +5,7 @@ import { PRESET_WORKFLOWS } from '../../../preset_workflow';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { WorkflowCard } from './WorkflowCard';
 import { Header } from '../common/Header';
+import type { LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 
 interface DashboardProps {
   lang: Language;
@@ -23,6 +24,7 @@ interface DashboardProps {
   onRefresh?: () => void;
   /** 纯前端模式不显示社区栏目 */
   hideCommunityTab?: boolean;
+  resolveLightX2VResultRef?: (ref: LightX2VResultRef, context?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -40,7 +42,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSetActiveTab,
   isLoading = false,
   onRefresh,
-  hideCommunityTab = false
+  hideCommunityTab = false,
+  resolveLightX2VResultRef
 }) => {
   const { t } = useTranslation(lang);
   const accentColor = '#90dce1';
@@ -121,6 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onToggleThumbsup={onToggleThumbsup}
                     mode="MY"
                     accentColor={accentColor}
+                    resolveLightX2VResultRef={resolveLightX2VResultRef}
                   />
                   ))
               )
@@ -141,6 +145,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onToggleThumbsup={onToggleThumbsup}
                     mode="COMMUNITY"
                     accentColor={accentColor}
+                    resolveLightX2VResultRef={resolveLightX2VResultRef}
                   />
                 ))
               )
@@ -155,6 +160,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   isPreset={true}
                   mode="PRESET"
                   accentColor={accentColor}
+                  resolveLightX2VResultRef={resolveLightX2VResultRef}
                 />
               ))
             )}

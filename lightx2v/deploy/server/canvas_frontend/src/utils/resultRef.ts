@@ -112,3 +112,15 @@ export async function resolveLightX2VResultRef(
   }
   throw new Error(`resolveLightX2VResultRef: missing workflow_id/node_id/port_id for ref ${JSON.stringify(ref)}`);
 }
+
+/**
+ * 通过 resolveLightX2VResultRef 获取 task 结果预览 URL（不再直连拼 /assets/task/result）。
+ * 调用方需传入 resolver 与 context，异步返回与 resolveLightX2VResultRef 一致。
+ */
+export async function getResultRefPreviewUrl(
+  ref: LightX2VResultRef,
+  resolveFn: (r: LightX2VResultRef, ctx?: { workflow_id?: string; node_id?: string; port_id?: string }) => Promise<string>,
+  context?: { workflow_id?: string; node_id?: string; port_id?: string }
+): Promise<string> {
+  return resolveFn(ref, context);
+}

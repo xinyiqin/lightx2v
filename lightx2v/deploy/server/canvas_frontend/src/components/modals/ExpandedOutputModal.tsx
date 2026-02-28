@@ -4,7 +4,7 @@ import { DataType } from '../../../types';
 import { downloadFile } from '../../utils/download';
 import { useTranslation, Language } from '../../i18n/useTranslation';
 import { pcmToWavUrl } from '../../utils/audio';
-import { getAssetPath, getResultRefPreviewUrl } from '../../utils/assetPath';
+import { getAssetPath } from '../../utils/assetPath';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { collectLightX2VResultRefs } from '../../utils/resultRef';
 import { AudioNodePreview } from '../previews/AudioNodePreview';
@@ -429,9 +429,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               };
               const v = getMediaValue(rawForDisplay);
               const fallback = v !== '' ? (v.startsWith('http') || v.startsWith('data:') || v.startsWith('blob:') ? v : getAssetPath(v)) : '';
-              const isLocalRef = refForDisplay && (refForDisplay as any).is_cloud !== true && typeof (refForDisplay as any).task_id === 'string' && typeof (refForDisplay as any).output_name === 'string';
-              const localRefUrl = isLocalRef ? getResultRefPreviewUrl(refForDisplay as { task_id: string; output_name: string }) : '';
-              const videoSrc = (resolvedMediaUrl || localRefUrl || fromApi || fallback) || '';
+              const videoSrc = (resolvedMediaUrl || fromApi || fallback) || '';
               if (!videoSrc || videoSrc === '') {
                 return <div className="text-sm text-slate-500">{(isRef && !resolvedMediaUrl) || (isFileRef(rawForDisplay) && !resolvedFileUrl) ? 'Loading...' : 'No video data'}</div>;
               }

@@ -85,10 +85,20 @@ def fmt_workflow_file_path(file_entry: dict) -> str | None:
     return f"workflows/{workflow_id}/{file_id}{ext}"
 
 
-def save_task_entry(user_id: str, workflow_id: str, run_id: str, data: dict, files_tasks: dict):
+def save_task_entry(
+    user_id: str,
+    workflow_id: str,
+    node_id: str,
+    port_id: str,
+    run_id: str,
+    data: dict,
+    files_tasks: dict,
+) -> dict:
     task_id = data["task_id"]
     task_entry = {
         "workflow_id": workflow_id,
+        "node_id": node_id,
+        "port_id": port_id,
         "user_id": user_id,
         "kind": "task",
         "task_id": task_id,
@@ -105,6 +115,8 @@ def save_task_entry(user_id: str, workflow_id: str, run_id: str, data: dict, fil
 async def save_file_entry(
     user_id: str,
     workflow_id: str,
+    node_id: str,
+    port_id: str,
     run_id: str,
     data: Any,
     files_tasks: dict,
@@ -124,6 +136,8 @@ async def save_file_entry(
     file_id = f"wf_{workflow_id}_{user_id}_{md5}"
     file_entry = {
         "workflow_id": workflow_id,
+        "node_id": node_id,
+        "port_id": port_id,
         "user_id": user_id,
         "kind": "file",
         "file_id": file_id,
@@ -147,15 +161,17 @@ async def format_and_save_entry(
     user_id: str,
     run_id: str,
     workflow_id: str,
+    node_id: str,
+    port_id: str,
     files_tasks: dict,
     data_manager: BaseDataManager,
 ) -> list[dict]:
     """解析用户上传的节点输出值，存储并返回 entry dict。"""
     item = output_data_raw
     if item["type"] == "task":
-        return save_task_entry(user_id, workflow_id, run_id, item["data"], files_tasks)
+        return save_task_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks)
     elif item["type"] == "base64":
-        return await save_file_entry(user_id, workflow_id, run_id, item["data"], files_tasks, data_manager)
+        return await save_file_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks, data_manager)
     else:
         raise ValueError(f"Unknown output data type: {item['type']}")
     

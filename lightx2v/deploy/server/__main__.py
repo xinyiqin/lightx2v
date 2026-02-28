@@ -2250,7 +2250,7 @@ async def api_v1_workflow_node_output_port_save(request: Request, user=Depends(v
 
         try:
             # parse output_data, save it, return entry dict, workflow["files_tasks"] changed
-            new_entry = await format_and_save_entry(output_data, user_id, run_id, workflow_id, files_tasks, data_manager)
+            new_entry = await format_and_save_entry(output_data, user_id, run_id, workflow_id, node_id, port_id, files_tasks, data_manager)
         except ValueError:
             traceback.print_exc()
             return error_response("Failed to format and save entries", 400)

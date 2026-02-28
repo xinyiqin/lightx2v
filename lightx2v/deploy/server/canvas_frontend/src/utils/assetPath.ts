@@ -1,11 +1,3 @@
-/** LightX2V 结果引用：用 task_id + output_name 直接拼出带 token 的预览 URL，无需调 result_url 接口 */
-export function getResultRefPreviewUrl(ref: { task_id: string; output_name: string }): string {
-  const path = `/assets/task/result?task_id=${encodeURIComponent(ref.task_id)}&name=${encodeURIComponent(ref.output_name)}`;
-  const withToken = getAssetPath(path);
-  if (typeof window !== 'undefined' && withToken.startsWith('/')) return window.location.origin + withToken;
-  return withToken;
-}
-
 export function getAssetPath(path: string | null | undefined): string {
   // 处理 null、undefined 或非字符串类型
   if (!path || typeof path !== 'string') {
