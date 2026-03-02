@@ -385,7 +385,12 @@ const App: React.FC = () => {
     saveWorkflowBeforeRun: !isStandalone() && saveWorkflowToDatabase
       ? async (w) => await saveWorkflowToDatabase(w, { name: w.name })
       : undefined,
-    refreshWorkflowFromBackend: !isStandalone() ? refreshWorkflowFromBackend : undefined
+    refreshWorkflowFromBackend: !isStandalone() ? refreshWorkflowFromBackend : undefined,
+    getWorkflow: !isStandalone() ? getWorkflow : undefined,
+    // 批量/单节点执行前后各调用一次，将 workflow（含 node 参数）同步到后端
+    updateWorkflowSync: !isStandalone() && saveWorkflowToDatabase
+      ? async (_workflowId, w) => { await saveWorkflowToDatabase(w, { name: w.name }); }
+      : undefined,
   });
 
   // Destructure updateNodeData from nodeManagement (for use in other places)
@@ -1560,6 +1565,7 @@ const App: React.FC = () => {
         pendingRunNodeIds={pendingRunNodeIds}
         resolveLightX2VResultRef={resolveLightX2VResultRef}
         getNodeOutputUrl={workflow?.id ? getNodeOutputUrlForWorkflow : undefined}
+        refreshWorkflowFromBackend={!isStandalone() ? refreshWorkflowFromBackend : undefined}
           onSetReplaceMenu={modalState.setShowReplaceMenu}
           onSetOutputQuickAdd={modalState.setShowOutputQuickAdd}
           onSetModelSelect={modalState.setShowModelSelect}

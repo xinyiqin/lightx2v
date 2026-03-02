@@ -32,7 +32,7 @@ import { formatTime, formatRunTime } from '../../utils/format';
 import { screenToWorld, ViewState } from '../../utils/canvas';
 import { getAssetPath } from '../../utils/assetPath';
 import { historyEntryToDisplayValue, normalizeHistoryEntries, getEntryPortKeyedValue } from '../../utils/historyEntry';
-import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getNodeOutputDisplayUrl, getWorkflowFileUrl, persistDataUrlToLocal } from '../../utils/workflowFileManager';
+import { getLocalFileDataUrl, getWorkflowFileByFileId, getWorkflowFileText, getNodeOutputUrl, getNodeOutputDisplayUrl, getWorkflowFileUrl, persistDataUrlToLocal, saveNodeOutputsFromHistoryEntry } from '../../utils/workflowFileManager';
 import { isStandalone } from '../../config/runtimeMode';
 import { isLightX2VResultRef, type LightX2VResultRef } from '../../hooks/useWorkflowExecution';
 import { getOutputValueByPort, setOutputValueByPort, INPUT_PORT_IDS } from '../../utils/outputValuePort';
@@ -347,6 +347,8 @@ interface NodeProps {
   } | null;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
   getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
+  /** 可选：保存后刷新 workflow（用于历史条目选中后同步后端） */
+  refreshWorkflowFromBackend?: (workflowId: string) => Promise<void>;
 }
 
 export const Node: React.FC<NodeProps> = ({
@@ -394,7 +396,8 @@ export const Node: React.FC<NodeProps> = ({
   connecting,
   onNodeHeightChange,
   getNodeOutputUrl,
-  screenToWorldCoords
+  screenToWorldCoords,
+  refreshWorkflowFromBackend,
 }) => {
   const { t } = useTranslation(lang);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -800,8 +803,16 @@ export const Node: React.FC<NodeProps> = ({
         onUpdateNodeData(node.id, '__mergeData', entry.params);
       }
       setShowHistoryDropdown(false);
+
+      // 非 standalone 时按 task/file 格式调用 port/save，将选中的历史结果写回后端（使用 history entry 的 id 作为 run_id）
+      if (!isStandalone() && workflow?.id) {
+        const portKeyed = getEntryPortKeyedValue(entry);
+        saveNodeOutputsFromHistoryEntry(workflow.id, node.id, portKeyed, entry.id)
+          .then(() => refreshWorkflowFromBackend?.(workflow.id))
+          .catch((e) => console.warn('[Node] Save history selection to backend failed:', e));
+      }
     },
-    [node.id, node.tool_id, node.output_value, isInputNode, onUpdateNodeData]
+    [node.id, node.tool_id, node.output_value, isInputNode, onUpdateNodeData, workflow?.id, refreshWorkflowFromBackend]
   );
 
   const resolveAudioUrlForEntry = React.useCallback(async (entry: NodeHistoryEntry, portId?: string): Promise<string | null> => {
@@ -1159,12 +1170,13 @@ export const Node: React.FC<NodeProps> = ({
     !tool.models.some((m) => m.id === node.data.model);
 
   const modelsListEmpty = Array.isArray(tool.models) && tool.models.length === 0;
-  // 仅对需要模型的节点（AI 模型类）显示该警告；语音合成、音色克隆等节点不需要模型，不显示
+  // 仅对需要模型的节点（AI 模型类）显示该警告；语音合成、音色克隆等不显示；文本生成（大模型）不显示空列表警告
   const noModelNeededToolIds = ['tts', 'lightx2v-voice-clone'];
   const showModelsListEmptyWarning =
     modelsListEmpty &&
     tool.category === 'AI Model' &&
-    !noModelNeededToolIds.includes(tool.id);
+    !noModelNeededToolIds.includes(tool.id) &&
+    tool.id !== 'text-generation';
 
   // 当前模型不在支持列表中时，自动选为列表第一项
   React.useEffect(() => {
@@ -1352,62 +1364,64 @@ export const Node: React.FC<NodeProps> = ({
               )}
             </span>
           )}
-          <div className="relative" ref={historyDropdownRef}>
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowHistoryDropdown((v) => !v);
-              }}
-              className={`p-1 rounded transition-colors ${
-                nodeHistoryEntries.length > 0
-                  ? 'text-slate-400 hover:text-[#90dce1] opacity-0 group-hover:opacity-100'
-                  : 'text-slate-600 cursor-default opacity-0 group-hover:opacity-50'
-              }`}
-              title={lang === 'zh' ? '历史结果' : 'History'}
-            >
-              <History size={12} />
-            </button>
-            {showHistoryDropdown && (
-              <div
-                className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
+          {node.tool_id !== 'image-input' && (
+            <div className="relative" ref={historyDropdownRef}>
+              <button
                 onMouseDown={(e) => e.stopPropagation()}
-                onWheel={(e) => {
+                onClick={(e) => {
                   e.stopPropagation();
-                  if (e.ctrlKey) e.preventDefault();
+                  setShowHistoryDropdown((v) => !v);
                 }}
+                className={`p-1 rounded transition-colors ${
+                  nodeHistoryEntries.length > 0
+                    ? 'text-slate-400 hover:text-[#90dce1] opacity-0 group-hover:opacity-100'
+                    : 'text-slate-600 cursor-default opacity-0 group-hover:opacity-50'
+                }`}
+                title={lang === 'zh' ? '历史结果' : 'History'}
               >
-                {nodeHistoryEntries.length > 0 ? (
-                  nodeHistoryEntries.map((entry) => (
-                    <HistoryEntryItem
-                      key={entry.id}
-                      entry={entry}
-                      lang={lang}
-                      onSelect={() => handleHistoryEntrySelect(entry)}
-                      resolveLightX2VResultRef={resolveLightX2VResultRef ? resolveTaskRefForHistory : undefined}
-                      outputDataType={firstOutputType}
-                      outputPortId={firstOutputPortId ?? undefined}
-                      resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId ?? undefined)}
-                      resolveVideoUrl={(e) => resolveVideoUrlForEntry(e, firstOutputPortId ?? undefined)}
-                      resolveImageUrl={(e) => resolveImageUrlForEntry(e, firstOutputPortId ?? undefined)}
-                      resolveTextFileContent={workflow?.id && firstOutputType === DataType.TEXT ? (e) => {
-                        const portKeyed = getEntryPortKeyedValue(e);
-                        const keys = Object.keys(portKeyed);
-                        const portId = (keys.length === 1 ? keys[0] : undefined) ?? firstOutputPortId ?? 'out-text';
-                        const ov = (portId ? portKeyed[portId] : null) ?? (e?.output_value as { file_id?: string; run_id?: string });
-                        const fid = ov?.file_id;
-                        return fid ? getWorkflowFileText(workflow.id!, fid, node.id, portId, ov?.run_id) : Promise.resolve(null);
-                      } : undefined}
-                    />
-                  ))
-                ) : (
-                  <div className="px-3 py-4 text-[10px] text-slate-500 text-center">
-                    {lang === 'zh' ? '暂无历史记录' : 'No history'}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+                <History size={12} />
+              </button>
+              {showHistoryDropdown && (
+                <div
+                  className="absolute right-0 top-full mt-1 w-64 h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 custom-scrollbar"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onWheel={(e) => {
+                    e.stopPropagation();
+                    if (e.ctrlKey) e.preventDefault();
+                  }}
+                >
+                  {nodeHistoryEntries.length > 0 ? (
+                    nodeHistoryEntries.map((entry) => (
+                      <HistoryEntryItem
+                        key={entry.id}
+                        entry={entry}
+                        lang={lang}
+                        onSelect={() => handleHistoryEntrySelect(entry)}
+                        resolveLightX2VResultRef={resolveLightX2VResultRef ? resolveTaskRefForHistory : undefined}
+                        outputDataType={firstOutputType}
+                        outputPortId={firstOutputPortId ?? undefined}
+                        resolveAudioUrl={(e) => resolveAudioUrlForEntry(e, firstOutputPortId ?? undefined)}
+                        resolveVideoUrl={(e) => resolveVideoUrlForEntry(e, firstOutputPortId ?? undefined)}
+                        resolveImageUrl={(e) => resolveImageUrlForEntry(e, firstOutputPortId ?? undefined)}
+                        resolveTextFileContent={workflow?.id && firstOutputType === DataType.TEXT ? (e) => {
+                          const portKeyed = getEntryPortKeyedValue(e);
+                          const keys = Object.keys(portKeyed);
+                          const portId = (keys.length === 1 ? keys[0] : undefined) ?? firstOutputPortId ?? 'out-text';
+                          const ov = (portId ? portKeyed[portId] : null) ?? (e?.output_value as { file_id?: string; run_id?: string });
+                          const fid = ov?.file_id;
+                          return fid ? getWorkflowFileText(workflow.id!, fid, node.id, portId, ov?.run_id) : Promise.resolve(null);
+                        } : undefined}
+                      />
+                    ))
+                  ) : (
+                    <div className="px-3 py-4 text-[10px] text-slate-500 text-center">
+                      {lang === 'zh' ? '暂无历史记录' : 'No history'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {!isInputNode && (
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {node.status === NodeStatus.RUNNING || node.status === NodeStatus.PENDING || (pendingRunNodeIds && pendingRunNodeIds.includes(node.id)) ? (

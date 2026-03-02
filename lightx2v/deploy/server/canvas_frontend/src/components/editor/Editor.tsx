@@ -148,6 +148,7 @@ interface EditorProps {
   onPinOutputToCanvas?: (content: any, type: DataType) => void;
   resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
   getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
+  refreshWorkflowFromBackend?: (workflowId: string) => Promise<void>;
   onNodeHeightChange?: (nodeId: string, height: number) => void;
   // AI Chat props
   isAIChatOpen?: boolean;
@@ -296,6 +297,7 @@ export const Editor: React.FC<EditorProps> = ({
   onPinOutputToCanvas = () => {},
   resolveLightX2VResultRef,
   getNodeOutputUrl,
+  refreshWorkflowFromBackend,
   // AI Chat props
   isAIChatOpen = false,
   isAIChatCollapsed = false,
@@ -446,6 +448,7 @@ export const Editor: React.FC<EditorProps> = ({
           onAddNodeToChat={onAddNodeToChatContext}
           resolveLightX2VResultRef={resolveLightX2VResultRef}
           getNodeOutputUrl={getNodeOutputUrl}
+          refreshWorkflowFromBackend={refreshWorkflowFromBackend}
         />
 
         {/* 右侧面板容器：NodeConfigPanel */}

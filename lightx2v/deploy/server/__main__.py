@@ -2022,6 +2022,8 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
                         return True
             return False
 
+        # ignore update node_output_history from frontend
+        params.pop("node_output_history", None)
         if "nodes" in params:
             incoming_nodes = {n["id"]: n for n in params["nodes"]}
             existing_nodes = {n["id"]: n for n in existing_workflow["nodes"]}
@@ -2034,15 +2036,20 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
                     logger.warning(f"ignore update output value {node_id}, {node['output_value']} -> {output_value}")
                     node["output_value"] = output_value
 
-            deleted_node_ids = set(existing_nodes.keys()) - set(incoming_nodes.keys())
-            # 如果有删除节点，则把对应的 node_output_history 删除
-            # 这里只删除nodes和node_output_history记录，不删files_tasks记录和真实文件记录，在output/save时会重新记录
-            if deleted_node_ids:
-                history = params.get("node_output_history") or existing_workflow.get("node_output_history") or {}
-                params["node_output_history"] = {k: v for k, v in history.items() if k not in deleted_node_ids}
+            # 删除不再存在的节点的 node_output_history 记录
+            history = existing_workflow.get("node_output_history") or {}
+            delete_history_ids = set(history.keys()) - set(incoming_nodes.keys())
+            if delete_history_ids:
+                history = {k: v for k, v in history.items() if k not in delete_history_ids}
+                params["node_output_history"] = history
                 logger.warning(
-                    f"Workflow {workflow_id}: delete nodes {deleted_node_ids}, removed node_output_history entries"
+                    f"Workflow {workflow_id}: delete node_output_history entries {delete_history_ids}"
                 )
+
+            # 如果有删除节点，不删files_tasks记录和真实文件记录，在output/save时会重新记录
+            deleted_node_ids = set(existing_nodes.keys()) - set(incoming_nodes.keys())
+            if deleted_node_ids:
+                logger.warning(f"Workflow {workflow_id}: delete nodes {deleted_node_ids}")
 
         success = await _update_workflow(workflow_id, params, user)
         if success:

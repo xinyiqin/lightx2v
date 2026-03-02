@@ -341,6 +341,60 @@ export async function saveNodeOutputs(
   }
 }
 
+/**
+ * 点击历史记录条目时专用：按 entry 的 output_value 格式（kind 为 task 或 file）调用 port/save。
+ * kind=task 时上传 { output_data: { type: "task", data: { task_id, output_name } } }；
+ * kind=file 时上传 { output_data: { type: "file", data: { file_id } } }。
+ * run_id 通过 query_params 传递（通常为 history entry 的 id）。
+ */
+export async function saveNodeOutputsFromHistoryEntry(
+  workflowId: string,
+  nodeId: string,
+  portKeyed: Record<string, { kind?: string; task_id?: string; output_name?: string; file_id?: string }>,
+  runId?: string
+): Promise<void> {
+  if (isStandalone()) return;
+  const outputPortKeys = Object.keys(portKeyed).filter((k) => k.startsWith('out-') || k === '__json__');
+  const runIdParam = runId ? encodeURIComponent(runId) : '';
+  for (const portId of outputPortKeys) {
+    const v = portKeyed[portId];
+    if (v == null || typeof v !== 'object') continue;
+    const kind = v.kind ?? (v as any).type;
+    let outputData: { type: string; data: Record<string, string> } | null = null;
+    if ((kind === 'task' || kind === 'lightx2v_result') && (v.task_id != null || (v as any).taskId != null)) {
+      outputData = {
+        type: 'task',
+        data: {
+          task_id: v.task_id ?? (v as any).taskId,
+          output_name: v.output_name ?? (v as any).outputName ?? 'output',
+        },
+      };
+    } else if (kind === 'file' && (v.file_id != null || (v as any).fileId != null)) {
+      outputData = {
+        type: 'file',
+        data: {
+          file_id: v.file_id ?? (v as any).fileId,
+        },
+      };
+    }
+    if (!outputData) continue;
+    const body = { output_data: outputData };
+    const url = `/api/v1/workflow/${workflowId}/node/${nodeId}/output/${encodeURIComponent(portId)}/save${runIdParam ? `?run_id=${runIdParam}` : ''}`;
+    const response = await apiRequest(url, { method: 'POST', body: JSON.stringify(body) });
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      let errMsg = `Save history entry ${nodeId}/${portId}: ${response.status} ${response.statusText}`;
+      if (contentType.includes('application/json')) {
+        try {
+          const errData = await response.json();
+          errMsg = (errData as { message?: string }).message ?? errMsg;
+        } catch (_) {}
+      }
+      throw new Error(errMsg);
+    }
+  }
+}
+
 /** 按 (workflowId, nodeId, portId, fileId?) 或 (workflowId, nodeId, portId) 永久缓存 */
 const nodeOutputUrlCache = new Map<string, string>();
 /** 同一 node+port+run 只允许一个请求在进行 */

@@ -170,7 +170,11 @@ interface UseWorkflowExecutionProps {
   lang: Language;
   onSaveExecutionToLocal?: (workflowState: WorkflowState) => Promise<void>;
   saveWorkflowBeforeRun?: (workflow: WorkflowState) => Promise<string | void>;
-  refreshWorkflowFromBackend?: (workflowId: string) => Promise<void>;
+  refreshWorkflowFromBackend?: (workflowId: string, options?: { getCurrentWorkflow?: () => WorkflowState | null }) => Promise<WorkflowState | null>;
+  /** 执行前、执行后各调用一次，用于同步 workflow（含 node 参数）到后端 */
+  updateWorkflowSync?: (workflowId: string, workflow: WorkflowState) => Promise<void>;
+  /** 获取当前 workflow（用于执行结束后 refresh 时合并，再调 update 避免旧 output_value 覆盖远端） */
+  getWorkflow?: () => WorkflowState | null;
 }
 
 // --- Hook 实现 --------------------------------------------------------------
@@ -191,6 +195,8 @@ function useWorkflowExecutionImpl({
   onSaveExecutionToLocal,
   saveWorkflowBeforeRun,
   refreshWorkflowFromBackend,
+  updateWorkflowSync,
+  getWorkflow,
 }: UseWorkflowExecutionProps) {
   const { t } = useTranslation(lang);
 
@@ -752,17 +758,26 @@ function useWorkflowExecutionImpl({
         }
       });
 
-      // 阶段一：输入节点通过 /save 保存到后端，再 GET workflow 更新
-      await saveInputNodesAndRefresh(wfId, nodesToRunIds, workflow.connections, sessionOutputs);
-
-      const lightX2VConfig = getLightX2VConfig(workflow);
       const hasValidDbId =
         wfId &&
         (wfId.startsWith('workflow-') ||
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wfId));
+
+      // 执行前：同步 workflow（含 node 参数）到后端
+      if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
+        const wf = workflowRef.current ?? workflow;
+        if (wf) await updateWorkflowSync(wfId, wf);
+      }
+
+      // 阶段一：输入节点通过 /save 保存到后端，再 GET workflow 更新
+      await saveInputNodesAndRefresh(wfId, nodesToRunIds, workflow.connections, sessionOutputs);
+
+      const lightX2VConfig = getLightX2VConfig(workflow);
       const shouldSaveOutputs = hasValidDbId && !isStandalone();
       const cancelledByFailure = new Set<string>();
       const topologicalBatches = getTopologicalBatches(nodesToRunIds, workflow.connections);
+      // 本次批量/单节点执行共用同一个 run_id，供各节点 port/save 使用
+      const runId = crypto.randomUUID();
 
       for (const batchNodeIds of topologicalBatches) {
         const batch = batchNodeIds
@@ -1301,9 +1316,8 @@ function useWorkflowExecutionImpl({
               return { ...prev, nodes: updated };
             });
 
-            // Task 节点完成：调用 /save 保存 { task_id, output_name }，再 GET workflow 更新
+            // Task 节点完成：调用 /save 保存 { task_id, output_name }，再 GET workflow 更新（使用本次执行统一的 runId）
             if (shouldSaveOutputs && valueToStore != null) {
-              const runId = crypto.randomUUID();
               const toSave: Record<string, any> =
                 typeof valueToStore === 'object' && !Array.isArray(valueToStore)
                   ? valueToStore
@@ -1419,6 +1433,15 @@ function useWorkflowExecutionImpl({
         }
       }
 
+      // 执行后：先从后端拉取最新 output_value（各节点 /port/save 已写入），再同步到 update，避免本地未刷新的 output_value 覆盖远端
+      if (!isStandalone() && hasValidDbId && updateWorkflowSync && refreshWorkflowFromBackend) {
+        const latest = await refreshWorkflowFromBackend(wfId, { getCurrentWorkflow: getWorkflow ?? (() => workflowRef.current) });
+        if (latest) await updateWorkflowSync(wfId, latest);
+      } else if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
+        const wf = workflowRef.current;
+        if (wf) await updateWorkflowSync(wfId, wf);
+      }
+
       const j = runningJobsByJobIdRef.current.get(jobId);
       if (j?.pollIntervalId) {
         clearInterval(j.pollIntervalId);
@@ -1450,6 +1473,8 @@ function useWorkflowExecutionImpl({
       saveInputNodesAndRefresh,
       getInputValueForPort,
       refreshWorkflowFromBackend,
+      updateWorkflowSync,
+      getWorkflow,
     ]
   );
 

@@ -87,6 +87,7 @@ interface CanvasProps {
   onAddNodeToChat?: (nodeId: string, name: string) => void;
   resolveLightX2VResultRef?: (ref: import('../../hooks/useWorkflowExecution').LightX2VResultRef) => Promise<string>;
   getNodeOutputUrl?: (nodeId: string, portId: string, fileId?: string, runId?: string) => Promise<string | null>;
+  refreshWorkflowFromBackend?: (workflowId: string) => Promise<void>;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -146,7 +147,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   onNodeHeightChange,
   onAddNodeToChat,
   resolveLightX2VResultRef,
-  getNodeOutputUrl
+  getNodeOutputUrl,
+  refreshWorkflowFromBackend,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -339,6 +341,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             resolveLightX2VResultRef={resolveLightX2VResultRef}
             getNodeOutputUrl={getNodeOutputUrl}
             screenToWorldCoords={screenToWorldCoords}
+            refreshWorkflowFromBackend={refreshWorkflowFromBackend}
           />
         ))}
         </div>

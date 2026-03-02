@@ -112,26 +112,29 @@ def save_task_entry(
     return task_entry
 
 
-async def save_file_entry(
+# only existed file entry can be saved
+def save_existed_file_entry(
+    data: dict,
+    files_tasks: dict,
+) -> dict:
+    file_id = data["file_id"]
+    assert file_id in files_tasks, f"File {file_id} not found in files_tasks"
+    file_entry = files_tasks[file_id]
+    return file_entry
+
+
+async def save_bytes_entry(
     user_id: str,
     workflow_id: str,
     node_id: str,
     port_id: str,
     run_id: str,
-    data: Any,
+    output_bytes: bytes,
+    mime_type: str,
     files_tasks: dict,
     data_manager: BaseDataManager,
-) -> dict:
-    encoded = data
-    mime_type = "application/octet-stream"
-
-    if data.startswith("data:"):
-        header, encoded = data.split(",", 1)
-        mime_type = header.split(":")[1].split(";")[0].strip()
- 
-    output_bytes = await asyncio.to_thread(base64.b64decode, encoded)
+):
     md5 = await asyncio.to_thread(calc_md5, output_bytes)
-
     # unique file id is related to workflow_id, user_id and md5 of output_bytes
     file_id = f"wf_{workflow_id}_{user_id}_{md5}"
     file_entry = {
@@ -156,6 +159,40 @@ async def save_file_entry(
     return file_entry
 
 
+async def save_b64_entry(
+    user_id: str,
+    workflow_id: str,
+    node_id: str,
+    port_id: str,
+    run_id: str,
+    data: Any,
+    files_tasks: dict,
+    data_manager: BaseDataManager,
+) -> dict:
+    encoded = data
+    mime_type = "application/octet-stream"
+    if data.startswith("data:"):
+        header, encoded = data.split(",", 1)
+        mime_type = header.split(":")[1].split(";")[0].strip()
+    output_bytes = await asyncio.to_thread(base64.b64decode, encoded)
+    return await save_bytes_entry(user_id, workflow_id, node_id, port_id, run_id, output_bytes, mime_type, files_tasks, data_manager)
+
+
+async def save_text_entry(
+    user_id: str,
+    workflow_id: str,
+    node_id: str,
+    port_id: str,
+    run_id: str,
+    data: str,
+    files_tasks: dict,
+    data_manager: BaseDataManager,
+):
+    output_bytes = data.encode("utf-8")
+    mime_type = "text/plain"
+    return await save_bytes_entry(user_id, workflow_id, node_id, port_id, run_id, output_bytes, mime_type, files_tasks, data_manager)
+
+
 async def format_and_save_entry(
     output_data_raw: Any,
     user_id: str,
@@ -171,7 +208,11 @@ async def format_and_save_entry(
     if item["type"] == "task":
         return save_task_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks)
     elif item["type"] == "base64":
-        return await save_file_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks, data_manager)
+        return await save_b64_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks, data_manager)
+    elif item["type"] == "text":
+        return await save_text_entry(user_id, workflow_id, node_id, port_id, run_id, item["data"], files_tasks, data_manager)
+    elif item["type"] == "file":
+        return save_existed_file_entry(item["data"], files_tasks)
     else:
         raise ValueError(f"Unknown output data type: {item['type']}")
     
