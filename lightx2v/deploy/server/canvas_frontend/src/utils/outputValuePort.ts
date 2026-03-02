@@ -62,7 +62,10 @@ export function getOutputValueByPort(node: { output_value?: any; data?: { value?
 /** 判断是否为合法的 entry（仅允许 kind === 'file' | 'task'，禁止 url 字符串或 kind === 'url'） */
 export function isValidOutputEntry(val: any): boolean {
   if (val == null) return false;
-  if (typeof val === 'string') return false;
+  if (typeof val === 'string') {
+    if (val.startsWith('data:')) return true;
+    else return false;
+  }
   if (typeof val !== 'object' || Array.isArray(val)) return false;
   const k = (val as { kind?: string }).kind;
   return k === 'file' || k === 'task';

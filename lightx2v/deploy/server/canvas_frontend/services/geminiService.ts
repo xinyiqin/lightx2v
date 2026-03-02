@@ -658,22 +658,6 @@ export const lightX2VTask = async (
     throw new Error(status === "CANCELLED" ? 'LightX2V Task was cancelled' : `LightX2V Task ended with status: ${status}`);
   }
 
-  // 2.5 save port output value
-  const saveEntry = await lightX2VRequest({
-    baseUrl: actualBaseUrl,
-    token: actualToken,
-    endpoint: `/api/v1/workflow/${workflow_id}/node/${node_id}/output/${port_id}/save`,
-    options: {
-      method: 'POST',
-      body: JSON.stringify({ output_data: { type: 'task', data: { task_id: taskId, output_name: outputName, workflow_id: workflow_id, node_id: node_id, port_id: port_id } } })
-    }
-  });
-  if (!saveEntry.ok) {
-    await handleLightX2VError(saveEntry, `Save port output value (workflow_id: ${workflow_id} node_id: ${node_id} port_id: ${port_id})`);
-  }
-  const saveData = await saveEntry.json();
-  console.log('[LightX2V] Save port output value data:', saveData);
-
   const ref = toLightX2VResultRef(
     workflow_id,
     node_id,

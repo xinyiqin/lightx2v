@@ -175,18 +175,21 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
   }, [workflow, expandedOutput?.nodeId, expandedResultData?.type]);
 
   const refToResolve = refFromResultEntryTop ?? refFromSourceOutputsTop ?? lightX2VRef ?? lateWorkflowRef;
+  const defaultPortIdByType = expandedResultData?.type === DataType.VIDEO ? 'out-video' : expandedResultData?.type === DataType.AUDIO ? 'out-audio' : 'out-image';
+  const effectivePortIdForResolve = expandedOutput?.fieldId ?? defaultPortIdByType;
+
   useEffect(() => {
     if (!refToResolve || !resolveLightX2VResultRef) {
       setResolvedMediaUrl(null);
       return;
     }
     let cancelled = false;
-    const ctx = workflowId && expandedResultData?.nodeId ? { workflow_id: workflowId, node_id: expandedResultData.nodeId, port_id: expandedOutput?.fieldId ?? 'out-image' } : undefined;
+    const ctx = workflowId && expandedResultData?.nodeId ? { workflow_id: workflowId, node_id: expandedResultData.nodeId, port_id: effectivePortIdForResolve } : undefined;
     resolveLightX2VResultRef(refToResolve, ctx).then(url => {
       if (!cancelled) setResolvedMediaUrl(url);
     }).catch(() => { if (!cancelled) setResolvedMediaUrl(null); });
     return () => { cancelled = true; };
-  }, [refToResolve?.task_id, refToResolve?.output_name, refToResolve?.is_cloud, resolveLightX2VResultRef, workflowId, expandedResultData?.nodeId, expandedOutput?.fieldId]);
+  }, [refToResolve?.task_id, refToResolve?.output_name, refToResolve?.is_cloud, resolveLightX2VResultRef, workflowId, expandedResultData?.nodeId, effectivePortIdForResolve]);
 
   // 仅对本地 file 类输出（kind: 'file', file_id）请求本地后端；x2v ref 已在上方处理，此处不再请求
   useEffect(() => {
@@ -211,7 +214,8 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
     }
     const fileId = (effectiveContent as { file_id?: string }).file_id;
     const runId = (effectiveContent as { run_id?: string }).run_id;
-    const portId = expandedOutput.fieldId || effectivePortId || 'output';
+    const defaultPort = type === DataType.VIDEO ? 'out-video' : type === DataType.AUDIO ? 'out-audio' : 'out-image';
+    const portId = expandedOutput.fieldId || effectivePortId || defaultPort;
     // Avoid requesting URL when file_id looks like a port id (e.g. "out-image") to prevent 404
     const looksLikePortId = !fileId || fileId === portId || /^out-/.test(fileId);
     if (!workflowId || !fileId || !getNodeOutputUrl || looksLikePortId) {
@@ -349,7 +353,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
                         resolveLightX2VResultRef={resolveLightX2VResultRef}
                         workflowId={workflowId}
                         nodeId={expandedResultData.nodeId}
-                        portId={expandedOutput?.fieldId ?? 'out-image'}
+                        portId={effectivePortIdForResolve}
                         getNodeOutputUrl={getNodeOutputUrl}
                         className="max-h-full max-w-full rounded-2xl shadow-2xl border border-slate-800 object-contain"
                       />
