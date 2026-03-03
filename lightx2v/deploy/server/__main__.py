@@ -2163,10 +2163,10 @@ async def api_v1_workflow_node_output_url(request: Request, user=Depends(verify_
         file_id = request.query_params.get("file_id", "")
         task_id = request.query_params.get("task_id", "")
         try:
-            entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_manager)
+            entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_id, task_manager)
         except Exception:
             traceback.print_exc()
-            return error_response(f"entry node={node_id}, port={port_id}, file_id={file_id} not found nor access", 404)
+            return error_response(f"entry node={node_id}, port={port_id}, file_id={file_id}, task_id={task_id} not found nor access", 404)
 
         urls = []
         for entry in entries:
@@ -2182,8 +2182,8 @@ async def api_v1_workflow_node_output_url(request: Request, user=Depends(verify_
 
             assert storage_path, f"File entry {entry} path is not valid!"
             url = await data_manager.presign_url(storage_path)
-            # if url is None:
-            url = f"./assets/workflow/file?workflow_id={workflow_id}&node_id={node_id}&port_id={port_id}&file_id={file_id}&task_id={task_id}"
+            if url is None:
+                url = f"./assets/workflow/file?workflow_id={workflow_id}&node_id={node_id}&port_id={port_id}&file_id={file_id}&task_id={task_id}"
             urls.append(url)
         if len(urls) == 1:
             return {"url": urls[0]}
@@ -2204,12 +2204,12 @@ async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access
         # only for task changed not cached
         task_id = request.query_params.get("task_id", "")
         try:
-            entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_manager)
+            entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_id, task_manager)
             assert len(entries) == 1, f"should be one entry, but got {len(entries)}, {entries}"
             entry = entries[0]
         except Exception:
             traceback.print_exc()
-            return error_response(f"entry node={node_id}, port={port_id}, file_id={file_id} not found nor access", 404)
+            return error_response(f"entry node={node_id}, port={port_id}, file_id={file_id}, task_id={task_id} not found nor access", 404)
         data, filename, mime_type = await load_bytes_from_entry(entry, task_manager, data_manager)
         headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
         headers["Cache-Control"] = "public, max-age=3600"

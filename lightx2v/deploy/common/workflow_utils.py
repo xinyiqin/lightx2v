@@ -414,6 +414,7 @@ async def query_output_entries(
     node_id: str,
     port_id: str,
     file_id: str,
+    task_id: str,
     task_manager: BaseTaskManager,
 ) -> dict | None:
 
@@ -425,6 +426,10 @@ async def query_output_entries(
         entry = workflow.get("files_tasks", {}).get(file_id, None)
         if not entry:
             raise Exception(f"File {file_id} not found in files_tasks!")
+    elif task_id:
+        entry = workflow.get("files_tasks", {}).get(task_id, None)
+        if not entry:
+            raise Exception(f"Task {task_id} not found in files_tasks!")
     else:
         node = next((n for n in workflow["nodes"] if n["id"] == node_id), None)
         if not node or "output_value" not in node or port_id not in node["output_value"]:
@@ -504,7 +509,7 @@ async def transfer_workflow_output(
     if isinstance(params.get("prompt", ""), list):
         logger.info(f"Transform workflow output: prompt: {params['prompt']}...")
         workflow_id, node_id, port_id = params["prompt"]
-        entries = await query_output_entries(user_id, workflow_id, node_id, port_id, "", task_manager)
+        entries = await query_output_entries(user_id, workflow_id, node_id, port_id, "", "", task_manager)
         assert len(entries) == 1, f"Expected 1 entry, got {len(entries)}"
         raw_bytes, _, _ = await load_bytes_from_entry(entries[0], task_manager, data_manager)
         params["prompt"] = raw_bytes.decode("utf-8")
@@ -523,7 +528,7 @@ async def transfer_workflow_output(
         bytes_data = []
         for item in items:
             workflow_id, node_id, port_id = item
-            entries = await query_output_entries(user_id, workflow_id, node_id, port_id, "", task_manager)
+            entries = await query_output_entries(user_id, workflow_id, node_id, port_id, "", "", task_manager)
             for entry in entries:
                 raw_bytes, _, _ = await load_bytes_from_entry(entry, task_manager, data_manager)
                 bytes_data.append(raw_bytes)
