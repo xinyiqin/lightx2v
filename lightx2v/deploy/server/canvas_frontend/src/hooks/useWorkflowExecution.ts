@@ -362,6 +362,54 @@ function useWorkflowExecutionImpl({
   const workflowRef = useRef<WorkflowState | null>(workflow);
   const effectiveWorkflowIdRef = useRef<string | null>(null);
 
+  /** port/save 与执行后同步：入队后按顺序依次执行，避免多 Node 同时请求 /port/save */
+  type PortSaveTask = { type: 'port_save'; wfId: string; nodeId: string; toSave: Record<string, any>; runId: string };
+  type PostSaveTask = { type: 'post_save'; wfId: string };
+  type PortSaveQueueTask = PortSaveTask | PostSaveTask;
+  const portSaveQueueRef = useRef<PortSaveQueueTask[]>([]);
+  const portSaveProcessorRunningRef = useRef(false);
+
+  const processPortSaveQueue = useCallback(async () => {
+    if (portSaveProcessorRunningRef.current || portSaveQueueRef.current.length === 0) return;
+    portSaveProcessorRunningRef.current = true;
+    while (portSaveQueueRef.current.length > 0) {
+      const task = portSaveQueueRef.current.shift()!;
+      try {
+        if (task.type === 'post_save') {
+          // 执行后：在所有 port/save 完成后拉取最新 workflow 并同步到后端（/update 只在 batch 前后各一次）
+          await new Promise((r) => setTimeout(r, 300));
+          const wf = getWorkflow?.() ?? workflowRef.current;
+          console.log('[WorkflowExecution] Update workflow after execution (from queue):', wf);
+          if (wf && updateWorkflowSync) await updateWorkflowSync(task.wfId, wf);
+        } else {
+          // port_save 只做保存，不在此处调 /update 和 GET workflow，避免 batch 中多次调用
+          const newOutputs = await saveNodeOutputs(task.wfId, task.nodeId, task.toSave, task.runId);
+          console.log('[WorkflowExecution] New outputs:', newOutputs);
+          if (refreshWorkflowFromBackend) await refreshWorkflowFromBackend(task.wfId);
+        }
+      } catch (e) {
+        console.warn('[WorkflowExecution] Port save queue task failed:', e);
+      }
+    }
+    portSaveProcessorRunningRef.current = false;
+  }, [updateWorkflowSync, getWorkflow, refreshWorkflowFromBackend]);
+
+  const enqueuePortSave = useCallback(
+    (task: Omit<PortSaveTask, 'type'>) => {
+      portSaveQueueRef.current.push({ type: 'port_save', ...task });
+      processPortSaveQueue();
+    },
+    [processPortSaveQueue]
+  );
+
+  const enqueuePostSave = useCallback(
+    (wfId: string) => {
+      portSaveQueueRef.current.push({ type: 'post_save', wfId });
+      processPortSaveQueue();
+    },
+    [processPortSaveQueue]
+  );
+
   React.useEffect(() => {
     workflowRef.current = workflow;
   }, [workflow]);
@@ -766,6 +814,7 @@ function useWorkflowExecutionImpl({
       // 执行前：同步 workflow（含 node 参数）到后端
       if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
         const wf = workflowRef.current ?? workflow;
+        console.log('[WorkflowExecution] Update workflow before execution:', wf);
         if (wf) await updateWorkflowSync(wfId, wf);
       }
 
@@ -1316,7 +1365,7 @@ function useWorkflowExecutionImpl({
               return { ...prev, nodes: updated };
             });
 
-            // Task 节点完成：调用 /save 保存 { task_id, output_name }，再 GET workflow 更新（使用本次执行统一的 runId）
+            // Task 节点完成：将 /save 放入队列依次执行，避免多 Node 同时请求 port/save
             if (shouldSaveOutputs && valueToStore != null) {
               const toSave: Record<string, any> =
                 typeof valueToStore === 'object' && !Array.isArray(valueToStore)
@@ -1325,12 +1374,7 @@ function useWorkflowExecutionImpl({
                     ? { [tool.outputs[0].id]: valueToStore }
                     : {};
               if (Object.keys(toSave).length > 0) {
-                try {
-                  await saveNodeOutputs(wfId, node.id, toSave, runId);
-                  if (refreshWorkflowFromBackend) await refreshWorkflowFromBackend(wfId);
-                } catch (e) {
-                  console.warn('[WorkflowExecution] Save task output failed:', e);
-                }
+                enqueuePortSave({ wfId, nodeId: node.id, toSave, runId });
               }
             }
 
@@ -1433,13 +1477,9 @@ function useWorkflowExecutionImpl({
         }
       }
 
-      // 执行后：先从后端拉取最新 output_value（各节点 /port/save 已写入），再同步到 update，避免本地未刷新的 output_value 覆盖远端
-      if (!isStandalone() && hasValidDbId && updateWorkflowSync && refreshWorkflowFromBackend) {
-        const latest = await refreshWorkflowFromBackend(wfId, { getCurrentWorkflow: getWorkflow ?? (() => workflowRef.current) });
-        if (latest) await updateWorkflowSync(wfId, latest);
-      } else if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
-        const wf = workflowRef.current;
-        if (wf) await updateWorkflowSync(wfId, wf);
+      // 执行后：放入队列，保证在所有 port/save 执行结束后再拉取最新 workflow 并同步到后端
+      if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
+        enqueuePostSave(wfId);
       }
 
       const j = runningJobsByJobIdRef.current.get(jobId);

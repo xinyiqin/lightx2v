@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { WorkflowState, WorkflowNode, NodeHistoryEntry, Connection } from '../../types';
+import { WorkflowState, WorkflowNode, NodeHistoryEntry, Connection, NodeStatus } from '../../types';
 import { apiRequest } from '../utils/apiClient';
 import { getWorkflowFileByFileId, getWorkflowFileText, getLocalFileDataUrl, persistDataUrlToLocal, uploadLocalUrlAsNodeOutput, isLocalAssetUrlToUpload, saveInputFileViaOutputSave } from '../utils/workflowFileManager';
 import { TOOLS } from '../../constants';
@@ -13,6 +13,14 @@ import { createHistoryEntryFromValue, createHistoryEntryFromPortKeyedOutputValue
 /** 不再强制规范 text-generation 端口 id：支持 default 的 out-text1/out-text2 与 AI 等指定的自定义 id，原样保留 nodes/connections */
 function migrateTextGenerationPortIds(nodes: WorkflowNode[], connections: Connection[]): { nodes: WorkflowNode[]; connections: Connection[] } {
   return { nodes, connections };
+}
+
+/** 判断节点输出值是否有效（非空），用于加载后恢复已完成节点的状态，避免刷新后仍显示「排队中」 */
+function hasValidOutputValue(outVal: any): boolean {
+  if (outVal == null) return false;
+  if (typeof outVal !== 'object') return true;
+  if (Array.isArray(outVal)) return outVal.length > 0;
+  return Object.keys(outVal).length > 0;
 }
 
 export const useWorkflow = () => {
@@ -704,7 +712,13 @@ export const useWorkflow = () => {
             const canonical = outVal ?? n.data?.value;
             return { ...n, output_value: canonical, data: { ...n.data, value: canonical } };
           }
-          return { ...n, output_value: outVal };
+          // 刷新后重载：若节点已有有效输出（如 text-generation/语音合成/语音克隆已执行完），恢复为 SUCCESS 并清除 run_state，避免显示「排队中」
+          const completed = hasValidOutputValue(outVal);
+          return {
+            ...n,
+            output_value: outVal,
+            ...(completed ? { status: NodeStatus.SUCCESS, run_state: { status: 'SUCCEED', subtasks: [] } } : {}),
+          };
         });
         const workflowWithOutputs = { ...foundMigrated, nodes: nodesWithOutputs };
         setWorkflow(workflowWithOutputs);
@@ -924,7 +938,13 @@ export const useWorkflow = () => {
             const canonical = outVal ?? n.data?.value;
             return { ...n, output_value: canonical, data: { ...n.data, value: canonical } };
           }
-          return { ...n, output_value: outVal };
+          // 刷新后重载：若节点已有有效输出（如 text-generation/语音合成/语音克隆已执行完），恢复为 SUCCESS 并清除 run_state，避免显示「排队中」
+          const completed = hasValidOutputValue(outVal);
+          return {
+            ...n,
+            output_value: outVal,
+            ...(completed ? { status: NodeStatus.SUCCESS, run_state: { status: 'SUCCEED', subtasks: [] } } : {}),
+          };
         });
         const workflow: WorkflowState = {
           id: wf.workflow_id,
