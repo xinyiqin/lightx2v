@@ -110,7 +110,9 @@ export const useResultManagement = ({
       else if (resolvedOutName === 'output_video') type = DataType.VIDEO;
       else if (firstVal && firstVal.kind == 'file' && firstVal.mime_type == "text/plain"){
         type = DataType.TEXT;
-        expandedOutput.fieldId = Object.keys(content)[0];
+        if (!expandedOutput.fieldId) {
+          expandedOutput.fieldId = Object.keys(content)[0];
+        }
       }
     }
     if (expandedOutput.fieldId && content && typeof content === 'object') {
