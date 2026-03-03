@@ -788,6 +788,33 @@ const App: React.FC = () => {
       return;
     }
 
+    // 预设工作流：进入编辑器前先在后端通过 /create 创建用户自己的 workflow，
+    // 避免后续「运行模板」时再次触发创建导致调用两次 /create。
+    if (!isStandalone() && w.id && w.id.startsWith('preset-')) {
+      try {
+        const newId = await ensureWorkflowOwned(w);
+        const newWorkflowFromPreset: WorkflowState = {
+          ...w,
+          id: newId,
+          isDirty: false,
+          isRunning: false,
+        };
+        setSelectedNodeId(null);
+        setSelectedConnectionId(null);
+        setValidationErrors([]);
+        voiceList.resetVoiceList();
+        voiceList.resetCloneVoiceList();
+        setWorkflow(newWorkflowFromPreset);
+        setCurrentView('EDITOR');
+        if (typeof window !== 'undefined' && window.history?.replaceState) {
+          window.history.replaceState(null, '', `#workflow/${newId}`);
+        }
+        return;
+      } catch (error) {
+        console.error('[App] Failed to create workflow from preset, fallback to legacy open logic:', error);
+      }
+    }
+
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
     setValidationErrors([]);
@@ -859,7 +886,7 @@ const App: React.FC = () => {
     }
 
     // History will be automatically initialized by useUndoRedo when workflow changes
-  }, [workflow, loadWorkflow, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors]);
+  }, [workflow, loadWorkflow, voiceList, setWorkflow, setCurrentView, setSelectedNodeId, setSelectedConnectionId, setValidationErrors, ensureWorkflowOwned]);
 
   const createNewWorkflow = useCallback(async () => {
     setSelectedNodeId(null);
