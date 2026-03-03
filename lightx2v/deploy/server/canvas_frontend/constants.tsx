@@ -252,6 +252,9 @@ const getFilteredModels = (models: ModelDefinition[]): ModelDefinition[] => {
       'ppchat-gemini-2.5-flash': ['PPCHAT_API_KEY'],
       'lightx2v': ['LIGHTX2V_TOKEN', 'LIGHTX2V_CLOUD_TOKEN'],
     };
+    if (model.id.startsWith('doubao-') || model.id.startsWith('deepseek-')) {
+      return true;
+    }
 
     const requiredEnvVars = modelEnvMap[model.id];
     if (!requiredEnvVars) {

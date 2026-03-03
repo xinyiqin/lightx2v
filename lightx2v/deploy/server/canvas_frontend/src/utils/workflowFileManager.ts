@@ -612,15 +612,33 @@ export async function getNodeOutputData(
   }
 }
 
-/** 通用：fetch URL 转为 data URL (base64) */
-async function fetchUrlAsDataUrl(url: string): Promise<string | null> {
+/** 通用：fetch URL 转为 data URL (base64)；可选传入 mime_type 强制使用指定类型 */
+async function fetchUrlAsDataUrl(url: string, mimeType?: string): Promise<string | null> {
   const fetchUrl = url.startsWith('/') && !url.startsWith('//') ? `${typeof window !== 'undefined' ? window.location.origin : ''}${url}` : url;
   const fetchRes = await fetch(fetchUrl, { credentials: url.includes('/api/') || url.includes('/assets/') ? 'include' : 'omit' });
   if (!fetchRes.ok) return null;
   const blob = await fetchRes.blob();
   return await new Promise<string | null>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
+    reader.onloadend = () => {
+      const result = reader.result as string | null;
+      if (!result) {
+        resolve(null);
+        return;
+      }
+      // 默认 data URL：data:[<mediatype>][;base64],<data>
+      if (!mimeType) {
+        resolve(result);
+        return;
+      }
+      const commaIndex = result.indexOf(',');
+      if (commaIndex === -1) {
+        resolve(result);
+        return;
+      }
+      const dataPart = result.slice(commaIndex + 1);
+      resolve(`data:${mimeType};base64,${dataPart}`);
+    };
     reader.onerror = () => reject(new Error('Failed to read blob'));
     reader.readAsDataURL(blob);
   });
@@ -967,10 +985,12 @@ export async function getWorkflowFileByFileId(
     if (isStandalone()) return null;
     if (nodeId && portId) {
       const displayUrl = await getNodeOutputUrl(workflowId, nodeId, portId, fileId, runId);
-      if (displayUrl) return await fetchUrlAsDataUrl(displayUrl);
+      if (displayUrl) {
+        return await fetchUrlAsDataUrl(displayUrl, mimeType);
+      }
     }
     const url = buildWorkflowFileUrl(workflowId, fileId, { nodeId, portId, runId, mimeType, ext });
-    return await fetchUrlAsDataUrl(url);
+    return await fetchUrlAsDataUrl(url, mimeType);
   } catch (error) {
     console.error('[WorkflowFileManager] Error getting workflow file by file_id:', error);
     return null;
