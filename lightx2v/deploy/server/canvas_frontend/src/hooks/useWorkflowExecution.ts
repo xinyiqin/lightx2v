@@ -42,6 +42,8 @@ import { useTranslation, Language } from '../i18n/useTranslation';
 import {
   saveNodeOutputs,
   saveInputFileViaOutputSave,
+  uploadLocalUrlAsNodeOutput,
+  isLocalAssetUrlToUpload,
   getWorkflowFileByFileId,
   getWorkflowFileText,
 } from '../utils/workflowFileManager';
@@ -517,25 +519,31 @@ function useWorkflowExecutionImpl({
 
         const nodeValue = getOutputValueByPort(node, portId);
         if (nodeValue == null) continue;
-
+        console.log('[WorkflowExecution saveInputNodesAndRefresh] Node value:', node, portId, nodeValue);
         const isDataUrl = (v: any) => typeof v === 'string' && v.startsWith('data:');
+        const isLocalUrl = (s: string) => typeof s === 'string' && isLocalAssetUrlToUpload(s);
         const isImage = portId === 'out-image';
         const arr = Array.isArray(nodeValue) ? nodeValue : [nodeValue].filter(Boolean);
 
         if (arr.length > 0 && (isImage || arr.length === 1)) {
           const newOutputValue: any[] = [];
           for (const item of arr) {
-            if (isDataUrl(item)) {
-              try {
+            try {
+              if (isDataUrl(item)) {
                 const saveRef = await saveInputFileViaOutputSave(wfId, node.id, portId, item);
                 const ref = toFileRefForOutputValue(saveRef);
-                if (ref) newOutputValue.push(ref);
-                else newOutputValue.push(item);
-              } catch (e) {
-                console.warn('[WorkflowExecution] Save input file failed:', e);
+                newOutputValue.push(ref || item);
+              }
+              else if (isLocalUrl(item)) {
+                const saveRef = await uploadLocalUrlAsNodeOutput(wfId, node.id, portId, item, 0);
+                const ref = toFileRefForOutputValue(saveRef)
+                newOutputValue.push(ref || item);
+              }
+              else {
                 newOutputValue.push(item);
               }
-            } else {
+            } catch (e) {
+              console.warn('[WorkflowExecution] Save input file failed:', e);
               newOutputValue.push(item);
             }
           }
@@ -546,25 +554,22 @@ function useWorkflowExecutionImpl({
             portId,
             finalVal
           );
-        } else if (!Array.isArray(nodeValue) && isDataUrl(nodeValue)) {
+        } else if (!Array.isArray(nodeValue)) {
           try {
-            const saveRef = await saveInputFileViaOutputSave(wfId, node.id, portId, nodeValue);
-            const ref = toFileRefForOutputValue(saveRef);
-            if (ref) {
-              sessionOutputs[node.id] = setOutputValueByPort(
-                node.output_value,
-                node.tool_id,
-                portId,
-                ref
-              );
-            } else {
-              sessionOutputs[node.id] = setOutputValueByPort(
-                node.output_value,
-                node.tool_id,
-                portId,
-                nodeValue
-              );
+            let ref: any | null = nodeValue;
+            if (isDataUrl(nodeValue)) {
+                const saveRef = await saveInputFileViaOutputSave(wfId, node.id, portId, nodeValue);
+                ref = toFileRefForOutputValue(saveRef);
+            } else if(isLocalUrl(nodeValue)) {
+                const saveRef = await uploadLocalUrlAsNodeOutput(wfId, node.id, portId, nodeValue, 0);
+                ref = toFileRefForOutputValue(saveRef);
             }
+            sessionOutputs[node.id] = setOutputValueByPort(
+              node.output_value,
+              node.tool_id,
+              portId,
+              ref
+            );
           } catch (e) {
             console.warn('[WorkflowExecution] Save input file failed:', e);
             sessionOutputs[node.id] = setOutputValueByPort(

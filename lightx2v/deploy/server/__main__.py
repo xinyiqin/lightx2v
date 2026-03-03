@@ -50,6 +50,7 @@ from lightx2v.deploy.common.workflow_utils import (
     fmt_workflow_file_path,
     to_persisted_message,
     transfer_workflow_output,
+    check_invalid_output_value,
 )
 from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
@@ -1845,6 +1846,10 @@ async def api_v1_workflow_create(request: Request, user=Depends(verify_user_acce
         else:
             tags = [str(tag) for tag in tags if isinstance(tag, (str, int, float))]
 
+        for node in nodes:
+            if check_invalid_output_value(node):
+                logger.warning(f"invalid update output value {node['output_value']}")
+                del node["output_value"]
         try:
             workflow_id = await task_manager.create_workflow(
                 user_id=user["user_id"],
@@ -2010,18 +2015,6 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
         if not existing_workflow:
             raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-        def check_invalid_output_value(node):
-            if "output_value" not in node:
-                return False
-            output_value = node["output_value"]
-            if isinstance(output_value, dict):
-                for value in output_value.values():
-                    if isinstance(value, str) or (isinstance(value, list) and any(isinstance(item, str) for item in value)):
-                        return True
-                    if isinstance(value, dict) and ("user_id" not in value or "workflow_id" not in value or "run_id" not in value):
-                        return True
-            return False
-
         # ignore update node_output_history from frontend
         params.pop("node_output_history", None)
         if "nodes" in params:
@@ -2030,6 +2023,7 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
             # ignore update output value of existing node
             for node_id, node in incoming_nodes.items():
                 if check_invalid_output_value(node):
+                    logger.warning(f"invalid update output value {node['output_value']}")
                     assert node_id in existing_nodes, f"node {node_id} not found in existing workflow"
                     if node_id in existing_nodes:
                         output_value = existing_nodes[node_id]["output_value"]

@@ -50,44 +50,6 @@ export default defineConfig(({ mode }) => {
         qiankun('react-canvas', {
           useDevMode: mode === 'development'
         }),
-        // Dev proxy for /api/lightx2v/result_url (production uses Express server)
-        {
-          name: 'lightx2v-result-url-proxy',
-          configureServer(server) {
-            server.middlewares.use(async (req, res, next) => {
-              if (req.url?.startsWith('/api/lightx2v/result_url')) {
-                try {
-                  const u = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
-                  const taskId = u.searchParams.get('task_id');
-                  const outputName = u.searchParams.get('output_name') || u.searchParams.get('name');
-                  const isCloud = u.searchParams.get('is_cloud') === 'true';
-                  const baseUrl = isCloud
-                    ? (mergedEnv.LIGHTX2V_CLOUD_URL || 'https://x2v.light-ai.top').replace(/\/$/, '')
-                    : (mergedEnv.LIGHTX2V_URL || '').replace(/\/$/, '');
-                  const token = isCloud ? (mergedEnv.LIGHTX2V_CLOUD_TOKEN || '').trim() : (mergedEnv.LIGHTX2V_TOKEN || '').trim();
-                  if (!baseUrl || !taskId || !outputName) {
-                    res.statusCode = 400;
-                    res.setHeader('Content-Type', 'application/json');
-                    res.end(JSON.stringify({ error: 'task_id and output_name required; baseUrl for is_cloud must be set' }));
-                    return;
-                  }
-                  const target = `${baseUrl}/api/v1/task/result_url?task_id=${encodeURIComponent(taskId)}&name=${encodeURIComponent(outputName)}`;
-                  const proxyRes = await fetch(target, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-                  const data = await proxyRes.json().catch(() => ({}));
-                  res.statusCode = proxyRes.status;
-                  res.setHeader('Content-Type', 'application/json');
-                  res.end(JSON.stringify(data));
-                } catch (e) {
-                  res.statusCode = 502;
-                  res.setHeader('Content-Type', 'application/json');
-                  res.end(JSON.stringify({ error: String((e as Error).message) }));
-                }
-                return;
-              }
-              next();
-            });
-          }
-        }
       ],
       define: {
         'process.env.API_KEY': JSON.stringify(mergedEnv.GEMINI_API_KEY),

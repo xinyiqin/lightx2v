@@ -85,6 +85,19 @@ def fmt_workflow_file_path(file_entry: dict) -> str | None:
     return f"workflows/{workflow_id}/{file_id}{ext}"
 
 
+def check_invalid_output_value(node):
+    if "output_value" not in node:
+        return False
+    output_value = node["output_value"]
+    if isinstance(output_value, dict):
+        for value in output_value.values():
+            if isinstance(value, str) or (isinstance(value, list) and any(isinstance(item, str) for item in value)):
+                return True
+            if isinstance(value, dict) and ("user_id" not in value or "workflow_id" not in value or "run_id" not in value):
+                return True
+    return False
+
+
 def save_task_entry(
     user_id: str,
     workflow_id: str,

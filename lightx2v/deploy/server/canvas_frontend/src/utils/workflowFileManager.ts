@@ -914,7 +914,7 @@ export async function uploadLocalUrlAsNodeOutput(
 ): Promise<SaveInputFileRef | null> {
   try {
     const path = localUrl.startsWith('./') ? localUrl.slice(1) : localUrl;
-    const urlToFetch = path.startsWith('http') ? path : (typeof window !== 'undefined' ? window.location.origin : '') + path;
+    const urlToFetch = getAssetPath(path);
     const res = await fetch(urlToFetch);
     if (!res.ok) return null;
     const blob = await res.blob();

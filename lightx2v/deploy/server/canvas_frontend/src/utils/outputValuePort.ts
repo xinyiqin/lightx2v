@@ -85,14 +85,17 @@ export function setOutputValueByPort(
 }
 
 /** 从 save API 返回的 ref 中提取仅用于写入 output_value 的 entry（不含 file_url，保证 kind 为 file）。 */
-export function toFileRefForOutputValue(saveRef: { kind?: string; file_id: string; mime_type?: string; ext?: string; run_id?: string; file_url?: string } | null): { kind: 'file'; file_id: string; mime_type?: string; ext?: string; run_id?: string } | null {
+export function toFileRefForOutputValue(
+  saveRef: { kind?: string; file_id: string; mime_type?: string; ext?: string; run_id?: string; file_url?: string; user_id?: string; workflow_id?: string } | null): { kind: 'file'; file_id: string; mime_type?: string; ext?: string; run_id?: string; user_id?: string; workflow_id?: string } | null {
   if (!saveRef || !saveRef.file_id) return null;
   return {
     kind: 'file',
     file_id: saveRef.file_id,
-    ...(saveRef.mime_type != null && { mime_type: saveRef.mime_type }),
-    ...(saveRef.ext != null && { ext: saveRef.ext }),
-    ...(saveRef.run_id != null && { run_id: saveRef.run_id }),
+    user_id: saveRef.user_id,
+    workflow_id: saveRef.workflow_id,
+    run_id: saveRef.run_id,
+    ext: saveRef.ext,
+    mime_type: saveRef.mime_type,
   };
 }
 
