@@ -319,7 +319,7 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
             </button>
           </div>
         </div>
-        <div className="flex-1 p-12 overflow-y-auto flex items-center justify-center custom-scrollbar">
+        <div className="flex-1 min-h-0 p-12 overflow-y-auto overflow-x-auto flex items-center justify-center custom-scrollbar">
           {expandedResultData.type === DataType.TEXT ? (
             isEditingResult ? (
               <textarea
@@ -345,20 +345,22 @@ export const ExpandedOutputModal: React.FC<ExpandedOutputModalProps> = ({
               const items = Array.isArray(res) ? res : res != null ? [res] : [];
               if (items.length === 0) return <div className="text-sm text-slate-500">No image data</div>;
               return (
-                <div className="flex gap-4 flex-wrap justify-center">
-                  {items.map((img, i) => (
-                    <div key={i} className="flex items-center justify-center">
-                      <ResolvedImage
-                        content={img}
-                        resolveLightX2VResultRef={resolveLightX2VResultRef}
-                        workflowId={workflowId}
-                        nodeId={expandedResultData.nodeId}
-                        portId={effectivePortIdForResolve}
-                        getNodeOutputUrl={getNodeOutputUrl}
-                        className="max-h-full max-w-full rounded-2xl shadow-2xl border border-slate-800 object-contain"
-                      />
-                    </div>
-                  ))}
+                <div className="w-full h-full min-h-0 flex items-center justify-center">
+                  <div className="flex gap-4 flex-wrap justify-center items-center max-h-full max-w-full">
+                    {items.map((img, i) => (
+                      <div key={i} className="flex items-center justify-center max-h-full">
+                        <ResolvedImage
+                          content={img}
+                          resolveLightX2VResultRef={resolveLightX2VResultRef}
+                          workflowId={workflowId}
+                          nodeId={expandedResultData.nodeId}
+                          portId={effectivePortIdForResolve}
+                          getNodeOutputUrl={getNodeOutputUrl}
+                          className="max-h-full max-w-full w-auto h-auto rounded-2xl shadow-2xl border border-slate-800 object-contain"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               );
             })()

@@ -190,7 +190,7 @@ const HistoryEntryItem: React.FC<{
       {(hasThumbnail || hasVideoFileThumbnail || hasImageFileThumbnail) ? (
         <span className="flex-shrink-0 w-1/2 min-w-[72px] aspect-square rounded overflow-hidden bg-slate-700 flex items-center justify-center">
           {hasImageFileThumbnail ? (
-            <img src={imageUrl!} alt="" className="w-full h-full object-cover" />
+            <img src={imageUrl!} alt="" className="w-full h-full object-contain" />
           ) : hasVideoFileThumbnail ? (
             <video
               src={videoUrl!}
@@ -209,11 +209,11 @@ const HistoryEntryItem: React.FC<{
             />
           ) : resolvedUrl ? (
             isImage ? (
-              <img src={resolvedUrl} alt="" className="w-full h-full object-cover" />
+              <img src={resolvedUrl} alt="" className="w-full h-full object-contain" />
             ) : (
               <video
                 src={resolvedUrl}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
                 muted
                 preload="metadata"
                 onMouseOver={(e) => {

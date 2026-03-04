@@ -319,7 +319,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                     ) : type === DataType.IMAGE ? (
                       <div
                         onClick={() => expand()}
-                        className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar cursor-pointer"
+                        className="flex gap-2 overflow-x-auto h-full pb-1 custom-scrollbar cursor-pointer items-center"
                       >
                         {(Array.isArray(res) ? res : res != null ? [res] : []).map((img, i) => (
                           <React.Fragment key={i}>
@@ -330,7 +330,7 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
                               nodeId={node.id}
                               portId={tool?.outputs?.[0]?.id ?? 'out-image'}
                               getNodeOutputUrl={getNodeOutputUrl}
-                              className="h-full w-auto object-cover rounded-lg border border-slate-800"
+                              className="max-h-full w-auto object-contain rounded-lg border border-slate-800"
                             />
                           </React.Fragment>
                         ))}
