@@ -1101,14 +1101,6 @@ function useWorkflowExecutionImpl({
                   );
                 }
                 break;
-              case 'gemini-watermark-remover': {
-                const watermarkImg = Array.isArray(nodeInputs['in-image'])
-                  ? nodeInputs['in-image'][0]
-                  : nodeInputs['in-image'];
-                if (!watermarkImg) throw new Error('Image input is required for watermark removal');
-                result = await removeGeminiWatermark(watermarkImg);
-                break;
-              }
               case 'tts': {
                 const isLightX2V = model === 'lightx2v' || model?.startsWith('lightx2v');
                 if (isLightX2V) {

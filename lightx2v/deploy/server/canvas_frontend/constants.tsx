@@ -604,20 +604,5 @@ export const TOOLS: ToolDefinition[] = [
 
       // LightX2V models will be added dynamically via updateLightX2VModels
     ]
-  },
-  {
-    id: 'gemini-watermark-remover',
-    name: 'Gemini Watermark Remover',
-    name_zh: 'Gemini 图片水印去除',
-    category: 'Image Processing',
-    category_zh: '图像处理',
-    description: 'Remove watermarks from Gemini AI generated images using Reverse Alpha Blending',
-    description_zh: '使用反向 Alpha 混合算法去除 Gemini AI 生成图片的水印',
-    inputs: [
-      { id: 'in-image', type: DataType.IMAGE, label: 'Image with Watermark', label_zh: '带水印图像' }
-    ],
-    outputs: [{ id: 'out-image', type: DataType.IMAGE, label: 'Image without Watermark', label_zh: '去水印图像' }],
-    icon: 'Eraser',
-    models: []
   }
 ];
