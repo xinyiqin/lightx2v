@@ -54,7 +54,7 @@ const App: React.FC = () => {
     return (saved as any) || 'zh';
   });
   const [currentView, setCurrentView] = useState<'DASHBOARD' | 'EDITOR'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'MY' | 'COMMUNITY' | 'PRESET'>(() => (isStandalone() ? 'PRESET' : 'COMMUNITY'));
+  const [activeTab, setActiveTab] = useState<'MY' | 'COMMUNITY' | 'PRESET'>(() => (isStandalone() ? 'PRESET' : 'MY'));
   const [communityWorkflows, setCommunityWorkflows] = useState<WorkflowState[]>([]);
   const nameSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
