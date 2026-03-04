@@ -599,18 +599,34 @@ export const lightX2VTask = async (
     input_last_frame: summarizeMedia(payload.input_last_frame),
   }, null, 2));
 
-  const submitRes = await lightX2VRequest({
-    baseUrl: actualBaseUrl,
-    token: actualToken,
-    endpoint: '/api/v1/task/submit',
-    options: {
-    method: 'POST',
-    body: JSON.stringify(payload)
-    }
-  });
 
-  if (!submitRes.ok) {
-    await handleLightX2VError(submitRes, 'Submit');
+  let submitRes: Response;
+  // retry 3 times if user visit too frequently
+  for (let attempt = 0; attempt < 3; attempt++) {
+    submitRes = await lightX2VRequest({
+      baseUrl: actualBaseUrl,
+      token: actualToken,
+      endpoint: '/api/v1/task/submit',
+      options: {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }
+    });
+    if (submitRes.ok) { break; }
+    if (submitRes.status === 400) {
+      const errText = await submitRes.clone().text();
+      if (errText.includes('visit too frequently')) {
+        const wait_ms = Math.random() * 1000 + 100; // wait 100-1100ms
+        console.warn(`[LightX2V] Submit rate limited, retry ${attempt + 1}/3 after ${wait_ms}ms`);
+        await new Promise(r => setTimeout(r, wait_ms));
+        continue;
+      }
+    }
+    break;
+  }
+
+  if (!submitRes!.ok) {
+    await handleLightX2VError(submitRes!, 'Submit');
   }
 
   const submitData = await submitRes.json();
