@@ -459,56 +459,13 @@ const App: React.FC = () => {
           const currentUserId = getCurrentUserId();
           const { isPreset, workflow: existingWorkflow } = await checkWorkflowOwnership(workflowId, currentUserId);
 
-          if (existingWorkflow) {
-            if (isPreset) {
-              // Preset workflow - copy it to user's workflows
-              console.log('[App] Workflow is a preset, copying to create user-owned version');
-
-              // Generate new UUID for copied workflow
-              const generateUUID = () => {
-                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                  const r = Math.random() * 16 | 0;
-                  const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                  return v.toString(16);
-                });
-              };
-              const newWorkflowId = generateUUID();
-
-              // Copy workflow via API
-              const copyResponse = await apiRequest(`/api/v1/workflow/${workflowId}/copy`, {
-                method: 'POST',
-                body: JSON.stringify({
-                  workflow_id: newWorkflowId
-                })
-              });
-
-              if (copyResponse.ok) {
-                const copyData = await copyResponse.json();
-                const copiedWorkflowId = copyData.workflow_id;
-                console.log('[App] Workflow copied successfully, new ID:', copiedWorkflowId);
-
-                // Load the copied workflow
-                const loaded = await loadWorkflow(copiedWorkflowId);
-                if (loaded) {
-                  setWorkflow(loaded.workflow);
-                  setCurrentView('EDITOR');
-
-                  // Update URL with new workflow ID
-                  if (window.history && window.history.replaceState) {
-                    window.history.replaceState(null, '', `#workflow/${copiedWorkflowId}`);
-                  }
-                }
-              } else {
-                console.error('[App] Failed to copy preset workflow from URL');
-              }
-            } else {
-              // User's own workflow - load it directly
+          if (existingWorkflow && !isPreset) {
+              // Only load user's own workflows on hash change (preset workflows should be copied first)
               const loaded = await loadWorkflow(workflowId);
               if (loaded) {
                 setWorkflow(loaded.workflow);
                 setCurrentView('EDITOR');
               }
-            }
           } else {
             console.warn('[App] Workflow not found in database:', workflowId);
           }
@@ -788,33 +745,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // 预设工作流：进入编辑器前先在后端通过 /create 创建用户自己的 workflow，
-    // 避免后续「运行模板」时再次触发创建导致调用两次 /create。
-    if (!isStandalone() && w.id && w.id.startsWith('preset-')) {
-      try {
-        const newId = await ensureWorkflowOwned(w);
-        const newWorkflowFromPreset: WorkflowState = {
-          ...w,
-          id: newId,
-          isDirty: false,
-          isRunning: false,
-        };
-        setSelectedNodeId(null);
-        setSelectedConnectionId(null);
-        setValidationErrors([]);
-        voiceList.resetVoiceList();
-        voiceList.resetCloneVoiceList();
-        setWorkflow(newWorkflowFromPreset);
-        setCurrentView('EDITOR');
-        if (typeof window !== 'undefined' && window.history?.replaceState) {
-          window.history.replaceState(null, '', `#workflow/${newId}`);
-        }
-        return;
-      } catch (error) {
-        console.error('[App] Failed to create workflow from preset, fallback to legacy open logic:', error);
-      }
-    }
-
     setSelectedNodeId(null);
     setSelectedConnectionId(null);
     setValidationErrors([]);
@@ -825,49 +755,21 @@ const App: React.FC = () => {
     let workflowToOpen = w;
     let workflowIdToOpen = w.id;
 
-    if (w.id && (w.id.startsWith('workflow-') || w.id.startsWith('preset-') || w.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) || isStandalone())) {
+    // 先保证 workflow 属于当前用户
+    // 若为预设工作流，则调用/create 创建用户自己的 workflow
+    // 若为公共工作流，则调用/copy 复制公共工作流
+    if (!isStandalone() && workflowIdToOpen) {
       try {
-        if (isStandalone()) {
-          const loaded = await loadWorkflow(w.id);
+        const newId = await ensureWorkflowOwned(workflowToOpen);
+        if (newId && newId !== workflowIdToOpen) {
+          const loaded = await loadWorkflow(newId);
           if (loaded) {
             workflowToOpen = loaded.workflow;
-          }
-        } else {
-          const currentUserId = getCurrentUserId();
-          const { isPreset } = await checkWorkflowOwnership(w.id, currentUserId);
-
-          if (isPreset) {
-            const generateUUID = () => {
-              return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                const r = Math.random() * 16 | 0;
-                const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-              });
-            };
-            const newWorkflowId = generateUUID();
-            const copyResponse = await apiRequest(`/api/v1/workflow/${w.id}/copy`, {
-              method: 'POST',
-              body: JSON.stringify({ workflow_id: newWorkflowId })
-            });
-            if (copyResponse.ok) {
-              const copyData = await copyResponse.json();
-              workflowIdToOpen = copyData.workflow_id;
-              const loaded = await loadWorkflow(workflowIdToOpen);
-              if (loaded) {
-                workflowToOpen = loaded.workflow;
-              }
-            } else {
-              throw new Error(await copyResponse.text());
-            }
-          } else {
-            const loaded = await loadWorkflow(w.id);
-            if (loaded) {
-              workflowToOpen = loaded.workflow;
-            }
+            workflowIdToOpen = newId;
           }
         }
       } catch (error) {
-        console.warn('[App] Failed to load workflow from database, using cached version:', error);
+        console.error('[App] Failed to ensure workflow owned:', error);
       }
     }
 
@@ -914,9 +816,21 @@ const App: React.FC = () => {
         createAt: Date.now(),
         visibility: 'private'
       };
-
       // Create workflow in database (backend will generate workflow_id)
-      const finalWorkflowId = await saveWorkflowToDatabase(tempFlow, { name: t('untitled') });
+      const response = await apiRequest('/api/v1/workflow/create', {
+          method: 'POST',
+          body: JSON.stringify(tempFlow)
+      });
+
+      let finalWorkflowId = null;
+      if (response.ok) {
+          const data = await response.json();
+          finalWorkflowId = data.workflow_id;
+          console.log('[Workflow] Workflow created in database with ID:', finalWorkflowId);
+      } else {
+          const errorText = await response.text();
+          throw new Error(errorText);
+      }
 
       // Update workflow with backend-generated ID
       const finalFlow = { ...tempFlow, id: finalWorkflowId, isDirty: false };

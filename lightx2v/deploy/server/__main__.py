@@ -2096,12 +2096,12 @@ async def api_v1_workflow_copy(request: Request, user=Depends(verify_user_access
             description=original_workflow.get("description", ""),
             nodes=original_workflow.get("nodes", []),
             connections=original_workflow.get("connections", []),
-            visibility=original_workflow.get("visibility", "private"),
+            visibility="private", # copied workflow is always private
             workflow_id=new_workflow_id,  # Use provided workflow_id or generate new one
             tags=original_workflow["tags"],
             node_output_history={}, # 复制时不需要 node_output_history
-            author_id=original_workflow["author_id"],
-            author_name=original_workflow["author_name"],
+            author_id=user["user_id"],
+            author_name=user.get("username", ""),
             files_tasks=original_workflow.get("files_tasks", {}),
         )
 

@@ -16,8 +16,8 @@ export async function checkWorkflowOwnership(
   if (!workflowId) {
     return { owned: false, isPreset: false, workflow: null };
   }
-  if (isStandalone()) {
-    const isPreset = workflowId.startsWith('preset-');
+  const isPreset = workflowId.startsWith('preset-');
+  if (isStandalone() || isPreset) {
     return { owned: !isPreset, isPreset, workflow: null };
   }
   const userId = currentUserId ?? DEFAULT_USER_ID_STANDALONE;
@@ -28,7 +28,6 @@ export async function checkWorkflowOwnership(
     if (checkResponse.ok) {
       const existingWorkflow = await checkResponse.json();
       const belongsToUser = existingWorkflow.user_id && existingWorkflow.user_id === userId;
-      const isPreset = !belongsToUser;
       return { owned: !!belongsToUser, isPreset, workflow: belongsToUser ? existingWorkflow : null };
     } else {
       // 工作流不存在（404 等）→ 不拥有，需先创建新 UUID

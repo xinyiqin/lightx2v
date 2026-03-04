@@ -275,7 +275,7 @@ class BaseTaskManager:
         node_output_history={},
         author_id=None,
         author_name=None,
-        file_tasks={},
+        files_tasks={},
     ):
         if workflow_id is None:
             workflow_id = str(uuid.uuid4())
@@ -307,7 +307,7 @@ class BaseTaskManager:
             "visibility": visibility,
             "tags": tags,
             "node_output_history": node_output_history,
-            "files_tasks": file_tasks,
+            "files_tasks": files_tasks,
             "author_id": author_id,
             "author_name": author_name,
             "global_inputs": {},

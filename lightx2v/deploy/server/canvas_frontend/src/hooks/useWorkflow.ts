@@ -230,17 +230,6 @@ export const useWorkflow = () => {
       // preset 工作流（仅前端或有后端）保存时都先分配新 UUID，再按环境保存
       let effectiveId = workflowId;
       let toSave: WorkflowState = options?.name ? { ...latestWorkflow, name: options.name } : latestWorkflow;
-      if (workflowId.startsWith('preset-')) {
-        effectiveId = typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        toSave = { ...toSave, id: effectiveId };
-        setWorkflow(prev => (prev && prev.id === workflowId ? { ...prev, id: effectiveId } : prev));
-        if (typeof window !== 'undefined' && window.history?.replaceState) {
-          window.history.replaceState(null, '', `#workflow/${effectiveId}`);
-        }
-        console.log('[Workflow] Preset workflow assigned new ID on save:', effectiveId);
-      }
 
       if (isStandalone()) {
         await saveWorkflowToLocal(toSave);
@@ -562,16 +551,8 @@ export const useWorkflow = () => {
         const currentUserId = getCurrentUserId();
         const { owned } = await checkWorkflowOwnership(effectiveId, currentUserId);
         if (!owned) {
-          // 不拥有（预设、他人工作流或 404）：先分配新 UUID，走创建逻辑
-          effectiveId = typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-          toSave = { ...toSave, id: effectiveId };
-          setWorkflow(prev => (prev && prev.id === workflowId ? { ...prev, id: effectiveId } : prev));
-          if (typeof window !== 'undefined' && window.history?.replaceState) {
-            window.history.replaceState(null, '', `#workflow/${effectiveId}`);
-          }
           console.log('[Workflow] Workflow not owned (preset/404), creating new with ID:', effectiveId);
+          return effectiveId;
         }
 
         // For saved workflows (UUID) that user owns, try to update first
@@ -594,51 +575,7 @@ export const useWorkflow = () => {
             }
           }
         }
-
-        // Create new workflow (preset save uses effectiveId; temp/update-failed let backend generate)
-        if (effectiveId !== workflowId && effectiveId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-          workflowData.workflow_id = effectiveId;
-        }
-        if (!isTemporaryId && !isSavedWorkflow) {
-          console.warn('[Workflow] Unknown workflow ID format, letting backend generate ID');
-        }
-
-        const hadUuidWhenBuildingPayload = isUuid(effectiveId);
-        console.log('[Workflow] Creating new workflow (backend will generate workflow_id)');
-        const response = await apiRequest('/api/v1/workflow/create', {
-          method: 'POST',
-          body: JSON.stringify(workflowData)
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const newWorkflowId = data.workflow_id;
-          console.log('[Workflow] Workflow created in database with ID:', newWorkflowId);
-
-          // 创建时若之前无 UUID（未先上传）：用 newWorkflowId 把 latestWorkflow 中的 base64 上传为 file_id，再 PUT
-          let nodesForPut = nodesToSave;
-          if (!hadUuidWhenBuildingPayload) {
-            nodesForPut = await uploadBase64InNodesToFileRefs(newWorkflowId, latestWorkflow.nodes);
-          }
-          // 将输入节点中的本地 URL（如 /assets/girl.png）通过 upload 存到后端
-          const nodesAfterLocalUrls = await resolveInputNodeLocalUrls(newWorkflowId, nodesForPut);
-          await apiRequest(`/api/v1/workflow/${newWorkflowId}/update`, {
-            method: 'POST',
-            body: JSON.stringify({ nodes: nodesAfterLocalUrls })
-          });
-
-          const updatedWorkflow = { ...latestWorkflow, id: newWorkflowId, nodes: nodesAfterLocalUrls };
-          setWorkflow(updatedWorkflow);
-          workflowRef.current = updatedWorkflow;
-          await saveWorkflowToLocal(updatedWorkflow);
-          if (typeof window !== 'undefined') {
-            window.history.replaceState(null, '', `#workflow/${newWorkflowId}`);
-          }
-          return newWorkflowId;
-        } else {
-          const errorText = await response.text();
-          throw new Error(`Failed to create workflow: ${errorText}`);
-        }
+        return effectiveId;
       } catch (error) {
         console.error('[Workflow] Failed to save workflow to database:', error);
 
@@ -1074,12 +1011,13 @@ export const useWorkflow = () => {
 
   /**
    * 确保当前工作流属于当前用户；若不拥有（预设/404），则先创建新 UUID 并更新状态。
-   * 用于 update/保存/自动保存前统一逻辑：不拥有则先建新再操作。
+   * 若为预设工作流，则调用/create 创建用户自己的 workflow
+   * 若为公共工作流，则调用/copy 复制公共工作流
    * @returns 实际应使用的 workflow id（原 id 或新建的 UUID）
    */
   const ensureWorkflowOwned = useCallback(async (current: WorkflowState): Promise<string> => {
     if (isStandalone()) return current.id;
-    const { owned } = await checkWorkflowOwnership(current.id, getCurrentUserId());
+    const { owned, isPreset } = await checkWorkflowOwnership(current.id, getCurrentUserId());
     if (owned) return current.id;
     const newId = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
@@ -1093,25 +1031,43 @@ export const useWorkflow = () => {
       }
       return out;
     };
-    const createData = {
-      name: current.name,
-      description: current.description ?? '',
-      nodes: current.nodes,
-      connections: current.connections,
-      workflow_id: newId,
-      tags: current.tags ?? [],
-      node_output_history: trimNodeHist(current.nodeOutputHistory ?? {})
-    };
-    const res = await apiRequest('/api/v1/workflow/create', { method: 'POST', body: JSON.stringify(createData) });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to create workflow: ${text}`);
+
+    // preset workflow, create it
+    if (isPreset) {
+      const createData = {
+        name: current.name,
+        description: current.description ?? '',
+        nodes: current.nodes,
+        connections: current.connections,
+        workflow_id: newId,
+        tags: current.tags ?? [],
+        node_output_history: trimNodeHist(current.nodeOutputHistory ?? {})
+      };
+      const res = await apiRequest('/api/v1/workflow/create', { method: 'POST', body: JSON.stringify(createData) });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Failed to create workflow: ${text}`);
+      } else {
+        console.log('[Workflow] ensureWorkflowOwned: created new preset workflow', newId);
+      }
+    }
+    // public workflow, copy it
+    else {
+      const copyResponse = await apiRequest(`/api/v1/workflow/${current.id}/copy`, {
+        method: 'POST',
+        body: JSON.stringify({ workflow_id: newId })
+      });
+      if (!copyResponse.ok) {
+        const text = await copyResponse.text();
+        throw new Error(`Failed to copy workflow: ${text}`);
+      } else {
+        console.log('[Workflow] ensureWorkflowOwned: copied public workflow', newId);
+      }
     }
     setWorkflow(prev => (prev && prev.id === current.id ? { ...prev, id: newId } : prev));
     if (typeof window !== 'undefined' && window.history?.replaceState) {
       window.history.replaceState(null, '', `#workflow/${newId}`);
     }
-    console.log('[Workflow] ensureWorkflowOwned: created new workflow', newId);
     return newId;
   }, [setWorkflow]);
 
