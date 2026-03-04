@@ -1738,7 +1738,8 @@ export const Node: React.FC<NodeProps> = ({
           );
         })}
 
-        {/* Output Ports */}
+        {/* Output Ports - 固定行高 30px、底留 24px 与 Connection 公式一致，mb-[-16px] 抵消 p-4 底边距使端口块底对齐节点底 */}
+        <div className="flex flex-col pb-[9px] -mb-4" style={{ minHeight: outputs.length ? outputs.length * 30 + 9 : 0 }}>
         {outputs.map((p) => {
           const isConnected = workflow.connections.some(
             (c) => c.source_node_id === node.id && c.source_port_id === p.id
@@ -1746,7 +1747,7 @@ export const Node: React.FC<NodeProps> = ({
           const compatibleTools = getCompatibleToolsForOutput(p.type);
           const showMenu = showOutputQuickAdd?.nodeId === node.id && showOutputQuickAdd?.portId === p.id;
           return (
-            <div key={p.id} className="flex items-center justify-end gap-2 text-[9px] font-bold text-slate-500 relative group/port">
+            <div key={p.id} className="h-[30px] flex items-center justify-end gap-2 text-[9px] font-bold text-slate-500 relative group/port shrink-0">
               {!isConnected && compatibleTools.length > 0 && (
                 <button
                   onMouseDown={(e) => e.stopPropagation()}
@@ -1791,6 +1792,7 @@ export const Node: React.FC<NodeProps> = ({
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* Preview: multi-port = one box per port; single = one box */}
