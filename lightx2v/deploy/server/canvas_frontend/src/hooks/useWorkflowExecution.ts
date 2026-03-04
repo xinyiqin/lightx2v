@@ -365,11 +365,11 @@ function useWorkflowExecutionImpl({
   const effectiveWorkflowIdRef = useRef<string | null>(null);
 
   /** port/save 与执行后同步：入队后按顺序依次执行，避免多 Node 同时请求 /port/save */
-  type PortSaveTask = { type: 'port_save'; wfId: string; nodeId: string; toSave: Record<string, any>; runId: string };
-  type PostSaveTask = { type: 'post_save'; wfId: string };
-  type PortSaveQueueTask = PortSaveTask | PostSaveTask;
-  const portSaveQueueRef = useRef<PortSaveQueueTask[]>([]);
+  type PortSaveTask = { wfId: string; nodeId: string; toSave: Record<string, any>; runId: string };
+  const portSaveQueueRef = useRef<PortSaveTask[]>([]);
   const portSaveProcessorRunningRef = useRef(false);
+  /** 用于「批量执行完一批后等待 port save 排空」的 Promise resolve */
+  const portSaveDrainResolveRef = useRef<(() => void) | null>(null);
 
   const processPortSaveQueue = useCallback(async () => {
     if (portSaveProcessorRunningRef.current || portSaveQueueRef.current.length === 0) return;
@@ -377,36 +377,34 @@ function useWorkflowExecutionImpl({
     while (portSaveQueueRef.current.length > 0) {
       const task = portSaveQueueRef.current.shift()!;
       try {
-        if (task.type === 'post_save') {
-          // 执行后：在所有 port/save 完成后拉取最新 workflow 并同步到后端（/update 只在 batch 前后各一次）
-          await new Promise((r) => setTimeout(r, 300));
-          const wf = getWorkflow?.() ?? workflowRef.current;
-          console.log('[WorkflowExecution] Update workflow after execution (from queue):', wf);
-          if (wf && updateWorkflowSync) await updateWorkflowSync(task.wfId, wf);
-        } else {
-          // port_save 只做保存，不在此处调 /update 和 GET workflow，避免 batch 中多次调用
-          const newOutputs = await saveNodeOutputs(task.wfId, task.nodeId, task.toSave, task.runId);
-          console.log('[WorkflowExecution] New outputs:', newOutputs);
-          if (refreshWorkflowFromBackend) await refreshWorkflowFromBackend(task.wfId);
-        }
+        const newOutputs = await saveNodeOutputs(task.wfId, task.nodeId, task.toSave, task.runId);
+        console.log('[WorkflowExecution] New outputs:', newOutputs);
+        if (refreshWorkflowFromBackend) await refreshWorkflowFromBackend(task.wfId);
       } catch (e) {
         console.warn('[WorkflowExecution] Port save queue task failed:', e);
       }
     }
     portSaveProcessorRunningRef.current = false;
-  }, [updateWorkflowSync, getWorkflow, refreshWorkflowFromBackend]);
+    // 通知「等待排空」的调用方：当前批次产生的 port save 已全部处理完，可开始下一轮
+    if (portSaveDrainResolveRef.current) {
+      portSaveDrainResolveRef.current();
+      portSaveDrainResolveRef.current = null;
+    }
+  }, [refreshWorkflowFromBackend]);
+
+  /** 等待 port save 队列排空（当前批次产生的所有 port/save 调用完成后再 resolve），用于批量执行时「一批结束后再开始下一批」 */
+  const waitForPortSaveQueueDrain = useCallback((): Promise<void> => {
+    if (portSaveQueueRef.current.length === 0 && !portSaveProcessorRunningRef.current) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      portSaveDrainResolveRef.current = resolve;
+    });
+  }, []);
 
   const enqueuePortSave = useCallback(
-    (task: Omit<PortSaveTask, 'type'>) => {
-      portSaveQueueRef.current.push({ type: 'port_save', ...task });
-      processPortSaveQueue();
-    },
-    [processPortSaveQueue]
-  );
-
-  const enqueuePostSave = useCallback(
-    (wfId: string) => {
-      portSaveQueueRef.current.push({ type: 'post_save', wfId });
+    (task: PortSaveTask) => {
+      portSaveQueueRef.current.push(task);
       processPortSaveQueue();
     },
     [processPortSaveQueue]
@@ -735,9 +733,11 @@ function useWorkflowExecutionImpl({
           nodesToRunIds.add(startNodeId);
         }
       } else {
+        // 整图运行：跳过已成功的节点，只运行尚无结果或已失败的节点
         nodesToRunIds = new Set(
           workflow.nodes
             .filter((n) => TOOLS.find((t) => t.id === n.tool_id)?.category !== 'Input')
+            .filter((n) => n.status !== NodeStatus.SUCCESS)
             .map((n) => n.id)
         );
       }
@@ -1480,11 +1480,17 @@ function useWorkflowExecutionImpl({
             };
           });
         }
-      }
 
-      // 执行后：放入队列，保证在所有 port/save 执行结束后再拉取最新 workflow 并同步到后端
-      if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
-        enqueuePostSave(wfId);
+        // 本批次产生的 port/save 全部完成后再开始下一轮，避免与下一批执行重叠
+        if (shouldSaveOutputs) {
+          await waitForPortSaveQueueDrain();
+        }
+        // 执行后：每批已等 port save 排空，此处直接拉取最新 workflow 并同步到后端，无需再入队 post_save
+        if (!isStandalone() && hasValidDbId && updateWorkflowSync) {
+          await new Promise((r) => setTimeout(r, 300));
+          const wf = getWorkflow?.() ?? workflowRef.current;
+          if (wf) await updateWorkflowSync(wfId, wf);
+        }
       }
 
       const j = runningJobsByJobIdRef.current.get(jobId);
@@ -1520,6 +1526,7 @@ function useWorkflowExecutionImpl({
       refreshWorkflowFromBackend,
       updateWorkflowSync,
       getWorkflow,
+      waitForPortSaveQueueDrain,
     ]
   );
 
