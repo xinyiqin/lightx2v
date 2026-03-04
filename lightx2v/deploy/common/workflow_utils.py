@@ -89,6 +89,8 @@ def check_invalid_output_value(node):
     if "output_value" not in node:
         return False
     output_value = node["output_value"]
+    if isinstance(output_value, str):
+        return True
     if isinstance(output_value, dict):
         for value in output_value.values():
             if isinstance(value, str) or (isinstance(value, list) and any(isinstance(item, str) for item in value)):
@@ -249,7 +251,7 @@ def update_workflow_node_output(
     node_history = all_history.get(node_id, [])
 
     # 同步更新节点的 output_value[port_id]（确保 ext、run_id 等字段直接写入 DB）
-    if "output_value" not in node:
+    if "output_value" not in node or isinstance(node["output_value"], str):
         node["output_value"] = {}
 
     # 如果 port_id 已存在，则将 new_entry 添加到 old_entry 列表中
@@ -428,8 +430,6 @@ async def query_output_entries(
             raise Exception(f"File {file_id} not found in files_tasks!")
     elif task_id:
         entry = workflow.get("files_tasks", {}).get(task_id, None)
-        if not entry:
-            raise Exception(f"Task {task_id} not found in files_tasks!")
     else:
         node = next((n for n in workflow["nodes"] if n["id"] == node_id), None)
         if not node or "output_value" not in node or port_id not in node["output_value"]:
