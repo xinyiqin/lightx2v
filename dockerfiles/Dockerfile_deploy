@@ -1,6 +1,11 @@
 FROM node:alpine3.21 AS frontend_builder
 COPY lightx2v /opt/lightx2v
 
+RUN cd /opt/lightx2v/deploy/server/canvas_frontend \
+    && export VITE_BASE_URL="/canvas/" \
+    && npm install \
+    && npm run build
+
 RUN cd /opt/lightx2v/deploy/server/frontend \
     && npm install \
     && npm run build
