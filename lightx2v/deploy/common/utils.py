@@ -183,6 +183,8 @@ async def preload_data(inp, inp_type, typ, val):
                         _, encoded = encoded.split(",", 1)
                     decoded = await asyncio.to_thread(base64.b64decode, encoded)
                     data[f"{inp}_{idx + 1}"] = decoded
+            else:
+                data = await asyncio.to_thread(base64.b64decode, val)
         # For multi-person audio directory, val should be a dict with file structure
         elif typ == "directory":
             data = {}

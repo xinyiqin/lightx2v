@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from lightx2v.deploy.common.audio_separator import AudioSeparator
+from lightx2v.deploy.common.face_detector import FaceDetector
 from lightx2v.deploy.common.pipeline import Pipeline
 from lightx2v.deploy.common.podcasts import VolcEnginePodcastClient
 from lightx2v.deploy.common.sensetime_voice_clone import SenseTimeTTSClient
@@ -2400,7 +2401,7 @@ if __name__ == "__main__":
     volcengine_asr_client = VolcEngineASRClient()
     sensetime_voice_clone_client = SenseTimeTTSClient()
     volcengine_podcast_client = VolcEnginePodcastClient()
-    # face_detector = FaceDetector(method=args.face_detector_method, model_path=args.face_detector_model_path)
+    face_detector = FaceDetector(method=args.face_detector_method, model_path=args.face_detector_model_path)
     try:
         audio_separator = AudioSeparator(model_path=args.audio_separator_model_path)
     except Exception as e:
