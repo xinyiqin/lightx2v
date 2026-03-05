@@ -2022,15 +2022,13 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
             existing_nodes = {n["id"]: n for n in existing_workflow["nodes"]}
             # ignore update output value of existing node
             for node_id, node in incoming_nodes.items():
+                # image list may be updated by output_value, check if valid
                 if check_invalid_output_value(node):
-                    ingore_value = node.pop("output_value", None)
-                    assert node_id in existing_nodes, f"node {node_id} not found in existing workflow"
-                    if "output_value" in existing_nodes[node_id]:
-                        output_value = existing_nodes[node_id]["output_value"]
-                        node["output_value"] = output_value
-                        logger.warning(f"ignore update output value {node_id}, {ingore_value} -> {output_value}")
-                    else:
-                        logger.warning(f"ignore update output value {node_id}, {ingore_value}")
+                    logger.warning(f"invalid update output value {node['output_value']}")
+                    del node["output_value"]
+                if "output_value" not in node and node_id in existing_nodes and "output_value" in existing_nodes[node_id]:
+                    node["output_value"] = existing_nodes[node_id]["output_value"]
+                    logger.warning(f"use existing output value {node_id}, {existing_nodes[node_id]['output_value']}")
 
             # 删除不再存在的节点的 node_output_history 记录
             history = existing_workflow.get("node_output_history") or {}

@@ -1050,7 +1050,7 @@ export const useWorkflow = () => {
       } else {
         console.log('[Workflow] ensureWorkflowOwned: created new preset workflow', newId);
         // save input nodes and refresh
-        saveWorkflowToDatabase({ ...createData, id: newId }, { name: current.name });
+        // saveWorkflowToDatabase({ ...createData, id: newId }, { name: current.name });
       }
     }
     // public workflow, copy it

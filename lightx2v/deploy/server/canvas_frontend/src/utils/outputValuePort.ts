@@ -60,9 +60,16 @@ export function getOutputValueByPort(node: { output_value?: any; data?: { value?
 }
 
 /** 判断是否为合法的 entry（仅允许 kind === 'file' | 'task'，禁止 url 字符串或 kind === 'url'） */
-export function isValidOutputEntry(val: any): boolean {
+export function isValidOutputEntry(val: any, toolId: string): boolean {
   if (val == null) return false;
-  if (typeof val === 'string') return true;
+  if (typeof val === 'string') {
+    if (val.startsWith('data:')) return true;
+    // 图像输入不允许 url 字符串
+    // 因为out-image为列表，需要通过改变output_value列表删除某张图
+    // 解析成 url 之后，就无法转回 file_entry
+    if (toolId == 'image-input') return false;
+    else return true;
+  }
   if (typeof val !== 'object' || Array.isArray(val)) return false;
   const k = (val as { kind?: string }).kind;
   return k === 'file' || k === 'task';

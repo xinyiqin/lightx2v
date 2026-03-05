@@ -151,21 +151,17 @@ export const useNodeManagement = ({
     // output_value 仅允许来自：服务器查询、/output/{port_id}/save 返回、或 node_output_history 的 entry；不得在前端擅自改为 url 或非法格式。
     // 只接受 port-keyed 的 ref：entry 为 { kind: 'file' | 'task', ... }，禁止 url 字符串或 kind === 'url'。
     if (key === 'output_value') {
-      const isRefOrPortKeyed = (v: any): boolean => {
+      const isRefOrPortKeyed = (v: any, toolId: string): boolean => {
         if (v == null) return true;
         if (typeof v === 'string') return false;
-        if (Array.isArray(v)) return v.every((item: any) => isValidOutputEntry(item));
+        if (Array.isArray(v)) return v.every((item: any) => isValidOutputEntry(item, toolId));
         if (typeof v === 'object' && isPortKeyedOutputValue(v)) {
           return Object.values(v).every((val: any) =>
-            val == null || (Array.isArray(val) ? val.every((i: any) => isValidOutputEntry(i)) : isValidOutputEntry(val))
+            val == null || (Array.isArray(val) ? val.every((i: any) => isValidOutputEntry(i, toolId)) : isValidOutputEntry(val, toolId))
           );
         }
-        return isValidOutputEntry(v);
+        return isValidOutputEntry(v, toolId);
       };
-      if (!isRefOrPortKeyed(value)) {
-        console.warn('updateNodeData output_value: only allow ref (kind file|task), reject url string or kind=url:', nodeId, value);
-        return;
-      }
 
       setWorkflow(prev => {
         if (!prev) return null;
@@ -180,6 +176,10 @@ export const useNodeManagement = ({
           ...prev,
           nodes: prev.nodes.map(n => {
             if (n.id !== nodeId) return n;
+            if (!isRefOrPortKeyed(value, n.tool_id)) {
+              console.warn('updateNodeData output_value: only allow ref (kind file|task), reject:', nodeId, value);
+              return n;
+            }
             const nextData = isInputWithValue ? { ...n.data, value: effectiveValue } : n.data;
             return { ...n, output_value: value, data: nextData, status: NodeStatus.IDLE };
           }),

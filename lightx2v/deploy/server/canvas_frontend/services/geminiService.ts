@@ -601,8 +601,8 @@ export const lightX2VTask = async (
 
 
   let submitRes: Response;
-  // retry 3 times if user visit too frequently
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // retry 10 times if user visit too frequently
+  for (let attempt = 0; attempt < 10; attempt++) {
     submitRes = await lightX2VRequest({
       baseUrl: actualBaseUrl,
       token: actualToken,
@@ -616,8 +616,8 @@ export const lightX2VTask = async (
     if (submitRes.status === 400) {
       const errText = await submitRes.clone().text();
       if (errText.includes('visit too frequently')) {
-        const wait_ms = Math.random() * 1000 + 100; // wait 100-1100ms
-        console.warn(`[LightX2V] Submit rate limited, retry ${attempt + 1}/3 after ${wait_ms}ms`);
+        const wait_ms = Math.random() * 3000 + 500; // wait 500-3500ms
+        console.warn(`[LightX2V] Submit rate limited, retry ${attempt + 1}/10 after ${wait_ms}ms`);
         await new Promise(r => setTimeout(r, wait_ms));
         continue;
       }
