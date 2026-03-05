@@ -3,15 +3,14 @@ import asyncio
 import base64
 import copy
 import json
-import time
 import mimetypes
 import os
 import re
 import tempfile
+import time
 import traceback
 import uuid
 from contextlib import asynccontextmanager
-from urllib.parse import quote
 
 import aiofiles
 import aiohttp
@@ -39,22 +38,22 @@ from lightx2v.deploy.common.utils import (
     load_inputs,
     media_to_audio,
 )
-from lightx2v.deploy.common.workflow_utils import (
-    CANVAS_MEDIA_TYPES,
-    fmt_user_name,
-    clean_file_or_task_entry,
-    format_and_save_entry,
-    update_workflow_node_output,
-    tidy_workflow_files_and_tasks,
-    query_output_entries,
-    load_bytes_from_entry,
-    fmt_workflow_file_path,
-    to_persisted_message,
-    transfer_workflow_output,
-    check_invalid_output_value,
-)
 from lightx2v.deploy.common.volcengine_asr import VolcEngineASRClient
 from lightx2v.deploy.common.volcengine_tts import VolcEngineTTSClient
+from lightx2v.deploy.common.workflow_utils import (
+    CANVAS_MEDIA_TYPES,
+    check_invalid_output_value,
+    clean_file_or_task_entry,
+    fmt_user_name,
+    fmt_workflow_file_path,
+    format_and_save_entry,
+    load_bytes_from_entry,
+    query_output_entries,
+    tidy_workflow_files_and_tasks,
+    to_persisted_message,
+    transfer_workflow_output,
+    update_workflow_node_output,
+)
 from lightx2v.deploy.data_manager import LocalDataManager, S3DataManager
 from lightx2v.deploy.queue_manager import LocalQueueManager, RabbitMQQueueManager
 from lightx2v.deploy.server.auth import AuthManager
@@ -1793,6 +1792,7 @@ canvas_assets_dir = os.path.join(static_dir, "canvas", "assets")
 if os.path.exists(canvas_assets_dir):
     app.mount("/canvas/assets", StaticFiles(directory=canvas_assets_dir), name="canvas-assets")
 
+
 # Canvas 子应用路由处理（必须在 vue_fallback 之前）
 @app.get("/canvas/{full_path:path}")
 async def canvas_fallback(full_path: str):
@@ -1826,6 +1826,7 @@ async def canvas_fallback(full_path: str):
 # =========================
 # Workflow API Endpoints
 # =========================
+
 
 @app.post("/api/v1/workflow/create")
 async def api_v1_workflow_create(request: Request, user=Depends(verify_user_access)):
@@ -1886,7 +1887,7 @@ async def api_v1_workflow_list(
 ):
     try:
         """List workflows with pagination and search. Query: public=true for public/community, public=false (default) for current user's."""
-        public = public.lower() in ("true", "1", "yes")        
+        public = public.lower() in ("true", "1", "yes")
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 10))
         search = request.query_params.get("search", None)
@@ -2037,9 +2038,7 @@ async def api_v1_workflow_update(request: Request, user=Depends(verify_user_acce
             if delete_history_ids:
                 history = {k: v for k, v in history.items() if k not in delete_history_ids}
                 params["node_output_history"] = history
-                logger.warning(
-                    f"Workflow {workflow_id}: delete node_output_history entries {delete_history_ids}"
-                )
+                logger.warning(f"Workflow {workflow_id}: delete node_output_history entries {delete_history_ids}")
 
             # 如果有删除节点，不删files_tasks记录和真实文件记录，在output/save时会重新记录
             deleted_node_ids = set(existing_nodes.keys()) - set(incoming_nodes.keys())
@@ -2097,10 +2096,10 @@ async def api_v1_workflow_copy(request: Request, user=Depends(verify_user_access
             description=original_workflow.get("description", ""),
             nodes=original_workflow.get("nodes", []),
             connections=original_workflow.get("connections", []),
-            visibility="private", # copied workflow is always private
+            visibility="private",  # copied workflow is always private
             workflow_id=new_workflow_id,  # Use provided workflow_id or generate new one
             tags=original_workflow["tags"],
-            node_output_history={}, # 复制时不需要 node_output_history
+            node_output_history={},  # 复制时不需要 node_output_history
             author_id=user["user_id"],
             author_name=user.get("username", ""),
             files_tasks=original_workflow.get("files_tasks", {}),

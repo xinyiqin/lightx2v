@@ -1,15 +1,15 @@
-import hashlib
-import time
 import asyncio
 import base64
+import hashlib
 import mimetypes
+import time
 import traceback
 from typing import Any
+
 from loguru import logger
+
 from lightx2v.deploy.data_manager import BaseDataManager
 from lightx2v.deploy.task_manager import BaseTaskManager, FinishedStatus, TaskStatus
-
-
 
 # 静态资源扩展名 -> MIME（供 canvas_fallback 返回正确类型，避免 text/html 导致 JS/CSS 报错）
 CANVAS_MEDIA_TYPES = {
@@ -62,6 +62,7 @@ MAX_CHAT_HISTORY = 50
 # =========================
 # Workflow Data Management Functions
 # =========================
+
 
 async def fmt_user_name(user_id: str, task_manager: BaseTaskManager) -> str:
     try:
@@ -230,7 +231,7 @@ async def format_and_save_entry(
         return save_existed_file_entry(item["data"], files_tasks)
     else:
         raise ValueError(f"Unknown output data type: {item['type']}")
-    
+
 
 def update_workflow_node_output(
     workflow: dict,
@@ -239,7 +240,6 @@ def update_workflow_node_output(
     run_id: str,
     new_entry: dict,
 ) -> dict | list[dict]:
-
     timestamp_ms = int(time.time() * 1000)
     # 当 workflow 中没有 node_id 时，node 为空字典
     # 因为前端会先上传文件，再更新 node items，此时是找不到 node 记录的
@@ -276,13 +276,16 @@ def update_workflow_node_output(
         item["output_value"][port_id] = new_entry
         item["timestamp"] = timestamp_ms
     else:
-        node_history.insert(0, {
-            "id": run_id,
-            "timestamp": timestamp_ms,
-            "execution_time": 0,
-            "output_value": {port_id: new_entry},
-            "params": node.get("data", {}),
-        })
+        node_history.insert(
+            0,
+            {
+                "id": run_id,
+                "timestamp": timestamp_ms,
+                "execution_time": 0,
+                "output_value": {port_id: new_entry},
+                "params": node.get("data", {}),
+            },
+        )
 
     # 按 timestamp 降序排列，截取前 MAX_NODE_HISTORY
     node_history.sort(key=lambda e: e["timestamp"], reverse=True)
@@ -291,6 +294,7 @@ def update_workflow_node_output(
     all_history[node_id] = node_history[:MAX_NODE_HISTORY]
     workflow["node_output_history"] = all_history
     return new_entry
+
 
 def collect_refs(value: Any) -> set[str]:
     """从 value 中提取所有 file_id 和 task_id。"""
@@ -352,7 +356,7 @@ async def delete_task_entry(entry: dict, task_manager: BaseTaskManager) -> bool:
             logger.error(f"Failed to delete task {task_id}: {traceback.format_exc()}")
             return False
         logger.info(f"Deleted workflow task: {task_id}")
-        return True    
+        return True
     except Exception:
         logger.error(f"Failed to delete workflow task {task_id}: {traceback.format_exc()}")
         return False
@@ -419,7 +423,6 @@ async def query_output_entries(
     task_id: str,
     task_manager: BaseTaskManager,
 ) -> dict | None:
-
     workflow = await task_manager.query_workflow(workflow_id, user_id=user_id)
     assert workflow, f"Workflow {workflow_id} not found"
 
@@ -453,7 +456,6 @@ async def load_bytes_from_entry(
     task_manager: BaseTaskManager,
     data_manager: BaseDataManager,
 ) -> bytes | None:
-
     if entry["kind"] == "file":
         storage_path = fmt_workflow_file_path(entry)
         assert storage_path, f"File entry {entry} not valid"

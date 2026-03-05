@@ -27,7 +27,22 @@ class PostgresSQLTaskManager(BaseTaskManager):
         self.metrics_monitor = metrics_monitor
         self.time_keys = ["create_t", "update_t", "ping_t", "valid_t", "last_run_t", "updated_at"]
         # chat_history 与 workflow 分开放置，不放在 workflow 行内
-        self.json_keys = ["params", "extra_info", "inputs", "outputs", "previous", "rounds", "subtitles", "nodes", "connections", "tags", "node_output_history", "global_inputs", "files_tasks", "messages"]
+        self.json_keys = [
+            "params",
+            "extra_info",
+            "inputs",
+            "outputs",
+            "previous",
+            "rounds",
+            "subtitles",
+            "nodes",
+            "connections",
+            "tags",
+            "node_output_history",
+            "global_inputs",
+            "files_tasks",
+            "messages",
+        ]
 
     async def init(self):
         await self.upgrade_db()
