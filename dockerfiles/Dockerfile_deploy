@@ -27,6 +27,9 @@ RUN export COMMIT=0e78a118995e66bb27d78518c4bd9a3e95b4e266 \
     && git checkout $COMMIT \
     && python setup.py install
 
+RUN pip uninstall pyannote.audio -y \
+    && pip install pyannote.audio==4.0.4 pydub
+
 COPY tools tools
 COPY assets assets
 COPY configs configs
