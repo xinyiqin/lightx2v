@@ -381,7 +381,7 @@ async def api_v1_llm_volc_responses(request: Request, user=Depends(verify_user_a
         body = await request.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON body: {e}")
-    api_key = os.environ.get("VOLCENGINE_LLM_API_KEY").strip()
+    api_key = (os.environ.get("VOLCENGINE_LLM_API_KEY") or "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="LLM API key not configured (set VOLCENGINE_LLM_API_KEY)")
     stream = body.get("stream") is True
@@ -1888,8 +1888,11 @@ async def api_v1_workflow_list(
     try:
         """List workflows with pagination and search. Query: public=true for public/community, public=false (default) for current user's."""
         public = public.lower() in ("true", "1", "yes")
-        page = int(request.query_params.get("page", 1))
-        page_size = int(request.query_params.get("page_size", 10))
+        try:
+            page = int(request.query_params.get("page", 1))
+            page_size = int(request.query_params.get("page_size", 10))
+        except ValueError:
+            return error_response("Invalid 'page' or 'page_size' parameter. Must be an integer.", 400)
         search = request.query_params.get("search", None)
         if page < 1 or page_size < 1:
             return error_response("page and page_size must be greater than 0", 400)
@@ -2205,7 +2208,8 @@ async def api_v1_workflow_file(request: Request, user=Depends(verify_user_access
         task_id = request.query_params.get("task_id", "")
         try:
             entries = await query_output_entries(user["user_id"], workflow_id, node_id, port_id, file_id, task_id, task_manager)
-            assert len(entries) == 1, f"should be one entry, but got {len(entries)}, {entries}"
+            if len(entries) != 1:
+                raise ValueError(f"should be one entry, but got {len(entries)}, {entries}")
             entry = entries[0]
         except Exception:
             traceback.print_exc()

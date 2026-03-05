@@ -218,7 +218,7 @@ async def format_and_save_entry(
     port_id: str,
     files_tasks: dict,
     data_manager: BaseDataManager,
-) -> list[dict]:
+) -> dict:
     """解析用户上传的节点输出值，存储并返回 entry dict。"""
     item = output_data_raw
     if item["type"] == "task":
@@ -455,7 +455,7 @@ async def load_bytes_from_entry(
     entry: dict,
     task_manager: BaseTaskManager,
     data_manager: BaseDataManager,
-) -> bytes | None:
+) -> tuple[bytes, str, str] | None:
     if entry["kind"] == "file":
         storage_path = fmt_workflow_file_path(entry)
         assert storage_path, f"File entry {entry} not valid"
